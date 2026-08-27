@@ -127,8 +127,12 @@ function RunRow({ run }: { run: RunSummary }) {
         )}
         <StatusGlyph status={run.status} />
         <Truncate className={`text-caption ${active ? "text-accent" : "text-ink"}`} title={run.agent_id}>{run.agent_id}</Truncate>
-        <span className="ml-auto flex shrink-0 items-center gap-1.5 text-tiny tabular-nums text-faint">
-          <span>{run.provider}</span>
+        {/* `min-w-0` ON THE FIGURES TOO. The group is `shrink-0` so the run id truncates first,
+            which is right — but at the width the sidebar reaches on a 1024px screen there is
+            nothing left for it to give and the row overflowed its own column instead, rendering
+            `fake 13 steps 13h ` cut mid-word with no ellipsis to say so. It may now reach one. */}
+        <span className="ml-auto flex min-w-0 shrink-0 items-center gap-1.5 overflow-hidden text-tiny tabular-nums text-faint">
+          <span className="truncate">{run.provider}</span>
           {run.step_count != null && <span>{run.step_count} steps</span>}
           {run.parent_run_id != null && run.branch_from_seq != null && (
             <span title="branched from this step">@{run.branch_from_seq}</span>
@@ -887,7 +891,13 @@ export function Sidebar() {
             pinned. The sticky headers are the stronger cue in this column — they say what you are
             under as well as that there is more — so they win and the mask goes to the scrollers
             that have no headings. */}
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      {/* `overflow-x-hidden` RATHER THAN NOTHING. The class set only `overflow-y-auto`, so
+          `overflow-x` computed to `auto` and 32px of content it could not fit became a HORIZONTAL
+          SCROLLBAR inside a vertical list — a scrollbar nobody looks for, under rows whose names
+          had already been cut. A list of rows overflows sideways because a row ran out of room,
+          which is a truncation, and a truncation ends in an ellipsis. `min-w-0` is what lets the
+          rows inside it shrink to reach one. */}
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
         {/* PINNED, above the rest of the list — §2's order for this column.
             Only when there is something pinned: an empty PINNED heading is the same noise as an
             empty section in the Threads view, and the same rule applies. Pinning is `P` on a

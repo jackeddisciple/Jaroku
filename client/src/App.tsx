@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { Sidebar } from "./components/Sidebar.tsx";
 import { RightPanel } from "./components/RightPanel.tsx";
@@ -17,6 +17,7 @@ import { EnforcementStrip } from "./components/EnforcementStrip.tsx";
 import { WorkspacePanel } from "./components/WorkspacePanel.tsx";
 import { WorkspaceSwitchLock } from "./components/WorkspaceSwitchLock.tsx";
 import { setWindowTitle } from "./lib/windowTitle.ts";
+import { SIDEBAR_DEFAULT_MIN_PCT, SIDEBAR_MAX_PCT, SIDEBAR_MIN_PX, pixelFloorPercent } from "./lib/paneFloor.ts";
 import { RoleRefusal } from "./components/RoleRefusal.tsx";
 import { InviteNotice } from "./components/InviteNotice.tsx";
 import { redeemPendingInvite } from "./lib/invite.ts";
@@ -50,6 +51,28 @@ import { useUiStore } from "./store/uiStore.ts";
  * only way to find out it was draggable was to try. An affordance that appears after you commit
  * to the action is not an affordance.
  */
+/**
+ * The sidebar's pixel floor, converted to the percentage `Panel` takes, against the group's real
+ * width — see lib/paneFloor.
+ *
+ * MEASURED ON THE SHELL rather than on the `PanelGroup`, because `PanelGroup`'s ref is an
+ * imperative handle (`getLayout`/`setLayout`) and not a DOM node. The shell is the group's parent
+ * and differs from it by the one-pixel border on each side, which is below the resolution of a
+ * floor whose job is to stop a column reaching 149px.
+ */
+function useSidebarFloor(shell: HTMLElement | null, fallback: number, max: number): number {
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    if (!shell || typeof ResizeObserver === "undefined") return;
+    const measure = (): void => setWidth(shell.clientWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(shell);
+    return () => observer.disconnect();
+  }, [shell]);
+  return pixelFloorPercent(SIDEBAR_MIN_PX, width, max, fallback);
+}
+
 function PaneDivider() {
   return (
     <PanelResizeHandle className="group relative w-[5px] shrink-0 cursor-col-resize">
@@ -64,6 +87,16 @@ function PaneDivider() {
 }
 
 export function App() {
+  // THE SHELL, AS A NODE, so the sidebar's pixel floor can be converted against the width the pane
+  // group actually has. A callback ref rather than `useRef`, because the measurement has to start
+  // when the node arrives and a ref object's assignment does not re-render anything.
+  //
+  // DECLARED HERE, ABOVE EVERY EARLY RETURN. Half a dozen screens below this line return before the
+  // layout renders — sign-in, first-run, the name screen, account onboarding — and a hook called
+  // after one of them would be a hook whose call order changes with the session.
+  const [shell, setShell] = useState<HTMLElement | null>(null);
+  const sidebarMin = useSidebarFloor(shell, SIDEBAR_DEFAULT_MIN_PCT, SIDEBAR_MAX_PCT);
+
   const activeAgentId = useBuildStore((s) => s.activeAgentId);
   const connected = useTraceStore((s) => s.connection === "open");
   const sessionStatus = useSessionStore((s) => s.status);
@@ -215,8 +248,17 @@ export function App() {
     // pane minimums are PERCENTAGES — at a 1000px window the sidebar's `minSize={14}` is 140px,
     // narrower than its own rows plus their padding, which is why its filter row used to clip. The
     // clipping was the symptom; a percentage floor on a fixed-content column is the cause.
+    //
+    // AND THAT CAUSE IS GONE NOW rather than moved again. Raising the shell floor and the
+    // percentage moved the threshold to 1024×768, where the same failure returned in full: agent
+    // names vanished entirely, run rows were cut mid-word and a horizontal scrollbar appeared
+    // inside a vertical list. The sidebar's floor is stated in PIXELS and converted against the
+    // width this group actually has — see lib/paneFloor.
     <div className="h-full min-w-[900px] overflow-x-auto bg-void p-2">
-      <div className="flex h-full flex-col overflow-hidden rounded-modal border border-edge bg-bg shadow-overlay">
+      <div
+        ref={setShell}
+        className="flex h-full flex-col overflow-hidden rounded-modal border border-edge bg-bg shadow-overlay"
+      >
         {/* top bar */}
         <TopBar />
 
@@ -255,7 +297,10 @@ export function App() {
         <PanelGroup direction="horizontal" autoSaveId="jaroku-layout-v4" className="flex-1 min-h-0">
           {mountSidebar && (
             <>
-              <Panel defaultSize={20} minSize={16} maxSize={34} order={1}>
+              {/* `minSize` IS A MEASURED PIXEL FLOOR, not a share of the window. 16% is 307px
+                  at 1920 and 164px at 1024 — one rule expressing two different requirements, and
+                  the narrow one is the one nobody is looking at while writing it. */}
+              <Panel defaultSize={20} minSize={sidebarMin} maxSize={SIDEBAR_MAX_PCT} order={1}>
                 <div className="h-full animate-panel-in motion-reduce:animate-none">
                   <Sidebar />
                 </div>

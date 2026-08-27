@@ -989,6 +989,14 @@ jobs:
           # rung is one comparison, and both ways of writing it wrong are right on the examples
           # somebody tries by hand.
           npm run test:format
+          # AND THE PANE FLOOR, which is the one rule in this client whose failure is invisible from
+          # the screen it is written on. App.tsx had already diagnosed it in prose — "a percentage
+          # floor on a fixed-content column is the cause" — and the two remedies applied since moved
+          # the threshold rather than removing it, so at 1024×768 every agent name vanished, run
+          # rows were cut mid-word and a horizontal scrollbar appeared inside a vertical list. 16%
+          # is 307px at 1920 and 164px at 1024: one number, two requirements, and only one of them
+          # is on the developer's monitor. The assertions are §24's five viewports.
+          npm run test:pane-floor
           # §14.1'S FOUR CLIENT SUITES, and the reason they are one group is that they are one
           # feature: a workspace you can be in more than one of. `test:workspace-switcher` holds
           # the arrangement rules — a personal workspace first, teams alphabetical by a comparison
