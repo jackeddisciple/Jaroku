@@ -141,6 +141,94 @@ try {
   const survived = await asApp(B, (tx) => tx.get(`SELECT status FROM runs WHERE id = ?`, [runB]));
   check((survived as { status?: string } | undefined)?.status === "completed", "...and it is still there, unchanged");
 
+  // --- the Cockpit's work items, which leak a HANDLE rather than only a fact ------------------
+  //
+  // Asked of rows rather than of the catalogue, like the `steps` section further down, because
+  // migration 064's whole reason for being a separate file is that the policy and the GRANT are
+  // reviewed together — and a GRANT with no policy is a table the application role reads across
+  // every tenant. The flag check at the bottom of this suite would not catch that on its own: it
+  // asserts the policy exists, and a policy that exists is not a policy that binds until somebody
+  // has watched a row refuse to cross.
+  //
+  // THE UPDATE IS THE ASSERTION THAT MATTERS HERE, more than the read. A work item carries the run
+  // id and the deployment id, and `cancelWork` and `retryWork` are UPDATEs against a row found by
+  // id — so a row reachable from the wrong workspace is not a disclosure, it is an operator in one
+  // tenant stopping a job in another, or re-spending its money.
+  console.log("\nwork items");
+
+  const workUserA = randomUUID();
+  const workUserB = randomUUID();
+  const workAgentA = randomUUID();
+  const workAgentB = randomUUID();
+  const itemA = randomUUID();
+  const itemB = randomUUID();
+  const nowIso = new Date().toISOString();
+
+  /** A workspace's own agent, deployment and one queued work item. Seeded through `scoped`,
+   *  which is the only way the owner reaches a FORCEd table. */
+  const seedWork = async (ws: string, userId: string, agentId: string, itemId: string): Promise<void> => {
+    await db.run(
+      `INSERT INTO users (id, external_id, email, created_at) VALUES (?, ?, ?, now())
+       ON CONFLICT (id) DO NOTHING`,
+      [userId, `rls|${userId}`, `${userId}@example.com`],
+    );
+    const deploymentId = `dep_${itemId.slice(0, 8)}`;
+    await db.scoped(ws, async (tx) => {
+      await tx.run(
+        `INSERT INTO agents (id, workspace_id, slug, current_version, created_at)
+         VALUES (?, ?, ?, 1, ?)`,
+        [agentId, ws, `rls_work_${agentId.slice(0, 8)}`, nowIso],
+      );
+      await tx.run(
+        `INSERT INTO deployments (id, workspace_id, agent_id, target, status, provider, model,
+                                  env_keys, created_at, updated_at, created_seq)
+         VALUES (?, ?, ?, 'railway', 'live', 'fake', 'fake-scripted', '[]'::json, ?, ?, 1)`,
+        [deploymentId, ws, agentId, nowIso, nowIso],
+      );
+      await tx.run(
+        `INSERT INTO work_items (id, workspace_id, agent_id, deployment_id, created_by, input,
+                                 status, created_at, created_seq)
+         VALUES (?, ?, ?, ?, ?, 'refund order 4471', 'running', now(), 1)`,
+        [itemId, ws, agentId, deploymentId, userId],
+      );
+    });
+  };
+  await seedWork(A, workUserA, workAgentA, itemA);
+  await seedWork(B, workUserB, workAgentB, itemB);
+
+  const workSeenByA = await asApp(A, (tx) => tx.all<{ id: string }>(`SELECT id FROM work_items`));
+  check(
+    workSeenByA.some((w) => w.id === itemA) && !workSeenByA.some((w) => w.id === itemB),
+    `the app role reads its own work and not the other workspace's (${workSeenByA.length} row(s))`,
+  );
+
+  const cancelledAcross = await asApp(A, (tx) =>
+    tx.run(`UPDATE work_items SET status = 'cancelled' WHERE id = ?`, [itemB]),
+  );
+  check(cancelledAcross.changes === 0, "cancelling another workspace's job changes nothing");
+
+  const stillRunning = await asApp(B, (tx) =>
+    tx.get<{ status: string }>(`SELECT status FROM work_items WHERE id = ?`, [itemB]),
+  );
+  check(stillRunning?.status === "running", "...and it is still running, which is what the operator would see");
+
+  // WITH CHECK, on the table where its absence would be a job attributed to somebody who never
+  // asked for it, running on a deployment they own and paying for it.
+  let workInsertRefused = false;
+  try {
+    await asApp(A, (tx) =>
+      tx.run(
+        `INSERT INTO work_items (id, workspace_id, agent_id, deployment_id, created_by, input,
+                                 status, created_at, created_seq)
+         VALUES (?, ?, ?, ?, ?, 'x', 'queued', now(), 2)`,
+        [randomUUID(), B, workAgentB, `dep_${itemB.slice(0, 8)}`, workUserB],
+      ),
+    );
+  } catch {
+    workInsertRefused = true;
+  }
+  check(workInsertRefused, "dispatching INTO another workspace is refused, not merely hidden");
+
   console.log("\nthe policy is FORCEd, not merely enabled");
 
   // A superuser bypasses RLS unconditionally — no policy, forced or otherwise, applies to
@@ -194,6 +282,11 @@ try {
     // would rather write to than read, which is why the policy's WITH CHECK half matters here
     // more than anywhere else in the schema.
     "agent_grants",
+    // The Cockpit's work items. On this list for the reason `agent_grants` is above it — what
+    // leaks across the boundary here is not only a fact but a HANDLE: a row carries the run id and
+    // the deployment id that `cancelWork` and `retryWork` act on, so a readable row in the wrong
+    // workspace is a job somebody else's operator can stop or re-spend money on.
+    "work_items",
   ];
   // `'p'` AS WELL AS `'r'`, because a partitioned table is not an ordinary one.
   //

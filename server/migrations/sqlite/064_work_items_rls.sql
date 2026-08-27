@@ -1,0 +1,16 @@
+-- 064_work_items_rls — nothing to do on SQLite, and the gap is worth naming rather than hiding.
+--
+-- The file exists because the two dialect directories are compared version for version by
+-- `test:migration-gate`, and a missing counterpart is reported as a deleted migration. It is the
+-- same shape 009_rls takes on this driver, and for the same reason: SQLite has no row-level
+-- security and no roles, so there is no second wall here.
+--
+-- What holds instead is what holds for every other table on this driver: `workStore.ts` takes a
+-- `TenantContext` as its first parameter on every method, which is a parameter you cannot omit
+-- rather than a WHERE clause you must remember, and `test:work-tenancy` asserts the negative
+-- direction — a pass for A cannot list, dispatch, cancel, retry or confirm anything in B.
+--
+-- That difference is acceptable for the reason 009 gives: this driver is the local development
+-- path, one person and one workspace on one machine, and the threat RLS defends against is a query
+-- written months from now that forgets its scope in a database holding six thousand tenants.
+-- Hosted is Postgres, and hosted is where the backstop exists.

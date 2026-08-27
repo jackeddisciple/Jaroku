@@ -220,6 +220,20 @@ export const EXPORTED_TABLES = [
   // it, this table says what was true rather than what changed, which is the half an investigator
   // has to reconstruct by replaying every event when it is missing.
   "agent_grants",
+  // WHAT THIS WORKSPACE ASKED ITS LIVE AGENTS TO DO, and what came back. §7 requires it in as many
+  // words, and the argument is the one `threads` makes one grain over: `runs` says what executed
+  // and `steps` says what it cost, and neither can say what was ASKED FOR or by whom — a deployed
+  // run's `agent_id` is the agent, not the person, and the request itself exists nowhere else.
+  //
+  // "What did we ask our agents to do" is the workspace's own operational record, and it is the
+  // question a team leaving with their agents most obviously needs an answer to. An export carrying
+  // every trace but not this would hand over the executions with every instruction removed.
+  //
+  // NO CREDENTIAL CAN BE IN IT, which is the only question this list asks. `input` is what a person
+  // typed and `output` is what their own agent returned, and both go through the same redactor the
+  // log sinks use on the way in — see `work/payload.ts`. That is the same posture `steps` already
+  // has toward the same class of text, and it is a stronger one: a step's payload is stored raw.
+  "work_items",
 ] as const;
 
 /**

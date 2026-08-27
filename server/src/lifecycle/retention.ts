@@ -111,6 +111,15 @@ export interface WorkspaceSweep {
    * a month would silently remove a blocking problem from the board that exists to show it.
    */
   inboxItemsDeleted: number;
+  /**
+   * FINISHED work items past the plan's window, swept on `ended_at`.
+   *
+   * Finished only, and on `ended_at` rather than `created_at`, which §7 states as a requirement
+   * and which is the same distinction the inbox item above draws: an item that has been running
+   * for six months is a STUCK JOB — a container somewhere may still be spending money on it —
+   * and a `created_at` cutoff would delete the one row saying so while it was still true.
+   */
+  workItemsDeleted: number;
 }
 
 export interface RetentionReport {
@@ -143,6 +152,10 @@ export const RETENTION_SWEPT_TABLES: readonly string[] = [
   // it does removes the resolved ones it leaves behind. A workspace that clears fourteen items a
   // week accumulates them forever, and this is the table the zero state's statistic reads.
   "inbox_items",
+  // Finished jobs. Swept on `ended_at`, which §7 requires and which the sweep's own comment argues
+  // — a job with no `ended_at` is not old, it is unfinished, and one of those is a container that
+  // may still be spending money.
+  "work_items",
 ];
 
 export const RETENTION_KEPT_TABLES: Record<string, string> = {
@@ -257,7 +270,33 @@ export class RetentionSweeper {
       stagingDeleted: 0,
       threadItemsDeleted: 0,
       inboxItemsDeleted: 0,
+      workItemsDeleted: 0,
     };
+
+    // FINISHED WORK ITEMS, on `ended_at`, and beside the inbox sweep below for the same structural
+    // reason: it has nothing to do with which runs expired, so a workspace with no old traces still
+    // has to have this table swept.
+    //
+    // `ended_at IS NOT NULL` IS THE WHOLE OF THE FILTER AND IT IS NOT A TIDINESS CHECK. A queued or
+    // running item has no `ended_at` and therefore cannot match a cutoff at all — but the column is
+    // also null on a `waiting` item, which is a job parked on a human decision, and one of those
+    // left over a long weekend is exactly the row somebody comes back to look for. Sweeping by
+    // `created_at` would take it, and the person would find no record that they had ever asked.
+    //
+    // THE TRACE GOES ON ITS OWN CLOCK, and the two windows are the same length but not the same
+    // read: `runs` is swept on `started_at` below. So a work item can outlive the trace it points
+    // at by the gap between when it was dispatched and when it ended, which is why `run_id` is not
+    // a foreign key — see migration 063 — and why the detail panel says the trace has been swept
+    // rather than showing an empty timeline.
+    out.workItemsDeleted = (
+      await this.deps.db.scoped(ctx.workspaceId, async (tx) =>
+        tx.run(
+          `DELETE FROM work_items
+            WHERE workspace_id = ? AND ended_at IS NOT NULL AND ended_at < ?`,
+          [ctx.workspaceId, cutoff],
+        ),
+      )
+    ).changes;
 
     // RESOLVED INBOX ITEMS, BEFORE THE RUN READ AND ITS EARLY RETURN. This has nothing to do with
     // which runs expired — a workspace with no expired runs still accumulates resolved items — and
