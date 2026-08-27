@@ -224,7 +224,7 @@ console.log("\nundo");
 //
 //   THE OBJECT STORE. A key carries the version it was written under — `…/agents/<id>/v<n>/<path>`
 //   — so a manifest handed to `addVersion` reserves v5 and names paths that exist only under v3.
-//   Every read of the restored version asks for `v5/agent.py` and gets nothing. This is GAP-001's
+//   Every read of the restored version asks for `v5/agent.py` and gets nothing. This is `forkAgent`'s
 //   defect one axis over: there a manifest crossed an AGENT boundary, here a VERSION one.
 //
 //   THE DISK. `runtime/agents/<slug>` is what a local run spawns from, what `planDeploy` checks

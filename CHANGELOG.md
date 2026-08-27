@@ -18,10 +18,10 @@ response variants, memory decisions, forked objects and restored versions are se
 it, and in every one the expensive part — schema, store, route, component, empty state, suite —
 was finished and the missing piece was between five and fifty lines.
 
-The audit is `gaps.md`: sixteen confirmed findings, each traced along one chain from backend
-capability to user action and back, with the break recorded. All sixteen are closed here, one
-commit each, each left with CI green before the next was started. Two more were discovered while
-closing them and are recorded in the same file rather than absorbed quietly.
+The audit produced sixteen confirmed findings, each traced along one chain from backend capability
+to user action and back, with the break recorded. All sixteen are closed here, one commit each,
+each left with CI green before the next was started. Two more were discovered while closing them
+and are written up below rather than absorbed quietly.
 
 **The one to fix first was the one that made the rest visible.** `WsRelay.answer()` — the shared
 path for every point-to-point read on the socket — had three outcomes and expressed two: a success
@@ -197,14 +197,14 @@ and all of them had fewer writers than readers. `schema/events.md` is untouched.
   as a silent success: migration 045 allows one live check per commit, so opening the approval's
   paid row while the dry-run check was still running **read that row back and wrote nothing** —
   `approvedForSha` stayed false and the re-run went out on the fake provider having reported
-  success. Recorded as GAP-018.
+  success.
 
 ### Still owed
 
-- **Forty-five server suites are registered in `package.json` and absent from `ci.yml`** — recorded
-  as GAP-017, and found by this pass rather than reported by it: two of the four suites this work
-  needed for verification turned out not to run. Three were added. The rest need triage per suite
-  rather than a bulk addition, and `test:edit-versions` is the proof: it validates a generated
+- **Forty-five server suites are registered in `package.json` and absent from `ci.yml`** — found by
+  this pass rather than reported by it: two of the four suites this work needed for
+  verification turned out not to run. Three were added. The rest need triage per suite rather
+  than a bulk addition, and `test:edit-versions` is the proof: it validates a generated
   project by importing it with Python, and the server job has node and nothing else, so it fails
   there for a reason that says nothing about the code under test. It is recorded in the workflow as
   deliberately absent, with the reason, rather than left looking forgotten.

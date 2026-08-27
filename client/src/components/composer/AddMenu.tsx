@@ -36,7 +36,7 @@ export function AddMenu({
    * Why the list is empty, when the reason is a read that failed rather than an agent with
    * nothing in it. The two are indistinguishable from `available` alone — both are an empty set —
    * and telling somebody to "generate an agent" about an agent with two published versions is a
-   * confident wrong answer rather than a missing one, which is the failure GAP-003 is about.
+   * confident wrong answer rather than a missing one, which is the failure this field prevents.
    */
   unavailable = null,
   onPick,

@@ -224,7 +224,7 @@ function RevokeForm({
  * about code that did. "Three references" means something different when two of them are guesses.
  */
 /**
- * When this credential was replaced, and why — GAP-13's unreadable record.
+ * When this credential was replaced, and why — the record that could be written and not read.
  *
  * EVERY ROTATION HAS BEEN RECORDED SINCE THE VAULT LANDED, with its reason and a millisecond-safe
  * tie-break ordering, and `rotations()` had no caller anywhere: this panel could rotate a credential

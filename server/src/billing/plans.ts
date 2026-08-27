@@ -281,7 +281,7 @@ export const PLANS: Record<PlanId, PlanLimits> = { free: FREE, pro: PRO, team: T
  * declared on `PlanFeatures` ahead of the surfaces they will gate — which is the right order, and
  * `entitlementGate.ts` argues it — and they are absent here for exactly that reason. A billing
  * panel that listed them would be selling three capabilities the product does not have, which is
- * the mistake the public pricing page made and GAP-014 undoes.
+ * the mistake the public pricing page made and this list does not repeat.
  *
  * `platformKey`, `byok` and `mcp` are absent too, for the opposite reason: every plan has them, so
  * a list including them describes nothing about the choice somebody is making. A row here earns

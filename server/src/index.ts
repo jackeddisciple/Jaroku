@@ -3323,7 +3323,7 @@ const turnVariants = new TurnVariantStore(store.database());
  * ONE HELPER FOR FOUR DISPATCH SITES, because the interesting part is identical at all of them and
  * getting it slightly different in one is how "which model wrote this?" starts disagreeing with
  * itself. What each site supplies is what it knows: the turn, the model, and the effort plan the
- * adapter produced (GAP-005) — which is exactly the pair `effort_requested` / `effort_applied` the
+ * adapter produced — which is exactly the pair `effort_requested` / `effort_applied` the
  * clamp marker is derived from.
  *
  * SETTLED BY VARIANT ID RATHER THAN BY TURN, which is `settle`'s own rule: a method that took a
@@ -5522,7 +5522,7 @@ async function broadcastUsage(ctx: TenantContext): Promise<void> {
             //
             // ONLY THE FLAGS THAT GATE SOMETHING. `approvalBatchApprove`, `policyEngine` and
             // `evalCiGate` are declared ahead of the surfaces they will gate and are deliberately
-            // absent — see `EntitlementKind` and GAP-014. Selling them here would repeat on a
+            // absent — see `EntitlementKind`. Selling them here would repeat on a
             // billing panel the exact mistake the pricing page made.
             features: FEATURE_LABELS.filter(([flag]) => limits.features[flag]).map(([, name]) => name),
           };
@@ -6070,8 +6070,9 @@ async function forkAgent(ctx: TenantContext, slug: string): Promise<void> {
 
   // AND ONTO THE DISK THE LOCAL RUN PATH READS. `runnable`, `planDeploy` and the spawn all resolve
   // `runtime/agents/<slug>`, so a fork that exists only in the object store is a fork the composer
-  // refuses to run while blaming a missing `agent.py` the user cannot supply. GAP-007 makes that
-  // derivation honest for every agent; until then a fork must at least land where the runner looks.
+  // refuses to run while blaming a missing `agent.py` the user cannot supply. Deriving `runnable`
+  // from the manifest makes that honest for every agent; until then a fork must at least land where
+  // the runner looks.
   await projects.materialise(ctx, id, published, join(agentsDir(RUNTIME_DIR), forkSlug));
 
   console.log(`[agents] forked ${source.slug} v${version.version} to ${forkSlug} as v${published} (${sourceFiles.length} files)`);
@@ -6124,7 +6125,7 @@ async function restoreAgentVersion(ctx: TenantContext, slug: string, version: un
   // the version list and the byte total are all correct while the content is unreachable.
   //
   // It survived because the failure was invisible from every direction. The read threw, the throw
-  // was swallowed by `answer()` (GAP-003), and the panel simply did not change — which, on the
+  // was swallowed by `answer()`, and the panel simply did not change — which, on the
   // screen where somebody has just pressed Restore, is indistinguishable from a refresh that
   // worked. The audit that found this path recorded the Code view as CORRECT for that reason.
   //
@@ -6147,8 +6148,8 @@ async function restoreAgentVersion(ctx: TenantContext, slug: string, version: un
   // the restore inside the version history as well.
   //
   // Generate materialises, apply materialises, undo materialises. Restore not doing so was an
-  // inconsistency rather than a decision — GAP-007 removes the need to remember by making one
-  // helper the only way anything obtains a project directory.
+  // inconsistency rather than a decision — `ensureProjectDir` removes the need to remember by
+  // making one helper the only way anything obtains a project directory.
   await projects.materialise(ctx, agent.id, published, join(agentsDir(RUNTIME_DIR), slug));
 
   console.log(`[agents] ${slug} restored v${wanted} as v${published} (${restoredFiles.length} files)`);

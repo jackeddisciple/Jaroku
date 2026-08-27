@@ -21,7 +21,7 @@
 // WHAT IT CANNOT SEE, said out loud. It reads source text, so a handler that is present and does
 // nothing — `onClick={() => {}}` — passes, and so does one whose body is a no-op branch. Those are
 // a different failure and a harder one; this catches the shape that actually shipped, which is a
-// control with no handler at all. GAP-008's exhaustive `runAction` switch is the answer to the
+// control with no handler at all. The Inbox's exhaustive `runAction` switch is the answer to the
 // other half, and it is enforced by the typechecker rather than by a text scan.
 //
 //   npm run test:dead-controls
