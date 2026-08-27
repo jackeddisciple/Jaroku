@@ -91,6 +91,25 @@ export interface DeployManagerDeps {
    * else — the caller shows it and Jaroku keeps no copy.
    */
   onServeToken: (e: { deploymentId: string; url: string; token: string }) => void;
+  /**
+   * Put the serve token where every other credential already lives.
+   *
+   * THE REVERSAL, STATED WHERE IT HAPPENS. The old property was "Jaroku does not keep a copy",
+   * and it was a real property with a real argument behind it — a token that gates spending
+   * somebody's provider key should not be sitting in our database. What changed is what the
+   * product has to do: dispatch a run to a deployed agent, resume one, cancel one, and eventually
+   * do all three from a schedule with nobody present. Every one of those is a call to that
+   * endpoint, and a credential shown once and thrown away cannot make it.
+   *
+   * The new property is narrower and defensible: the token lives where every other credential
+   * lives — envelope-encrypted, workspace-scoped, with no path to plaintext except the dispatcher
+   * (see `SecretStore.getServeToken`, which is the only door to it and takes a service id rather
+   * than a name). Pretending it is not a change would be worse than making it.
+   *
+   * Injected rather than imported so this file still has no idea what a SecretStore is, the same
+   * way it has no idea a WebSocket exists. Returns a warning to log, or null.
+   */
+  storeServeToken: (e: { serviceId: string; token: string }) => Promise<string | null>;
   /** A full snapshot went stale — the caller re-broadcasts. */
   onChanged: () => void;
 }
@@ -464,14 +483,29 @@ export class DeployManager {
       }
       await this.log(id, "publishing", "jaroku", `live at ${url}`);
       if (serveToken) {
-        // NOT through log(). A log line is persisted to deployment_logs, and this token gates
-        // an endpoint that spends the user's provider key — putting it in the database would
-        // undo the one thing the whole secrets design is for. It goes out once, on the
-        // channel, to whoever is watching, and lives on only in Railway's variable store.
+        // STILL NOT THROUGH log(). A log line is persisted to `deployment_logs` in plaintext and
+        // broadcast to every connected browser, and this token gates an endpoint that spends the
+        // user's provider key. That has not changed and must not: the value goes out once, on
+        // the channel, to whoever is watching.
+        //
+        // WHAT HAS CHANGED IS WHERE IT ALSO GOES. Stored first, so that a deploy which cannot
+        // keep the token says so while somebody is still reading the log rather than three days
+        // later when a scheduled dispatch fails with a 401.
+        const warning = await this.deps.storeServeToken({ serviceId: target.serviceId, token: serveToken });
         this.deps.onServeToken({ deploymentId: id, url, token: serveToken });
+        // AND THE LINE THAT USED TO BE FALSE. It read "Jaroku does not keep a copy", which was
+        // true when nothing could call this endpoint on your behalf and is a lie now that
+        // something does. The replacement says the same thing the reversal is defended on: not
+        // that the token is unheld, but that it is held the way every other credential is.
         await this.log(id, "publishing", "jaroku",
-          "a bearer token was generated and set on Railway. It is shown once, above — Jaroku " +
-          "does not keep a copy.");
+          warning
+            ? `a bearer token was generated and set on Railway, and is shown once above — but ` +
+              `Jaroku could not store its own copy (${warning}), so it cannot dispatch runs to ` +
+              `this agent until you reconnect it.`
+            : "a bearer token was generated, set on Railway, and stored in this workspace's " +
+              "vault — envelope-encrypted, workspace-scoped, and readable by nothing but the " +
+              "dispatcher that calls your agent. It is shown once above so you can call the " +
+              "endpoint yourself.");
       } else {
         await this.log(id, "publishing", "jaroku",
           "this endpoint has NO token — anyone with the URL can run the agent on your key.");

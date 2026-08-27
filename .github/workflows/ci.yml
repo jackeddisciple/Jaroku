@@ -307,6 +307,12 @@ jobs:
           # paused one (silent by design), one that finished a moment ago, and one still pushing
           # after eighty minutes. A sweep that closes those is worse than no sweep, and invisible.
           npm run test:deploy-reconcile
+          # AND THE REVERSAL THIS PART MAKES, checked the way test:log-redaction checks its own:
+          # one known secret, and every route out of the deploy path tried against it. "Jaroku
+          # does not keep a copy" was a real property with a real argument, and Part 1 ends it —
+          # so most of this suite is ABSENCE, and one assertion reads the deploy manager for a
+          # line the USER reads that still makes the old claim.
+          npm run test:serve-token-store
 
       # THE SUITES THAT SHIPPED WITH v0.2.15 AND CI HAS NEVER RUN. They were written, they passed,
       # and nothing but the person who wrote them ever executed them — the same gap the client job's

@@ -29,6 +29,7 @@ import { randomUUID } from "node:crypto";
 import type { Db, Queryable } from "../db/db.ts";
 import { asInt } from "../db/db.ts";
 import type { TenantContext } from "../db/tenant.ts";
+import { serveTokenEnvKeyFor } from "../envWriter.ts";
 import type { ElevationReceipt } from "./elevation.ts";
 import type { SecretRefRepository } from "../db/repositories/secretRefs.ts";
 import {
@@ -84,14 +85,31 @@ export class KmsSecretStore implements SecretStore {
   }
 
   async set(ctx: TenantContext, name: string, value: string): Promise<SetResult> {
+    const written = await this.seal(ctx.workspaceId, name, value);
+    if (!written.ok) return written;
+    await this.opts.refs.markConfigured(ctx, { name, provider: this.opts.providerFor?.(name) ?? null });
+    // No warning to give. The local store's exists because a shell variable beats the file on
+    // the next restart; nothing shadows a row.
+    return written;
+  }
+
+  /**
+   * The encryption and the write, without the registry entry.
+   *
+   * Shared by `set` and `setServeToken` so the two cannot drift in how a value is validated,
+   * which key version seals it, or what authenticated data binds it to the workspace. What they
+   * differ in is the ONE thing they should: whether the name becomes a row in the credential
+   * panel. See `SecretStore.setServeToken`.
+   */
+  private async seal(workspaceId: string, name: string, value: string): Promise<SetResult> {
     assertSecretName(name);
     const refusal = unstorableReason(value);
     if (refusal) return { ok: false, warning: refusal };
 
-    const key = await this.currentDataKey(ctx.workspaceId);
-    const ciphertext = sealWithDataKey(key.material, value, aadFor(ctx.workspaceId, name));
+    const key = await this.currentDataKey(workspaceId);
+    const ciphertext = sealWithDataKey(key.material, value, aadFor(workspaceId, name));
     const now = new Date().toISOString();
-    await this.q(ctx.workspaceId).run(
+    await this.q(workspaceId).run(
       `INSERT INTO workspace_secrets
          (workspace_id, name, data_key_id, ciphertext, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?)
@@ -99,11 +117,8 @@ export class KmsSecretStore implements SecretStore {
          data_key_id = excluded.data_key_id,
          ciphertext  = excluded.ciphertext,
          updated_at  = excluded.updated_at`,
-      [ctx.workspaceId, name, key.rowId, ciphertext, now, now],
+      [workspaceId, name, key.rowId, ciphertext, now, now],
     );
-    await this.opts.refs.markConfigured(ctx, { name, provider: this.opts.providerFor?.(name) ?? null });
-    // No warning to give. The local store's exists because a shell variable beats the file on
-    // the next restart; nothing shadows a row.
     return { ok: true, warning: null };
   }
 
@@ -174,6 +189,33 @@ export class KmsSecretStore implements SecretStore {
    */
   async getForPlatformCall(ctx: TenantContext, names: string[]): Promise<Record<string, string>> {
     return this.decryptInto(ctx.workspaceId, names);
+  }
+
+  /**
+   * See `SecretStore.getServeToken`.
+   *
+   * `decryptInto` is reused rather than reimplemented, so this value goes through the same AAD
+   * check every other read does — a ciphertext moved between workspaces or relabelled fails to
+   * authenticate here exactly as it does on the run path. The workspace comes from the context
+   * and the name is derived from the service, so neither half of "which secret" is a caller's
+   * free choice.
+   */
+  async getServeToken(ctx: TenantContext, serviceId: string): Promise<string | null> {
+    const name = serveTokenEnvKeyFor(serviceId);
+    const found = await this.decryptInto(ctx.workspaceId, [name]);
+    return found[name] ?? null;
+  }
+
+  /**
+   * See `SecretStore.setServeToken`.
+   *
+   * Sealed exactly as every other credential is — same data key, same authenticated data, same
+   * refusals — and deliberately NOT registered in `secret_refs`, so it does not appear in the
+   * panel. That is what makes this store agree with the local one, whose `NOT_A_SECRET` filter
+   * already hides `JAROKU_*` names from `listNames`.
+   */
+  async setServeToken(ctx: TenantContext, serviceId: string, token: string): Promise<SetResult> {
+    return this.seal(ctx.workspaceId, serveTokenEnvKeyFor(serviceId), token);
   }
 
   /**

@@ -2197,6 +2197,21 @@ const deployDeps: DeployManagerDeps = {
   onStage: (e) => relay.broadcastDeploy(contextForDeploy(), { type: "stage", ...e }),
   onLog: (e) => relay.broadcastDeploy(contextForDeploy(), { type: "log", ...e }),
   onServeToken: (e) => relay.broadcastDeploy(contextForDeploy(), { type: "serveToken", ...e }),
+  // THE REVERSAL, WIRED. See DeployManagerDeps.storeServeToken for why "Jaroku does not keep a
+  // copy" stopped being the property this deploy holds. The manager is handed a function rather
+  // than the store, so it still has no idea what a SecretStore is — the same shape `token` and
+  // `configuredNames` already take.
+  storeServeToken: async ({ serviceId, token }) => {
+    try {
+      const result = await secrets.setServeToken(contextForDeploy(), serviceId, token);
+      return result.ok ? result.warning : (result.warning ?? "the vault refused the value");
+    } catch (err) {
+      // Reported rather than thrown: a deploy that reached a live URL has succeeded, and failing
+      // it here would tear down a working agent over a credential the user was just shown. What
+      // it costs is dispatch, and the log line says exactly that.
+      return (err as Error).message;
+    }
+  },
   onFinished: (d) => {
     relay.broadcastDeploy(contextForDeploy(), {
       type: "finished",

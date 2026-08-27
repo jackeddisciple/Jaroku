@@ -166,6 +166,7 @@
     "test:serve-confirm": "tsx src/serveConfirm.test.ts",
     "test:serve-cancel": "tsx src/serveCancel.test.ts",
     "test:deploy-reconcile": "tsx src/deployReconcile.test.ts",
+    "test:serve-token-store": "tsx src/serveTokenStore.test.ts",
     "test:github-sync": "tsx src/githubSync.test.ts",
     "test:github-push": "tsx src/githubPush.test.ts",
     "test:github-first-push": "tsx src/githubFirstPush.test.ts",

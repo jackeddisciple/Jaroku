@@ -13,6 +13,7 @@
 import { randomUUID } from "node:crypto";
 import { systemContextFor, newRequestId, type TenantContext } from "../db/tenant.ts";
 import type { SecretStore } from "./secretStore.ts";
+import { serveTokenEnvKeyFor } from "../envWriter.ts";
 
 export interface SecretConformanceResult {
   failures: number;
@@ -66,6 +67,59 @@ export async function runSecretConformance(
     !("JAROKU_MCP_NEVER_SET_TOKEN" in (await store.getForPlatformCall(ctx, ["JAROKU_MCP_NEVER_SET_TOKEN"]))),
     "a name with no value is absent rather than an empty string, here too",
   );
+
+  // --- the fourth door: a deployed agent's own bearer token ----------------------------
+  //
+  // NARROWER THAN THE THREE ABOVE, AND THE ASSERTIONS ARE MOSTLY ABOUT THAT. It takes a SERVICE
+  // ID rather than a name — the store derives the name itself — so unlike a `get(ctx, name)` it
+  // cannot be pointed at an arbitrary credential, and unlike `getForRun` it returns exactly one
+  // value. The property both implementations must agree on is that the derivation is the same
+  // one, or a token stored locally would be unfindable in production and the reconnect flow
+  // would look like the only thing that ever worked.
+  const SERVICE = `svc-${randomUUID()}`;
+  const SERVE_TOKEN = "srv_conformance_0123456789_ABCdef";
+
+  check(
+    (await store.getServeToken(ctx, SERVICE)) === null,
+    "a deployment with no stored token answers null rather than an empty string",
+  );
+  const stored = await store.setServeToken(ctx, SERVICE, SERVE_TOKEN);
+  check(stored.ok, "a deployment's token can be stored", stored.warning ?? "");
+  check(
+    (await store.getServeToken(ctx, SERVICE)) === SERVE_TOKEN,
+    "...and once stored, the dispatcher can read it back byte for byte",
+  );
+  // THE NAME DERIVATION IS THE STORE'S, ON BOTH HALVES. Asserted from the outside: nothing here
+  // told the store what to call it, and `get` found what `set` wrote. Two implementations that
+  // derived it differently would each work alone and fail the moment a deployment moved between
+  // them.
+  check(
+    (await store.getServeToken(ctx, `svc-${randomUUID()}`)) === null,
+    "a different deployment's id reaches a different credential, or none",
+  );
+  // NOT IN THE PANEL, ON EITHER STORE. A serve token is host plumbing — nobody typed it, nobody
+  // can usefully edit it, and rotating it is a button. One row per deployment would bury the
+  // credentials the panel exists for. The local store hides every `JAROKU_*` name already; this
+  // is what stops the hosted one from listing what the local one hides.
+  check(
+    !(await store.listNames(ctx)).some((r) => r.name === serveTokenEnvKeyFor(SERVICE)),
+    "...and it is not listed as one of the workspace's own credentials",
+  );
+  await store.delete(ctx, serveTokenEnvKeyFor(SERVICE));
+  check(
+    (await store.getServeToken(ctx, SERVICE)) === null,
+    "...and forgetting a deployment's token makes it unreadable again",
+  );
+  // AND THE REDEPLOY CASE, which is why the key is a SERVICE rather than a deployment row: a
+  // second deploy sets a new token on the same service, and there must be exactly one stored
+  // token per thing that can be called rather than a dead one accumulating per deploy.
+  await store.setServeToken(ctx, SERVICE, "srv_first_0123456789_ABCdef");
+  await store.setServeToken(ctx, SERVICE, "srv_second_0123456789_ABCdef");
+  check(
+    (await store.getServeToken(ctx, SERVICE)) === "srv_second_0123456789_ABCdef",
+    "redeploying overwrites the stored token rather than leaving two",
+  );
+  await store.delete(ctx, serveTokenEnvKeyFor(SERVICE));
 
   // --- the surface that does not exist, and the one door that now does -----------------
   //

@@ -118,6 +118,60 @@ export interface SecretStore {
   getForPlatformCall(ctx: TenantContext, names: string[]): Promise<Record<string, string>>;
 
   /**
+   * The bearer token for one deployed agent's own endpoint, for the dispatcher that calls it.
+   *
+   * THE FOURTH DOOR, AND IT IS THE NARROWEST ONE ON THIS INTERFACE. It exists because the deploy
+   * layer reversed a property it used to hold out loud — "Jaroku does not keep a copy" — and a
+   * reversal is worth making visible rather than smuggling through a method that already exists.
+   *
+   * WHY NOT ONE OF THE THREE ALREADY HERE, since the honest answer to "can something existing
+   * carry this" is what §8 asks for before it is built:
+   *
+   *   `getForRun` takes a RUN ID and resolves the workspace from it. The dispatcher is holding a
+   *   deployment, and the run it is about to start does not exist yet — that is the point of the
+   *   call. A synthetic run id would resolve to nothing on the hosted store and would attribute
+   *   `last_used_at` to a run nobody could find, which is exactly the dishonest reuse the
+   *   `getForPlatformCall` note already rejected once.
+   *
+   *   `getForPlatformCall` is for a model call the platform makes on a workspace's behalf. This is
+   *   not a model call and not the platform's spend; widening that method's meaning to fit would
+   *   make its own careful docstring false.
+   *
+   *   `revealForUser` hands a value to the PERSON who owns it, behind a live elevation. Nobody is
+   *   present here — this is a dispatcher on a background path — and requiring elevation would
+   *   mean a scheduled job could never run a deployed agent.
+   *
+   * WHAT KEEPS IT NARROW. It takes a SERVICE ID, not a name: the store derives the name itself
+   * through `serveTokenEnvKeyFor`, so this door cannot be asked for an arbitrary credential the
+   * way a `get(ctx, name)` could. It returns ONE value, never a map. And like `getForRun`, it is
+   * a value flowing INTO an outbound call — an Authorization header on a request to the user's
+   * own container — and never back out to a request handler.
+   *
+   * Null means there is no stored token, which is a real and common state rather than an error:
+   * every agent deployed before this existed has one, and it is what the reconnect flow is for.
+   */
+  getServeToken(ctx: TenantContext, serviceId: string): Promise<string | null>;
+
+  /**
+   * Store a deployment's own bearer token. The write half of the door above.
+   *
+   * A SEPARATE METHOD RATHER THAN `set(ctx, serveTokenEnvKeyFor(id), token)`, and the reason is
+   * `listNames`. A serve token is Jaroku's own plumbing, not a credential a user typed: they
+   * never set it, they cannot usefully edit it, and rotating it is a button rather than a paste.
+   * The local store already knows that — its `NOT_A_SECRET` filter hides every `JAROKU_*` name
+   * that is not an MCP token, for exactly this reason — and the hosted store lists from the
+   * name registry, which the generic `set` writes to unconditionally. So the generic path made
+   * the two implementations DISAGREE about whether a workspace with three deployments has three
+   * credentials: invisible locally, three rows of `JAROKU_DEPLOY_<uuid>_SERVE_TOKEN` in
+   * production, burying the keys the panel exists for.
+   *
+   * Pairing the write with the read fixes that in one place and keeps the name derivation
+   * entirely inside the store, which is what stops a caller reaching a different secret through
+   * either half.
+   */
+  setServeToken(ctx: TenantContext, serviceId: string, token: string): Promise<SetResult>;
+
+  /**
    * Hand a stored value back to the person who owns it.
    *
    * THE THIRD PLAINTEXT EXIT, AND THE ONE THAT REVERSES THE RULE AT THE TOP OF THIS FILE. It is

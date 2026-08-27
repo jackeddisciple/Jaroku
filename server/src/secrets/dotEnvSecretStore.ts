@@ -34,7 +34,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { parseLine } from "../env.ts";
-import type { CredentialWriter } from "../envWriter.ts";
+import { serveTokenEnvKeyFor, type CredentialWriter } from "../envWriter.ts";
 import type { TenantContext } from "../db/tenant.ts";
 import type { ElevationReceipt } from "./elevation.ts";
 import type { SecretRefRepository } from "../db/repositories/secretRefs.ts";
@@ -124,6 +124,42 @@ export class DotEnvSecretStore implements SecretStore {
    */
   async getForPlatformCall(_ctx: TenantContext, names: string[]): Promise<Record<string, string>> {
     return this.getForRun("", names);
+  }
+
+  /**
+   * See `SecretStore.getServeToken`.
+   *
+   * The name is derived here rather than taken, which is what makes this door narrow: there is no
+   * argument a caller could pass that reaches a different credential. Locally the value is a line
+   * in `runtime/.env` like every other, so the read is the same read — what differs between the
+   * two stores is where the bytes live, never what the method means.
+   */
+  async getServeToken(_ctx: TenantContext, serviceId: string): Promise<string | null> {
+    const name = serveTokenEnvKeyFor(serviceId);
+    const found = await this.getForRun("", [name]);
+    return found[name] ?? null;
+  }
+
+  /**
+   * See `SecretStore.setServeToken`.
+   *
+   * Through the same one writer of `runtime/.env` every other value goes through — the round-trip
+   * refusal and the chmod are not skipped — but deliberately NOT registered in `secret_refs`. It
+   * is host plumbing rather than a credential somebody typed, and `NOT_A_SECRET` already hides it
+   * from `listNames` on this store; registering it would make the hosted store list what this one
+   * hides, which is the drift the conformance suite exists to catch.
+   *
+   * The written value is exported into `process.env` as well, so `getServeToken` finds it in the
+   * same process that just stored it rather than only after a restart. Locally that IS the store:
+   * a fresh deploy followed immediately by a dispatch is the ordinary case, and it must not be
+   * the one case that needs the server bounced.
+   */
+  async setServeToken(_ctx: TenantContext, serviceId: string, token: string): Promise<SetResult> {
+    const name = serveTokenEnvKeyFor(serviceId);
+    assertSecretName(name);
+    const written = this.opts.writer.set(name, token);
+    if (written.ok) process.env[name] = token;
+    return written;
   }
 
   /**

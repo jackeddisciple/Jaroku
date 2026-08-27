@@ -40,6 +40,24 @@ export function authEnvKeyFor(serverId: string): string {
   return `JAROKU_MCP_${serverId.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_TOKEN`;
 }
 
+/**
+ * The name a deployment's own bearer token is stored under. Same convention, same reason.
+ *
+ * KEYED BY THE RAILWAY SERVICE, NOT BY THE DEPLOYMENT ROW, and that is the whole of the choice.
+ * The token is a VARIABLE ON A SERVICE — it is what `upsertVariables` set, and it is what the
+ * container running right now reads at boot. A redeploy makes a new deployment row and sets a
+ * new token on the SAME service, so keying by row would leave one dead secret per deploy
+ * accumulating in the vault forever, and would make "which of these is the live one" a question
+ * with a wrong answer available. Keyed by service, a redeploy overwrites, and there is exactly
+ * one stored token per thing that can be called.
+ *
+ * Lives here rather than in the deploy layer because this is where the convention is, and a
+ * second spelling of it somewhere else is how a stored credential becomes unfindable.
+ */
+export function serveTokenEnvKeyFor(serviceId: string): string {
+  return `JAROKU_DEPLOY_${serviceId.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_SERVE_TOKEN`;
+}
+
 export interface CredentialWriter {
   /** Store a value under `key`. Returns a warning when the write will not take effect. */
   set(key: string, value: string): { ok: boolean; warning: string | null };
