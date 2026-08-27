@@ -449,16 +449,22 @@ export async function startControlPlane(
   // Recorded as it arrives rather than read back later: a bus entry is released the moment a run
   // closes, and a suite that asked afterwards would find nothing for exactly the runs it cares
   // about most.
+  // ONCE PER RUN, not once per `open`. A resume opens the same run again — see DeployRuns.open,
+  // which guards its own listeners for the same reason — and a second recorder here would count
+  // every event of the resumed segment twice, which reads in an assertion as a trace with
+  // duplicated steps rather than as a bug in this file.
   const originalOpen = runs.open.bind(runs);
   runs.open = (input) => {
     const opened = originalOpen(input);
-    events.set(input.runId, []);
-    control.set(input.runId, []);
-    parseErrors.set(input.runId, []);
-    const emitter = bus.register(input.runId);
-    emitter.on("event", (e) => events.get(input.runId)!.push(e));
-    emitter.on("control", (c) => control.get(input.runId)!.push(c));
-    emitter.on("parseError", (e) => parseErrors.get(input.runId)!.push(e));
+    if (!events.has(input.runId)) {
+      events.set(input.runId, []);
+      control.set(input.runId, []);
+      parseErrors.set(input.runId, []);
+      const emitter = bus.register(input.runId);
+      emitter.on("event", (e) => events.get(input.runId)!.push(e));
+      emitter.on("control", (c) => control.get(input.runId)!.push(c));
+      emitter.on("parseError", (e) => parseErrors.get(input.runId)!.push(e));
+    }
     return opened;
   };
 

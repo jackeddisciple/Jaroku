@@ -22,6 +22,7 @@ import {
   startMockProvider, startServe, traceShape, type MockTurn,
 } from "../fixtures/deploy/serveHarness.ts";
 import { startMockServe } from "../fixtures/deploy/mockServe.ts";
+import { DeployDispatcher } from "./deployDispatch.ts";
 import { BackpressureTracker, DEFAULT_BACKPRESSURE_LIMITS } from "./sandbox/backpressure.ts";
 import type { TraceEvent } from "./types.ts";
 
@@ -246,6 +247,112 @@ const deployed = control.eventsFor(runId);
 await served.stop();
 await hostedProvider.close();
 await control.close();
+
+// --- pause and resume, through the actions the control plane already had -----------------------
+//
+// A deployed run pauses because `controlplane_http.poll_control` asks at every node boundary and
+// `bus.signal` answers — the same two halves a hosted sandbox run has always had, finally being
+// used. Nothing here is a new mechanism; the only thing Part 1 added is that something now sends
+// the action and something now dispatches the continuation.
+
+{
+  const pauseControl = await startControlPlane();
+  const pauseProject = deployedProject();
+  const pauseProvider = await startMockProvider(SCRIPT);
+  // Slow enough at each boundary that there is a boundary to pause AT. The delay is a debug aid
+  // the runner already has, not something added for this.
+  const paused = await startServe({
+    project: pauseProject, provider: pauseProvider, env: { JAROKU_STEP_DELAY_MS: "1200" },
+  });
+  const dispatcher = new DeployDispatcher({
+    runs: pauseControl.runs,
+    endpoint: async () => ({ url: paused.url, serveToken: paused.token }),
+  });
+  const pausedRunId = randomUUID();
+
+  const started = await dispatcher.start({
+    deploymentId: "dep-1", workspaceId: pauseControl.workspaceId, agentId: pauseProject.agentId,
+    runId: pausedRunId, input: INPUT, controlPlaneUrl: pauseControl.url,
+  });
+  check("a deployed run can be dispatched by the server that will watch it", started.ok, JSON.stringify(started));
+
+  {
+    const deadline = Date.now() + 120_000;
+    while (!pauseControl.eventsFor(pausedRunId).some((e) => e.kind === "step") && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  }
+  pauseControl.bus.signal(pausedRunId, { action: "pause" });
+  {
+    const deadline = Date.now() + 90_000;
+    while (!pauseControl.controlFor(pausedRunId).some((c) => c["ctrl"] === "run_closed") && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 150));
+    }
+  }
+
+  const pauseCtrl = pauseControl.controlFor(pausedRunId).find((c) => c["ctrl"] === "paused");
+  check("a pause reaches the container and is honoured at a node boundary", pauseCtrl !== undefined,
+    pauseControl.controlFor(pausedRunId).map((c) => String(c["ctrl"])).join(", "));
+  check("...leaving a durable checkpoint to continue from",
+    typeof pauseCtrl?.["checkpoint_id"] === "string" && String(pauseCtrl["checkpoint_id"]).length > 0,
+    JSON.stringify(pauseCtrl));
+  // A PAUSED RUN IS NOT A FINISHED RUN. run_end is what closes a run out, and emitting one here
+  // would make a run somebody is about to resume read as over — with a cost, a status and a
+  // place in the Activity feed it has not earned yet.
+  check("...and NOT a run_end, because a paused run is not over",
+    !pauseControl.eventsFor(pausedRunId).some((e) => e.kind === "run_end"),
+    traceShape(pauseControl.eventsFor(pausedRunId)).join(" "));
+  check("...which the container says out loud rather than leaving to be inferred",
+    pauseControl.controlFor(pausedRunId).find((c) => c["ctrl"] === "run_closed")?.["status"] === "paused");
+
+  const stepsAtPause = pauseControl.eventsFor(pausedRunId).filter((e) => e.kind === "step");
+  const seqOffset = Math.max(...stepsAtPause.map((e) => (e.kind === "step" ? e.step.seq : -1))) + 1;
+
+  const resumed = await dispatcher.resume({
+    deploymentId: "dep-1", workspaceId: pauseControl.workspaceId, agentId: pauseProject.agentId,
+    runId: pausedRunId, seqOffset, controlPlaneUrl: pauseControl.url,
+  });
+  check("a paused deployed run can be resumed", resumed.ok, JSON.stringify(resumed));
+  {
+    const deadline = Date.now() + 120_000;
+    while (!pauseControl.eventsFor(pausedRunId).some((e) => e.kind === "run_end") && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 200));
+    }
+  }
+
+  const whole = pauseControl.eventsFor(pausedRunId);
+  const seqs = whole.filter((e) => e.kind === "step").map((e) => (e.kind === "step" ? e.step.seq : -1));
+  check("...and finishes", whole.at(-1)?.kind === "run_end" &&
+    (whole.at(-1) as { run: { status: string } }).run.status === "completed",
+    traceShape(whole).join(" "));
+  // ONE RUN, ONE TIMELINE. A resumed segment that restarted its seq at zero would overwrite the
+  // steps it is meant to follow — the run would end up shorter than it was before it was
+  // resumed, with the paused half silently replaced.
+  check("...as ONE run with one ascending timeline, not two runs stitched together",
+    whole.filter((e) => e.kind === "run_start").length === 1 &&
+      new Set(seqs).size === seqs.length &&
+      Math.min(...seqs) === 0,
+    seqs.join(","));
+  check("...continuing from where the pause stopped rather than re-running what was done",
+    seqs.filter((s) => s >= seqOffset).length > 0 && seqs.length > stepsAtPause.length,
+    `paused at ${stepsAtPause.length} steps, finished with ${seqs.length}`);
+
+  // AND THE REFUSAL THE EPHEMERAL FILESYSTEM MAKES NECESSARY. A container's checkpoints do not
+  // survive a restart, and a resume that found none would start the graph over under the same
+  // run id, re-spending what it already spent, with nothing anywhere saying so.
+  const ghost = await dispatcher.resume({
+    deploymentId: "dep-1", workspaceId: pauseControl.workspaceId, agentId: pauseProject.agentId,
+    runId: randomUUID(), seqOffset: 0, controlPlaneUrl: pauseControl.url,
+  });
+  check("a resume with no checkpoint left in the container is refused, never restarted",
+    !ghost.ok && ghost.reason === "no_checkpoint", JSON.stringify(ghost));
+
+  await paused.stop();
+  await pauseProvider.close();
+  await pauseControl.close();
+  pauseProject.cleanup();
+}
+
 project.cleanup();
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 process.exitCode = fail === 0 ? 0 : 1;

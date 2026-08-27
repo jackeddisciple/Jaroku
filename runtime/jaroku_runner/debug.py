@@ -58,6 +58,24 @@ from typing import Any, Iterator
 from . import controlplane_http
 
 # runtime/.checkpoints/ — sibling of jaroku_runner/, alongside .staging/ and .history/.
+#
+# OVERRIDABLE, AND THE DEPLOYED PATH IS WHY. This resolves relative to wherever the package
+# lives, which is right locally and wrong in a container: a deploy vendors the runner INSIDE the
+# agent project, so the default lands checkpoints under `<project>/.jaroku/.checkpoints/` — a
+# directory inside the image's own writable layer, unbounded, and gone the moment Railway
+# restarts the service. serve.py sets JAROKU_CHECKPOINT_DIR to somewhere it owns and can sweep,
+# and that is the whole of the difference. An exported project sets nothing and is unchanged.
+_CHECKPOINT_DIR_ENV = "JAROKU_CHECKPOINT_DIR"
+
+
+def checkpoint_dir() -> Path:
+    override = (os.environ.get(_CHECKPOINT_DIR_ENV) or "").strip()
+    return Path(override) if override else Path(__file__).resolve().parent.parent / ".checkpoints"
+
+
+#: Kept as a module attribute because the branch tooling on the Node side and the eval sweep both
+#: reason about "the checkpoint directory" as a single place. Read through `checkpoint_dir()`
+#: everywhere it matters, so an override applies; this stays the local answer.
 CHECKPOINT_DIR = Path(__file__).resolve().parent.parent / ".checkpoints"
 
 # stderr sentinel for runner -> server control events (never on stdout / the trace stream).
@@ -69,8 +87,9 @@ def _log(*args: Any) -> None:
 
 
 def checkpoint_db_path(run_id: str) -> Path:
-    CHECKPOINT_DIR.mkdir(exist_ok=True)
-    return CHECKPOINT_DIR / f"{run_id}.sqlite"
+    directory = checkpoint_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / f"{run_id}.sqlite"
 
 
 # The schema LangGraph's tables live in on the Postgres path. Jaroku owns the schema and the
@@ -111,7 +130,7 @@ def thread_id_for(run_id: str, workspace_id: str | None = None) -> str:
 
 
 def control_path(run_id: str) -> Path:
-    return CHECKPOINT_DIR / f"{run_id}.control"
+    return checkpoint_dir() / f"{run_id}.control"
 
 
 def emit_ctrl(obj: dict) -> None:

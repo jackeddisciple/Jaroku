@@ -1202,10 +1202,26 @@ const checkpoints = openCheckpointStore(CHECKPOINTER, { checkpointDir: CHECKPOIN
 }
 
 const controlFile = (runId: string): string => join(CHECKPOINT_DIR, `${runId}.control`);
-/** Ask the runner to pause: it reads this file at its next node boundary. */
+/**
+ * Ask the runner to pause: it reads this at its next node boundary.
+ *
+ * TWO TRANSPORTS, ONE MEANING, and the second is why a deployed run can be paused at all. A
+ * local runner reads a file on a disk both processes share. A run inside somebody else's
+ * container shares no disk with this process and is not reachable from it at all — it reaches
+ * IN, on its own long-poll, and `bus.signal` is what that poll returns. `controlplane_http.py`
+ * and `debug.py` already speak it; nothing here is new machinery, it is the existing action
+ * finally being sent.
+ *
+ * BOTH, UNCONDITIONALLY, RATHER THAN A BRANCH ON WHICH KIND OF RUN THIS IS. The file is inert
+ * for a run that never looks at a disk; `signal` is a no-op for a run the bus has never heard of
+ * (see RunEventBus.signal's own early return). Choosing between them would mean this function
+ * needed to know which kind of run it was addressing, and getting that wrong is a pause button
+ * that silently does nothing.
+ */
 function requestPause(runId: string): void {
   mkdirSync(CHECKPOINT_DIR, { recursive: true });
   writeFileSync(controlFile(runId), "pause");
+  runEventBus.signal(runId, { action: "pause" });
 }
 /** Clear any stale pause request (before a fresh run of, or a resume of, this run id). */
 function clearControl(runId: string): void {
@@ -11256,7 +11272,13 @@ async function runAgent(
 
 // Pause the live run at its next node boundary (the runner honours the control file there).
 async function pauseRun(ctx: TenantContext, runId: string): Promise<void> {
-  if (!runActive || activeRunId !== runId) {
+  // THE INTERACTIVE RUN, OR A DEPLOYED ONE. `activeRunId` names the single run this server is
+  // executing in its own interactive slot, which is the only kind of run that existed here. A
+  // run in somebody's container is not that and never will be — there is no slot, no
+  // subprocess, and several of them can be in flight at once — so gating on `activeRunId` alone
+  // is a pause button that does nothing on exactly the runs Part 1 exists to make controllable.
+  const deployed = deployRuns.has(runId);
+  if (!deployed && (!runActive || activeRunId !== runId)) {
     console.log(`[debug] pauseRun ignored — ${runId} is not the active run`);
     return;
   }

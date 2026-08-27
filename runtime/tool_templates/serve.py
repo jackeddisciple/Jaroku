@@ -205,12 +205,50 @@ def _runner_search_path() -> str | None:
     return str(vendored) if (vendored / "jaroku_runner").is_dir() else None
 
 
+#: Where this container keeps the durable checkpoint each run leaves behind.
+#:
+#: NOT WHERE THE RUNNER WOULD PUT THEM. `debug.py` resolves `.checkpoints/` relative to its own
+#: package, and a deploy vendors that package INSIDE the agent project — so the default lands
+#: them under `<project>/.jaroku/.checkpoints/`, which is a directory in the image's own writable
+#: layer, unbounded, and mixed in with the code. Naming a directory here means there is one place
+#: to sweep and one place to look.
+#:
+#: AND THEY DO NOT SURVIVE A RESTART, which is worth saying plainly rather than discovering. A
+#: container's filesystem is its own; Railway restarting the service — which setting a variable
+#: does — takes every checkpoint with it, so a run paused before a restart cannot be resumed
+#: after one. What a resume finds instead is a missing checkpoint, and LangGraph starts the
+#: thread from nothing, which would silently re-run a graph that had already spent money. So a
+#: resume whose checkpoint is gone is refused (see do_POST), and the honest answer is a 409
+#: rather than a run that quietly starts over.
+CHECKPOINT_ROOT = PROJECT_DIR / ".jaroku-checkpoints"
+
+
+def _checkpoint_db(run_id: str) -> Path:
+    return CHECKPOINT_ROOT / f"{run_id}.sqlite"
+
+
+def _discard_checkpoint(run_id: str) -> None:
+    """Drop a finished run's checkpoint. Never a paused one — that is what resume reads.
+
+    A container that keeps every run's checkpoint forever fills its own disk, one SQLite file per
+    request, with nothing to clear it but a redeploy. A container that drops a PAUSED run's
+    checkpoint has thrown away the run.
+    """
+    for suffix in ("", "-wal", "-shm"):
+        try:
+            (CHECKPOINT_ROOT / f"{run_id}.sqlite{suffix}").unlink(missing_ok=True)
+        except OSError as exc:
+            log(f"[serve] {run_id[:8]} could not remove its checkpoint: {exc}")
+
+
 def _run_environment(
     run_id: str,
     provider: str,
     model: str | None,
     run_token: str | None,
     control_plane_url: str | None,
+    resume_run_id: str | None = None,
+    seq_offset: int = 0,
 ) -> dict:
     """The environment one run executes in.
 
@@ -233,6 +271,19 @@ def _run_environment(
     env["JAROKU_PROVIDER"] = provider
     if model:
         env["JAROKU_MODEL"] = model
+    # One directory this container owns, rather than one the runner picks relative to wherever
+    # it happens to have been vendored. See CHECKPOINT_ROOT.
+    env["JAROKU_CHECKPOINT_DIR"] = str(CHECKPOINT_ROOT)
+    # A RESUME IS THE SAME RUN CONTINUING, not a new one. The runner emits no run_start for it
+    # and its seq picks up where the paused segment stopped, so the timeline stays one timeline —
+    # which is why the offset has to travel: without it a resumed segment restarts at 0 and
+    # overwrites the steps it is meant to follow.
+    if resume_run_id:
+        env["JAROKU_RESUME_RUN_ID"] = resume_run_id
+        env["JAROKU_SEQ_OFFSET"] = str(max(0, seq_offset))
+    else:
+        env.pop("JAROKU_RESUME_RUN_ID", None)
+        env.pop("JAROKU_SEQ_OFFSET", None)
     # The project, named by path rather than by import. `contract.load_agent` resolves this the
     # same way a sandboxed run does — see jaroku_runner/contract.py's agent_dir().
     env["JAROKU_AGENT_DIR"] = str(PROJECT_DIR)
@@ -454,6 +505,7 @@ class AgentService:
         env = _run_environment(
             run_id, record["provider"], record.get("model"),
             record.get("run_token"), record.get("control_plane_url"),
+            record.get("resume_run_id"), int(record.get("seq_offset") or 0),
         )
         proc = subprocess.Popen(
             [sys.executable, "-m", "jaroku_runner", self.agent_id, user_input],
@@ -483,6 +535,8 @@ class AgentService:
         model: str | None,
         run_token: str | None,
         control_plane_url: str | None,
+        resume_run_id: str | None = None,
+        seq_offset: int = 0,
     ) -> None:
         """Take a slot, start the run, and hand back immediately.
 
@@ -509,6 +563,8 @@ class AgentService:
             "closed": False,
             "status": "",
             "cancelled": False,
+            "resume_run_id": resume_run_id,
+            "seq_offset": seq_offset,
         }
         proc = self._start(record, user_input)
         record["proc"] = proc
@@ -547,6 +603,11 @@ class AgentService:
             log(f"[serve] {run_id[:8]} run finished (exit {code}, {status if closed else 'no result reported'})")
             if not closed:
                 _push_run_end(record, _died_reason(code))
+            # THE CHECKPOINT GOES WITH THE RUN, UNLESS THE RUN IS PAUSED. A paused run's whole
+            # value is that its checkpoint is durable and a resume continues from it; every other
+            # outcome leaves a SQLite file per request with nothing to clear it but a redeploy.
+            if status != "paused":
+                _discard_checkpoint(record.get("resume_run_id") or run_id)
         except Exception as exc:  # noqa: BLE001 — a reaper that dies leaks a slot forever
             log(f"[serve] {run_id[:8]} could not be waited on: {type(exc).__name__}: {exc}")
         finally:
@@ -657,8 +718,9 @@ class Handler(BaseHTTPRequestHandler):
                         "GET /": "no auth · -> this document",
                         "POST /run": (
                             "bearer · {input, run_id?, run_token?, control_plane_url?, "
-                            "provider?, model?} -> 202 {run_id, accepted_at} · returns "
-                            "immediately; the run's outcome is on its trace"
+                            "provider?, model?, resume_run_id?, seq_offset?} -> "
+                            "202 {run_id, accepted_at} · returns immediately; the run's outcome "
+                            "is on its trace. 409 if a resume's checkpoint is gone"
                         ),
                     },
                 },
@@ -717,8 +779,35 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(payload, dict):
             self._send(400, {"error": 'expected {"input": "<text>"}'})
             return
+
+        # A RESUME CONTINUES AN EXISTING RUN AND CARRIES NO INPUT, because the input it is
+        # continuing was consumed by the segment that paused. Read before `input` is validated,
+        # so a resume is not refused for lacking something it must not have.
+        resume_run_id = payload.get("resume_run_id")
+        resume_run_id = resume_run_id.strip() if isinstance(resume_run_id, str) and resume_run_id.strip() else None
+        seq_offset = payload.get("seq_offset")
+        seq_offset = int(seq_offset) if isinstance(seq_offset, int) and seq_offset >= 0 else 0
+
         user_input = payload.get("input")
-        if not isinstance(user_input, str) or not user_input.strip():
+        if resume_run_id:
+            # THE CHECKPOINT IS THE PRECONDITION, and it is checked rather than assumed. A
+            # container's filesystem does not survive a restart — and setting a Railway variable
+            # restarts it — so a run paused before one has nothing left to continue from. Without
+            # this check LangGraph would find an empty thread and start the graph from the
+            # beginning, re-running nodes that already spent money, under the same run id, with
+            # nothing anywhere saying it had happened. A 409 is the honest answer.
+            if not _checkpoint_db(resume_run_id).exists():
+                self._send(409, {
+                    "error": "this run has no checkpoint in this container — it cannot be resumed",
+                    "run_id": resume_run_id,
+                    "reason": (
+                        "a container's checkpoints do not survive a restart, and setting a "
+                        "variable on the service restarts it"
+                    ),
+                })
+                return
+            user_input = ""
+        elif not isinstance(user_input, str) or not user_input.strip():
             self._send(400, {"error": 'expected {"input": "<text>"}'})
             return
 
@@ -731,6 +820,11 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(run_id, str) or not run_id.strip():
             run_id = str(uuid.uuid4())
         run_id = run_id.strip()
+        # A resume runs UNDER THE RUN IT IS CONTINUING. The runner reads JAROKU_RESUME_RUN_ID as
+        # the run's id, so anything else here would push a continuation into a run that does not
+        # exist while leaving the paused one open forever.
+        if resume_run_id:
+            run_id = resume_run_id
 
         # CONFIGURED, NEVER ASSUMED, and per request rather than per container. The token is
         # scoped to this one run and expires; the deployment holds nothing long-lived that
@@ -765,7 +859,8 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         try:
-            self.service.dispatch(run_id, user_input, provider, model, run_token, control_plane_url)
+            self.service.dispatch(run_id, user_input, provider, model, run_token, control_plane_url,
+                                  resume_run_id, seq_offset)
         except Exception as exc:  # noqa: BLE001 — a failure to START a run is a 500, not a crash
             # THE ONE FAILURE THAT IS STILL THE REQUEST'S. Nothing was accepted, no run exists,
             # and no trace will ever mention this — so it is answered here and the slot goes

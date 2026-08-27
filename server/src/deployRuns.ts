@@ -122,17 +122,50 @@ export class DeployRuns extends EventEmitter<RunPoolEvents> {
    */
   open(input: { runId: string; workspaceId: string; deploymentId: string; agentId: string }): OpenedDeployRun {
     const at = this.now();
-    const emitter = this.deps.bus.register(input.runId);
+    const runId = input.runId;
+    const emitter = this.deps.bus.register(runId);
+    // LISTENERS ONCE PER RUN, EVEN THOUGH `open` IS CALLED MORE THAN ONCE FOR IT.
+    //
+    // A resume opens the SAME run again: it needs a fresh token (the first may be near expiry)
+    // and the bus entry has to be live, but it is one run and its events must be delivered once.
+    // Attaching a second set here would emit every step of the resumed segment twice — and
+    // downstream that is a step inserted twice, a run counted twice against a quota, and two
+    // relay frames for one thing that happened. `insertStep` would deduplicate most of it and
+    // that is exactly what makes the bug quiet.
+    //
     // ATTRIBUTED BY THE ENTRY THAT REGISTERED IT, never by anything in the payload. The run id
     // here is the one JAROKU minted at dispatch; the ids INSIDE an event are text a container
     // sent, and the ingest chain reconciles the two before it writes anything. That is the same
     // separation runPool.makeSlot draws between the slot and the line, for the same reason: a
     // container is running code a model wrote, on somebody else's infrastructure.
-    const runId = input.runId;
-    emitter.on("event", (event) => { this.heard(runId); this.emit("event", { runId, event }); });
-    emitter.on("control", (ctrl) => { this.heard(runId); this.emit("control", { runId, ctrl }); });
-    emitter.on("stderr", (line) => { this.heard(runId); this.emit("stderr", { runId, line }); });
-    emitter.on("parseError", ({ line, error }) => { this.heard(runId); this.emit("parseError", { runId, line, error }); });
+    if (!this.open_.has(runId)) {
+      emitter.on("event", (event) => { this.heard(runId); this.emit("event", { runId, event }); });
+      emitter.on("control", (ctrl) => {
+        this.heard(runId);
+        this.emit("control", { runId, ctrl });
+        // `run_closed` IS A DEPLOYED RUN'S EXIT, and closing on it rather than on `run_end` is a
+        // correction rather than a preference. A container has no exit for this server to
+        // observe, so something has to say "that was the last of it" — and `run_end` is not that
+        // something, for two reasons that pull in opposite directions:
+        //
+        //   A PAUSED RUN EMITS NO run_end AT ALL. Its whole point is that it is unfinished, so
+        //   closing on run_end would leave every paused run holding a live token for two hours
+        //   with nothing ever revoking it.
+        //
+        //   AND run_end IS NOT LAST. The runner pushes it, flushes, and THEN says `run_closed` —
+        //   two separate HTTP requests. Closing on the first unregisters the bus entry, and the
+        //   second is dropped by a bus that has never heard of the run. That is how this was
+        //   found: the control line the close is supposed to key on stopped arriving.
+        //
+        // A container that pushes a run_end and then dies before saying this is left to the
+        // reconciliation sweep, which is what the sweep is for.
+        if (ctrl["ctrl"] === "run_closed" && ctrl["status"] !== "paused") {
+          setImmediate(() => this.close(runId, "ended"));
+        }
+      });
+      emitter.on("stderr", (line) => { this.heard(runId); this.emit("stderr", { runId, line }); });
+      emitter.on("parseError", ({ line, error }) => { this.heard(runId); this.emit("parseError", { runId, line, error }); });
+    }
     const runToken = mintRunToken(
       this.deps.signingKey,
       input.runId,
@@ -140,16 +173,20 @@ export class DeployRuns extends EventEmitter<RunPoolEvents> {
       DEPLOY_RUN_TOKEN_TTL_S,
       at,
     );
+    const existing = this.open_.get(runId);
     const entry: DeployRunEntry = {
-      runId: input.runId,
+      runId,
       workspaceId: input.workspaceId,
       deploymentId: input.deploymentId,
       agentId: input.agentId,
       tokenExpiresAtMs: at + DEPLOY_RUN_TOKEN_TTL_S * 1000,
-      startedAtMs: at,
+      // A RESUME KEEPS THE RUN'S ORIGINAL START, because that is what the run's own wall clock
+      // is measured against and a resume is the same run continuing. `lastHeardAtMs` does move,
+      // since being dispatched again IS a sign of life and the sweep measures silence.
+      startedAtMs: existing?.startedAtMs ?? at,
       lastHeardAtMs: at,
     };
-    this.open_.set(input.runId, entry);
+    this.open_.set(runId, entry);
     return { runToken, entry };
   }
 
