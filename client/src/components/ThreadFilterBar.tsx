@@ -40,11 +40,17 @@ export function ThreadFilterBar({
     <div className="shrink-0 border-b border-hair px-5 py-2">
       <div className="flex items-center gap-2 rounded-control bg-active px-2.5 py-1.5">
         <span className="shrink-0 text-faint"><SearchIcon size={ICON.xs} /></span>
+        {/* A PLACEHOLDER IS NOT AN ACCESSIBLE NAME, and it is the one thing that disappears the
+            moment somebody starts typing — so a screen-reader user arrived at an unnamed text
+            field, and arrived at it again with a value in it and still nothing saying what the
+            value was for. The label says what it filters rather than repeating the word: "filter"
+            is what the control does, "threads" is what it does it to. */}
         <input
           ref={inputRef}
           value={query}
           onChange={(e) => onQuery(e.target.value)}
           placeholder="filter…"
+          aria-label="Filter threads"
           className="min-w-0 flex-1 bg-transparent text-caption text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring"
         />
         {query && (
@@ -66,6 +72,13 @@ export function ThreadFilterBar({
             <button
               key={id}
               onClick={() => onFilter(id)}
+              // COLOUR IS NEVER THE ONLY SIGNAL (§10) — `ShieldControl` states the rule and
+              // `ActivityView`'s 24h/7d/30d chips already apply it two surfaces away. Between the
+              // active chip and the other four there was exactly one difference, `bg-active
+              // text-ink`, so which of five filters was applied was a fact only a sighted user
+              // had. These are a pressed group rather than tabs: the panel below is one list being
+              // narrowed, not five panels.
+              aria-pressed={active}
               // Dimmed at zero rather than disabled: clicking "Archived 0" is a legitimate thing to do
               // — it answers "have I archived anything" — and the empty state that follows says so.
               // A disabled chip would refuse a question it could perfectly well answer.

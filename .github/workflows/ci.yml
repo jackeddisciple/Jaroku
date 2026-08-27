@@ -1046,6 +1046,15 @@ jobs:
           # their keyboard. The sweep at the end is the half that keeps it fixed: translating eleven
           # hints is a morning, and the twelfth written next year is what puts it back.
           npm run test:mod-key
+          # THE ONE SURFACE OF FOUR THAT FAILED THE RUNTIME A11Y SWEEP, and it failed it twice: an
+          # input whose only name was a placeholder — which is not exposed as one and disappears the
+          # moment somebody types — and five chips whose active state was the class `bg-active
+          # text-ink` and nothing else. The codebase states the rule itself in ShieldControl
+          # ("COLOUR IS NEVER THE ONLY SIGNAL") and applies it correctly on Activity's range chips
+          # two surfaces away, so this is a local omission rather than a systemic gap. The
+          # load-bearing assertion is that the pressed chip MOVES: hardcoding it on the first passes
+          # a count and lies on four filters out of five.
+          npm run test:thread-filter-a11y
           # §14.1'S FOUR CLIENT SUITES, and the reason they are one group is that they are one
           # feature: a workspace you can be in more than one of. `test:workspace-switcher` holds
           # the arrangement rules — a personal workspace first, teams alphabetical by a comparison
