@@ -1203,3 +1203,35 @@ jobs:
           # since that value IS the pinning property: the socket goes to a literal address while
           # the certificate is still checked against the name.
           npm run test:connector-http
+
+      # AND THE SUITES THAT DRIVE A REAL DEPLOYED RUN, which need node as well as Python because
+      # they are TypeScript driving a Python container. They live in this job rather than in
+      # `server` for the reason `server`'s own comment already gives about `test:edit-versions`:
+      # "adding uv to this job would buy one suite at the cost of a Python toolchain on every
+      # server run". That argument was right and still is. What changed is that the deploy path
+      # now STARTS A RUNNER, and no amount of reading source can assert that a deployed run
+      # produces the same trace a local run does — both have to actually run.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
+
+      # `--frozen`, so a lockfile that has drifted from pyproject.toml fails here rather than
+      # resolving to something nobody reviewed. The base install is enough: the interceptor, the
+      # runner and the sqlite checkpointer are all in it, and nothing in these suites reaches a
+      # connector. The venv it creates at runtime/.venv is what the harness runs serve.py with —
+      # and therefore what serve.py's own `sys.executable` names when it starts the runner.
+      - name: the runtime's own environment
+        working-directory: runtime
+        run: uv sync --frozen --no-dev
+
+      - name: a deployed agent, driven for real
+        run: |
+          # POST /run answers before the graph finishes — and the framing discipline the old
+          # synchronous handler got right still holds. Half of this suite is about code nobody
+          # touched, driven on raw sockets, because the way that code gets broken is somebody
+          # reorganising the handler around the new 202 and moving the read past the refusal.
+          # A desync is visible there as the NEXT response being wrong, never as this one failing.
+          npm run test:serve-async

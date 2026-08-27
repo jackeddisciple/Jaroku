@@ -95,6 +95,15 @@ def log(*args) -> None:
     print(*args, flush=True)
 
 
+def _now_iso() -> str:
+    """UTC, to the second, with a Z — the same spelling the trace schema uses everywhere else.
+
+    Built from ``time`` rather than ``datetime.now(timezone.utc)`` for no reason beyond keeping
+    this file's imports as short as they already are; both produce the same string.
+    """
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
 def _num_env(name: str, default: float) -> float:
     """A positive number from the environment, or the default.
 
@@ -300,8 +309,20 @@ class AgentService:
         # interpreter with a LangGraph import in it.
         self.slots = threading.Semaphore(concurrency)
         self.concurrency = concurrency
+        # THE RUNS THIS CONTAINER IS CURRENTLY EXECUTING, by id.
+        #
+        # Needed the moment POST /run stops waiting for its own run: nothing else holds the
+        # process, so without this a started run is unreachable — nothing to wait on, nothing
+        # to release a slot, and nothing for a later request to name. Guarded by a lock because
+        # ThreadingHTTPServer means several requests genuinely are in here at once.
+        self._live: dict[str, "subprocess.Popen[str]"] = {}
+        self._lock = threading.Lock()
 
-    def start(
+    def live_run_ids(self) -> list:
+        with self._lock:
+            return list(self._live)
+
+    def _start(
         self,
         run_id: str,
         user_input: str,
@@ -348,6 +369,55 @@ class AgentService:
             target=_pump_stderr, args=(proc.stderr, run_id), daemon=True, name=f"log-{run_id[:8]}"
         ).start()
         return proc
+
+    def dispatch(
+        self,
+        run_id: str,
+        user_input: str,
+        provider: str,
+        model: str | None,
+        run_token: str | None,
+        control_plane_url: str | None,
+    ) -> None:
+        """Take a slot, start the run, and hand back immediately.
+
+        THE SLOT IS TAKEN BY THE CALLER, NOT HERE — see do_POST. The 429 has to be decided
+        before anything is started and answered on the request that asked, so the acquire is
+        where the refusal is; this is the half that must eventually release it.
+
+        RAISES IF THE RUN CANNOT BE STARTED, and the caller releases the slot and answers 500.
+        That is the one failure that is genuinely the REQUEST's rather than the run's: nothing
+        was accepted, no run exists, and no trace will ever mention it.
+        """
+        proc = self._start(run_id, user_input, provider, model, run_token, control_plane_url)
+        with self._lock:
+            self._live[run_id] = proc
+        threading.Thread(
+            target=self._reap, args=(run_id, proc), daemon=True, name=f"reap-{run_id[:8]}"
+        ).start()
+
+    def _reap(self, run_id: str, proc: "subprocess.Popen[str]") -> None:
+        """Wait for one run, then release its slot and forget it.
+
+        THE ONLY PLACE A SLOT IS RELEASED once a run has started, and it has to be somewhere
+        like this: the request that took the slot returned a 202 seconds or minutes ago, so
+        there is no `finally` on any request left to do it. A slot leaked here is permanent —
+        the container answers 429 forever, healthy, with nothing running.
+
+        So the wait is unconditional and the release is in a `finally`. `proc.wait()` on a
+        process that has already exited returns immediately; on one that never exits, the
+        container's own lifetime is the bound, which is the same bound a graph that never
+        returns already had.
+        """
+        try:
+            code = proc.wait()
+            log(f"[serve] {run_id[:8]} run finished (exit {code})")
+        except Exception as exc:  # noqa: BLE001 — a reaper that dies leaks a slot forever
+            log(f"[serve] {run_id[:8]} could not be waited on: {type(exc).__name__}: {exc}")
+        finally:
+            with self._lock:
+                self._live.pop(run_id, None)
+            self.slots.release()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -452,7 +522,8 @@ class Handler(BaseHTTPRequestHandler):
                         "GET /": "no auth · -> this document",
                         "POST /run": (
                             "bearer · {input, run_id?, run_token?, control_plane_url?, "
-                            "provider?, model?} -> 200 {run_id, status, duration_ms}"
+                            "provider?, model?} -> 202 {run_id, accepted_at} · returns "
+                            "immediately; the run's outcome is on its trace"
                         ),
                     },
                 },
@@ -559,27 +630,35 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         try:
-            started = time.monotonic()
-            proc = self.service.start(run_id, user_input, provider, model, run_token, control_plane_url)
-            code = proc.wait()
-            # THE RESPONSE NO LONGER CARRIES THE ANSWER, and this is the first half of why. The
-            # output and the final state were this file reading a graph's return value, and it
-            # does not invoke one any more — both are on the trace now, as an ordinary run, in
-            # the same shape a local run of the same agent produces. What is left is the fact
-            # the caller needs to go and read it: which run this was.
-            self._send(200, {
-                "run_id": run_id,
-                "status": "completed" if code == 0 else "error",
-                "duration_ms": int((time.monotonic() - started) * 1000),
-            })
+            self.service.dispatch(run_id, user_input, provider, model, run_token, control_plane_url)
         except Exception as exc:  # noqa: BLE001 — a failure to START a run is a 500, not a crash
-            # The type and message, and the traceback to the log. A deployed agent's failures
-            # are the operator's to read; they are not for whoever called the URL.
-            log(f"[serve] run failed: {type(exc).__name__}: {exc}")
+            # THE ONE FAILURE THAT IS STILL THE REQUEST'S. Nothing was accepted, no run exists,
+            # and no trace will ever mention this — so it is answered here and the slot goes
+            # back. Every failure AFTER this point belongs to the run and arrives as a run_end
+            # with status "error", which is exactly what a local crash produces.
+            self.service.slots.release()
+            log(f"[serve] could not start a run: {type(exc).__name__}: {exc}")
             traceback.print_exc(file=sys.stdout)
             self._send(500, {"error": f"{type(exc).__name__}: {exc}"})
-        finally:
-            self.service.slots.release()
+            return
+
+        # 202, AND THIS IS THE CHANGE EVERYTHING DOWNSTREAM RESTS ON.
+        #
+        # The synchronous handler is why a job could not pause for a human, why a long run died
+        # on an HTTP timeout, why cancel was impossible, and why a voice or phone surface could
+        # never work — all four are the same fact wearing different clothes: the answer was the
+        # graph's return value, so the request had to outlive the graph. It does not any more.
+        # Accept, start, answer, and let the trace tell the story; Jaroku has always known how
+        # to read one as it streams, because that is the one thing this product is built around.
+        #
+        # NO OUTPUT AND NO STATE. There is nothing honest to put there — the run has not
+        # happened. The run id is what the caller needs, and it is the id JAROKU chose, so the
+        # caller was already able to address this run before it asked.
+        #
+        # THE SLOT IS NOT RELEASED HERE. It belongs to the run now, and `_reap` gives it back
+        # when the run ends. Releasing it on the response would make DEFAULT_CONCURRENCY bound
+        # open connections instead of running graphs, which is exactly the bound it is not.
+        self._send(202, {"run_id": run_id, "accepted_at": _now_iso()})
 
 
 # --- entrypoint ------------------------------------------------------------------------
