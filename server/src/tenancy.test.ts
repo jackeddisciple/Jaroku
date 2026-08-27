@@ -41,6 +41,7 @@ import { EvalStore } from "./evalStore.ts";
 import { McpStore } from "./mcpStore.ts";
 import { DeployStore } from "./deployStore.ts";
 import { InboxStore } from "./inbox/inboxStore.ts";
+import { WorkStore } from "./work/workStore.ts";
 import { dedupeKey } from "./inbox/registry.ts";
 import { DbTicketStore } from "./db/repositories/tickets.ts";
 import { SecretRefRepository } from "./db/repositories/secretRefs.ts";
@@ -91,6 +92,18 @@ interface Fixture {
   /** One open Inbox item, and the person whose dismissal of it is theirs alone. */
   inboxItemId: string;
   userId: string;
+  /**
+   * One dispatched job, its agent's uuid, and a context that names the person who dispatched it.
+   *
+   * A CONTEXT OF ITS OWN, because `systemContextFor` has a null actor and `work_items.created_by`
+   * is NOT NULL — the store refuses a request that names nobody, which is the column's whole point.
+   * The other fixtures do not need one; this is the first table in the schema that insists on an
+   * actor rather than merely recording one.
+   */
+  workCtx: TenantContext;
+  workAgentId: string;
+  workItemId: string;
+  workRunId: string;
 }
 
 async function populate(db: Db, label: string): Promise<Fixture> {
@@ -155,7 +168,7 @@ async function populate(db: Db, label: string): Promise<Fixture> {
   await deploys.appendLog(ctx, deployment.id, "building", "build", `line for ${label}`);
 
   // The same slug in both, which migration 008 is what makes possible.
-  await agents.upsertFromDisk(ctx, { slug: "support_bot", display_name: `support (${label})` });
+  const agentRow = await agents.upsertFromDisk(ctx, { slug: "support_bot", display_name: `support (${label})` });
 
   // ONE INBOX ITEM AND ONE PERSON WHO HAS DISMISSED IT. Both halves are needed: §6.3 asks for a test
   // that an item generated for A is invisible to B, and the per-user table has no `workspace_id` of
@@ -178,10 +191,27 @@ async function populate(db: Db, label: string): Promise<Fixture> {
   });
   await inbox.setUserState(ctx, item.id, member.user.id, { dismissed_at: new Date().toISOString() });
 
+  // ONE DISPATCHED JOB, on this workspace's own deployment, attributed to this workspace's own
+  // person. It is left `running` rather than finished, because the transitions are what an
+  // operator in the wrong workspace would reach for — `finish` and `markWaiting` are asserted
+  // below against B's id, and both would be no-ops on an item that had already ended for reasons
+  // that have nothing to do with tenancy.
+  const work = new WorkStore(db);
+  const workCtx: TenantContext = { ...ctx, actorUserId: member.user.id };
+  const workRunId = randomUUID();
+  const workItem = await work.create(workCtx, {
+    agentId: agentRow.id,
+    deploymentId: deployment.id,
+    runId: workRunId,
+    input: `refund order 4471 for ${label}`,
+  });
+  await work.markRunning(workCtx, workItem.id);
+
   return {
     ctx, runId, datasetId: dataset.id, exampleId: example.id, evalId: evalRun.id,
     jobId: job!.id, serverId: "mock", deploymentId: deployment.id, agentSlug: "support_bot",
     inboxItemId: item.id, userId: member.user.id,
+    workCtx, workAgentId: agentRow.id, workItemId: workItem.id, workRunId,
   };
 }
 
@@ -225,6 +255,39 @@ async function suite(label: string, db: Db): Promise<void> {
   check((await agents.list(A.ctx)).some((a) => a.display_name === "support (a)"), "...and its own agent");
   check((await inbox.listOpen(A.ctx)).some((i) => i.id === A.inboxItemId), "...and its own Inbox item");
 
+  // --- the Cockpit's work items ------------------------------------------------
+  //
+  // §7's assertion "in the direction the Inbox tested": the negative one. What makes this table
+  // different from every other list above is that a row is a HANDLE — it carries the run id and
+  // the deployment id that cancel and retry act on — so the reads and the transitions are both
+  // checked, and the transitions matter more.
+  const work = new WorkStore(db);
+
+  check(
+    (await work.list(A.workCtx, { scope: "all" })).items.every((w) => w.id !== B.workItemId),
+    "the work list carries none of B's jobs",
+  );
+  check(
+    (await work.list(A.workCtx, { scope: "all" })).items.some((w) => w.id === A.workItemId),
+    "...while A sees its own",
+  );
+  check(
+    (await work.list(A.workCtx, { scope: "all", agentId: B.workAgentId })).items.length === 0,
+    "...and filtering by B's agent id returns nothing rather than B's jobs",
+  );
+  // The counts are the badge and the fleet strip. An aggregate that read across the boundary is
+  // the shape of bug §5.4 of the Activity specification calls the highest-risk one in the product,
+  // and it is invisible: the number is present, plausible and somebody else's.
+  check(
+    (await work.countsByStatus(A.workCtx)).running === 1,
+    "the status counts are A's own, not both workspaces'",
+  );
+  check(
+    (await work.liveByAgent(A.workCtx)).every((r) => r.agent_id !== B.workAgentId),
+    "the per-agent live counts name none of B's agents",
+  );
+  check(await work.inFlight(A.workCtx) === 1, "and the concurrency cap counts one workspace's jobs");
+
   // --- read by id --------------------------------------------------------------
 
   console.log("  · reading by id");
@@ -262,6 +325,12 @@ async function suite(label: string, db: Db): Promise<void> {
     (await inbox.userState(A.ctx, B.inboxItemId, B.userId)).dismissed_at === null,
     "B's person's dismissal of B's item is not readable from A, even naming both ids",
   );
+  check((await work.get(A.workCtx, B.workItemId)) === undefined, "a work item id from B resolves to nothing");
+  // BY RUN ID AS WELL, which is the read the trace lifecycle makes and therefore the one an
+  // unscoped shortcut is most tempting in: what arrives from a container is a run id, and the
+  // ingest chain has already reconciled it — but a store that trusted it unscoped would be the one
+  // place that reconciliation could be walked around.
+  check((await work.byRun(A.workCtx, B.workRunId)) === undefined, "...and so does a lookup by B's run id");
 
   // --- mutate ------------------------------------------------------------------
 
@@ -356,6 +425,23 @@ async function suite(label: string, db: Db): Promise<void> {
     "nor stamp a payload onto B's row of the same key",
   );
   check((await inbox.resolvedSince(A.ctx, "1970-01-01T00:00:00.000Z")) === 0, "and A's cleared count counts none of B's");
+
+  // §7'S NEGATIVE ASSERTION, ON THE FOUR TRANSITIONS. Each of these is what an operator's button
+  // in workspace A would send if it were handed workspace B's item id, and every one of them ends
+  // a job or moves it: `finish` is cancel, `markWaiting` and `markResumed` are the confirmation
+  // gate opening and closing, and `attachRun` is what a re-dispatch would repoint. Reads leaking
+  // here would be a disclosure; these would be an operator in one tenant acting inside another.
+  check(await work.finish(A.workCtx, B.workItemId, { status: "cancelled" }) === false,
+    "cancelling B's job from A changes nothing");
+  check(await work.markWaiting(A.workCtx, B.workItemId) === false, "nor can A park B's job on a confirmation");
+  check(await work.markResumed(A.workCtx, B.workItemId) === false, "nor answer one for it");
+  check(await work.attachRun(A.workCtx, B.workItemId, randomUUID()) === false,
+    "nor repoint B's job at a run of A's");
+  check((await work.get(B.workCtx, B.workItemId))?.status === "running",
+    "...and B's job is still running, which is what its operator would see");
+  // The transition A DOES own still works, or every assertion above passes on a store whose
+  // guards refuse everything.
+  check(await work.markWaiting(A.workCtx, A.workItemId) === true, "while A can park its own");
 
   // --- a forged workspace in a payload -----------------------------------------
 
@@ -527,6 +613,17 @@ const SCOPED_API: Record<string, string[]> = {
   InboxStore: [
     "record", "setPayload", "listOpen", "listForUser", "get", "byKey", "resolve", "reopen",
     "setUserState", "userState", "resolvedSince",
+  ],
+  // The Cockpit's one table. Every method is listed from the commit it lands in, for the reason
+  // `ActivityStore`'s note gives one entry down — and with one addition that makes this list matter
+  // more than most: the four transitions here are UPDATEs found by id, and an unscoped one is not a
+  // row leaking but an operator in workspace A ending a job in workspace B.
+  //
+  // `hydrate` and `q` are absent for the reason the other stores' row-shapers are: they touch no
+  // database and take no context, which is why `test:db-boundary` exempts them by name.
+  WorkStore: [
+    "create", "get", "byRun", "list", "countsByStatus", "liveByAgent", "inFlight",
+    "markRunning", "markWaiting", "markResumed", "finish", "attachRun",
   ],
   // The Activity tab's aggregates. §5.4 calls this the highest-risk surface in the product for the
   // row-level-security class of bug, because it is nothing but aggregates over exactly the tables

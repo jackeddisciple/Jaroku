@@ -98,6 +98,11 @@ const SCOPED_MODULES = [
   // thing standing between "one grouped query per module, scoped" and "one grouped query per
   // module, everybody's" is that no method on the class can be called without a scope.
   "activity/activityStore.ts",
+  // The Cockpit's work items. The rule is at its sharpest here for a reason none of the tables
+  // above share: a row carries the run id and the deployment id that `cancelWork` and `retryWork`
+  // act on, so an unscoped read is not a disclosure but a HANDLE — an operator in one tenant able
+  // to stop a job in another, or to re-spend its money.
+  "work/workStore.ts",
   "db/repositories/agents.ts",
   // Per-agent access. The rule is at its strongest here, because what an unscoped method on this
   // class would return is not a row of somebody's data — it is somebody's PERMISSION, read by a

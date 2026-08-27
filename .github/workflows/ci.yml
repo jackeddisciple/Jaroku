@@ -501,6 +501,21 @@ jobs:
           # process that had the credentials in its environment.
           npm run test:inbox-payload
 
+      # THE COCKPIT, the fifth sidebar destination, in a step of its own from its first suite — the
+      # same reason the steps above and below it are separate rather than appended to whichever step
+      # had room. A reader looking for "what covers the Cockpit" finds it here, and a suite added to
+      # this feature has an obvious place to go.
+      - name: the cockpit
+        working-directory: server
+        run: |
+          # The one table Part 2 adds, and the three claims §13 asks it to prove. Two of them are
+          # bugs that would be found by somebody watching rows swap places while they read them —
+          # the created_seq tie-break on a same-millisecond pair, which is a double-click rather
+          # than a hypothetical — and one is the input cap, asserted in BYTES rather than in
+          # characters: a cap written as `.length` accepts a string of emoji four times the size it
+          # meant to and hands the container a body it refuses with a 413.
+          npm run test:work-store
+
       # THE ACTIVITY DESTINATION, the fourth and last of the sidebar's tabs, in a step of its own
       # from its first suite — the same reason the three steps above are separate rather than
       # appended to whichever step had room. A reader looking for "what covers Activity" finds it

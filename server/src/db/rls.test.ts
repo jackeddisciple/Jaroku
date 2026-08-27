@@ -47,6 +47,15 @@ const A = randomUUID();
 const B = randomUUID();
 const runA = randomUUID();
 const runB = randomUUID();
+// The work fixture's ids, up here rather than beside the section that seeds them, because the
+// cleanup in `finally` has to name them: `deployments.workspace_id` deliberately does not cascade,
+// so a workspace cannot be deleted while one of its deployments is still there.
+const workUserA = randomUUID();
+const workUserB = randomUUID();
+const workAgentA = randomUUID();
+const workAgentB = randomUUID();
+const itemA = randomUUID();
+const itemB = randomUUID();
 const slug = (id: string): string => `rls-${id.slice(0, 8)}`;
 
 /**
@@ -156,12 +165,6 @@ try {
   // tenant stopping a job in another, or re-spending its money.
   console.log("\nwork items");
 
-  const workUserA = randomUUID();
-  const workUserB = randomUUID();
-  const workAgentA = randomUUID();
-  const workAgentB = randomUUID();
-  const itemA = randomUUID();
-  const itemB = randomUUID();
   const nowIso = new Date().toISOString();
 
   /** A workspace's own agent, deployment and one queued work item. Seeded through `scoped`,
@@ -524,7 +527,24 @@ try {
         await tx.run(`DELETE FROM runs WHERE id = ?`, [id]);
       }));
   }
+  // THE WORK FIXTURE, IN DEPENDENCY ORDER AND BEFORE THE WORKSPACES. `work_items.workspace_id`
+  // cascades and `deployments.workspace_id` deliberately does NOT — a deployment is a real service
+  // in somebody's Railway account, and a cascade would forget it silently — so deleting the
+  // workspace fails on the deployment rather than taking it with it. The agent and the user go
+  // with the workspace; these two do not.
+  for (const [ws, itemId] of [[A, itemA], [B, itemB]] as const) {
+    await tidy(`the work fixture for ${ws.slice(0, 8)}`, () =>
+      db.scoped(ws, async (tx) => {
+        await tx.run(`DELETE FROM work_items WHERE id = ?`, [itemId]);
+        await tx.run(`DELETE FROM deployments WHERE id = ?`, [`dep_${itemId.slice(0, 8)}`]);
+      }));
+  }
   await tidy("two workspaces", () => db.run(`DELETE FROM workspaces WHERE id IN (?, ?)`, [A, B]));
+  // AND THE TWO PEOPLE, after the workspaces rather than before: `work_items.created_by` references
+  // them and cascades from the workspace, not from the user. Unlike everything above this suite,
+  // `users` is not workspace-scoped, so nothing else would ever remove these — and this suite runs
+  // against a real database rather than a scratch one.
+  await tidy("two users", () => db.run(`DELETE FROM users WHERE id IN (?, ?)`, [workUserA, workUserB]));
   // Unguarded on purpose: an open pool keeps the process alive, so this has to run even if
   // everything above it went wrong.
   await db.close();
