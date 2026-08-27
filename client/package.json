@@ -28,6 +28,7 @@
     "test:bare-keys": "tsx src/lib/bareKeys.test.ts",
     "test:format": "tsx src/lib/format.test.ts",
     "test:pane-floor": "tsx src/lib/paneFloor.test.ts",
+    "test:dialog": "tsx src/lib/dialog.test.ts",
     "test:export": "tsx src/lib/evalExport.test.ts",
     "test:csv": "tsx src/lib/csv.test.ts",
     "test:auth": "tsx src/lib/auth.test.ts",

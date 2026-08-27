@@ -15,7 +15,7 @@
 // reached from the surfaces that name the thing they change. A caller says which section it means,
 // so a control never opens a panel that then has to be navigated.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   sendInviteMember, sendLeaveWorkspace, sendListAudit, sendListMembers, sendRemoveMember,
   sendRevokeInvite, sendSetMemberRole,
@@ -34,6 +34,7 @@ import { AccountSection } from "./AccountSection.tsx";
 import { absTime, fmtUntil, isExpired, relTime } from "../lib/format.ts";
 import { avatarColor, avatarLetter, orderMembers } from "../lib/memberList.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
+import { useDialog } from "../lib/dialog.ts";
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { Chip } from "./Chip.tsx";
 import { EmptyState, LoadingLine } from "./EmptyState.tsx";
@@ -1173,11 +1174,18 @@ function DataSection() {
   );
 }
 
+/**
+ * The id the dialog's `aria-labelledby` points at, and the id on the heading it names.
+ *
+ * A constant rather than two string literals, because the whole value of the attribute is that the
+ * two match — and two literals in two places in one file is exactly the pair that stops matching.
+ */
+const WORKSPACE_DIALOG_LABEL_ID = "workspace-panel-title";
+
 export function WorkspacePanel() {
   const section = useUiStore((s) => s.workspaceSection);
   const open = useUiStore((s) => s.openWorkspacePanel);
   const close = useUiStore((s) => s.closeWorkspacePanel);
-  const card = useRef<HTMLDivElement>(null);
   const workspaces = useSessionStore((s) => s.workspaces);
   const workspaceId = useSessionStore((s) => s.workspaceId);
   const kind = workspaces.find((w) => w.id === workspaceId)?.kind ?? null;
@@ -1222,6 +1230,15 @@ export function WorkspacePanel() {
     return () => document.removeEventListener("keydown", onKey);
   }, [section, close]);
 
+  // IT DIMS THE APPLICATION, SO IT HAS TO BE A DIALOG. It had the scrim, the Escape and the
+  // outside-click and none of the semantics: no `role`, no `aria-modal`, no initial focus, no
+  // containment and no scroll lock — so a screen reader was told nothing had opened, and Tab walked
+  // straight out of the panel into a sidebar that is visibly greyed out. See lib/dialog.
+  //
+  // CALLED ABOVE THE EARLY RETURN, because a hook that stops being called on close is a hook whose
+  // cleanup never runs — and the cleanup is what gives the focus back.
+  const { ref: card, dialogProps } = useDialog(Boolean(section), WORKSPACE_DIALOG_LABEL_ID);
+
   if (!section) return null;
 
   return (
@@ -1235,10 +1252,13 @@ export function WorkspacePanel() {
     >
       <div
         ref={card}
-        className="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-modal border border-edge bg-elevated shadow-overlay"
+        {...dialogProps}
+        className="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-modal border border-edge bg-elevated shadow-overlay focus-visible:outline-none"
       >
         <div className="flex shrink-0 items-center gap-1 border-b border-hair px-4 py-2.5">
-          <span className={TYPE.panelLabel}>Workspace</span>
+          {/* THE DIALOG'S OWN NAME, and the reason it has an id. A dialog whose accessible name is
+              "dialog" announces that something opened and nothing about what. */}
+          <span id={WORKSPACE_DIALOG_LABEL_ID} className={TYPE.panelLabel}>Workspace</span>
           <div className="ml-3 flex items-center gap-1">
             {sections.map((s) => (
               <button

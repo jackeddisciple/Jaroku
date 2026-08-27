@@ -1015,6 +1015,15 @@ jobs:
           # is 307px at 1920 and 164px at 1024: one number, two requirements, and only one of them
           # is on the developer's monitor. The assertions are §24's five viewports.
           npm run test:pane-floor
+          # AND WHAT MAKES AN OVERLAY A DIALOG. The workspace panel — the one that owns "delete this
+          # workspace permanently" — dimmed the application behind it and was, to anything but a
+          # pair of eyes, a div: no role, no aria-modal, no initial focus, no containment, no scroll
+          # lock. Fifteen Tab presses walked out of it and put a focus ring on a rename box in the
+          # greyed-out sidebar. The load-bearing assertions are the BACKWARD wrap, because a trap
+          # that holds forwards and leaks backwards passes every check done by hand, and the
+          # semantics, asserted on rendered markup because a role nobody rendered is a claim in a
+          # comment.
+          npm run test:dialog
           # §14.1'S FOUR CLIENT SUITES, and the reason they are one group is that they are one
           # feature: a workspace you can be in more than one of. `test:workspace-switcher` holds
           # the arrangement rules — a personal workspace first, teams alphabetical by a comparison
