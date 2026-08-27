@@ -19,7 +19,8 @@
 //
 //   npm run test:run-model
 
-import { defaultModelFor, providerForModel, runProviders, type ProviderModel } from "./providerStore.ts";
+import { defaultModelFor, providerForModel, runProviders } from "./providerStore.ts";
+import type { ProviderModel } from "../types.ts";
 
 let fail = 0;
 const check = (name: string, ok: boolean, detail = ""): void => {
