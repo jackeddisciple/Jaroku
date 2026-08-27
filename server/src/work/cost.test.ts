@@ -56,7 +56,10 @@ const agent = await agents.upsertFromDisk(ctx, { slug: "cost_agent", display_nam
 
 /** A deployment on a named model, so an item's price is the deployment's decision. */
 async function deploymentOn(model: string): Promise<string> {
-  const row = await deploys.create(ctx, { agentId: agent.id, provider: "anthropic", model, envKeys: [] });
+  // BY SLUG, as `DeployManager` writes it. Nothing in this suite joins through it — costs are
+  // read by deployment id — but a fixture that spelled a column differently from production is
+  // one somebody copies into a suite where it does matter.
+  const row = await deploys.create(ctx, { agentId: agent.slug, provider: "anthropic", model, envKeys: [] });
   await deploys.patch(ctx, row.id, { status: "live", url: "http://127.0.0.1:1" });
   return row.id;
 }

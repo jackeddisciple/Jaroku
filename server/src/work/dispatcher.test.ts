@@ -58,6 +58,7 @@ closers.push(() => new Promise<void>((r) => controlPlane.close(() => r())));
 async function fixture(db: Db, url: string | null, opts: { serveToken?: string | null } = {}): Promise<{
   ctx: TenantContext;
   agentId: string;
+  slug: string;
   deploymentId: string;
   work: WorkStore;
   dispatcher: WorkDispatcher;
@@ -74,9 +75,15 @@ async function fixture(db: Db, url: string | null, opts: { serveToken?: string |
     email: `dispatch-${suffix}@example.com`,
   });
   const ctx: TenantContext = { ...testContext(), actorUserId: person.user.id };
-  const agent = await agents.upsertFromDisk(ctx, { slug: `dispatch_${suffix}`, display_name: "dispatch agent" });
+  const slug = `dispatch_${suffix}`;
+  const agent = await agents.upsertFromDisk(ctx, { slug, display_name: "dispatch agent" });
+  // THE DEPLOYMENT NAMES THE AGENT BY SLUG, which is what `DeployManager` writes: that column is
+  // `text` from migration 002 and predates agent uuids. A fixture that used the uuid here would
+  // AGREE WITH a dispatcher that compared uuids, and both would be wrong together — in production
+  // every dispatch would refuse with "this agent is not live", which reads as a deployment problem
+  // rather than a lookup one. That is exactly how this was missed the first time.
   const deployment = await deploys.create(ctx, {
-    agentId: agent.id, provider: "anthropic", model: "claude-haiku-4-5", envKeys: [],
+    agentId: slug, provider: "anthropic", model: "claude-haiku-4-5", envKeys: [],
   });
   const serviceId = `svc_${suffix}`;
   await deploys.patch(ctx, deployment.id, {
@@ -101,11 +108,12 @@ async function fixture(db: Db, url: string | null, opts: { serveToken?: string |
     work,
     deployments: deploys,
     dispatch,
+    agentSlug: async (_c, uuid) => (uuid === agent.id ? slug : null),
     serveToken: async (_c, id) => serveTokens.get(id) ?? null,
     controlPlaneUrl: () => controlPlaneUrl,
   });
 
-  return { ctx, agentId: agent.id, deploymentId: deployment.id, work, dispatcher, serveTokens };
+  return { ctx, agentId: agent.id, slug, deploymentId: deployment.id, work, dispatcher, serveTokens };
 }
 
 /** A server that answers one status to every request. For the branches a stub agent never takes. */
@@ -187,6 +195,10 @@ console.log("\nrefused, with nothing written");
       work,
       deployments: new DeployStore(db),
       dispatch: new DeployDispatcher({ runs: deployRuns, endpoint: async () => null }),
+      // THE SLUG RESOLVES AND THE DEPLOYMENT DOES NOT, which is the case worth testing: an agent
+      // this workspace has, with nothing live behind it. A resolver answering null would refuse
+      // for the wrong reason and the assertion below would pass anyway.
+      agentSlug: async () => `nodeploy_${suffix}`,
       serveToken: async () => null,
       controlPlaneUrl: () => controlPlaneUrl,
     });
@@ -239,6 +251,16 @@ console.log("\n202, and the row that follows it");
     check("...against the deployment that actually ran it", out.item.deployment_id === f.deploymentId);
     check("...and joined to a run before anything left the process", typeof out.item.run_id === "string");
     check("no failure kind on a job that has not failed", out.item.failure_kind === null && out.item.ended_at === null);
+
+    // THE TWO SPELLINGS OF "WHICH AGENT", ASSERTED APART. This is the check that would have caught
+    // the confusion rather than leaving it to be found by opening the tab: a work item names its
+    // agent by UUID because its column is a real foreign key, and the deployment it ran on names
+    // the same agent by SLUG because that column is `text` from migration 002. They are different
+    // strings for one agent, and code that compared them found nothing and refused every dispatch
+    // with a sentence about deployments.
+    check("the item names its agent by uuid", out.item.agent_id === f.agentId && f.agentId !== f.slug);
+    const ran = await new DeployStore(db).get(f.ctx, out.item.deployment_id);
+    check("...while the deployment it ran on names the same agent by slug", ran?.agent_id === f.slug);
 
     // THE JOIN IS THE POINT OF THE COLUMN. A trace event carries a run id and nothing else, so the
     // lifecycle's only way back to the item is this read — and it is what makes the Cockpit's cost,
@@ -315,6 +337,7 @@ console.log("\nthe cap, on a workspace that is already busy");
       work: f.work,
       deployments: new DeployStore(db),
       dispatch: new DeployDispatcher({ runs: deployRuns, endpoint: async () => ({ url: stub!.url, serveToken: "stub-token" }) }),
+      agentSlug: async () => f.slug,
       serveToken: async () => "stub-token",
       controlPlaneUrl: () => controlPlaneUrl,
       concurrency: () => 2,
@@ -430,6 +453,7 @@ console.log("\nwhat is worth trying again");
           endpoint: async () => ({ url, serveToken: "stub-token" }),
           timeoutMs: 3_000,
         }),
+        agentSlug: async () => f.slug,
         serveToken: async () => "stub-token",
         controlPlaneUrl: () => controlPlaneUrl,
         now: () => clock,

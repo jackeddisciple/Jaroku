@@ -63,8 +63,12 @@ await identity.addMember(ctx, colleague.user.id, "member");
 const serveTokens = new Set<string>();
 async function liveAgent(slug: string, opts: { token?: boolean; publicServe?: boolean } = {}): Promise<{ agentId: string; deploymentId: string }> {
   const agent = await agents.upsertFromDisk(ctx, { slug, display_name: slug });
+  // BY SLUG, which is what `DeployManager` writes — `deployments.agent_id` is `text` from
+  // migration 002 and predates agent uuids. A fixture using the uuid here would agree with a
+  // fleet builder that keyed the map by uuid, and both would be wrong together: every card would
+  // read "an agent that has been deleted" in production while the suite stayed green.
   const deployment = await deploys.create(ctx, {
-    agentId: agent.id, provider: "anthropic", model: "claude-haiku-4-5",
+    agentId: slug, provider: "anthropic", model: "claude-haiku-4-5",
     envKeys: opts.publicServe ? ["JAROKU_SERVE_PUBLIC"] : [],
   });
   const serviceId = `svc-${slug}`;
@@ -80,7 +84,22 @@ const snapshots = new WorkSnapshots({
   work,
   agentNames: async (c) => new Map((await agents.list(c, { includeArchived: true })).map((a) => [a.id, a.display_name ?? a.slug])),
   actorNames: async (c) => new Map((await identity.listMembers(c)).map((m) => [m.user_id, m.display_name ?? m.email])),
-  deployments: (c) => deploys.currentByAgent(c),
+  // JOINED ONTO UUIDS, exactly as index.ts does it — `currentByAgent` is keyed by SLUG and
+  // everything else the Cockpit holds is keyed by uuid. The join is the caller's so the two
+  // spellings meet in one place; doing it differently here from production would make this
+  // suite green against a shape the product does not have.
+  deployments: async (c) => {
+    const [bySlug, rows] = await Promise.all([
+      deploys.currentByAgent(c),
+      agents.list(c, { includeArchived: true }),
+    ]);
+    const out = new Map<string, Awaited<ReturnType<typeof deploys.get>>>();
+    for (const a of rows) {
+      const d = bySlug.get(a.slug);
+      if (d) out.set(a.id, d);
+    }
+    return out as never;
+  },
   hasServeToken: async (_c, serviceId) => serveTokens.has(serviceId),
   scoped: (c) => db.forWorkspace(c.workspaceId),
 });

@@ -57,7 +57,7 @@ const person = await identity.provisionUser(systemContext(newRequestId()), {
 const ctx: TenantContext = { ...testContext(), actorUserId: person.user.id };
 const agent = await agents.upsertFromDisk(ctx, { slug: "redaction_agent" });
 const deployment = await deploys.create(ctx, {
-  agentId: agent.id, provider: "anthropic", model: "claude-haiku-4-5", envKeys: [],
+  agentId: agent.slug, provider: "anthropic", model: "claude-haiku-4-5", envKeys: [],
 });
 
 async function finished(o: { output?: string; error?: string }): Promise<{ output: string | null; error: string | null }> {

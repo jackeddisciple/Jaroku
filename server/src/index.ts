@@ -270,7 +270,7 @@ import {
   type ProviderId,
 } from "./providers.ts";
 import { allPrices, capabilityFor } from "./pricing.ts";
-import { DeployStore, isInFlight as isDeployInFlight } from "./deployStore.ts";
+import { DeployStore, isInFlight as isDeployInFlight, type Deployment } from "./deployStore.ts";
 import { DeployOps } from "./deployOps.ts";
 import { DeployDispatcher } from "./deployDispatch.ts";
 // THE COCKPIT. Every command it needs already existed — Part 1 built health, logs, kill and
@@ -6392,6 +6392,11 @@ const workDispatcher = new WorkDispatcher({
   dispatch: workDispatch,
   // BY RAILWAY SERVICE ID, not by deployment row — see `SecretStore.getServeToken` for the two
   // reasons Part 1 keyed it that way, and `dispatcher.ts` for what the second one costs here.
+  // THE SEAM BETWEEN TWO SPELLINGS OF "WHICH AGENT". A work item names an agent by uuid because
+  // its column is a real foreign key; a deployment names one by SLUG, because that column is
+  // `text` from migration 002 and `DeployManager` writes `req.agentId` into it after resolving it
+  // with `bySlug`. See `WorkDispatcher.liveDeployment`.
+  agentSlug: async (ctx, agentUuid) => (await agentRepo.byId(ctx, agentUuid))?.slug ?? null,
   serveToken: (ctx, serviceId) => secrets.getServeToken(ctx, serviceId),
   controlPlaneUrl: () => CONTROL_PLANE_URL,
   concurrency: () => workConcurrencyFromEnv(),
@@ -6421,7 +6426,21 @@ const workSnapshots = new WorkSnapshots({
     const members = await bootIdentity.listMembers(ctx);
     return new Map(members.map((m) => [m.user_id, m.display_name ?? m.email]));
   },
-  deployments: (ctx) => deployStore.currentByAgent(ctx),
+  // JOINED ONTO UUIDS HERE, because `currentByAgent` is keyed by SLUG and everything else the
+  // Cockpit holds is keyed by uuid — see `WorkSnapshotDeps.deployments`. Done in one place
+  // rather than inside the builder so the two spellings meet exactly once.
+  deployments: async (ctx) => {
+    const [bySlug, agents] = await Promise.all([
+      deployStore.currentByAgent(ctx),
+      agentRepo.list(ctx, { includeArchived: true }),
+    ]);
+    const out = new Map<string, Deployment>();
+    for (const agent of agents) {
+      const deployment = bySlug.get(agent.slug);
+      if (deployment) out.set(agent.id, deployment);
+    }
+    return out;
+  },
   hasServeToken: async (ctx, serviceId) => (await secrets.getServeToken(ctx, serviceId)) !== null,
   // THE CACHE, NEVER A PROBE. §10 asks for a bounded poll with a stated staleness rather than a
   // per-render fetch, and a snapshot builder that probed would make twenty outbound requests to

@@ -164,7 +164,16 @@ export interface WorkSnapshotDeps {
   agentNames: (ctx: TenantContext) => Promise<Map<string, string>>;
   /** User uuid → display name or email. One read for the page. */
   actorNames: (ctx: TenantContext) => Promise<Map<string, string>>;
-  /** Agent uuid → its current deployment. One read for the strip. */
+  /**
+   * Agent UUID → its current deployment. One read for the strip.
+   *
+   * KEYED BY UUID, WHICH `DeployStore.currentByAgent` IS NOT — that map is keyed by the agent's
+   * SLUG, because `deployments.agent_id` is a `text` column from migration 002 that predates agent
+   * uuids and `DeployManager` still writes a slug into it. The join is the caller's, and it is
+   * declared here rather than done inside this class so the two spellings meet in exactly one
+   * place: a map keyed by slug and read with a uuid matches nothing, which renders every card as
+   * "an agent that has been deleted" and looks like a data problem rather than a lookup one.
+   */
   deployments: (ctx: TenantContext) => Promise<Map<string, Deployment>>;
   /** Whether a Railway service has a stored serve token. Null for a deployment with no service. */
   hasServeToken: (ctx: TenantContext, serviceId: string) => Promise<boolean>;

@@ -81,8 +81,11 @@ async function populate(
   // THE SAME SLUG IN BOTH, which migration 008 is what makes possible and which is the case a
   // scoped read has to get right rather than the case it obviously does.
   const agent = await agents.upsertFromDisk(ctx, { slug: "shared_bot", display_name: `shared (${label})` });
+  // BY SLUG, which is what `DeployManager` writes — see `dispatcher.test.ts`'s fixture for what a
+  // uuid here costs. It is also the sharper case for this suite: both workspaces use the same
+  // slug, so a deployment lookup that was not scoped would find the OTHER tenant's row.
   const deployment = await deploys.create(ctx, {
-    agentId: agent.id, provider: "anthropic", model: "claude-haiku-4-5", envKeys: [],
+    agentId: "shared_bot", provider: "anthropic", model: "claude-haiku-4-5", envKeys: [],
   });
   await deploys.patch(ctx, deployment.id, {
     status: "live", url,
@@ -141,6 +144,7 @@ export async function workTenancySuite(
     const deployRuns = new DeployRuns({ signingKey: randomBytes(32), revocations, bus });
     const work = new WorkStore(db);
     const deploys = new DeployStore(db);
+    const agents = new AgentRepository(db);
     const trace = new TraceStore(db);
 
     const endpointFor = (url: string) => new DeployDispatcher({
@@ -152,6 +156,18 @@ export async function workTenancySuite(
       work,
       deployments: deploys,
       dispatch: endpointFor(url),
+      // THE REAL REPOSITORY, SCOPED, AND NOT A STUB THAT ANSWERS "shared_bot" FOR ANYTHING.
+      //
+      // This is the line the suite is actually about. Both workspaces have an agent called
+      // `shared_bot`, so a resolver that ignored the context would turn A dispatching to B'S
+      // AGENT UUID into a job that ran happily on A's own agent — accepted rather than refused,
+      // with a `work_items` row in A whose `agent_id` names a row in B. The foreign key would not
+      // catch it: `agents(id)` is globally unique, so the write is legal and simply wrong.
+      //
+      // `byId` takes a context and answers `undefined` for an agent this workspace does not have,
+      // which is what turns a forged id into "this agent is not live" instead of somebody else's
+      // agent doing your work.
+      agentSlug: async (c, uuid) => (await agents.byId(c, uuid))?.slug ?? null,
       serveToken: async () => "t",
       controlPlaneUrl: () => "http://127.0.0.1:9",
     });

@@ -67,6 +67,17 @@ export type WorkDispatchOutcome =
 export interface WorkDispatcherDeps {
   work: WorkStore;
   deployments: DeployStore;
+  /**
+   * An agent's SLUG, from its uuid, or null for one this workspace does not have.
+   *
+   * THE SEAM BETWEEN TWO SPELLINGS OF "WHICH AGENT". `work_items.agent_id` is a uuid because it is
+   * a real foreign key; `deployments.agent_id` is a slug because that column predates agent uuids
+   * and `DeployManager` still writes one. See `liveDeployment` for what conflating them costs.
+   *
+   * A FUNCTION RATHER THAN THE REPOSITORY, so this module keeps importing no repository — the same
+   * posture every other dependency here takes.
+   */
+  agentSlug: (ctx: TenantContext, agentUuid: string) => Promise<string | null>;
   /** Part 1's client. The one thing in this codebase that calls an agent's own URL. */
   dispatch: DeployDispatcher;
   /** The stored serve token for a Railway SERVICE — never for a deployment row. See step 3. */
@@ -112,6 +123,18 @@ export class WorkDispatcher {
   /**
    * The latest LIVE deployment for an agent, or null.
    *
+   * `deployments.agent_id` IS THE AGENT'S SLUG, NOT ITS UUID, and that is the whole reason this
+   * method resolves one before it looks anything up. The column is `text` from migration 002,
+   * which predates agent uuids entirely; `DeployManager` writes `req.agentId` into it and proves
+   * what that is one line earlier by calling `agents.bySlug(ctx, req.agentId)`. Everything else
+   * that reads deployments per agent — the Agents grid, `currentByAgent` — is keyed by slug too.
+   *
+   * `work_items.agent_id` IS THE UUID, because it is a real foreign key to `agents(id)` and §4
+   * wanted one. So the Cockpit is the first thing in this codebase that holds both spellings at
+   * once, and this is the seam. Passing the uuid straight to `listForAgent` compares a uuid
+   * against a slug, matches nothing, and refuses every dispatch with "this agent is not live" —
+   * which looks exactly like a deployment problem and is not one.
+   *
    * `created_at DESC, created_seq DESC` IS THE STORE'S OWN ORDER, so this filters rather than
    * re-sorts: `listForAgent` already returns newest-first with the tie broken, and a second
    * ordering here would be a second answer to "which deployment is current" that could disagree
@@ -121,8 +144,10 @@ export class WorkDispatcher {
    * behind it; `currentForAgent` deliberately prefers an in-flight row because the panel wants to
    * show what is happening, and this wants the opposite — what can actually run a job.
    */
-  async liveDeployment(ctx: TenantContext, agentId: string): Promise<Deployment | null> {
-    const rows = await this.deps.deployments.listForAgent(ctx, agentId);
+  async liveDeployment(ctx: TenantContext, agentUuid: string): Promise<Deployment | null> {
+    const slug = await this.deps.agentSlug(ctx, agentUuid);
+    if (!slug) return null;
+    const rows = await this.deps.deployments.listForAgent(ctx, slug);
     return rows.find((d) => d.status === "live" && d.url) ?? null;
   }
 

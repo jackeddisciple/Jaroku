@@ -51,8 +51,10 @@ const person = await identity.provisionUser(systemContext(newRequestId()), {
 });
 const ctx: TenantContext = { ...testContext(), actorUserId: person.user.id };
 const agent = await agents.upsertFromDisk(ctx, { slug: "lifecycle_agent", display_name: "lifecycle" });
+// BY SLUG, as `DeployManager` writes it — see `dispatcher.test.ts`'s fixture for why a uuid here
+// is a fixture that agrees with a bug.
 const deployment = await deploys.create(ctx, {
-  agentId: agent.id, provider: "anthropic", model: "claude-haiku-4-5", envKeys: [],
+  agentId: agent.slug, provider: "anthropic", model: "claude-haiku-4-5", envKeys: [],
 });
 await deploys.patch(ctx, deployment.id, { status: "live", url: "http://127.0.0.1:1" });
 
