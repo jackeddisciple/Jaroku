@@ -20,6 +20,7 @@
 
 import { useEffect, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import { AgentWorkPointer } from "./AgentOps.tsx";
 import { InboxPointer } from "./InboxPointer.tsx";
 import { AgentOverview } from "./AgentOverview.tsx";
 import { AgentVersions } from "./AgentVersions.tsx";
@@ -162,6 +163,10 @@ export function AgentDetail() {
           renameable and a card keyed on one would be orphaned by a rename. `card.uuid` is where the
           grid carries it. */}
       <InboxPointer agentUuid={detail.card.uuid} />
+      {/* §3: "Do not put a work list inside Agent detail; a second place a job can be dealt with is
+          the mistake the Inbox already refused. Put a pointer strip there instead." Below the Inbox
+          pointer rather than above it, because what is BROKEN outranks what is merely in flight. */}
+      <AgentWorkPointer agentUuid={detail.card.uuid} />
       {narrow ? (
         // STACKED, ARTIFACT FIRST. The overview and the version history are what the surface is
         // about; the tabs are what you go to next, which is the right order to scroll through.

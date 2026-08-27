@@ -92,6 +92,20 @@ export interface FleetCardView {
   url: string | null;
   /** The version this deployment built from, or null for a row that predates migration 041. */
   version: number | null;
+  /**
+   * What a job dispatched to this agent will actually run on.
+   *
+   * ON THE CARD RATHER THAN LOOKED UP AT DISPATCH TIME, because §9's pre-flight gate has to name
+   * them BEFORE the button is pressed — "one line naming the agent, the deployment version, and
+   * the provider and model it will run on". A gate that fetched them would be a gate that
+   * appears empty for a moment, which is a confirmation dialog somebody presses through.
+   *
+   * THE DEPLOYMENT'S, NOT THE AGENT'S CURRENT DEFAULT. A container was built against one
+   * provider and one model and cannot be told to use another; showing what the agent would use
+   * if redeployed would be naming a price nobody is about to pay.
+   */
+  provider: string;
+  model: string;
   connection: FleetConnection;
   /** What is happening right now, for §9's one sentence. */
   running: number;
@@ -243,6 +257,8 @@ export class WorkSnapshots {
         deployment_id: deployment.id,
         url: deployment.url,
         version: deployment.version,
+        provider: deployment.provider,
+        model: deployment.model,
         connection: await this.connectionOf(ctx, deployment),
         running: mine.find((r) => r.status === "running")?.count ?? 0,
         waiting: mine.find((r) => r.status === "waiting")?.count ?? 0,

@@ -31,6 +31,7 @@ import { useUiStore } from "../store/uiStore.ts";
 import { useWorkStore } from "../store/workStore.ts";
 import { EmptyState, LoadingLine } from "./EmptyState.tsx";
 import { FleetStrip } from "./FleetStrip.tsx";
+import { WorkComposer } from "./WorkComposer.tsx";
 import { WorkDetail } from "./WorkDetail.tsx";
 import { WorkList } from "./WorkList.tsx";
 import { GaugeIcon, RocketIcon } from "./panelIcons.tsx";
@@ -155,6 +156,11 @@ function FleetAndWork() {
     <>
       <FleetStrip />
       <WorkList />
+      {/* THE COMPOSER SITS AT THE BOTTOM, under the list rather than over it, which is where every
+          other input in this product is. It is the one control on this tab that CREATES something,
+          and putting it above the work would make the tab read as a form with a history under it
+          rather than as a console with a way to act. */}
+      <WorkComposer />
     </>
   );
 }

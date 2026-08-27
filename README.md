@@ -2088,6 +2088,194 @@ than silently starting the graph over and re-spending what it already spent.
 
 ---
 
+## The Cockpit
+
+Jaroku builds an agent and then hands you a URL. The Cockpit is where that stops being the end of
+the story. It is the operator's surface for agents that are **already live**, and it answers five
+questions and no others: *what is live*, *give this agent a real job*, *what is happening to the
+jobs I gave it*, *what does it need from me right now*, and *what did it cost*.
+
+None of that is approximate, because a deployed run is an ordinary traced run: the cost is summed
+from `steps`, the trace is the trace, the pause is real, and a job that needs a human decision
+genuinely stops and waits for one.
+
+### What it is, and what it is not
+
+**It is not the Agents tab.** Agents is agent-first — pick one, then work on it. The Cockpit is
+**work-first**: one list across every agent, because the operator asks "what is happening", not
+"how is agent four". There is deliberately no work list inside Agent detail; what sits there is a
+pointer strip — *3 running, 1 waiting on you* — that opens this tab filtered to that agent. A
+second place a job can be dealt with is the mistake the Inbox already refused.
+
+**It is not the Inbox.** The Inbox is system state: what is broken, with every item dying on its own
+via a server-evaluated predicate. A job's outcome is not a predicate over workspace state — it is a
+record of something that happened, and a job blocked on a human dies when the human answers.
+Different table, different law, different tab. Nothing migrates out of `inbox_items`.
+
+They touch in exactly one place. A deployed run waiting on an MCP confirmation is blocking in the
+Inbox's sense and waiting on you in the Cockpit's. It has one home — the Cockpit — and the Inbox
+carries a pointer to it rather than a second card. Two boards showing the same thing is how both
+stop being believed.
+
+### The shape
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│  Cockpit          2 running · 1 waiting on you                       │
+├──────────────────────────────────────────────────────────────────────┤
+│ ┌────────────────┐┌────────────────┐┌────────────────┐               │  the fleet:
+│ │ ● billing_bot  ││ ○ mailer   v3  ││ ⚠ scraper      │  ← scrolls →  │  a glance, one
+│ │ 2 running ·    ││ idle · 11 jobs ││ not connected  │               │  card per LIVE
+│ │ 1 waiting      ││ today · $0.42  ││ [Reconnect]    │               │  deployment
+│ └────────────────┘└────────────────┘└────────────────┘               │
+├──────────────────────────────────────────────────────────────────────┤
+│  [Mine][Everyone's]   [All] [◐ 2] [⏸ 1] [✓ 40]                       │
+│  ⏸ refund order 4471 — "it never arrived"          4.2s      $0.0031 │
+│    billing_bot · Ada · waiting on stripe/create_refund               │
+│  ✓ chase the invoice for ACME                      9.1s      $0.0084 │
+│    mailer · Bo                                                       │
+├──────────────────────────────────────────────────────────────────────┤
+│  [billing_bot ▾]  Give this agent a real job…                    [↑] │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+The **fleet strip** is a glance, not a dashboard. Its one line is the hardest design in the tab and
+the rule is that no card may say something that would be true of twenty cards: not "Running" and
+not "Deployed", but *2 running · 1 waiting on you*, or *idle · 11 jobs today · $0.42*, or *not
+connected*. A status word alone is what the Railway dashboard already gives, and it is the reason
+somebody is opening Railway instead of this.
+
+A card whose credential is refused says **only that**. Its counts are stale by construction —
+nothing has been able to dispatch to it — so carrying them would invite you to read the second half
+and conclude it is working.
+
+### The four connection states
+
+| | what it means | what to do |
+|---|---|---|
+| **connected** | Jaroku holds a serve token for this deployment's Railway service. | nothing |
+| **unconnected** | No stored token. Every agent deployed before the production bridge is here. | Reconnect |
+| **unauthorised** | A token exists and the agent refused it — rotated on Railway out from under us. | Reconnect |
+| **public** | `JAROKU_SERVE_PUBLIC=1`. A **warning** state, not a healthy one: anyone with the URL can spend your provider key. | decide whether you meant it |
+
+**Reconnect restarts the service, and says so before you press it.** Setting a variable on Railway
+restarts the container: every run in flight in it dies, and its checkpoints die with them, so a run
+paused this morning cannot be resumed afterwards. That sentence is worded identically wherever the
+same consequence appears, because two different sentences for one consequence teach you that
+neither is precise.
+
+### Giving an agent a job
+
+**The dispatch composer is not the build composer, and does not route through `lib/intent`.** The
+build composer's whole design is that one input routes by *(selection context + phrasing)* into
+plan / revise / explain / branch / fix / edit. Here there is exactly one destination — a live
+agent, for real — and reusing the routing would mean *"refund order 4471"* could be read as an edit
+instruction and quietly turned into a code change to the agent that was supposed to do it.
+
+**A pre-flight gate sits between the button and the dispatch**, naming the agent, the deployment
+version, and the provider and model it will run on. Money asks first, and there is no free dry-run
+path out here. A deployment written before migration 041 has no recorded version, and the gate says
+*an unrecorded version* rather than guessing one.
+
+Then five steps, in this order:
+
+1. **Resolve the live deployment.** No live deployment refuses *before* a row is written and names
+   the Deploy panel — nothing was asked of anybody, so there is nothing to record.
+2. **Write the row**, as `queued`, before anything leaves the process. A dispatch creates work in
+   somebody else's account and can be interrupted at any point; a record that only appeared on
+   success would turn a crash into a container spending money with nothing here knowing it was
+   asked to.
+3. **Resolve the credential**, by Railway **service** id rather than by deployment row, so a
+   redeploy overwrites one variable instead of accumulating one dead secret per deploy.
+4. **`POST /run`, expect `202`.** Bounded, discriminating retry on a 429 and on connection
+   transients only, honouring `Retry-After`. A 401 or a 400 fails identically every time, so
+   retrying either multiplies nothing but the bill. Each retry uses a **fresh run id**: the
+   revocation list is keyed by run id, so reusing one would take the 202 and then have every push
+   the container made refused for the life of the run.
+5. **Nothing else.** From here the trace drives the state.
+
+### Six statuses, and what closes a job
+
+`queued · running · waiting · succeeded · failed · cancelled`
+
+`waiting` means **a person has to answer something**. It exists because the production bridge made
+it reachable, it is the only state where a human is the blocker, and it is the only thing the
+sidebar badge counts — a badge that counts everything never reaches zero, and a badge that is never
+zero is one people train themselves to ignore.
+
+`cancelled` means genuinely cancelled **at a node boundary**. A cancel is a request, not an
+outcome: the node in flight finishes, the runner emits its boundary line, and the run's own
+`run_end` is what closes the item. A cancelled run and a crashed one arrive as the *same* event —
+the frozen schema has three run statuses and none of them is `cancelled` — so what separates them
+is the boundary line, watched for rather than matched out of the error text.
+
+### Six failure kinds
+
+| | what it means |
+|---|---|
+| `unauthorised` | 401 — the stored serve token is wrong, or there is none. The one with a button attached. |
+| `agent_error` | The agent raised. The trace has the failing step. |
+| `rejected` | 400/413 — Jaroku sent something the agent refused. **That is a bug in Jaroku** and is worded that way. |
+| `unreachable` | DNS, refused, reset. |
+| `stopped_reporting` | The container went quiet past the ceiling. **It may have completed, and it may have spent money.** Never "failed". |
+| `busy` | 429 after the retry budget was exhausted. |
+
+### Honesty rules, enforced in code
+
+- **Unknown is not zero.** An unpriced model reports `null` and renders `—`. A run whose steps are
+  partly priced is marked incomplete and the row says so with a `+`. Never a confidently wrong
+  total.
+- **Cost is summed from `steps`, never `runs.cost`.** A run that crashed mid-graph never emitted a
+  `run_end`, and its row reads 0 while its steps record real money already spent. There is no cost
+  column on `work_items` so that this cannot quietly become two answers.
+- **`stopped_reporting` says what it means** — the container went quiet, it may have completed, it
+  may have spent money.
+- **Three zero states, three sentences.** No live agents → *"No agents are live yet"*, with a route
+  to Deploy. Live agents, no jobs → *"Nothing has been asked of them yet"*. A filter with nothing
+  behind it says the filter is on. Nothing blocked should feel like an achievement; nothing
+  deployed should feel like a next step.
+
+### What it costs to read
+
+Two grouped queries build the fleet strip whatever it holds, and one builds a page's costs whatever
+the page holds — forty agents and forty jobs cost what one costs, asserted as equality rather than
+as a threshold. The one read that is per-card is the serve-token check, and it is not batched
+because `SecretStore.getServeToken` deliberately takes one service id and returns one value, which
+is what keeps it from being asked for an arbitrary credential.
+
+### Out of scope, deliberately
+
+- **Delegation** — giving a teammate the right to dispatch to your agent sits on `agent_grants` and
+  is its own piece of work. When it is built, the composite-FK mistake previously documented on
+  `agent_grants` must not be repeated.
+- **External users** — everything here is inside the workspace.
+- **Per-agent conversation** — asking an agent "did you send that mail" is answered from
+  `work_items`, not by the agent, which has no memory across runs. That is Part 3, and it extends
+  the existing threads machinery rather than adding a second one. Two constraints it puts on this
+  release now: `work_items.id` must be stable and citable, because Part 3's answers cite it and the
+  citation is clickable; and the work detail must be reachable by id alone, because a citation chip
+  opens it without a list in between. Both hold.
+- **Voice and calls** — the layer above. It is now buildable, because `waiting` exists and means
+  something.
+- **Schedules and triggers, rollback and environment variables, per-agent spend ceilings, and
+  delivering a result outward.** All four sit directly on machinery this release creates and none of
+  them is in it. `work_items.created_by` stays `NOT NULL` so that a scheduled item is attributed to
+  the person who created the schedule rather than to nobody, and the `mine` filter is written so it
+  can later mean "mine, including what my schedules did overnight".
+
+### Still owed
+
+The fleet strip's health figure is whatever the last probe found, and nothing probes on a timer —
+it is filled by the commands that already ask (a reconnect, a kill) and by anything else that calls
+`DeployOps.health`. A card that has never been probed says nothing rather than guessing, which is
+correct, but it does mean the strip is not a health monitor and does not claim to be.
+
+`test:work-tenancy` and `test:rls` are the two suites that need Postgres to mean anything; there is
+no Postgres on the machine this was built on, so CI is the first place the RLS half of them ever
+runs.
+
+---
+
 ## The React client
 
 Three resizable columns:
@@ -2100,12 +2288,13 @@ Three resizable columns:
 │  ─────────  │  · Chat  → Jaroku         │  [Agent][Deploy][GitHub]   │
 │  Threads    │  · Test  → the agent      │  [Secrets][Usage][Conns]   │
 │  Agents     │                           │                            │
-│  Inbox      │  plan cards               │  Trace is the hero.        │
-│  Activity   │  diff cards               │  Click a step → detail     │
-│  ─────────  │  streaming files          │  panel slides over.        │
-│  agents     │  explain answers          │                            │
-│  runs       │  ────────────────────     │  Code opens as an overlay  │
-│  history    │  the control bar          │  (Cmd+P / a diff row).     │
+│  Cockpit    │  plan cards               │  Trace is the hero.        │
+│  Inbox      │  diff cards               │  Click a step → detail     │
+│  Activity   │  streaming files          │  panel slides over.        │
+│  ─────────  │  explain answers          │                            │
+│  agents     │  ────────────────────     │  Code opens as an overlay  │
+│  runs       │  the control bar          │  (Cmd+P / a diff row).     │
+│  history    │                           │                            │
 └─────────────┴───────────────────────────┴────────────────────────────┘
 ```
 

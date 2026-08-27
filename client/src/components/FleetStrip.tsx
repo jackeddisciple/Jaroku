@@ -27,6 +27,7 @@ import { sendListWork, sendReconnectAgent } from "../lib/socket.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { useWorkStore } from "../store/workStore.ts";
 import type { FleetCardView } from "../types.ts";
+import { AgentOps } from "./AgentOps.tsx";
 import { Capable } from "./Capable.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
 import { AlertTriangleIcon, GlobeIcon, PlugIcon } from "./panelIcons.tsx";
@@ -174,6 +175,10 @@ function FleetCard({ card }: { card: FleetCardView }) {
       {/* THE PROBE'S ANSWER, WITH ITS AGE. Absent when nobody has asked, which is a third state and
           not "unhealthy" — see `healthLine`. */}
       {health && <span className="text-tiny text-faint">{health}</span>}
+
+      {/* HEALTH, LOGS AND KILL — the three things people still open the Railway dashboard for. Part 1
+          built all three and left them with no caller; this is where they surface. */}
+      <AgentOps card={card} />
 
       {needsReconnect(card.connection) && (
         <Capable cmd="reconnectAgent">

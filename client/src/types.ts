@@ -2367,6 +2367,9 @@ export interface FleetCardView {
   deployment_id: string;
   url: string | null;
   version: number | null;
+  /** What a job will run on — named by §9's pre-flight gate BEFORE the button is pressed. */
+  provider: string;
+  model: string;
   connection: FleetConnection;
   running: number;
   waiting: number;
