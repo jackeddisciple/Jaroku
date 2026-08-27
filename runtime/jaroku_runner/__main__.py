@@ -139,6 +139,16 @@ def main(argv: list[str]) -> int:
                                        edit_values=edit_values, edit_node=edit_node)
         if outcome == "paused":
             paused = True
+        elif outcome == "cancelled":
+            # A CANCELLED RUN IS AN ERRORED RUN ON THE FROZEN SCHEMA, because the schema has
+            # three statuses and this part adds none. "error" with a reason that says what
+            # happened is the honest fit: the run did not complete, and the trace says why in the
+            # one field built to carry it. It is deliberately NOT a paused run — nothing will
+            # resume from it — and deliberately not "completed", which would put a run somebody
+            # stopped into the same bucket as one that finished its work.
+            run.status = "error"
+            run.error = "Cancelled: the run was stopped at a node boundary"
+            log(f"[jaroku] {run.error}")
         else:
             run.status = "completed"
     except ContractError as exc:

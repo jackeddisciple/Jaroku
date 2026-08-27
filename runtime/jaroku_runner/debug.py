@@ -145,22 +145,41 @@ def emit_ctrl(obj: dict) -> None:
     controlplane_http.push_control_line(obj)
 
 
-def _pause_requested(run_id: str) -> bool:
-    """Whether the boundary just reached should stop and hold.
+def _requested_action(run_id: str) -> str | None:
+    """What the boundary just reached should do next: ``"pause"``, ``"cancel"``, or None.
 
-    Hosted, this is controlplane_http's short poll of GET /control — see that module's note on
-    why the boundary check stays effectively instant rather than using the server's full 25s
-    long-poll budget. Locally (the only case a copied-out project ever reaches, since neither
-    JAROKU_CONTROL_PLANE_URL nor JAROKU_RUN_TOKEN exists outside Jaroku) this is unchanged: the
-    control file's mere presence and content, nothing else.
+    TWO TRANSPORTS, ONE MEANING, AND BOTH ARE READ. Hosted, this is controlplane_http's short
+    poll of GET /control — see that module's note on why the boundary check stays effectively
+    instant rather than using the server's full 25s long-poll budget. Locally (a copied-out
+    project, or `npm run dev`) it is the control file's presence and content, nothing else.
+
+    THE FILE IS READ EVEN WHEN A CONTROL PLANE IS CONFIGURED, which is new and is what makes
+    ``POST /cancel`` on a deployed agent work. That request arrives at serve.py, not at Jaroku —
+    it may be somebody holding the deployment's own bearer token, and the container has no way to
+    reach into the control plane on their behalf. So it writes the file, in the directory it
+    already tells this process to use for checkpoints, and the runner finds it at the same
+    boundary it would have found a pushed action. One mechanism, two ways in.
+
+    ORDER MATTERS AND IS ARGUABLE ONLY ONE WAY: the control plane first, because when both have
+    something to say the one that came from Jaroku is the one with a person behind it.
+
+    CANCEL IS A THIRD ACTION BESIDE PAUSE, NOT A KILL. It is checked here — at a whole node
+    boundary, never mid-node — and acted on by the caller, which stops the loop and lets the
+    run's own finally emit a run_end. Killing the process instead would abandon the node in
+    flight and leave no run_end at all, which is exactly the silence this design refuses.
     """
     if controlplane_http.configured():
-        return controlplane_http.poll_control() == "pause"
+        action = controlplane_http.poll_control()
+        if action in ("pause", "cancel"):
+            return action
     p = control_path(run_id)
     try:
-        return p.exists() and p.read_text().strip() == "pause"
+        if not p.exists():
+            return None
+        requested = p.read_text().strip()
+        return requested if requested in ("pause", "cancel") else None
     except OSError:
-        return False
+        return None
 
 
 @contextmanager
@@ -307,7 +326,19 @@ def run_with_checkpoints(
 
             if not snapshot.next:
                 return "completed"
-            if _pause_requested(run_id):
+            requested = _requested_action(run_id)
+            if requested == "cancel":
+                # THE CHECKPOINT IS STILL DURABLE HERE and is deliberately not used: a cancelled
+                # run is over, so the caller emits a run_end and nothing will resume from it.
+                # What the boundary buys is that the node that WAS running finished — its step is
+                # on the trace, its cost is counted, and the run ends where a reader can see it
+                # ended rather than in the middle of something.
+                emit_ctrl({
+                    "ctrl": "cancelled", "run_id": run_id, "seq_high": seq_high,
+                    "checkpoint_id": checkpoint_id, "next": list(snapshot.next),
+                })
+                return "cancelled"
+            if requested == "pause":
                 emit_ctrl({
                     "ctrl": "paused", "run_id": run_id, "seq_high": seq_high,
                     "checkpoint_id": checkpoint_id, "next": list(snapshot.next),

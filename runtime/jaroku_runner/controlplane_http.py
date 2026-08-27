@@ -154,9 +154,14 @@ def push_control_line(ctrl: dict) -> None:
 
 
 def poll_control(timeout_s: float = BOUNDARY_POLL_TIMEOUT_S) -> str | None:
-    """Ask the control plane whether to pause. Returns "pause", "resume", or None (nothing to
-    do, or the poll itself failed — a network hiccup must read as "keep going", the same fail-
-    open-toward-progress choice the local file check makes by simply not existing yet)."""
+    """Ask the control plane what to do next. Returns "pause", "resume", "cancel", or None
+    (nothing to do, or the poll itself failed — a network hiccup must read as "keep going", the
+    same fail-open-toward-progress choice the local file check makes by simply not existing yet).
+
+    CANCEL FAILS OPEN TOWARD PROGRESS TOO, and that is deliberate rather than overlooked. A poll
+    that could not reach the control plane knows nothing, and a run that stopped itself on a
+    network hiccup would be a cancel nobody asked for — the run continues, the next boundary asks
+    again, and the server's own reconciliation is the backstop if it never gets an answer."""
     if not configured():
         return None
     # The server is told to give up SLIGHTLY before this client's own socket timeout does. Told
@@ -173,7 +178,7 @@ def poll_control(timeout_s: float = BOUNDARY_POLL_TIMEOUT_S) -> str | None:
         _log(f"control poll failed, continuing: {exc}")
         return None
     action = result.get("action")
-    return action if action in ("pause", "resume") else None
+    return action if action in ("pause", "resume", "cancel") else None
 
 
 def request_mcp_confirm(nonce: str, payload: dict, timeout_s: float) -> str:

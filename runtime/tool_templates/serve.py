@@ -477,6 +477,36 @@ class AgentService:
         with self._lock:
             return list(self._live)
 
+    def cancel(self, run_id: str) -> bool:
+        """Ask one run to stop at its next node boundary. Returns whether it was running here.
+
+        WRITES THE CONTROL FILE THE RUNNER ALREADY READS, rather than signalling the process.
+        That is the whole difference between a cancel and a kill: `debug.py` checks for an action
+        between two nodes and nowhere else, so a run stopped this way finishes the node it is
+        inside, emits its step, and ends with a run_end that says it was cancelled. A SIGTERM
+        would land mid-node, abandon whatever that node had already done, and leave no run_end at
+        all — the exact silence the outer bracket exists to prevent, caused deliberately.
+        `debug.py` reads this file even when a control plane is configured, precisely so that a
+        caller holding this deployment's bearer token — who has no way to reach Jaroku's control
+        plane — can still stop a run.
+
+        IDEMPOTENT, and it answers 202 for a run it has never heard of as well as one it has:
+        a cancel is a request about a run's future, the caller cannot know whether the run
+        finished a millisecond ago, and 404 would make a successful cancel and a completed run
+        look like different outcomes to somebody pressing a button.
+        """
+        CHECKPOINT_ROOT.mkdir(parents=True, exist_ok=True)
+        try:
+            (CHECKPOINT_ROOT / f"{run_id}.control").write_text("cancel", encoding="utf-8")
+        except OSError as exc:
+            log(f"[serve] {run_id[:8]} could not record a cancel: {exc}")
+            return False
+        with self._lock:
+            record = self._live.get(run_id)
+            if record is not None:
+                record["cancelled"] = True
+            return record is not None
+
     def _start(
         self,
         record: dict,
@@ -722,6 +752,10 @@ class Handler(BaseHTTPRequestHandler):
                             "202 {run_id, accepted_at} · returns immediately; the run's outcome "
                             "is on its trace. 409 if a resume's checkpoint is gone"
                         ),
+                        "POST /cancel": (
+                            "bearer · {run_id} -> 202 {run_id} · the run stops at its next node "
+                            "boundary and ends with a run_end saying it was cancelled"
+                        ),
                     },
                 },
             )
@@ -729,7 +763,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, {"error": "not found"})
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path.split("?", 1)[0].rstrip("/") != "/run":
+        route = self.path.split("?", 1)[0].rstrip("/") or "/"
+        if route not in ("/run", "/cancel"):
             self._send(404, {"error": "not found"})
             return
 
@@ -778,6 +813,24 @@ class Handler(BaseHTTPRequestHandler):
             return
         if not isinstance(payload, dict):
             self._send(400, {"error": 'expected {"input": "<text>"}'})
+            return
+
+        # CANCEL IS ANSWERED HERE, AFTER THE SAME FRAMING AND THE SAME CREDENTIAL CHECK EVERY
+        # OTHER POST GOES THROUGH. Sharing do_POST's front half rather than getting a handler of
+        # its own is deliberate: that code exists because of a real desync bug, and a second
+        # route with its own body handling would be a second chance to reintroduce it.
+        if route == "/cancel":
+            cancel_id = payload.get("run_id")
+            if not isinstance(cancel_id, str) or not cancel_id.strip():
+                self._send(400, {"error": 'expected {"run_id": "<id>"}'})
+                return
+            cancel_id = cancel_id.strip()
+            running = self.service.cancel(cancel_id)
+            log(f"[serve] {cancel_id[:8]} cancel requested ({'running here' if running else 'not running here'})")
+            # 202, LIKE /run, AND FOR THE SAME REASON: the run stops at its next node boundary,
+            # which has not happened yet. What actually became of it is on its trace — a run_end
+            # with status error and a reason that says it was cancelled.
+            self._send(202, {"run_id": cancel_id})
             return
 
         # A RESUME CONTINUES AN EXISTING RUN AND CARRIES NO INPUT, because the input it is

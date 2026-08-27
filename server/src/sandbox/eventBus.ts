@@ -23,6 +23,20 @@ export type ControlAction =
   | { action: "none" }
   | { action: "pause" }
   | { action: "resume" }
+  /**
+   * Stop this run for good, at its next node boundary.
+   *
+   * A THIRD ACTION BESIDE pause AND resume, checked in the same place and acting at the same
+   * moment — see debug.py, which reads all three at a boundary and nowhere else. It is not a
+   * kill: a killed process abandons whatever the node it was inside had already done, leaves no
+   * run_end, and produces exactly the silence §6 spends a paragraph refusing. A cancel stops
+   * between two nodes, so the trace ends where the run ended and says so.
+   *
+   * The difference from `pause` is what happens next and nothing about the mechanism: a paused
+   * run keeps its checkpoint and emits no run_end because it is unfinished; a cancelled run
+   * emits run_end with status "error" and is over.
+   */
+  | { action: "cancel" }
   | { action: "mcp-confirm"; nonce: string; verdict: "run" | "once" | "deny" };
 
 interface PendingWaiter {
@@ -136,8 +150,18 @@ export class RunEventBus {
     // pause again while its sandbox was not asking should see "pause", not replay all three — so
     // a new one supersedes any earlier one rather than queuing behind it. mcp-confirm verdicts
     // are nonce-specific and are never collapsed.
-    if (action.action === "pause" || action.action === "resume") {
-      entry.queue = entry.queue.filter((a) => a.action !== "pause" && a.action !== "resume");
+    //
+    // A CANCEL SUPERSEDES A PAUSE, AND NOTHING SUPERSEDES A CANCEL. The three are one decision
+    // about what this run should do next, so a run told to pause and then cancel must see the
+    // cancel — a queue that delivered the pause first would stop the run at a boundary and hold
+    // it there, with the cancel behind a poll the paused runner has already stopped making. The
+    // reverse is not symmetric: a cancel is terminal, so a pause arriving after one has nothing
+    // left to act on and is dropped rather than queued behind it.
+    if (entry.queue.some((a) => a.action === "cancel") && action.action !== "mcp-confirm") return;
+    if (action.action === "pause" || action.action === "resume" || action.action === "cancel") {
+      entry.queue = entry.queue.filter(
+        (a) => a.action !== "pause" && a.action !== "resume" && a.action !== "cancel",
+      );
     }
     if (entry.queue.length >= MAX_QUEUED_ACTIONS) entry.queue.shift();
     entry.queue.push(action);

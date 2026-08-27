@@ -537,12 +537,13 @@ export function killRunnerChildren(served: ServedAgent): number {
   return killed;
 }
 
-/** One dispatch, exactly as Jaroku makes it. */
+/** One POST to a deployed agent, exactly as Jaroku makes it. `/run` unless told otherwise. */
 export async function dispatch(
   served: ServedAgent,
   body: Record<string, unknown>,
+  path: "/run" | "/cancel" = "/run",
 ): Promise<{ status: number; body: Record<string, unknown> }> {
-  const res = await fetch(`${served.url}/run`, {
+  const res = await fetch(`${served.url}${path}`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${served.token}` },
     body: JSON.stringify(body),

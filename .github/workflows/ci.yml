@@ -1255,3 +1255,10 @@ jobs:
           # exactly two jobs in one container. Beside it, the process boundary that makes the same
           # leak structurally impossible in the deployed path, read off the real _run_environment.
           npm run test:serve-confirm
+          # CANCEL, AND WHETHER IT IS HONEST. The question the spec asks is not whether a button
+          # exists but whether it stops anything at a node boundary — so the load-bearing
+          # assertions are that the node in flight FINISHED (a kill would leave its step
+          # unemitted, since a step is emitted when it ends) and that a run_end still arrives.
+          # Driven through both ways in: the control plane, and the container endpoint somebody
+          # holding only the deployment bearer token would use.
+          npm run test:serve-cancel
