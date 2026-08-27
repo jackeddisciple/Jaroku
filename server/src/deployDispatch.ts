@@ -44,7 +44,26 @@ export interface DeployDispatchDeps {
 
 export type DispatchOutcome =
   | { ok: true; runId: string; acceptedAt: string }
-  | { ok: false; reason: DispatchFailure; detail: string; status?: number };
+  | {
+      ok: false;
+      reason: DispatchFailure;
+      detail: string;
+      status?: number;
+      /**
+       * What the container's own `Retry-After` asked for, in milliseconds, when it sent one.
+       *
+       * CARRIED RATHER THAN OBEYED HERE, because this class does not retry — it makes one request
+       * and reports what came back, which is what keeps it usable for a dispatch, a resume and a
+       * cancel alike. Whoever is deciding whether to try again is the one that has a budget, and
+       * a header parsed at the point it arrives is a header nobody downstream has to re-fetch.
+       *
+       * Both forms of the header are accepted, because both are legal and `serve.py` is not the
+       * only thing that can answer this endpoint: a number of seconds, or an HTTP date. A date in
+       * the past is zero rather than negative, and anything unparseable is absent rather than
+       * guessed at.
+       */
+      retryAfterMs?: number;
+    };
 
 /**
  * Why a dispatch did not happen, as a value rather than a sentence.
@@ -195,7 +214,7 @@ export class DeployDispatcher {
       // EVERY OTHER ANSWER CLOSES THE RUN AGAIN, so no token stays valid for a run that never
       // started and no bus entry is left waiting for pushes that will never come.
       this.deps.runs.close(runId, "cancelled");
-      return { ok: false, ...describe(res.status, text) };
+      return { ok: false, ...describe(res.status, text), ...retryAfter(res.headers) };
     } catch (err) {
       this.deps.runs.close(runId, "cancelled");
       const aborted = (err as { name?: string }).name === "AbortError";
@@ -238,7 +257,7 @@ export class DeployDispatcher {
       });
       const text = await res.text();
       if (res.status === 202) return { ok: true, runId, acceptedAt: new Date().toISOString() };
-      return { ok: false, ...describe(res.status, text) };
+      return { ok: false, ...describe(res.status, text), ...retryAfter(res.headers) };
     } catch (err) {
       return {
         ok: false,
@@ -249,6 +268,31 @@ export class DeployDispatcher {
       clearTimeout(timer);
     }
   }
+}
+
+/**
+ * `Retry-After`, in milliseconds, or nothing.
+ *
+ * BOUNDED AT AN HOUR, because this is a number a container Jaroku does not control chose, and it
+ * ends up in a `setTimeout` on the control plane. A header asking for a week is not a request to
+ * honour; it is a request to stop and let a person decide, which is what the caller's own attempt
+ * budget does with an absent value anyway.
+ */
+const MAX_RETRY_AFTER_MS = 60 * 60 * 1000;
+
+function retryAfter(headers: Headers): { retryAfterMs?: number } {
+  const raw = headers.get("retry-after");
+  if (!raw) return {};
+  const seconds = Number(raw.trim());
+  if (Number.isFinite(seconds)) {
+    return { retryAfterMs: Math.min(Math.max(seconds, 0) * 1000, MAX_RETRY_AFTER_MS) };
+  }
+  const at = Date.parse(raw);
+  if (Number.isNaN(at)) return {};
+  // A DATE IN THE PAST IS ZERO, NOT NEGATIVE. Clocks disagree, and a container whose idea of now
+  // is thirty seconds ahead of ours would otherwise produce a negative delay that reads as "never
+  // wait" in one caller and throws in another.
+  return { retryAfterMs: Math.min(Math.max(at - Date.now(), 0), MAX_RETRY_AFTER_MS) };
 }
 
 /**

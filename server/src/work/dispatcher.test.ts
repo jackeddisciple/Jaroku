@@ -338,27 +338,212 @@ console.log("\nthe cap, on a workspace that is already busy");
   }
 }
 
-// --- 7. what a non-202 means ---------------------------------------------------------------------
+// --- 7. every failure kind, against a container that answers it ----------------------------------
 //
-// One case here rather than all six: the rest of the mapping, and the retry policy that decides
-// which of them is worth trying again, are `test:work-retry`'s.
+// §4's table has six kinds and each one puts a different sentence and a different control on the
+// card. `stopped_reporting` is the one that is not reachable from here — it is what Part 1's
+// reconciliation writes for a container that went quiet AFTER accepting, which is
+// `test:deploy-reconcile`'s and `test:work-lifecycle`'s ground rather than the dispatcher's.
 
-console.log("\na container that refuses");
+console.log("\nevery kind a dispatch can fail with");
 {
   const db = await openTestSqlite();
-  const refuser = await answering(400, "input must be a string");
-  try {
-    const f = await fixture(db, refuser.url);
-    const out = await f.dispatcher.dispatch(f.ctx, { agentId: f.agentId, input: "hello" });
+  const cases: { status: number; body: string; kind: string; why: string }[] = [
     // A 4xx IS JAROKU'S BUG AND IS WORDED THAT WAY. §4's table says so in as many words, which is
     // why this is `rejected` rather than `agent_error`: telling somebody their agent crashed when
     // Jaroku sent it something malformed points them at the wrong product.
-    check("a 400 fails the job as rejected", !out.ok && out.stage === "failed" && out.failureKind === "rejected");
-    check("...carrying what the container actually said", !out.ok && /input must be a string/.test(out.detail));
-  } finally {
-    await refuser.close();
-    await db.close();
+    { status: 400, body: "input must be a string", kind: "rejected", why: "a 400 is Jaroku sending something the agent refused" },
+    { status: 413, body: "body too large", kind: "rejected", why: "...and so is a 413" },
+    { status: 401, body: "", kind: "unauthorised", why: "a 401 is the stored token being wrong" },
+    { status: 403, body: "", kind: "unauthorised", why: "...and a 403 is the same fact and the same button" },
+    // AND A 5xx IS THEIRS. The trace has the failing step, and pointing at Jaroku here would send
+    // somebody to read this repository's source about a crash inside code a model wrote for them.
+    { status: 500, body: "Traceback (most recent call last)", kind: "agent_error", why: "a 500 is the agent's own crash" },
+    { status: 503, body: "starting up", kind: "agent_error", why: "...and so is a 503" },
+  ];
+  for (const c of cases) {
+    const server = await answering(c.status, c.body);
+    try {
+      const f = await fixture(db, server.url, { serveToken: "stub-token" });
+      const out = await f.dispatcher.dispatch(f.ctx, {
+        agentId: f.agentId, input: "hello",
+        // The budget is spent instantly so a retryable status does not hold the suite open; the
+        // non-retryable ones never reach it.
+      });
+      check(c.why, !out.ok && out.stage === "failed" && out.failureKind === c.kind,
+        out.ok ? "accepted" : `${out.stage}: ${out.detail}`);
+      if (c.body) {
+        check(`...carrying what the container actually said (${c.status})`, !out.ok && out.detail.includes(c.body.slice(0, 20)));
+      }
+    } finally {
+      await server.close();
+    }
   }
+  await db.close();
+}
+
+// --- 8. the retry policy -------------------------------------------------------------------------
+//
+// §6's Bounds in one sentence: "bounded, discriminating retry on 429 and connection transients
+// only, honouring Retry-After — a 401 or 400 fails identically every time and retrying multiplies
+// nothing but the bill". Every assertion here is about one of those four words.
+
+console.log("\nwhat is worth trying again");
+{
+  const db = await openTestSqlite();
+
+  /** A server that answers `first` for the first `n` requests and then `then`. Counts requests. */
+  const flaky = async (n: number, first: number, then: number, headers: Record<string, string> = {}) => {
+    let seen = 0;
+    const server: Server = createServer((_req, res) => {
+      seen++;
+      const status = seen <= n ? first : then;
+      if (status === 202) {
+        res.writeHead(202, { "content-type": "application/json" });
+        res.end(JSON.stringify({ accepted_at: new Date().toISOString() }));
+        return;
+      }
+      res.writeHead(status, { "content-type": "text/plain", ...(seen <= n ? headers : {}) });
+      res.end("busy");
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    return {
+      url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+      requests: () => seen,
+      close: () => new Promise<void>((r) => server.close(() => r())),
+    };
+  };
+
+  /** A dispatcher whose clock and sleep are fake together, so the budget is real and costs nothing. */
+  const withFakeClock = (f: Awaited<ReturnType<typeof fixture>>, url: string) => {
+    let clock = Date.now();
+    const waits: number[] = [];
+    const deploys = new DeployStore(db);
+    return {
+      waits,
+      dispatcher: new WorkDispatcher({
+        work: f.work,
+        deployments: deploys,
+        dispatch: new DeployDispatcher({
+          runs: deployRuns,
+          endpoint: async () => ({ url, serveToken: "stub-token" }),
+          timeoutMs: 3_000,
+        }),
+        serveToken: async () => "stub-token",
+        controlPlaneUrl: () => controlPlaneUrl,
+        now: () => clock,
+        sleep: async (ms) => { waits.push(ms); clock += ms; },
+      }),
+    };
+  };
+
+  // A 429 THAT CLEARS. One retry, and the job runs — which is the whole reason retrying at all is
+  // worth the complexity: a container at its own concurrency limit is a container that will have
+  // room in a moment.
+  {
+    const server = await flaky(1, 429, 202);
+    try {
+      const f = await fixture(db, server.url);
+      const { dispatcher, waits } = withFakeClock(f, server.url);
+      const out = await dispatcher.dispatch(f.ctx, { agentId: f.agentId, input: "hello" });
+      check("a 429 that clears is retried and accepted", out.ok === true, out.ok ? "" : out.detail);
+      check("...after exactly one more request", server.requests() === 2, String(server.requests()));
+      check("...having waited the backoff", waits.length === 1 && waits[0] === 1_000, waits.join(","));
+    } finally {
+      await server.close();
+    }
+  }
+
+  // AND A 429 THAT DOES NOT. Bounded: three attempts including the first, and then the container's
+  // own last word rather than a fourth request.
+  {
+    const server = await flaky(99, 429, 429);
+    try {
+      const f = await fixture(db, server.url);
+      const { dispatcher, waits } = withFakeClock(f, server.url);
+      const out = await dispatcher.dispatch(f.ctx, { agentId: f.agentId, input: "hello" });
+      check("a container that stays busy fails as busy", !out.ok && out.stage === "failed" && out.failureKind === "busy");
+      check("...after three attempts and no more", server.requests() === 3, String(server.requests()));
+      check("...backing off between them", waits.join(",") === "1000,2000", waits.join(","));
+    } finally {
+      await server.close();
+    }
+  }
+
+  // `Retry-After` IN SECONDS WINS OVER THE BACKOFF. The container is the thing that knows how long
+  // its own slots are held; ignoring it is how one overloaded container becomes a retry storm.
+  {
+    const server = await flaky(1, 429, 202, { "retry-after": "5" });
+    try {
+      const f = await fixture(db, server.url);
+      const { dispatcher, waits } = withFakeClock(f, server.url);
+      const out = await dispatcher.dispatch(f.ctx, { agentId: f.agentId, input: "hello" });
+      check("Retry-After is honoured over the backoff", out.ok === true && waits[0] === 5_000, waits.join(","));
+    } finally {
+      await server.close();
+    }
+  }
+
+  // AND A `Retry-After` LONGER THAN THE BUDGET ENDS IT RATHER THAN BEING TRUNCATED. Coming back
+  // early is exactly what the header exists to stop, and waiting the remainder before giving up
+  // spends the budget to learn nothing.
+  {
+    const server = await flaky(99, 429, 429, { "retry-after": "600" });
+    try {
+      const f = await fixture(db, server.url);
+      const { dispatcher, waits } = withFakeClock(f, server.url);
+      const out = await dispatcher.dispatch(f.ctx, { agentId: f.agentId, input: "hello" });
+      check("a Retry-After past the budget stops rather than being truncated",
+        !out.ok && out.stage === "failed" && out.failureKind === "busy" && waits.length === 0 && server.requests() === 1,
+        `${waits.length} waits, ${server.requests()} requests`);
+    } finally {
+      await server.close();
+    }
+  }
+
+  // THE FOUR THAT ARE NEVER RETRIED, and this is the assertion §6 is actually about: "a 401 or 400
+  // fails identically every time and retrying multiplies nothing but the bill". The request count
+  // is the whole check — a second 401 costs nothing but a second 500 is a graph crashing twice on
+  // somebody's provider key.
+  for (const status of [400, 401, 403, 500]) {
+    const server = await flaky(99, status, status);
+    try {
+      const f = await fixture(db, server.url);
+      const { dispatcher } = withFakeClock(f, server.url);
+      const out = await dispatcher.dispatch(f.ctx, { agentId: f.agentId, input: "hello" });
+      check(`a ${status} is asked exactly once`, !out.ok && server.requests() === 1, String(server.requests()));
+    } finally {
+      await server.close();
+    }
+  }
+
+  // A RETRY USES A FRESH RUN ID, and this is the subtlest thing in the file. Part 1's client closes
+  // the run on every answer that is not a 202, and closing REVOKES the token — against a denylist
+  // keyed by RUN ID. Reusing the id would get its 202, mark the item running, and then have every
+  // push the container made refused for the life of the run: a job that reads as executing and
+  // produces no trace, no cost and no ending. It would only ever happen under load, which is the
+  // only condition a 429 arrives in.
+  {
+    const server = await flaky(1, 429, 202);
+    try {
+      const f = await fixture(db, server.url);
+      const before = (await f.work.list(f.ctx, { scope: "all" })).items.length;
+      const { dispatcher } = withFakeClock(f, server.url);
+      const out = await dispatcher.dispatch(f.ctx, { agentId: f.agentId, input: "hello" });
+      check("the retried job is running", out.ok === true);
+      if (out.ok) {
+        check("...on a run id the first attempt did not revoke", !revocations.isRevoked(out.item.run_id!));
+        check("...which is still registered on the bus", deployRuns.has(out.item.run_id!));
+        // ONE ROW, NOT TWO. A retry is the same job asked again, not a second job — the operator
+        // pressed dispatch once.
+        check("...and it is still one job", (await f.work.list(f.ctx, { scope: "all" })).items.length === before + 1);
+      }
+    } finally {
+      await server.close();
+    }
+  }
+
+  await db.close();
 }
 
 for (const close of closers) await close();

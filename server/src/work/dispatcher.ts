@@ -77,6 +77,16 @@ export interface WorkDispatcherDeps {
   concurrency?: () => number;
   /** Injected so the private-address refusal is exercised without a live network. */
   resolver?: Resolver;
+  /**
+   * The clock and the wait, injected together so the retry budget can be exercised in a
+   * millisecond rather than in forty-five seconds.
+   *
+   * BOTH OR NEITHER, and a suite that replaces one must replace the other: the budget is measured
+   * against `now` and consumed by `sleep`, so a fake sleep with a real clock spends no time and
+   * retries forever, and a real sleep with a fake clock waits for a budget that never runs out.
+   */
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
 }
 
 /**
@@ -214,7 +224,7 @@ export class WorkDispatcher {
     }
 
     // --- 4. POST /run, and expect 202 --------------------------------------------------------
-    const started = await this.deps.dispatch.start({
+    const { outcome: started } = await this.send(ctx, item.id, {
       deploymentId: deployment.id,
       workspaceId: ctx.workspaceId,
       agentId: input.agentId,
@@ -244,7 +254,105 @@ export class WorkDispatcher {
     await this.deps.work.markRunning(ctx, item.id, started.acceptedAt);
     return { ok: true, item: (await this.deps.work.get(ctx, item.id)) ?? item };
   }
+
+  /**
+   * `POST /run`, with §6's bounded, DISCRIMINATING retry in front of it.
+   *
+   * DISCRIMINATING IS THE WHOLE OF IT. A 401 or a 400 fails identically every time — the token is
+   * wrong, or Jaroku sent something the agent refuses — so a retry there multiplies nothing but
+   * the bill and the time before somebody is told what to fix. Only two answers are worth trying
+   * again, and both are about the moment rather than the request: a 429, which says "not now", and
+   * a connection transient, which says nothing at all. `RETRYABLE` is that list and it is
+   * deliberately short.
+   *
+   * BOUNDED BY BOTH AN ATTEMPT COUNT AND A WALL-CLOCK BUDGET, because either alone has a hole. An
+   * attempt count with no budget honours a `Retry-After: 3600` twice and holds a dispatch open for
+   * two hours; a budget with no count spins against a container refusing instantly. The two
+   * together mean a dispatch either succeeds, or fails with the container's own last word, inside
+   * a bounded time — which is what makes it safe to do this inline rather than in a queue.
+   *
+   * THE CONTAINER'S OWN `Retry-After` WINS OVER THE BACKOFF when it sent one, clamped to what is
+   * left of the budget. Ignoring it is how a control plane turns one overloaded container into a
+   * retry storm, and `serve.py` is the thing that actually knows how long its own slots are held.
+   */
+  private async send(
+    ctx: TenantContext,
+    itemId: string,
+    input: {
+      deploymentId: string;
+      workspaceId: string;
+      agentId: string;
+      runId: string;
+      input: string;
+      provider?: string;
+      model?: string;
+      controlPlaneUrl: string;
+    },
+  ): Promise<{ outcome: Awaited<ReturnType<DeployDispatcher["start"]>>; runId: string }> {
+    const sleep = this.deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+    const now = (): number => this.deps.now?.() ?? Date.now();
+    const deadline = now() + RETRY_BUDGET_MS;
+
+    let runId = input.runId;
+    let outcome = await this.deps.dispatch.start(input);
+
+    for (let attempt = 1; attempt < MAX_DISPATCH_ATTEMPTS; attempt++) {
+      if (outcome.ok || !RETRYABLE.has(outcome.reason)) break;
+      const remaining = deadline - now();
+      if (remaining <= 0) break;
+      const asked = outcome.retryAfterMs ?? RETRY_BASE_MS * 2 ** (attempt - 1);
+      // A WAIT LONGER THAN WHAT IS LEFT IS NOT TRUNCATED, it ends the attempt. The container asked
+      // for a specific amount of time; coming back early is the thing `Retry-After` exists to stop,
+      // and waiting the remainder and then giving up spends the budget to learn nothing.
+      if (asked > remaining) break;
+      await sleep(asked);
+
+      // A FRESH RUN ID PER ATTEMPT, AND THIS IS NOT COSMETIC. `DeployDispatcher` closes the run on
+      // every answer that is not a 202, and `DeployRuns.close` REVOKES the token — and the
+      // revocation list is keyed by RUN ID rather than by the token's own value. So a retry that
+      // reused the id would get its 202, mark the item running, and then have every push the
+      // container made refused for the life of the run: a job that reads as executing and produces
+      // no trace, no cost and no ending. The failure would be silent and would only ever appear
+      // under load, which is the only condition a 429 arrives in.
+      //
+      // The row is repointed before the request goes out, so a crash between the two leaves the
+      // item naming the run that is about to exist rather than the one that is already dead.
+      runId = randomUUID();
+      await this.deps.work.attachRun(ctx, itemId, runId);
+      outcome = await this.deps.dispatch.start({ ...input, runId });
+    }
+    return { outcome, runId };
+  }
 }
+
+/**
+ * The two answers worth sending the same request again for.
+ *
+ * `busy` IS A 429 AND `unreachable` IS A CONNECTION THAT DID NOT COMPLETE — a refused socket, a
+ * reset, a container still waking a cold interpreter past the acceptance timeout. Neither says
+ * anything about the request; both say something about the moment.
+ *
+ * EVERY OTHER KIND IS DELIBERATELY ABSENT and each absence is a decision. `unauthorised` and
+ * `no_credential` fail identically until somebody reconnects. `refused` is Jaroku's own bug on a
+ * 4xx and the agent's own crash on a 5xx, and neither is fixed by asking twice — a crashing graph
+ * asked twice is a graph that crashes twice, on somebody's provider key. `no_checkpoint` is state
+ * that is gone. `no_deployment` means there is nothing at the address any more.
+ */
+const RETRYABLE: ReadonlySet<DispatchFailure> = new Set<DispatchFailure>(["busy", "unreachable"]);
+
+/** Including the first. Three is one real try and two second chances. */
+export const MAX_DISPATCH_ATTEMPTS = 3;
+/** The first backoff, doubling. Short, because a job somebody just pressed is being waited on. */
+export const RETRY_BASE_MS = 1_000;
+/**
+ * The wall-clock ceiling on all of it.
+ *
+ * Forty-five seconds, which is a little more than the thirty a single acceptance is allowed —
+ * because a dispatch that has already burnt one full acceptance timeout has told us what we needed
+ * to know, and the operator pressing the button is still watching. Longer belongs to a queue,
+ * which is what Part 3's scheduler is for.
+ */
+export const RETRY_BUDGET_MS = 45_000;
 
 /**
  * Whether this server may POST a job to that address, reusing the sandbox policy's refusal.
