@@ -1,6 +1,6 @@
 // The full-screen region a sidebar nav button opens (§2).
 //
-// ONE SWITCH, FOUR DESTINATIONS, AND ALL FOUR ARE BUILT. Threads came first, Agents second, the
+// ONE SWITCH, FIVE DESTINATIONS, AND ALL FIVE ARE BUILT. Threads came first, Agents second, the
 // Inbox third and Activity last; the mechanism this shell was built for is what made plugging each
 // one in a case in this switch and nothing else, exactly as its own comment promised. The
 // placeholder machinery below it is gone with the last placeholder, which is the honest end state:
@@ -24,12 +24,14 @@
 import type { NavDestination } from "../store/uiStore.ts";
 import { ThreadsView } from "./ThreadsView.tsx";
 import { AgentsView } from "./AgentsView.tsx";
+import { CockpitView } from "./CockpitView.tsx";
 import { InboxView } from "./InboxView.tsx";
 import { ActivityDashboard } from "./ActivityDashboard.tsx";
 
 export function FullScreenView({ destination }: { destination: NavDestination }) {
   if (destination === "threads") return <ThreadsView />;
   if (destination === "agents") return <AgentsView />;
+  if (destination === "work") return <CockpitView />;
   if (destination === "inbox") return <InboxView />;
   return <ActivityDashboard />;
 }

@@ -21,6 +21,7 @@ import { useUiStore, type NavDestination } from "../store/uiStore.ts";
 import { useGithubStore } from "../store/githubStore.ts";
 import { useThreadStore } from "../store/threadStore.ts";
 import { useInboxStore } from "../store/inboxStore.ts";
+import { useWorkStore, workBadgeCount } from "../store/workStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher.tsx";
 import { Chip } from "./Chip.tsx";
@@ -30,7 +31,7 @@ import { EmptyState } from "./EmptyState.tsx";
 import { ArchiveRestoreIcon, FilterIcon } from "./agentIcons.tsx";
 import { keyHint } from "../lib/modKey.ts";
 import {
-  ActivityIcon, CheckIcon, GitForkIcon, GlobeIcon, HashIcon, InboxIcon, LogOutIcon, RocketIcon,
+  ActivityIcon, CheckIcon, GaugeIcon, GitForkIcon, GlobeIcon, HashIcon, InboxIcon, LogOutIcon, RocketIcon,
   LoaderIcon, PauseIcon, PencilIcon, PlusIcon, SearchIcon, SettingsIcon, SparklesIcon, XIcon,
 } from "./panelIcons.tsx";
 
@@ -43,6 +44,7 @@ import {
 const NAV_DESTINATIONS: { id: NavDestination; label: string; icon: (p: { size?: number }) => React.ReactElement }[] = [
   { id: "threads", label: "Threads", icon: HashIcon },
   { id: "agents", label: "Agents", icon: SparklesIcon },
+  { id: "work", label: "Cockpit", icon: GaugeIcon },
   { id: "inbox", label: "Inbox", icon: InboxIcon },
   { id: "activity", label: "Activity", icon: ActivityIcon },
 ];
@@ -390,16 +392,31 @@ function NavRail() {
    * counts of "what is waiting on me" that disagree are visible in two places somebody compares.
    */
   const waiting = useInboxStore((s) => s.counts.badge);
+  /**
+   * §9's badge: `waiting` and nothing else.
+   *
+   * THROUGH `workBadgeCount` RATHER THAN READING THE FIELD, so there is exactly one definition
+   * of what this badge means and `test:work-badge` can hold it. §9 asks for the equivalent of
+   * the Inbox's test — the one that fails if somebody "fixes" the badge to count more — and a
+   * selector reaching straight into `counts.waiting` would be a second definition beside it.
+   *
+   * NOT `running`, which would be lit whenever the product was working; not `failed`, which is
+   * over and is the Inbox's to raise; not `queued`, which is a moment. `waiting` is the only
+   * state where a HUMAN is the blocker, and that is the only thing a badge should ever mean.
+   */
+  const waitingOnYou = useWorkStore((s) => workBadgeCount(s.counts));
 
   return (
     <div className="flex w-10 shrink-0 flex-col items-center gap-0.5 py-2">
       {NAV_DESTINATIONS.map(({ id, label, icon: Icon }) => {
         const active = navSection === id;
-        const badge = id === "inbox" ? waiting : id === "threads" ? needsYou : 0;
+        const badge = id === "inbox" ? waiting : id === "threads" ? needsYou : id === "work" ? waitingOnYou : 0;
         const badgeTitle =
           id === "inbox"
             ? `${waiting} item${waiting === 1 ? "" : "s"} blocked or waiting on a decision`
-            : `${needsYou} thread${needsYou === 1 ? "" : "s"} waiting on you`;
+            : id === "work"
+              ? `${waitingOnYou} job${waitingOnYou === 1 ? "" : "s"} waiting for somebody to answer something`
+              : `${needsYou} thread${needsYou === 1 ? "" : "s"} waiting on you`;
         return (
           <button
             key={id}

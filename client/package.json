@@ -57,6 +57,7 @@
     "test:permission-ui": "tsx src/lib/permissionUi.test.ts",
     "test:access-tab": "tsx src/lib/accessTab.test.ts",
     "test:reset": "tsx src/store/reset.test.ts",
+    "test:work-badge": "tsx src/store/workBadge.test.ts",
     "test:thread-store": "tsx src/store/threadStore.test.ts",
     "test:thread-cost": "tsx src/lib/threadCost.test.ts",
     "test:thread-groups": "tsx src/lib/threadGroups.test.ts",

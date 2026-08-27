@@ -281,6 +281,33 @@ export function ActivityIcon(p: P) {
   return svg(p, <path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" />);
 }
 
+/**
+ * The Cockpit's mark: a gauge, because that is what the tab is.
+ *
+ * HERE RATHER THAN IN `lib/actionIcons.tsx`, which is where §9 asks for it, and this is a
+ * deliberate correction rather than an oversight. `actionIcons` maps an ACTION KIND to an icon, a
+ * verb and an accent — `read`, `write`, `call`, `fail` — and a nav destination is not an action;
+ * it has no verb and no tense. The four marks it sits beside (`HashIcon`, `SparklesIcon`,
+ * `InboxIcon`, `ActivityIcon`) are all here, so this is the file §9's actual rule points at: "one
+ * icon set, not a second icon module". Adding it to the action registry would have been the second
+ * module, wearing the first one's name.
+ *
+ * A DIAL AND NOT A ROCKET. The tab is where an operator watches what is already flying; a rocket
+ * is the Deploy panel's mark and means "put this up", which is the one thing the Cockpit does not
+ * do. The needle sits at rest rather than at full, because a gauge pinned to its limit reads as an
+ * alarm — and this glyph is drawn every frame whether or not anything is wrong.
+ */
+export function GaugeIcon(p: P) {
+  return svg(
+    p,
+    <>
+      <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
+      <path d="m13.4 10.6 3.6-3.6" />
+      <path d="M3.5 18a10 10 0 1 1 17 0" />
+    </>,
+  );
+}
+
 // ── Navigation and controls ─────────────────────────────────────────────────
 
 /** lucide:search — the sidebar's agent filter. */

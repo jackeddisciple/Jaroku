@@ -30,7 +30,18 @@ import type { GithubAttachment } from "../types.ts";
  * `navSection` are in-memory state reset on every load — so there is no stored value to migrate
  * and an alias would be a second spelling with nothing to spell.
  */
-export type NavDestination = "threads" | "agents" | "inbox" | "activity";
+/**
+ * §9 ADDS A FIFTH, AND ITS POSITION IS THE ARGUMENT: Threads, Agents, Cockpit, Inbox, Activity.
+ * Build sits left of run; what is broken and what happened sit right of both. That reads as the
+ * order of the work rather than the order the tabs were written in, which is what the sidebar
+ * had before — Activity was appended because it came last.
+ *
+ * `work` RATHER THAN `cockpit` AS THE ID, because the id is what the code says and the label is
+ * what the person reads. Every store, table, channel and command in this feature is named for
+ * what it holds — `work_items`, the `work` channel, `workStore` — and a destination id spelled
+ * after the tab's marketing name would be the one place that vocabulary broke.
+ */
+export type NavDestination = "threads" | "agents" | "work" | "inbox" | "activity";
 
 /**
  * Which part of the workspace panel is showing, or null for closed.

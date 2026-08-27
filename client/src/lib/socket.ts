@@ -27,6 +27,7 @@ import { isRefusal, useEntitlementStore } from "../store/entitlementStore.ts";
 import { refusedRole } from "./useCapability.ts";
 import { useThreadStore } from "../store/threadStore.ts";
 import { useInboxStore } from "../store/inboxStore.ts";
+import { matchesFilters, useWorkStore } from "../store/workStore.ts";
 import { useActivityStore } from "../store/activityStore.ts";
 import { useAgentGridStore } from "../store/agentGridStore.ts";
 import { resetWorkspaceStores } from "../store/reset.ts";
@@ -529,6 +530,42 @@ function dispatch(msg: ServerMessage): void {
         i.setUndo(msg.token ? { token: msg.token, action: msg.action, changed: msg.changed, at: Date.now() } : null);
       } else if (msg.type === "error") i.setError(msg.message);
       else if (msg.type === "notice") console.info("[inbox]", msg.message);
+      break;
+    }
+    case "work": {
+      // A SNAPSHOT REPLACES AND A DELTA TOUCHES ONE ROW, and here the delta is the common case
+      // rather than the exception: §5 makes a transition a single item precisely because a work
+      // list moves every few seconds. What makes broadcasting one payload safe is that the store
+      // filters it — see `matchesFilters`.
+      const w = useWorkStore.getState();
+      if (msg.type === "snapshot") {
+        // A PAGE AFTER THE FIRST IS APPENDED RATHER THAN REPLACING. The cursor is what tells
+        // them apart, and it is the client's own record of what it asked for — the server sends
+        // the same shape either way, because a page is a page.
+        if (pendingWorkPage) {
+          pendingWorkPage = false;
+          w.appendPage({ items: msg.items, nextCursor: msg.nextCursor });
+        } else {
+          w.setSnapshot(msg);
+        }
+      } else if (msg.type === "item") {
+        // THE FILTER IS APPLIED HERE, which is the one thing this store decides. A broadcast
+        // item carries no filter — it cannot, it goes to every socket in the workspace — so a
+        // client holding "mine, failed" receives transitions for jobs it is not showing.
+        const viewer = useSessionStore.getState().user?.id ?? null;
+        if (matchesFilters(msg.item, w.filters, viewer)) w.noteItem(msg.item);
+        else if ("input" in msg.item) w.openItem(msg.item);
+        else w.noteItem(msg.item);
+      } else if (msg.type === "fleet") w.setFleet(msg.cards, msg.anyLive);
+      else if (msg.type === "dispatched") {
+        // NAVIGATION, WHICH IS WHY IT IS ANSWERED TO THIS SOCKET AND NOT BROADCAST: the composer
+        // clears and the detail panel opens on the job that was just started.
+        w.openItem(msg.item);
+        w.noteItem(msg.item);
+      }
+      else if (msg.type === "logs") w.setLogs({ deploymentId: msg.deploymentId, lines: msg.lines, cursor: msg.cursor });
+      else if (msg.type === "error") w.setError(msg.message);
+      else if (msg.type === "notice") w.setNotice(msg.message);
       break;
     }
     case "activity": {
@@ -1892,6 +1929,81 @@ export function sendCommitGithub(agentId: string, message: string, push = true):
 // EVERY MUTATION RETURNS WHETHER IT LEFT THE TAB, which is the lesson §3.4's archive notice taught
 // on the channel next door: a toast claiming forty items were dismissed over a socket that silently
 // dropped the command is a promise the product did not keep. The board's own actions check.
+
+/**
+ * Whether the snapshot now in flight is a NEXT PAGE rather than a fresh list.
+ *
+ * ON THE CLIENT RATHER THAN IN THE PAYLOAD, because the server sends the same shape either way
+ * — a page is a page — and only the caller knows which of the two it asked for. A flag rather
+ * than a queue because there is only ever one list on screen: a second `load more` while the
+ * first is in flight is the same request, and the guard in `sendListWork` is what makes it a
+ * no-op instead of two appends of the same rows.
+ */
+let pendingWorkPage = false;
+
+/**
+ * One page of the work list, under the filters the store is holding.
+ *
+ * THE FILTERS COME FROM THE STORE rather than from the caller, for the reason `sendGetActivity`
+ * reads the range there: "which list am I looking at" is a fact about the app's state rather
+ * than an argument a row knows, and every caller forgetting one is how two surfaces end up
+ * describing different lists.
+ */
+export function sendListWork(opts: { more?: boolean } = {}): void {
+  const s = useWorkStore.getState();
+  if (opts.more && (!s.nextCursor || pendingWorkPage)) return;
+  pendingWorkPage = opts.more === true;
+  send({
+    cmd: "listWork",
+    scope: s.filters.scope,
+    status: s.filters.status ?? undefined,
+    agentId: s.filters.agentId ?? undefined,
+    cursor: opts.more ? s.nextCursor : null,
+  });
+}
+
+export function sendListFleet(): void {
+  send({ cmd: "listFleet" });
+}
+
+/** One job in full. The panel opens on the id first, so it is never a blank slide-over. */
+export function sendLoadWorkItem(itemId: string): void {
+  useWorkStore.getState().openingItem(itemId);
+  send({ cmd: "loadWorkItem", itemId });
+}
+
+export function sendDispatchWork(agentId: string, input: string): boolean {
+  return send({ cmd: "dispatchWork", agentId, input });
+}
+
+export function sendCancelWork(itemId: string): boolean {
+  return send({ cmd: "cancelWork", itemId });
+}
+
+export function sendRetryWork(itemId: string): boolean {
+  return send({ cmd: "retryWork", itemId });
+}
+
+/** §9's Reconnect. The caller warns about the restart BEFORE this is sent, never after. */
+export function sendReconnectAgent(deploymentId: string): boolean {
+  return send({ cmd: "reconnectAgent", deploymentId });
+}
+
+/**
+ * One window of a container's runtime log.
+ *
+ * THE CURSOR IS A TIMESTAMP AND IS PASSED BACK EXACTLY AS IT ARRIVED — never rebuilt from the
+ * last line on screen. Railway's log query answers with the most recent N lines of a stream that
+ * is still being written, so a cursor derived from what is rendered walks backwards through a
+ * moving window. See `DeployOps.runtimeLogs`, which is where that bug is argued at length.
+ */
+export function sendLoadAgentLogs(deploymentId: string, since?: string | null): void {
+  send({ cmd: "loadAgentLogs", deploymentId, since: since ?? null });
+}
+
+export function sendKillAgent(deploymentId: string): boolean {
+  return send({ cmd: "killAgent", deploymentId });
+}
 
 /** Ask for the board again. A full-snapshot channel's way of checking it is not stale. */
 export function sendListInbox(): void {

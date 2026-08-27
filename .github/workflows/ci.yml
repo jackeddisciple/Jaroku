@@ -875,6 +875,13 @@ jobs:
           # its own background into the markup and which no token, class or variable can reach.
           npm run test:colour-system
           npm run test:reset
+          # §9 ASKS FOR THIS SUITE BY NAME: "The Inbox has a test that fails if somebody 'fixes'
+          # its badge to count more; write the equivalent here." A badge that counts everything
+          # never reaches zero, and a badge that is never zero is one people train themselves to
+          # ignore — so `waiting` is the only state it counts, because it is the only one where a
+          # human is the blocker. Its second half reads the SIDEBAR'S SOURCE, because a correct
+          # function beside a component that adds up fields is two definitions.
+          npm run test:work-badge
           npm run test:thread-store
           npm run test:thread-cost
           npm run test:thread-groups

@@ -1718,6 +1718,11 @@ export type ServerMessage =
   // person — two of the three verbs are personal — which is why the server rebuilds it per recipient
   // and why only a delta is ever broadcast as one payload.
   | ({ channel: "inbox" } & InboxMessage)
+  // Its own channel, parallel to `inbox` and for the same reason: a job somebody gave a live
+  // agent is not a problem waiting on somebody. What is different here is the other way round
+  // from the Inbox — a snapshot is NOT broadcast, because it carries the asking client's filter,
+  // and only a single-item delta ever goes to the workspace.
+  | ({ channel: "work" } & WorkMessage)
   // `complete` and `window` are present only on the answer to `loadHistory` — a growing WINDOW
   // rather than a cursor, so the channel keeps its full-snapshot discipline and `applyHistory` keeps
   // merging by run id. A broadcast that carries neither leaves the flags alone.
@@ -1791,6 +1796,18 @@ export type ClientCommand =
   // they have no socket scoped to the workspace they are joining — it is POST /v1/invites/accept.
   // Threads (§7.1). The two reads are answered to this client alone; the four mutations come back
   // as a full snapshot to the whole workspace, so nothing here ever merges a partial update.
+  // The Cockpit (§5). Three reads and six verbs, and there is deliberately no confirm command
+  // among them: a confirmation on a deployed run goes through `resolveMcpConfirm` like every
+  // other, because the modal must not be able to tell which kind of run it is answering.
+  | { cmd: "listWork"; scope?: "mine" | "all"; status?: WorkStatus; agentId?: string; cursor?: string | null }
+  | { cmd: "loadWorkItem"; itemId: string }
+  | { cmd: "listFleet" }
+  | { cmd: "dispatchWork"; agentId: string; input: string }
+  | { cmd: "cancelWork"; itemId: string }
+  | { cmd: "retryWork"; itemId: string }
+  | { cmd: "reconnectAgent"; deploymentId: string }
+  | { cmd: "loadAgentLogs"; deploymentId: string; since?: string | null }
+  | { cmd: "killAgent"; deploymentId: string }
   | { cmd: "listThreads" }
   | { cmd: "loadThread"; threadId: string }
   | { cmd: "createThread"; agentId?: string | null; title?: string }
@@ -2288,6 +2305,117 @@ export type ExplainSubject =
   | { kind: "step"; step: { name: string; type: string; seq: number; error: string | null; input: unknown; output: unknown } }
   | { kind: "node"; nodeId: string }
   | { kind: "agent" };
+
+// --- the Cockpit (§4–§11) -----------------------------------------------------------------------
+//
+// EVERY SHAPE HERE IS SNAKE_CASE, matching the wire rather than the client's own camelCase, for
+// the reason every other payload in this file does: these are what the server SENT, and a client
+// type that renamed the fields would be a second definition of the payload that the first change
+// to it makes wrong.
+
+/** §4's closed set of six. A status nothing can enter would be a status that lies. */
+export type WorkStatus = "queued" | "running" | "waiting" | "succeeded" | "failed" | "cancelled";
+
+/**
+ * §4's closed set of six failure kinds.
+ *
+ * `stopped_reporting` IS NOT `failed` AND MUST NEVER BE RENDERED AS ONE — §11.3. The container
+ * went quiet, it may have completed, and it may have spent money. `unauthorised` is the only one
+ * with a button attached, and `rejected` is the one that has to be worded as JAROKU's bug.
+ */
+export type WorkFailureKind =
+  | "unauthorised" | "agent_error" | "rejected" | "unreachable" | "stopped_reporting" | "busy";
+
+/** §9's four connection states. `public` is a WARNING state, not a healthy one. */
+export type FleetConnection = "connected" | "unconnected" | "unauthorised" | "public";
+
+export type DeployHealthState = "healthy" | "unhealthy" | "unreachable" | "no_url";
+
+export interface WorkItemView {
+  id: string;
+  agent_id: string;
+  agent_name: string | null;
+  deployment_id: string;
+  run_id: string | null;
+  created_by: string;
+  created_by_name: string | null;
+  input_preview: string;
+  status: WorkStatus;
+  output_preview: string | null;
+  error: string | null;
+  failure_kind: WorkFailureKind | null;
+  created_at: string;
+  started_at: string | null;
+  ended_at: string | null;
+  /** Null means UNKNOWN, rendered `—`. Never a zero standing in for it — §11.1. */
+  cost_usd: number | null;
+  tokens: number | null;
+  duration_ms: number | null;
+  /** False when the cost is a floor rather than a total. The row says so. */
+  cost_complete: boolean;
+}
+
+/** One job in full, for the detail panel: the same row plus what a row does not carry. */
+export interface WorkItemDetailView extends WorkItemView {
+  input: string;
+  output: string | null;
+}
+
+export interface FleetCardView {
+  agent_id: string;
+  agent_name: string;
+  deployment_id: string;
+  url: string | null;
+  version: number | null;
+  connection: FleetConnection;
+  running: number;
+  waiting: number;
+  queued: number;
+  jobs_today: number;
+  spend_today: number | null;
+  spend_complete: boolean;
+  /** Null means NOBODY HAS ASKED, which is a third state and not unhealthy — §10. */
+  health: DeployHealthState | null;
+  health_stale_ms: number | null;
+}
+
+export type WorkCounts = Record<WorkStatus, number>;
+
+/** The filters a page ANSWERS FOR, echoed back so one that arrives late can be dropped. */
+export interface WorkFilters {
+  scope: "mine" | "all";
+  status: WorkStatus | null;
+  agentId: string | null;
+}
+
+export interface RuntimeLogLine {
+  timestamp: string;
+  message: string;
+  severity: string | null;
+}
+
+export type WorkMessage =
+  | {
+      type: "snapshot";
+      items: WorkItemView[];
+      nextCursor: string | null;
+      counts: WorkCounts;
+      filters: WorkFilters;
+    }
+  /**
+   * ONE JOB, CHANGED — §5's rule in one member of a union.
+   *
+   * It carries the whole row rather than the fields that moved, so a client REPLACES rather
+   * than merges. It is also the answer to `loadWorkItem`, which carries the two extra fields —
+   * the shapes are compatible on purpose, so one handler files both.
+   */
+  | { type: "item"; item: WorkItemView | WorkItemDetailView }
+  | { type: "fleet"; cards: FleetCardView[]; anyLive: boolean }
+  /** A dispatch this client asked for was accepted. To the asker, because it is navigation. */
+  | { type: "dispatched"; item: WorkItemDetailView }
+  | { type: "logs"; deploymentId: string; lines: RuntimeLogLine[]; cursor: string | null }
+  | { type: "error"; message: string; itemId?: string }
+  | { type: "notice"; message: string; itemId?: string };
 
 // --- the Activity tab (§1–§10) ------------------------------------------------------------------
 //

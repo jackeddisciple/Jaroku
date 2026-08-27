@@ -42,6 +42,7 @@ import { useProviderStore } from "./providerStore.ts";
 import { useSecretsStore } from "./secretsStore.ts";
 import { useThreadStore } from "./threadStore.ts";
 import { useTraceStore } from "./traceStore.ts";
+import { useWorkStore } from "./workStore.ts";
 import { useTurnInteractionStore } from "./turnInteractionStore.ts";
 import { forgetElevation } from "../lib/secrets.ts";
 
@@ -160,6 +161,18 @@ export const WORKSPACE_STORES: Record<string, Resettable> = {
   // beside it would offer to open a thread the new workspace cannot see.
   threadStore: useThreadStore as unknown as Resettable,
   traceStore: useTraceStore as unknown as Resettable,
+  // Every job one workspace has given a live agent, in the words the person typed, and what came
+  // back in the words the agent produced. The most directly personal thing in this client after
+  // a thread's preview line: an input is a real customer email or a real order id, an output is
+  // what the agent did about it, and `created_by_name` puts a colleague's name beside both.
+  //
+  // AND IT HOLDS HANDLES, WHICH IS WHY IT MATTERS MORE THAN IT LOOKS. A row carries the run id
+  // and the deployment id the Cancel and Retry buttons act on, so a list held across a switch
+  // would render controls pointed at another tenant's jobs — refused by the server, which makes
+  // the cost a button that 403s rather than a leak, and which is exactly the affordance §8 rules
+  // out `disabled` and `hidden` to avoid. The fleet strip beside it names public URLs and
+  // today's spend.
+  workStore: useWorkStore as unknown as Resettable,
   // Notes, pins and feedback, keyed by turn id. Two reasons this one matters more than it looks:
   // a note is somebody's words about ANOTHER tenant's turn, quoted verbatim, and the pins are one
   // PERSON's — carried across a switch they would render a rail of anchors into a conversation the
