@@ -31,6 +31,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { COMPOSER, GATE } from "../lib/cockpitCopy.ts";
 import { cockpitComposer } from "../lib/cockpitComposer.ts";
+import { SPINE_X } from "../lib/cockpitLayout.ts";
 import { needsReconnect } from "../lib/fleetSentence.ts";
 import { optimisticRow } from "../lib/workLive.ts";
 import { sendDispatchWork } from "../lib/socket.ts";
@@ -245,7 +246,7 @@ export function WorkComposer() {
     // build composer floats at `RADIUS.modal`; this one does not float at all.
     <div className="shrink-0 border-t border-hair bg-panel">
       {/* §8's DESTINATION LABEL. Always visible, above the input, at `tiny`. */}
-      <div className="flex items-center gap-2 px-4 pt-2 text-tiny">
+      <div className={`flex items-center gap-2 pt-2 text-tiny ${SPINE_X}`}>
         <span className={chosen ? "text-muted" : "text-faint"}>
           {chosen ? COMPOSER.destination(chosen.agent_name) : COMPOSER.noDestination}
         </span>
@@ -254,7 +255,7 @@ export function WorkComposer() {
         {moment.status && <span className="text-faint">· {moment.status}</span>}
       </div>
 
-      <div className="flex items-end gap-2 px-4 pt-1.5 pb-2.5">
+      <div className={`flex items-end gap-2 pt-1.5 pb-2.5 ${SPINE_X}`}>
         {/* THE PICKER IS ABSENT WHEN THERE IS ONE AGENT, which is the ordinary case: a workspace
             with one deployment should not be asked to choose between one thing. */}
         {live.length > 1 && (
