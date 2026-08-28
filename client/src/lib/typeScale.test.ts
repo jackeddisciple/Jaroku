@@ -247,6 +247,13 @@ console.log("\n§04: the mono face is confined to the files that are about code"
     "components/DiffCard.tsx", "components/GitHubStaging.tsx", "components/StateDiff.tsx",
     // Logs, terminal output and stack traces.
     "components/BackendFailure.tsx", "components/firstrun/FirstRun.tsx", "components/WorkspacePanel.tsx",
+    // A deployed job's error, which is a stack trace out of somebody else's container — and its
+    // input, but ONLY when that input parses as JSON. Both are on `MONO_IS_FOR` by name. The second
+    // is the one worth stating: the Cockpit's detail panel decides the face per block rather than
+    // per file, because an agent's input is usually a sentence a person typed and occasionally a
+    // structured document, and §05's test is "would fixed-width columns materially help somebody
+    // parse it" rather than "does this look technical".
+    "components/WorkDetail.tsx",
     // Literal payloads.
     "components/McpConfirmModal.tsx", "components/StateBranchEditor.tsx",
     // Environment variable names and .env paths, quoted inside prose.
