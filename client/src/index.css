@@ -159,6 +159,39 @@
     -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
   }
 
+  /* THE SAME IDEA ON THE OTHER AXIS, for the Cockpit's fleet strip.
+     §3B: "Add a horizontal fade at both ends when the strip overflows, matching .scroll-fade's
+     logic on the other axis and its 16px intent — a strip that cuts hard at the right edge does
+     not say 'there are more agents', and the user will not scroll a band they do not know
+     continues."
+
+     THREE CLASSES AND NOT ONE, WHICH IS THE DIFFERENCE FROM THE VERTICAL CASE. `.scroll-fade` is
+     unconditional because a vertical scroller in this app is always taller than its box; a strip is
+     usually NOT wider than its box — one agent, three agents — and a permanent fade over a strip
+     that does not overflow would dim the first and last card for no reason. It also has to say
+     WHICH way there is more: at the far left there is nothing above to hint at, and fading that
+     edge would be the mask lying about the scroll position. So the applied class follows the
+     measured overflow, and the measurement is redone when the data lands rather than only on
+     mount — §22 asks for exactly that check, because "a fade computed once on mount is invisible
+     on a strip that only overflows after the data loads".
+
+     16px, matching `.scroll-fade` rather than `Truncate`'s 28. The two are different intents:
+     Truncate's fade replaces a character of text and needs to be long enough to read as a
+     gradient over glyphs; this one sits over the edge of a 248px card and only has to say that the
+     card continues. §3B names the 16 explicitly. */
+  .scroll-fade-x-start {
+    mask-image: linear-gradient(to right, transparent 0, #000 16px);
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 16px);
+  }
+  .scroll-fade-x-end {
+    mask-image: linear-gradient(to left, transparent 0, #000 16px);
+    -webkit-mask-image: linear-gradient(to left, transparent 0, #000 16px);
+  }
+  .scroll-fade-x-both {
+    mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+  }
+
   /* Command palette group headings — style only the heading, so the label's text-transform
      never cascades onto the item rows.
 

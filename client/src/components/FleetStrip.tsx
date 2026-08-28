@@ -20,7 +20,7 @@
 // `restartsService` precisely so this can say it first — §9's own sentence is "A restart nobody was
 // warned about is how a control plane loses trust in one click."
 
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 
 import { CONNECTION_LABEL, FILTERS } from "../lib/cockpitCopy.ts";
 import { factsOf, fleetSentence, healthLine, needsReconnect } from "../lib/fleetSentence.ts";
@@ -145,7 +145,12 @@ function ReconnectControl({ card }: { card: FleetCardView }) {
  * is absolutely positioned to fill the card behind the content, so the whole surface is the target
  * and the sparkline sits above it in the stacking order with its own clicks intact.
  */
-function FleetCard({ card }: { card: FleetCardView }) {
+function FleetCard({ card, tabIndex, onArrow }: {
+  card: FleetCardView;
+  /** §12's roving tabindex. Exactly one card in the strip is `0`; see `FleetStrip`. */
+  tabIndex: number;
+  onArrow: (delta: 1 | -1, track: HTMLElement | null) => void;
+}) {
   const filters = useWorkStore((s) => s.filters);
   const setFilters = useWorkStore((s) => s.setFilters);
   const line = fleetSentence(factsOf(card));
@@ -154,6 +159,7 @@ function FleetCard({ card }: { card: FleetCardView }) {
 
   return (
     <div
+      role="listitem"
       style={{ width: CARD_WIDTH, minHeight: CARD_HEIGHT }}
       // `GLOW.hover`'s RUNG VIA THE HOVER BACKGROUND, AND `FOCUS_RING` UNMODIFIED — §4 asks for
       // both by name and forbids inventing a card-specific focus treatment. `focus-within` rather
@@ -173,6 +179,16 @@ function FleetCard({ card }: { card: FleetCardView }) {
           see the note above on why a bar cannot be nested inside this. */}
       <button
         type="button"
+        data-fleet-card
+        tabIndex={tabIndex}
+        onKeyDown={(e) => {
+          if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+          e.preventDefault();
+          // The track, which is this button's card's parent. Reached by DOM rather than by a ref
+          // per card, for the reason `AgentSparkline` does the same: forty refs to walk a list is
+          // forty pieces of state for a query the browser answers in one call.
+          onArrow(e.key === "ArrowRight" ? 1 : -1, e.currentTarget.parentElement?.parentElement ?? null);
+        }}
         onClick={() => {
           setFilters({ agentId: mine ? null : card.agent_id });
           sendListWork();
@@ -262,9 +278,91 @@ function FleetCard({ card }: { card: FleetCardView }) {
   );
 }
 
+/**
+ * Which ends of the strip have more beyond them — §3B's fade, measured rather than assumed.
+ *
+ * §22 IS WHY THIS IS A HOOK AND NOT A CLASS. "Verify the fade actually appears — a fade computed
+ * once on mount is invisible on a strip that only overflows after the data loads." Which is every
+ * strip in this product: the view mounts, asks for the fleet, and the cards arrive a round trip
+ * later. A measurement taken at mount is taken over an empty track, concludes there is no overflow,
+ * and is never revisited.
+ *
+ * SO IT WATCHES THREE THINGS, and each one is a way the answer can change without the others
+ * moving: the SCROLL position (there is nothing to the left until you scroll right), the track's
+ * own SIZE (the pane is resizable and the window is), and the CONTENT (a deployment goes live, or
+ * a kill removes a card). `ResizeObserver` on the track catches the second; observing the track's
+ * first child catches the third, because a card added or removed changes the row's width without
+ * changing the box around it.
+ *
+ * BOTH EDGES INDEPENDENTLY, because a fade at the far left would be the mask lying about the
+ * scroll position — there is nothing above the first card to hint at, and dimming it would say
+ * there is.
+ */
+function useEdgeFade(): { ref: React.RefObject<HTMLDivElement | null>; fade: string } {
+  const ref = useRef<HTMLDivElement>(null);
+  const [edges, setEdges] = useState({ start: false, end: false });
+
+  useLayoutEffect(() => {
+    const track = ref.current;
+    if (!track) return;
+    const measure = (): void => {
+      // A ONE-PIXEL TOLERANCE, because `scrollWidth` and `clientWidth` are rounded from fractional
+      // layout and a track that fits exactly reports a one-pixel overflow on some zoom levels —
+      // which would put a permanent fade on a strip of three cards that does not scroll.
+      const max = track.scrollWidth - track.clientWidth;
+      setEdges({ start: track.scrollLeft > 1, end: track.scrollLeft < max - 1 });
+    };
+    measure();
+    track.addEventListener("scroll", measure, { passive: true });
+    if (typeof ResizeObserver === "undefined") return () => track.removeEventListener("scroll", measure);
+    const observer = new ResizeObserver(measure);
+    observer.observe(track);
+    // The row of cards as well as the box around it — see the header. A card arriving changes the
+    // first and not the second, and the fade's whole job is to announce exactly that arrival.
+    if (track.firstElementChild) observer.observe(track.firstElementChild);
+    return () => {
+      track.removeEventListener("scroll", measure);
+      observer.disconnect();
+    };
+  }, []);
+
+  const fade = edges.start && edges.end ? "scroll-fade-x-both"
+    : edges.start ? "scroll-fade-x-start"
+    : edges.end ? "scroll-fade-x-end"
+    : "";
+  return { ref, fade };
+}
+
+/**
+ * §12's keyboard traversal: one tab stop for the strip, arrow keys within it.
+ *
+ * A ROVING TABINDEX, which is the pattern `AgentSparkline` already uses two files over and which
+ * the rest of the platform uses for a row of small related controls. §12: "keyboard-reachable by
+ * arrow keys within the strip and by Tab into and out of it." Forty cards as forty tab stops would
+ * put forty presses between somebody's keyboard and the work list, which is the region they came
+ * for — and a strip is a glance, so walking it should cost one stop and then arrows.
+ *
+ * THE SPARKLINE INSIDE EACH CARD ALSO ANSWERS TO ARROWS, and it stops propagation when it does —
+ * so arrows inside the health strip move between bars and arrows on the card move between cards.
+ * That is one rule read at two depths rather than a collision: the arrow always moves within
+ * whatever the focus is currently in.
+ *
+ * AND MOVING FOCUS SCROLLS THE STRIP, because a focused card outside the viewport is a focus ring
+ * nobody can see. `block: "nearest"` so the strip does not scroll vertically inside the page.
+ */
+function moveCardFocus(from: number, delta: 1 | -1, track: HTMLElement | null, count: number): void {
+  const next = Math.min(count - 1, Math.max(0, from + delta));
+  const cards = track?.querySelectorAll<HTMLElement>("[data-fleet-card]");
+  const target = cards?.[next];
+  if (!target) return;
+  target.focus();
+  target.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+
 export function FleetStrip() {
   const fleet = useWorkStore((s) => s.fleet);
   const notice = useWorkStore((s) => s.notice);
+  const { ref, fade } = useEdgeFade();
 
   return (
     <div className="shrink-0 border-b border-hair">
@@ -282,9 +380,26 @@ export function FleetStrip() {
           `px-5` IS THE SPINE. §Craft 3: the first card's left edge lines up with the word
           "Cockpit" above it and with the work row's status glyph below it. It was `px-6` against a
           `px-6` header, which agreed with itself and with nothing else in the app. */}
-      <div className={`flex gap-3 overflow-x-auto py-2 ${SPINE_X}`}>
-        {fleet.map((card) => (
-          <FleetCard key={card.deployment_id} card={card} />
+      {/* §22'S TWO SHAPES, BOTH SATISFIED BY `justify-start` AND A FIXED CARD WIDTH. One agent: the
+          card keeps its width and the strip does not stretch it — "a lone stretched card reads as a
+          layout bug". Forty agents: the row overflows and the fade says so. Neither case needs a
+          branch, which is the point of choosing a width rather than a fraction. */}
+      <div
+        ref={ref}
+        role="list"
+        aria-label="Live agents"
+        className={`flex justify-start gap-3 overflow-x-auto py-2 ${SPINE_X} ${fade}`}
+      >
+        {fleet.map((card, i) => (
+          <FleetCard
+            key={card.deployment_id}
+            card={card}
+            // THE FIRST CARD IS THE ENTRY POINT, unlike the sparkline's, whose entry is its LAST
+            // bar. The two differ because the questions differ: a sparkline is asked about its most
+            // recent run, and a strip is read left to right from its first agent.
+            tabIndex={i === 0 ? 0 : -1}
+            onArrow={(delta, track) => moveCardFocus(i, delta, track, fleet.length)}
+          />
         ))}
       </div>
       {/* WHAT A RECONNECT OR A KILL ACTUALLY DID, which is not the same as what was asked for —
