@@ -896,6 +896,22 @@ jobs:
           # money fragment has to hold: unknown is an em dash, priced-and-free is a zero, and a
           # card whose credential is refused says only that, because its counts are stale.
           npm run test:fleet-line
+          # THE COCKPIT'S VOICE, READ AS PROSE — the UI specification's §16 puts every string of
+          # that tab in one module precisely so it can be, and this is what makes the reading
+          # happen without a person. Its interesting assertions are ABSENCES, the same shape
+          # `test:colour-system` takes: a hard-coded `(s)` does not fail, it renders, and it
+          # renders identically at nought, one and two, so three behavioural fixtures agree with
+          # each other and all three are wrong. Two sentences are pinned character for character
+          # because three documents quote them — `rejected`'s "a bug on our side" and
+          # `stopped_reporting`'s two hedged clauses, which anybody tightening the copy removes.
+          npm run test:cockpit-copy
+          # AND ITS FIGURES, WHOSE LOAD-BEARING ASSERTION IS THAT THERE IS NO SECOND RULE. The same
+          # cost appears in the row, on the card and in the detail; a tab that formatted money for
+          # itself would agree with itself perfectly and disagree with the Usage panel about the
+          # same run, which is the class of bug that survives review because neither figure is
+          # wrong on its own. Beside it the null-versus-zero rule this repository has paid for
+          # once already: unknown is an em dash carrying the reason it is one, and never `$0.00`.
+          npm run test:cockpit-format
           npm run test:thread-store
           npm run test:thread-cost
           npm run test:thread-groups

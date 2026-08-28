@@ -60,6 +60,8 @@
     "test:work-badge": "tsx src/store/workBadge.test.ts",
     "test:work-delta": "tsx src/store/workDelta.test.ts",
     "test:fleet-line": "tsx src/lib/fleetLine.test.ts",
+    "test:cockpit-copy": "tsx src/lib/cockpitCopy.test.ts",
+    "test:cockpit-format": "tsx src/lib/cockpitFormat.test.ts",
     "test:thread-store": "tsx src/store/threadStore.test.ts",
     "test:thread-cost": "tsx src/lib/threadCost.test.ts",
     "test:thread-groups": "tsx src/lib/threadGroups.test.ts",
