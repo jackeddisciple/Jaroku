@@ -2691,6 +2691,11 @@ registerControlPlaneRoutes(router, {
   // pendingConfirms/confirmKey/relay, all declared later in this module but not called before
   // the server actually starts accepting requests.
   onMcpConfirmRequested: (runId, payload) => handleHostedMcpConfirmRequest(runId, payload),
+  // AND WHEN IT IS OVER. `clearConfirms` is what takes the ask out of `pendingConfirms` and puts
+  // `confirmResolved` on the wire; nothing was calling it for a HOSTED ask that ran out its own
+  // clock, so the modal stayed up at 0:00 over a job that had already failed. Idempotent — a
+  // person who answered has already cleared it, and this then finds nothing to clear.
+  onMcpConfirmSettled: (runId, nonce, verdict) => clearConfirms(runId, verdict, nonce),
 });
 
 function handleHostedMcpConfirmRequest(runId: string, payload: Record<string, unknown>): void {

@@ -33,6 +33,17 @@ export interface ControlPlaneDeps {
   /** Surfaced to the UI/relay as an ordinary control line ("ctrl":"tool_confirm"), exactly the
    *  shape mcp_bridge.py already emits — see index.ts's existing resolveMcpConfirm handler. */
   onMcpConfirmRequested?: (runId: string, payload: Record<string, unknown>) => void;
+  /**
+   * The ask is over — answered, or denied by its own timeout. The mirror of the hook above.
+   *
+   * WITHOUT IT A HOSTED ASK THAT TIMED OUT LEFT THE DIALOG ON SCREEN FOREVER. `awaitMcpConfirm`
+   * deletes its own waiter and answers the container `deny`, which is all the CONTAINER needs —
+   * but the server's `pendingConfirms` still held the ask, so no `confirmResolved` ever went out
+   * and every open tab kept a modal counting down past 0:00 over a run that had already ended.
+   * A local run does not have this hole: its runner emits `ctrl: "tool_confirm_closed"` and that
+   * path already clears. A container has no such line, so the route has to say so itself.
+   */
+  onMcpConfirmSettled?: (runId: string, nonce: string, verdict: "run" | "once" | "deny") => void;
   /** Counts what the trace route drops rather than ingests — see traceIngestMetrics.ts. */
   metrics?: TraceIngestMetrics;
   /** Bytes/lines/rate caps on the trace push — see backpressure.ts. Required rather than
@@ -196,5 +207,9 @@ async function handleMcpConfirm(req: HttpRequest, runId: string, deps: ControlPl
     MAX_MCP_CONFIRM_TIMEOUT_MS,
   );
   const verdict = await deps.bus.awaitMcpConfirm(runId, body.nonce, timeoutMs);
+  // WHOEVER SETTLED IT, the ask is over and the screens holding it have to be told. A person
+  // answering already clears through the command that answered; this is the other way it ends —
+  // the timeout — and it is the one nothing was closing.
+  deps.onMcpConfirmSettled?.(runId, body.nonce, verdict);
   return { body: { verdict } };
 }

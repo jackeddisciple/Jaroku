@@ -22,6 +22,7 @@ const signingKey = randomBytes(32);
 const bus = new RunEventBus();
 const revocations = new RunTokenRevocationList();
 const confirmRequests: Array<{ runId: string; payload: Record<string, unknown> }> = [];
+const confirmSettled: Array<{ runId: string; nonce: string; verdict: string }> = [];
 const backpressureViolations: Array<{ runId: string; reason: string }> = [];
 // A tiny cap, specifically for the backpressure tests below — the default (64 MB) would make
 // them either slow or pointless to actually cross.
@@ -34,6 +35,7 @@ registerControlPlaneRoutes(router, {
   revocations,
   backpressure,
   onMcpConfirmRequested: (runId, payload) => confirmRequests.push({ runId, payload }),
+  onMcpConfirmSettled: (runId, nonce, verdict) => confirmSettled.push({ runId, nonce, verdict }),
   onBackpressureViolation: (runId, reason) => backpressureViolations.push({ runId, reason }),
 });
 
@@ -137,12 +139,22 @@ const token1 = mintRunToken(signingKey, "run-1", "ws-1", 3600);
   const r = await pending;
   check("resolveMcpConfirm answers a blocked mcp-confirm POST", (r.json as { verdict: string })?.verdict === "once");
   check("onMcpConfirmRequested was told about the request", confirmRequests.some((c) => c.runId === "run-1" && c.payload.nonce === "abc123"));
+  check("...and told again when it settled, with the verdict",
+    confirmSettled.some((c) => c.runId === "run-1" && c.nonce === "abc123" && c.verdict === "once"));
 }
 {
   const before = Date.now();
   const r = await call("POST", "/v1/runs/run-1/mcp-confirm", token1, { nonce: "never-answered", timeout_s: 0.2 });
   check("an unanswered mcp-confirm denies on its own timeout, never allows", (r.json as { verdict: string })?.verdict === "deny");
   check("the timeout was actually honoured, not returned instantly", Date.now() - before >= 150);
+  // THE HALF THAT WAS MISSING. The container gets its `deny` either way; what nothing did was tell
+  // the SERVER, so the ask stayed in `pendingConfirms`, no `confirmResolved` went out, and every
+  // open tab kept a modal counting down past 0:00 over a run that had already ended. A local run
+  // has no such hole — its runner emits `ctrl: "tool_confirm_closed"` — so only the hosted path
+  // needed saying, and only the hosted path was broken.
+  check("a timed-out ask is reported settled, so the screens holding it can let go",
+    confirmSettled.some((c) => c.runId === "run-1" && c.nonce === "never-answered" && c.verdict === "deny"),
+    JSON.stringify(confirmSettled));
 }
 {
   const r = await call("POST", "/v1/runs/run-1/mcp-confirm", token1, { notNonce: true });
