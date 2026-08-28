@@ -171,9 +171,15 @@ export class WorkDispatcher {
         ok: false,
         stage: "refused",
         refusal: "at_capacity",
+        // BOTH NUMBERS, because they are not always the same one. This read "N jobs in flight,
+        // which is the limit", which is true only while the two are equal — and they part company
+        // the moment the cap is lowered under a workspace that is already busy, or jobs park in
+        // `waiting` on a person who never answers. A refusal reporting 1002 as the limit sends the
+        // operator looking for a ceiling that is not there, and buries the figure they would
+        // actually set `JAROKU_WORK_CONCURRENCY` to.
         detail:
-          `this workspace already has ${inFlight} job${inFlight === 1 ? "" : "s"} in flight, which is ` +
-          `the limit — wait for one to finish, or raise ${WORK_CONCURRENCY_ENV}`,
+          `this workspace has ${inFlight} job${inFlight === 1 ? "" : "s"} in flight and the limit is ` +
+          `${cap} — wait for one to finish, or raise ${WORK_CONCURRENCY_ENV}`,
       };
     }
 

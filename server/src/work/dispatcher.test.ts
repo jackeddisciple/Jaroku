@@ -375,6 +375,26 @@ console.log("\nthe cap, on a workspace that is already busy");
     check("...naming the figure and the variable, so it can be acted on",
       !refused.ok && /2 jobs in flight/.test(refused.detail) && /JAROKU_WORK_CONCURRENCY/.test(refused.detail),
       !refused.ok ? refused.detail : "");
+    check("...and the limit as its own number, not the count over again",
+      !refused.ok && /the limit is 2/.test(refused.detail), !refused.ok ? refused.detail : "");
+    {
+      // THE TWO NUMBERS PARTED COMPANY, which is the case the assertion above cannot see because a
+      // cap of two with two in flight prints "2" either way. A cap lowered under a busy workspace
+      // is the ordinary way here — as is a job parked in `waiting` on somebody who never answers.
+      const lowered = new WorkDispatcher({
+        work: f.work,
+        deployments: new DeployStore(db),
+        dispatch: new DeployDispatcher({ runs: deployRuns, endpoint: async () => ({ url: stub!.url, serveToken: "stub-token" }) }),
+        agentSlug: async () => f.slug,
+        serveToken: async () => "stub-token",
+        controlPlaneUrl: () => controlPlaneUrl,
+        concurrency: () => 1,
+      });
+      const over = await lowered.dispatch(f.ctx, { agentId: f.agentId, input: "over a lowered cap" });
+      check("a cap lowered under a busy workspace reports the count and the cap apart",
+        !over.ok && /2 jobs in flight/.test(over.detail) && /the limit is 1/.test(over.detail),
+        !over.ok ? over.detail : "");
+    }
     check("...and writing no row", (await f.work.list(f.ctx, { scope: "all" })).items.length === 2);
 
     // A REFUSAL AT THE CAP IS NOT A 429 FROM THE CONTAINER, which is the whole reason the cap
