@@ -2375,6 +2375,14 @@ export interface FleetCardView {
   waiting: number;
   queued: number;
   jobs_today: number;
+  /**
+   * When this agent was last given anything at all, or null if it never has been.
+   *
+   * NOT BOUNDED BY TODAY — the UI specification's §5 third clause is "last job 4m ago", and an
+   * agent whose last job was yesterday is not idle in any sense the reader means. Null is the
+   * card that has genuinely never been asked for anything, which is the one §5 renders "Idle" for.
+   */
+  last_job_at: string | null;
   spend_today: number | null;
   spend_complete: boolean;
   /** Null means NOBODY HAS ASKED, which is a third state and not unhealthy — §10. */

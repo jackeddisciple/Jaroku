@@ -59,7 +59,7 @@
     "test:reset": "tsx src/store/reset.test.ts",
     "test:work-badge": "tsx src/store/workBadge.test.ts",
     "test:work-delta": "tsx src/store/workDelta.test.ts",
-    "test:fleet-line": "tsx src/lib/fleetLine.test.ts",
+    "test:fleet-sentence": "tsx src/lib/fleetSentence.test.ts",
     "test:cockpit-copy": "tsx src/lib/cockpitCopy.test.ts",
     "test:cockpit-format": "tsx src/lib/cockpitFormat.test.ts",
     "test:thread-store": "tsx src/store/threadStore.test.ts",

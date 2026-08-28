@@ -113,6 +113,19 @@ export interface FleetCardView {
   queued: number;
   /** Today, so an idle card still says something real. */
   jobs_today: number;
+  /**
+   * When this agent was last given anything, at all — the UI specification's §5 third clause.
+   *
+   * NOT BOUNDED BY TODAY, which is the whole reason it is a second field rather than a corner of
+   * `jobs_today`. "Last job 4m ago" and "last job 3d ago" are both answers a settled card can give;
+   * an agent whose last job was yesterday has `jobs_today: 0` and is not idle in any sense the
+   * reader means, and a card that said "Idle" over it would be describing the calendar rather than
+   * the agent. §5's own words: "Idle is a real answer" — for an agent that has never been asked
+   * for anything, which is a different card from one that finished at four this morning.
+   *
+   * NULL MEANS NOTHING HAS EVER BEEN ASKED OF IT, and that is the card §5 renders "Idle" for.
+   */
+  last_job_at: string | null;
   /** Null is UNKNOWN and never zero, the same rule the rows follow. */
   spend_today: number | null;
   spend_complete: boolean;
@@ -273,11 +286,12 @@ export class WorkSnapshots {
    * into a second Agents grid, which §3 spends a paragraph saying this must not be.
    */
   async fleet(ctx: TenantContext): Promise<FleetPayload> {
-    const [agents, deployments, live, today] = await Promise.all([
+    const [agents, deployments, live, today, lastJob] = await Promise.all([
       this.deps.agentNames(ctx),
       this.deps.deployments(ctx),
       this.deps.work.liveByAgent(ctx),
       this.todayByAgent(ctx),
+      this.lastJobByAgent(ctx),
     ]);
 
     const cards: FleetCardView[] = [];
@@ -299,6 +313,7 @@ export class WorkSnapshots {
         waiting: mine.find((r) => r.status === "waiting")?.count ?? 0,
         queued: mine.find((r) => r.status === "queued")?.count ?? 0,
         jobs_today: at?.jobs ?? 0,
+        last_job_at: lastJob.get(agentId) ?? null,
         spend_today: at && isPricedModel(deployment.model) ? at.cost : null,
         spend_complete: at?.complete ?? true,
         health: health?.state ?? null,
@@ -338,6 +353,42 @@ export class WorkSnapshots {
    * server's day, and for somebody in Los Angeles the counter turns over in the afternoon. The
    * honest fix is a timezone on the user and it is not this part.
    */
+  /**
+   * When each agent was last given anything — §5's third clause, and a query of its own.
+   *
+   * NOT FOLDED INTO `todayByAgent`, and the reason is the join. That statement LEFT JOINs `steps`
+   * so it can sum a cost, which multiplies a job by its step count; it survives that with
+   * `COUNT(DISTINCT w.id)`, and a `MAX(w.created_at)` would survive it too — but only because a
+   * maximum happens to be idempotent under duplication. Widening its `WHERE` from "today" to "all
+   * time" so one extra column could ride along would make the whole aggregate scan every job this
+   * workspace has ever dispatched, over the multiplied row set, to answer a question about
+   * timestamps. This is one grouped read of one indexed column, and it runs beside the other four
+   * rather than after them.
+   *
+   * A TEXT MAX RATHER THAN A DATE ONE, which is safe here for the reason the whole schema stores
+   * instants as ISO-8601 text: that encoding is lexicographically ordered wherever the offset is
+   * `Z` and the precision is fixed, which `migration 063` guarantees for this column. It is worth
+   * stating rather than assuming, because it is exactly the kind of thing that is true in SQLite
+   * and true in Postgres for different reasons and would stop being true the day somebody wrote a
+   * local timestamp into the column.
+   */
+  private async lastJobByAgent(ctx: TenantContext): Promise<Map<string, string>> {
+    const rows = await this.deps.scoped(ctx).all<{ agent_id: string; last_job: unknown }>(
+      `SELECT agent_id, MAX(created_at) AS last_job
+         FROM work_items
+        WHERE workspace_id = ?
+        GROUP BY agent_id`,
+      [ctx.workspaceId],
+    );
+    const out = new Map<string, string>();
+    for (const row of rows) {
+      // A GROUP WITH NO ROWS CANNOT HAPPEN, but a null maximum can if the column were ever
+      // nullable — and a `String(null)` in this map would put the text "null" on a card.
+      if (row.last_job != null) out.set(String(row.agent_id), String(row.last_job));
+    }
+    return out;
+  }
+
   private async todayByAgent(ctx: TenantContext): Promise<Map<string, { jobs: number; cost: number; complete: boolean }>> {
     const midnight = new Date(this.deps.now?.() ?? Date.now());
     midnight.setUTCHours(0, 0, 0, 0);

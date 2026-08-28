@@ -267,8 +267,13 @@ console.log("\nthe statement count");
   // deliberately. §16 asks that forty agents cost what one costs, and this is where the honest
   // answer has two halves:
   //
-  //   THE AGGREGATES ARE FLAT and that is the half the question was about — the live counts and
-  //   today's jobs and spend are two GROUPED queries whatever the fleet holds, not one per card.
+  //   THE AGGREGATES ARE FLAT and that is the half the question was about — the live counts,
+  //   today's jobs and spend, and when each agent was last asked for anything are three GROUPED
+  //   queries whatever the fleet holds, not one per card. The third arrived with the UI
+  //   specification's §5 third clause ("last job 4m ago") and is a separate statement on purpose:
+  //   folding it into the spend aggregate would have meant widening that one's `WHERE` from today
+  //   to all time, so a question about timestamps would scan every job the workspace has ever
+  //   dispatched across a set already multiplied by its steps.
   //
   //   THE SERVE-TOKEN CHECK IS ONE PER LIVE DEPLOYMENT, and it is not batched because the door it
   //   goes through deliberately does not offer a batch: `SecretStore.getServeToken` takes ONE
@@ -295,7 +300,7 @@ console.log("\nthe statement count");
   const full = await readsPerFleet();
   const cards = (await snapshots.fleet(ctx)).cards;
   check(`the strip's database reads do not grow with the fleet (${full.db} for ${cards.length} cards)`,
-    full.db === 4, `${full.db}`);
+    full.db === 5, `${full.db}`);
   // ONE PER CARD THAT COULD HAVE A TOKEN, which is every card except a public one — a public
   // endpoint has none by design, so asking the vault about it would be a query whose answer says
   // nothing. That short-circuit is what makes the two numbers differ, and asserting the difference

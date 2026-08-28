@@ -888,14 +888,20 @@ jobs:
           # ever UPDATED is a page that ages and a list of what once matched — both of which look
           # like a working board.
           npm run test:work-delta
-          # §9 CALLS THE FLEET CARD'S ONE LINE THE HARDEST DESIGN IN THE FEATURE, and the reason
-          # is what happens when it is wrong: a strip of twenty cards all reading "Deployed",
-          # which is what the Railway dashboard already gives and is why somebody is opening
-          # Railway instead of this. So the property asserted is SPECIFICITY — six genuinely
-          # different agents produce six different sentences — beside the honesty rules the
-          # money fragment has to hold: unknown is an em dash, priced-and-free is a zero, and a
-          # card whose credential is refused says only that, because its counts are stale.
-          npm run test:fleet-line
+          # THE FLEET CARD'S ONE LINE, WHICH BOTH SPECIFICATIONS CALL THE HARDEST DESIGN IN THE
+          # FEATURE, and the reason is what happens when it is wrong: a strip of twenty cards all
+          # reading "Deployed", which is what the Railway dashboard already gives and is why
+          # somebody is opening Railway instead of this. So the property asserted is SPECIFICITY —
+          # six genuinely different agents produce six different sentences — beside the branch the
+          # UI specification's §5 spends its sharpest paragraph on: an unreachable agent REPLACES
+          # the sentence rather than prefixing it, because "not connected · 11 jobs today" invites
+          # the reader to work out which half is current. Both unreachable states, since they are
+          # two faults with one consequence and the commoner one is the one that gets special-cased.
+          #
+          # It supersedes `test:fleet-line`, which asserted the same rule against the parts-and-
+          # emphasis shape §5 replaced with a plain string. Two suites over one sentence would be
+          # two definitions of it, which is the arrangement this repository keeps refusing.
+          npm run test:fleet-sentence
           # THE COCKPIT'S VOICE, READ AS PROSE — the UI specification's §16 puts every string of
           # that tab in one module precisely so it can be, and this is what makes the reading
           # happen without a person. Its interesting assertions are ABSENCES, the same shape

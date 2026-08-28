@@ -26,7 +26,7 @@ import { ICON } from "../lib/tokens.ts";
 import { useWorkStore } from "../store/workStore.ts";
 import type { FleetCardView } from "../types.ts";
 import { Capable } from "./Capable.tsx";
-import { needsReconnect } from "../lib/fleetLine.ts";
+import { needsReconnect } from "../lib/fleetSentence.ts";
 import { DisabledReason, ENABLED, firstReason, type DisabledState } from "./DisabledReason.tsx";
 // `ArrowUpIcon` RATHER THAN A NEW SEND MARK. The composer bar's send control already uses it and
 // §4's rule is to extend the icons this app has rather than define a second glyph for an action

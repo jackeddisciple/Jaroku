@@ -9,7 +9,7 @@
 // live; a card for every draft would turn the glance into a second Agents grid, which §3 spends a
 // paragraph saying this must not become.
 //
-// THE ONE LINE IS `lib/fleetLine.ts`, and it is a pure module rather than JSX for the reason the
+// THE ONE LINE IS `lib/fleetSentence.ts`, a pure module rather than JSX for the reason the
 // composer bar's layout is: it is a RULE that looks obviously right in a screenshot and is wrong in
 // the case nobody had that day. What this file decides is weight and colour; what that one decides
 // is what the sentence says.
@@ -22,7 +22,7 @@
 
 import { useState } from "react";
 
-import { fleetLine, healthLine, needsReconnect } from "../lib/fleetLine.ts";
+import { factsOf, fleetSentence, healthLine, needsReconnect } from "../lib/fleetSentence.ts";
 import { sendListWork, sendReconnectAgent } from "../lib/socket.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { useWorkStore } from "../store/workStore.ts";
@@ -117,7 +117,7 @@ function ReconnectControl({ card }: { card: FleetCardView }) {
 function FleetCard({ card }: { card: FleetCardView }) {
   const filters = useWorkStore((s) => s.filters);
   const setFilters = useWorkStore((s) => s.setFilters);
-  const line = fleetLine(card);
+  const line = fleetSentence(factsOf(card));
   const health = healthLine(card);
   const mine = filters.agentId === card.agent_id;
 
@@ -152,14 +152,13 @@ function FleetCard({ card }: { card: FleetCardView }) {
         )}
       </button>
 
-      <div className="flex flex-wrap items-baseline gap-x-1.5 text-tiny leading-[1.5]">
-        {line.parts.map((part, i) => (
-          <span key={part.text} className={part.emphasis === "ink" ? "text-ink" : "text-muted"}>
-            {i > 0 && <span className="text-faint"> · </span>}
-            {part.text}
-          </span>
-        ))}
-      </div>
+      {/* ONE STRING, NOT WEIGHTED PARTS. It used to be fragments each carrying an emphasis, so
+          "1 waiting on you" could be rendered ink against a muted rest — and §5 replaces that
+          arrangement with PRECEDENCE: the clause a person can act on is the one that comes first
+          and the one that is never trimmed, so its prominence is its POSITION. Which is also what
+          §Craft's accent rule wants, since a second weight on a card that already carries a
+          connection glyph and a name is a third thing competing to be looked at first. */}
+      <div className="text-tiny leading-[1.5] text-muted">{line}</div>
 
       {/* A PUBLIC URL SAYS SO EVEN WHEN THE AGENT IS WORKING, which is why this sits under the
           sentence rather than replacing it: the state is real and so is the warning. */}
