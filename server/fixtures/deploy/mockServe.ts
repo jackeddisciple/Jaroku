@@ -5,6 +5,7 @@
 //   npm run mock:serve                         # http://127.0.0.1:8932
 //   MOCK_SERVE_PORT=9000 npm run mock:serve
 //   MOCK_SERVE_TOKEN=sekrit npm run mock:serve # requires Authorization: Bearer sekrit
+//   MOCK_SERVE_BEHAVIOUR=cancellable MOCK_SERVE_STEP_MS=4000 npm run mock:serve
 //
 // WRITTEN AGAINST node:http AND RAW JSON, NOT AGAINST serve.py's SHAPE, and that is the same
 // reasoning fixtures/mcp/mockServer.ts gives for not building on the MCP SDK's server half:
@@ -202,6 +203,22 @@ export async function startMockServe(opts: MockServeOptions = {}): Promise<MockS
       // makes — it acts at a node boundary, never mid-node — so the stub has to be able to
       // demonstrate it by not checking anywhere else.
       if (cancelled.has(d.runId)) {
+        // THE BOUNDARY IS ANNOUNCED BEFORE THE RUN ENDS, because a cancelled run and a crashed
+        // one arrive as the SAME `run_end` — the frozen schema has three run statuses and none
+        // of them is `cancelled`, so the ending alone cannot be told apart from a failure. The
+        // real runner emits this line at the boundary for exactly that reason (`debug.py`'s
+        // `emit_ctrl`), and a stub that pushed only the ending would have the server honestly
+        // report `agent_error` for every cancel driven against it — a fixture teaching a bug
+        // the product does not have.
+        await push(d, "/control", {
+          ctrl: {
+            ctrl: "cancelled",
+            run_id: d.runId,
+            seq_high: seq === 0 ? 0 : seq - 1,
+            checkpoint_id: `mock-cp-${seq}`,
+            next: [STEP_SHAPE[seq % STEP_SHAPE.length]!.name],
+          },
+        });
         const end: Run = {
           ...run, status: "error", ended_at: nowIso(), cost, tokens,
           error: "Cancelled: the run was stopped at a node boundary",
@@ -435,9 +452,15 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
   const port = Number(process.env["MOCK_SERVE_PORT"] ?? 8932);
   const token = process.env["MOCK_SERVE_TOKEN"] ?? null;
   const behaviour = (process.env["MOCK_SERVE_BEHAVIOUR"] as MockServeBehaviour) ?? "complete";
-  void startMockServe({ port, token, behaviour, onPush: (p, s) => console.log(`[mock-serve] -> ${s} ${p}`) }).then(
+  // A NODE THAT TAKES NO TIME CANNOT BE CANCELLED BY A PERSON, which is why this is reachable
+  // from the command line and not only from a suite. `cancellable` and `confirm` are the two
+  // behaviours somebody drives BY HAND — pressing Cancel, answering a confirmation — and a run
+  // that is over before the button is drawn demonstrates nothing. Zero stays the default,
+  // because every suite wants the run finished by the time the assertion reads it.
+  const stepDelayMs = Number(process.env["MOCK_SERVE_STEP_MS"] ?? 0);
+  void startMockServe({ port, token, behaviour, stepDelayMs, onPush: (p, s) => console.log(`[mock-serve] -> ${s} ${p}`) }).then(
     (h) => {
-      console.log(`[mock-serve] listening on ${h.url} · behaviour ${behaviour}`);
+      console.log(`[mock-serve] listening on ${h.url} · behaviour ${behaviour}${stepDelayMs ? ` · ${stepDelayMs}ms a node` : ""}`);
       if (token) console.log("[mock-serve] a bearer token is required on /run and /cancel");
     },
   );
