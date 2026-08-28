@@ -22,13 +22,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { DESTRUCTIVE, FAILURE_SENTENCE, LIVE } from "../lib/cockpitCopy.ts";
+import { DESTRUCTIVE, FAILURE_SENTENCE, FILTERS, HEADER, LIVE, STATUS_WORD } from "../lib/cockpitCopy.ts";
 import { cockpitCost, cockpitTime } from "../lib/cockpitFormat.ts";
 import { rowColumns, type RowColumns } from "../lib/workRow.ts";
 import { dayAt, flattenWork, workWindow } from "../lib/workWindow.ts";
 import { sendCancelWork, sendListWork, sendLoadWorkItem, sendRetryWork } from "../lib/socket.ts";
 import { ROW_HEIGHT, SPINE_X } from "../lib/cockpitLayout.ts";
-import { TYPE } from "../lib/tokens.ts";
+import { ICON, TYPE } from "../lib/tokens.ts";
 import { useMcpStore } from "../store/mcpStore.ts";
 import { useWorkStore } from "../store/workStore.ts";
 import { WORK_STATUS_ORDER } from "../store/workStore.ts";
@@ -37,6 +37,7 @@ import { Capable } from "./Capable.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { WorkGlyph } from "./WorkGlyph.tsx";
+import { XIcon } from "./panelIcons.tsx";
 
 /**
  * §6's row: one line, six slots, vertically centred.
@@ -76,10 +77,27 @@ function Row({ item, columns }: { item: WorkItemView; columns: RowColumns }) {
         style={{ height: ROW_HEIGHT }}
         // §6: "Selection is a hairline-strength background at INTERACTION's active rung, and it
         // persists while the detail panel is open so the reader can see where they are in the list."
-        className={`group flex items-center gap-3 border-b border-hair transition-colors duration-fast ${
+        className={`group relative flex items-center gap-3 border-b border-hair transition-colors duration-fast ${
           active ? "bg-active/50" : "hover:bg-active/30"
         }`}
       >
+        {/* §6's ONE LOUDER ROW. "A `waiting` row is the only row that is visually louder. A left
+            edge marker, exactly one, in the manner of the Inbox's single rose edge on a blocking
+            card. NOT A FILLED ROW, NOT A COLOURED BACKGROUND."
+
+            THE FORM IS THE INBOX'S AND THE COLOUR IS NOT. The Inbox's edge is rose because rose
+            appears exactly once in this product and that scarcity is what makes it work — so
+            borrowing the colour would spend it a second time and make it mean two things. What is
+            borrowed is the DEVICE: two pixels on the left edge, nothing else changed. The colour
+            is amber, because that is what `waiting` already is (§9) and a marker in a different
+            colour from the glyph two pixels away would be two signals for one state.
+
+            AND EXACTLY ONE ROW WEARS IT. `failed` does not — §9 asks that failed rows not be
+            painted, because a list where a fifth of the rows are marked is a list nobody scans.
+            `waiting` earns it by being the only status where a PERSON is the blocker. */}
+        {item.status === "waiting" && (
+          <span aria-hidden className="absolute inset-y-0 left-0 w-0.5 bg-run" />
+        )}
         {/* THE ROW IS THE TARGET, and the controls sit outside it rather than inside — a button
             nested in a button is a hit area that swallows the row's own click, which is the bug
             the Inbox's `view_evidence` control had. */}
@@ -267,6 +285,12 @@ function Filters() {
   const filters = useWorkStore((s) => s.filters);
   const counts = useWorkStore((s) => s.counts);
   const setFilters = useWorkStore((s) => s.setFilters);
+  // THE NAME COMES FROM THE FLEET, which is the one place it exists. A chip that carried the name
+  // the fleet card had when it was pressed would be a copy of a fact that moves — an agent renamed
+  // while the filter was applied would leave the chip naming somebody who no longer exists.
+  const agentName = useWorkStore(
+    (s) => s.fleet.find((c) => c.agent_id === s.filters.agentId)?.agent_name ?? "this agent",
+  );
 
   const choose = (patch: Parameters<typeof setFilters>[0]): void => {
     setFilters(patch);
@@ -275,41 +299,60 @@ function Filters() {
 
   return (
     <div className={`flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-hair py-2 ${SPINE_X}`}>
-      <div className="flex items-center gap-1">
+      {/* §6: "Toggles are the app's existing SEGMENTED CONTROL, not `<select>` — the codebase
+          records that its six native selects were a violation, and you are not adding a seventh."
+          The app's segmented control is a pressed group of chips: `ThreadFilterBar` establishes it
+          and `ActivityView`'s range chips repeat it, both with `aria-pressed`, both because §9's
+          rule is that colour is never the only signal — between an active chip and an inactive one
+          there was exactly one difference, `bg-active text-ink`, so which filter was applied was a
+          fact only a sighted user had.
+
+          §14: THE MINE/ALL TOGGLE IS NEVER GATED. "Part 2 is explicit: it is a filter, not a
+          permission." Anyone who can see the Cockpit sees the whole workspace's work when they
+          switch, for the reason `billing:read` is a member capability — a member whose job was
+          refused has to see what it was refused behind, and work in a shared workspace is not a
+          secret from the people sharing it. There is deliberately no `Capable` around this. */}
+      <div className="flex items-center gap-1" role="group" aria-label="Whose work to show">
         {(["mine", "all"] as const).map((scope) => (
           <button
             key={scope}
             type="button"
             onClick={() => choose({ scope })}
-            className={`rounded-control px-2 py-0.5 text-tiny transition-colors duration-fast ${
+            aria-pressed={filters.scope === scope}
+            className={`rounded-control px-2 py-0.5 text-tiny transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
               filters.scope === scope ? "bg-active text-ink" : "text-muted hover:text-ink"
             }`}
           >
-            {scope === "mine" ? "Mine" : "Everyone's"}
+            {FILTERS.scope[scope]}
           </button>
         ))}
       </div>
 
-      <div className="flex flex-wrap items-center gap-1">
+      <div className="flex flex-wrap items-center gap-1" role="group" aria-label="Filter by status">
         <button
           type="button"
           onClick={() => choose({ status: null })}
-          className={`rounded-control px-2 py-0.5 text-tiny transition-colors duration-fast ${
+          aria-pressed={filters.status === null}
+          className={`rounded-control px-2 py-0.5 text-tiny transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
             filters.status === null ? "bg-active text-ink" : "text-muted hover:text-ink"
           }`}
         >
-          All
+          {FILTERS.allStatuses}
         </button>
         {WORK_STATUS_ORDER.map((status) => (
           // A STATUS WITH NOTHING IN IT IS NOT OFFERED. A rail of six chips reading zero is six
-          // controls that lead to an empty list, and the counts are the workspace's — so a chip
-          // that is present is a chip with something behind it.
+          // controls that lead to an empty list, and the counts are the page's own scope — so a
+          // chip that is present is a chip with something behind it.
           counts[status] > 0 ? (
             <button
               key={status}
               type="button"
               onClick={() => choose({ status: filters.status === status ? null : status })}
-              className={`flex items-center gap-1.5 rounded-control px-2 py-0.5 text-tiny transition-colors duration-fast ${
+              aria-pressed={filters.status === status}
+              // §12: EVERY ICON-ONLY CONTROL HAS AN ACCESSIBLE NAME. A chip carrying a glyph and a
+              // figure reads as a bare number without one — "3", six times, in a row.
+              aria-label={`${STATUS_WORD[status]}: ${counts[status]}`}
+              className={`flex items-center gap-1.5 rounded-control px-2 py-0.5 text-tiny transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
                 filters.status === status ? "bg-active text-ink" : "text-muted hover:text-ink"
               }`}
             >
@@ -320,18 +363,81 @@ function Filters() {
         ))}
       </div>
 
-      {/* THE AGENT FILTER IS SET BY THE FLEET CARD AND CLEARED HERE, so somebody who arrived from a
-          card — or from an Agent detail's pointer strip — has a way back that does not require
-          finding the card again. */}
+      {/* §4's REMOVABLE CHIP, set by a fleet card and cleared here.
+          "The filter appears as a removable chip above the list, so the user can see WHY the list
+          shrank and can undo it in one press. A list that silently filtered is a list the user
+          thinks is broken."
+
+          IT NAMES THE AGENT, which is the difference from what this said before. "Showing one
+          agent — clear" tells the reader that a filter exists and not which one, so somebody who
+          arrived from an Agent detail's pointer strip — with no fleet card on screen to compare
+          against — could see that the list was narrowed and not to what. The name is the whole
+          value of the chip.
+
+          THE `×` IS PART OF THE CHIP RATHER THAN BESIDE IT, because the chip IS the undo. A label
+          with a separate dismiss control is two targets for one decision, and the smaller of them
+          is the one that does the thing. */}
       {filters.agentId && (
         <button
           type="button"
           onClick={() => choose({ agentId: null })}
-          className="ml-auto rounded-control px-2 py-0.5 text-tiny text-muted transition-colors duration-fast hover:text-ink"
+          className="ml-auto flex items-center gap-1 rounded-chip border border-hair bg-panel px-2 py-0.5 text-tiny text-ink transition-colors duration-fast hover:bg-active focus-visible:outline-none focus-visible:shadow-focusring"
+          title={FILTERS.clearAgent}
         >
-          Showing one agent — clear
+          <span className="max-w-[22ch] truncate">{FILTERS.agentChip(agentName)}</span>
+          <span className="shrink-0 text-faint" aria-hidden>
+            <XIcon size={ICON.badge} />
+          </span>
         </button>
       )}
+    </div>
+  );
+}
+
+/**
+ * §12's polite live region: `waiting`, and only `waiting`.
+ *
+ * "Live status changes announce through a polite live region. ONLY `waiting` ANNOUNCES, because it
+ * is the only change that needs a person — a region that announces every transition on a busy
+ * workspace is a screen reader nobody can use."
+ *
+ * THAT SCARCITY IS THE SAME RULE THE BADGE FOLLOWS, and it is worth stating together: the sidebar
+ * badge counts `waiting` and nothing else, the window title carries `waiting` and nothing else, and
+ * this announces `waiting` and nothing else. Three surfaces, one question — is a person the blocker
+ * — and a fourth thing reaching for any of them is what makes all three ignorable.
+ *
+ * IT ANNOUNCES A TRANSITION AND NOT A STATE. The region holds a sentence only for jobs that have
+ * JUST become `waiting`, which is what a live region is for; re-announcing every waiting job on
+ * every render would make a screen reader read the same three sentences on every delta in the
+ * workspace, most of which have nothing to do with them.
+ *
+ * `aria-live="polite"` AND NOT `assertive`. A job waiting on an answer is important and is not an
+ * interruption: assertive cuts off whatever the reader is in the middle of, which for a person
+ * reading a job's detail would mean losing their place to be told about a different job.
+ */
+function WaitingAnnouncer() {
+  const items = useWorkStore((s) => s.items);
+  const [announced, setAnnounced] = useState<Set<string>>(new Set());
+  const [sentence, setSentence] = useState("");
+
+  useEffect(() => {
+    const nowWaiting = items.filter((i) => i.status === "waiting");
+    const fresh = nowWaiting.filter((i) => !announced.has(i.id));
+    if (fresh.length === 0) {
+      // A JOB THAT STOPS WAITING IS FORGOTTEN, so that the same job blocking twice announces twice.
+      // Without this the set grows for the life of the session and the second confirmation on a
+      // long-running agent is silent.
+      const stillWaiting = new Set(nowWaiting.map((i) => i.id));
+      if ([...announced].some((id) => !stillWaiting.has(id))) setAnnounced(stillWaiting);
+      return;
+    }
+    setSentence(HEADER.announce(fresh[0]!.agent_name ?? "An agent"));
+    setAnnounced(new Set(nowWaiting.map((i) => i.id)));
+  }, [items, announced]);
+
+  return (
+    <div role="status" aria-live="polite" className="sr-only">
+      {sentence}
     </div>
   );
 }
@@ -411,6 +517,9 @@ export function WorkList() {
   return (
     <>
       <Filters />
+      {/* §12s live region. Outside the scroller, because a region inside a virtualised list would
+          be unmounted the moment the reader scrolled past it. */}
+      <WaitingAnnouncer />
       {/* §3C: THE ONLY REGION ON THIS TAB THAT SCROLLS VERTICALLY, and it says so at both edges.
           `.scroll-fade` is `index.css`'s own 16px mask, opted into by class exactly as that file
           intends — a hard cut at the top of a list whose head moves every few seconds reads as the
