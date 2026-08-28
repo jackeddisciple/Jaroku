@@ -902,6 +902,15 @@ jobs:
           # emphasis shape §5 replaced with a plain string. Two suites over one sentence would be
           # two definitions of it, which is the arrangement this repository keeps refusing.
           npm run test:fleet-sentence
+          # SIX STATUSES, SIX DISTINCT MARKS, and the only test that can see the failure is a
+          # PAIRWISE one. A glyph function is never wrong in a way a per-case assertion catches:
+          # every branch returns a mark, every mark renders, and a screenshot of any one of them
+          # looks right. What goes wrong is that two return the SAME mark — which is the mistake
+          # the sidebar shipped twice, `paused` falling through to the completed tick and two of
+          # four live states distinguishable only by hovering. It also holds the three axes §9's
+          # table gives each status: exactly two of six move, `stream-pulse` and never Tailwind's
+          # own, nothing invents a seventh colour, and every mark carries its word.
+          npm run test:work-glyphs
           # THE COCKPIT'S VOICE, READ AS PROSE — the UI specification's §16 puts every string of
           # that tab in one module precisely so it can be, and this is what makes the reading
           # happen without a person. Its interesting assertions are ABSENCES, the same shape

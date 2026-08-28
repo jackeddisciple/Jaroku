@@ -25,49 +25,15 @@ import { useEffect, useRef } from "react";
 import { fmtCost, fmtDuration } from "../lib/format.ts";
 import { sendCancelWork, sendListWork, sendLoadWorkItem, sendRetryWork } from "../lib/socket.ts";
 import { SPINE_X } from "../lib/cockpitLayout.ts";
-import { ICON, TYPE } from "../lib/tokens.ts";
+import { TYPE } from "../lib/tokens.ts";
 import { useMcpStore } from "../store/mcpStore.ts";
 import { useWorkStore } from "../store/workStore.ts";
 import { WORK_STATUS_ORDER } from "../store/workStore.ts";
-import type { WorkItemView, WorkStatus } from "../types.ts";
+import type { WorkItemView } from "../types.ts";
 import { Capable } from "./Capable.tsx";
 import { EmptyState } from "./EmptyState.tsx";
-import { StatusDot } from "./StatusBadge.tsx";
 import { Truncate } from "./Truncate.tsx";
-import {
-  CheckIcon, ClockIcon, LoaderIcon, MinusIcon, PauseIcon, XIcon,
-} from "./panelIcons.tsx";
-
-/**
- * §10's six marks, exhaustive by type so a seventh status is a compile error rather than a blank.
- *
- * THE TWO THAT ARE EASY TO GET WRONG, and each is a decision:
- *
- *   `waiting` IS A PAUSE, NOT A SPINNER. The graph has STOPPED — a person has to answer something —
- *   and a turning arc would say the opposite of what is true. It is the only mark here that is ink
- *   rather than a status colour, because it is the only state where the reader is the blocker.
- *
- *   `cancelled` IS A DASH, NOT A CROSS. Nothing failed; somebody pressed stop. A cross would file
- *   an ordinary operational decision under "something went wrong", which is the same conflation
- *   `stopped_reporting` exists to avoid one field over.
- */
-function WorkGlyph({ status }: { status: WorkStatus }) {
-  switch (status) {
-    case "queued":
-      // NOT AMBER. It is not doing anything yet, and amber means running.
-      return <StatusDot state="neutral" icon={ClockIcon} size={ICON.xs} title="queued" />;
-    case "running":
-      return <StatusDot state="pending" icon={LoaderIcon} spin size={ICON.xs} title="running" />;
-    case "waiting":
-      return <StatusDot state="warn" icon={PauseIcon} size={ICON.xs} title="waiting for you to answer something" />;
-    case "succeeded":
-      return <StatusDot state="ok" icon={CheckIcon} size={ICON.xs} title="succeeded" />;
-    case "failed":
-      return <StatusDot state="error" icon={XIcon} size={ICON.xs} title="failed" />;
-    case "cancelled":
-      return <StatusDot state="neutral" icon={MinusIcon} size={ICON.xs} title="cancelled" />;
-  }
-}
+import { WorkGlyph } from "./WorkGlyph.tsx";
 
 /**
  * What a failure kind means, in the operator's words rather than in the column's.
