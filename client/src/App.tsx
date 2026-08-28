@@ -16,7 +16,7 @@ import { AdminModeBanner } from "./components/AdminModeBanner.tsx";
 import { EnforcementStrip } from "./components/EnforcementStrip.tsx";
 import { WorkspacePanel } from "./components/WorkspacePanel.tsx";
 import { WorkspaceSwitchLock } from "./components/WorkspaceSwitchLock.tsx";
-import { setWindowTitle } from "./lib/windowTitle.ts";
+import { backgrounded, setWindowTitle } from "./lib/windowTitle.ts";
 import { SIDEBAR_DEFAULT_MIN_PCT, SIDEBAR_MAX_PCT, SIDEBAR_MIN_PX, pixelFloorPercent } from "./lib/paneFloor.ts";
 import { RoleRefusal } from "./components/RoleRefusal.tsx";
 import { InviteNotice } from "./components/InviteNotice.tsx";
@@ -36,6 +36,7 @@ import { useBuildStore } from "./store/buildStore.ts";
 import { useSessionStore } from "./store/sessionStore.ts";
 import { useTraceStore } from "./store/traceStore.ts";
 import { useUiStore } from "./store/uiStore.ts";
+import { useWorkStore, workBadgeCount } from "./store/workStore.ts";
 
 /**
  * The seam between two panes.
@@ -129,9 +130,29 @@ export function App() {
   const workspaceName = useSessionStore(
     (s) => s.workspaces.find((w) => w.id === s.workspaceId)?.name ?? null,
   );
+  /**
+   * §20: THE ONE COUNT THAT REACHES THE WINDOW, and only while the tab is backgrounded.
+   *
+   * `workBadgeCount` RATHER THAN A FIELD, so the sidebar badge, the Cockpit's live region and this
+   * read the same definition of "needs a person" — §20's "same scarcity rule as the badge" is only
+   * true if it is literally the same function. Anything that made this count more would have to
+   * pass through the one place the badge's own suite is pointed at.
+   *
+   * THE VISIBILITY LISTENER IS WHAT MAKES IT ARRIVE. A title computed only when the count changed
+   * would be right for somebody who backgrounded the tab AFTER a job started waiting and wrong for
+   * everybody who did it before — which is the commoner order, because the reason people leave is
+   * that nothing is happening yet.
+   */
+  const waiting = useWorkStore((s) => workBadgeCount(s.workspaceCounts));
+  const [hidden, setHidden] = useState(backgrounded);
   useEffect(() => {
-    setWindowTitle(workspaceName);
-  }, [workspaceName]);
+    const onVisibility = (): void => setHidden(backgrounded());
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
+  useEffect(() => {
+    setWindowTitle(workspaceName, hidden ? waiting : 0);
+  }, [workspaceName, waiting, hidden]);
 
   // §5.3s resume point, read off the session once it lands. A hook rather than an effect inside
   // `AccountOnboarding`, because the store has to hydrate whether or not the flow is on screen —

@@ -41,9 +41,47 @@ function bridge(): TauriBridge | undefined {
  * An absent name yields the product's own name alone, never "Jaroku — " with nothing after it.
  * That is the state before a session lands, and it is on screen for a frame on every launch.
  */
-export function titleFor(workspaceName: string | null | undefined): string {
+export function titleFor(workspaceName: string | null | undefined, waiting = 0): string {
   const name = (workspaceName ?? "").trim();
-  return name ? `Jaroku — ${name}` : "Jaroku";
+  const base = name ? `Jaroku — ${name}` : "Jaroku";
+  // THE COUNT GOES IN FRONT, which is where a taskbar and a tab strip both truncate LAST. The
+  // product name leads for the reason above — a window list truncates from the right — and a count
+  // that led would push it out; a count that trailed would be the first thing cut. `(2)` before the
+  // name is the one position that survives both.
+  return waiting > 0 ? `(${waiting}) ${base}` : base;
+}
+
+/**
+ * §20's rule for what may reach the window: `waiting`, and nothing else.
+ *
+ * "`windowTitle.ts` exists because, in its own words, the mistake gets made by somebody who is NOT
+ * LOOKING AT THE APP — alt-tabbing, reading a taskbar, picking a window out of a list after lunch.
+ * A JOB WAITING ON A PERSON IS EXACTLY THAT SITUATION. When the tab is backgrounded and something
+ * is `waiting`, the count reaches the title, through that module, alongside the workspace it
+ * already carries. NOTHING ELSE REACHES IT: not running, not failed. The same scarcity rule as the
+ * badge."
+ *
+ * SO THIS IS A THIRD SURFACE UNDER ONE RULE, and it is worth naming all three together: the sidebar
+ * badge counts `waiting` and nothing else, the Cockpit's live region announces `waiting` and
+ * nothing else, and the window title carries `waiting` and nothing else. One question — is a person
+ * the blocker — and the moment a fourth thing reaches any of them, all three become ignorable.
+ *
+ * ONLY WHEN THE TAB IS BACKGROUNDED, which is the clause that keeps it from being noise. Somebody
+ * looking at the app can see the badge; the title is for somebody who cannot, and a count that
+ * appeared in the title of the window they are already reading would be the same fact twice.
+ *
+ * `document.visibilityState` RATHER THAN `hasFocus`, because they answer different questions. A
+ * window can be unfocused and fully visible on a second monitor — which is precisely the reader
+ * this feature is for — and `hasFocus` would put the count in a title they are looking straight at.
+ * Visibility means the tab is genuinely not on screen.
+ */
+export function backgrounded(): boolean {
+  try {
+    return typeof document !== "undefined" && document.visibilityState === "hidden";
+  } catch {
+    // No document — a suite, or a worker. Not backgrounded, because there is no foreground either.
+    return false;
+  }
 }
 
 /**
@@ -59,8 +97,8 @@ export function titleFor(workspaceName: string | null | undefined): string {
  */
 let last: string | null = null;
 
-export function setWindowTitle(workspaceName: string | null | undefined): void {
-  const title = titleFor(workspaceName);
+export function setWindowTitle(workspaceName: string | null | undefined, waiting = 0): void {
+  const title = titleFor(workspaceName, waiting);
   if (title === last) return;
   last = title;
   try {

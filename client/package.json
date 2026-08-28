@@ -67,6 +67,7 @@
     "test:cockpit-composer": "tsx src/lib/cockpitComposer.test.ts",
     "test:cockpit-optimistic": "tsx src/lib/cockpitOptimistic.test.ts",
     "test:cockpit-empty": "tsx src/components/cockpitEmpty.test.ts",
+    "test:cockpit-craft": "tsx src/components/cockpitCraft.test.ts",
     "test:cockpit-copy": "tsx src/lib/cockpitCopy.test.ts",
     "test:cockpit-format": "tsx src/lib/cockpitFormat.test.ts",
     "test:thread-store": "tsx src/store/threadStore.test.ts",

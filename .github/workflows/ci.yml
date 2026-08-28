@@ -970,6 +970,21 @@ jobs:
           # list, and telling them nothing has been asked of their agents over forty of a
           # colleague's jobs is what sends them off to deploy a second agent.
           npm run test:cockpit-empty
+          # AND §24's LAST THREE IN ONE FILE, because they are one property read three ways: the
+          # a11y rules, the no-new-values rules and the craft rules are all "what does this tab do
+          # that the ladder already decided". §24 says to EXTEND rather than start a third, so the
+          # colour and type halves are not repeated here — `test:colour-system` and
+          # `test:type-scale` already scan every file in the client and one of them caught this
+          # build's `font-mono` on its first CI run. What is here is what neither covers: radius,
+          # arbitrary spacing, and the motion budget.
+          #
+          # The craft assertions are STRUCTURAL rather than visual. "Zero layout shift" cannot be
+          # measured without a browser; the thing that causes it can — a skeleton writing its
+          # dimensions out by hand beside a component writing the same dimensions out by hand — so
+          # what is asserted is that NEITHER file contains the number. It found a real one on its
+          # first run: an unmeasured container windowed to nothing, so the list painted one empty
+          # frame on every mount before the ResizeObserver filled it.
+          npm run test:cockpit-craft
           # THE COCKPIT'S VOICE, READ AS PROSE — the UI specification's §16 puts every string of
           # that tab in one module precisely so it can be, and this is what makes the reading
           # happen without a person. Its interesting assertions are ABSENCES, the same shape

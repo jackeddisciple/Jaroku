@@ -40,6 +40,17 @@ import { WorkGlyph } from "./WorkGlyph.tsx";
 import { XIcon } from "./panelIcons.tsx";
 
 /**
+ * How many rows to assume before the container has been measured.
+ *
+ * TWENTY, which is a tall screenful at `ROW_HEIGHT` and a bounded one at any screen. The number
+ * matters only for the single frame between mount and the first `ResizeObserver` callback: too few
+ * and a tall window paints a short list and then grows, too many and the frame the virtualiser
+ * exists to protect renders rows nobody will see. Twenty is more than a laptop shows and far less
+ * than a page.
+ */
+const FIRST_PAINT_ROWS = 20;
+
+/**
  * §6's row: one line, six slots, vertically centred.
  *
  * ONE LINE AND NOT TWO. It was two — the input above a metadata line carrying the agent, the actor
@@ -496,7 +507,27 @@ export function WorkList() {
     return () => observer.disconnect();
   }, [host]);
 
-  const view = workWindow(entries.length, scrollTop, viewport);
+  /**
+   * A VIEWPORT NOBODY HAS MEASURED RENDERS A SCREENFUL, NOT NOTHING — and this is §Craft 1 rather
+   * than a workaround.
+   *
+   * `feedWindow` answers an EMPTY window for a viewport of zero, deliberately and correctly: its
+   * own note says a container that has not been measured reports zero, and treating that as "render
+   * everything" would render ten thousand rows on the one frame the virtualiser exists to protect.
+   * What it cannot know is what a caller should do INSTEAD of everything.
+   *
+   * Rendering nothing is the wrong answer. A `ResizeObserver` fires after the first paint, so the
+   * list committed one frame with no rows and then filled — a flash of an empty list on every
+   * mount, every filter change and every workspace switch. That is the layout shift §Craft 1 opens
+   * with, at its most visible: not one pixel of jump but a whole region appearing.
+   *
+   * SO AN UNMEASURED CONTAINER IS ASSUMED TO BE ONE SCREENFUL. Bounded, so the frame the
+   * virtualiser protects is still protected; enough that the first paint is the list rather than a
+   * gap. If the real height turns out larger the observer corrects it on the next frame, which is
+   * the ordinary case for a window that was always going to be re-measured.
+   */
+  const height = viewport > 0 ? viewport : FIRST_PAINT_ROWS * ROW_HEIGHT;
+  const view = workWindow(entries.length, scrollTop, height);
   const slice = entries.slice(view.start, view.end);
   // §18's pinned heading — CSS `sticky` cannot survive virtualisation, because a group's box is
   // only as tall as the slice of it that is in the DOM. `dayAt` answers from the data instead.

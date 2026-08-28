@@ -30,6 +30,8 @@ import { selectRun } from "../lib/selection.ts";
 import { sendCancelWork, sendLoadRun, sendRetryWork } from "../lib/socket.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { useCanRun } from "../lib/useCapability.ts";
+import { workLink } from "../lib/workLink.ts";
+import { useSessionStore } from "../store/sessionStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { useWorkStore } from "../store/workStore.ts";
@@ -223,6 +225,9 @@ export function WorkDetail() {
   const close = useWorkStore((s) => s.closeItem);
   const needsLoad = useTraceStore((s) => s.needsLoad);
   const setRightTab = useUiStore((s) => s.setRightTab);
+  // §20s link carries the workspace, because a work item is scoped and a link naming only the item
+  // would be unopenable by the person who receives it.
+  const workspaceId = useSessionStore((s) => s.workspaceId);
   const open = Boolean(item ?? openingId);
 
   /**
@@ -445,14 +450,15 @@ export function WorkDetail() {
                 citable, because Part 3's answers cite it and the citation is clickable." Rendering
                 it is what makes that a property somebody can rely on rather than a promise.
 
-                IT COPIES THE BARE ID TODAY. §20 asks for more than that — an addressable identity
-                under the `jaroku://open` shape `deepLink.ts` has already reserved — and that is
-                the reach-beyond-the-tab commit rather than this one. Said here rather than left
-                implied, because a comment claiming a link this button does not produce is worse
-                than no comment. */}
+                AND IT COPIES A LINK RATHER THAN THE BARE ID — §20: "Give every work item an
+                addressable identity SO A FAILED JOB CAN BE PASTED TO A TEAMMATE." A uuid in a chat
+                message is a string nobody can do anything with; `jaroku://open?workspace=…` is the
+                shape `deepLink.ts` reserved for exactly this, and `workLink.ts` says plainly which
+                half of §20's offer was taken: the item is addressable, the receiving handler is
+                not built. The chip still SHOWS the id, because that is what a person recognises. */}
             <button
               type="button"
-              onClick={() => void navigator.clipboard?.writeText(item.id)}
+              onClick={() => void navigator.clipboard?.writeText(workLink(workspaceId ?? "", item.id))}
               className="ml-auto transition-opacity duration-fast hover:opacity-80 focus-visible:outline-none focus-visible:shadow-focusring"
               title={DETAIL.copyId}
               aria-label={DETAIL.copyId}

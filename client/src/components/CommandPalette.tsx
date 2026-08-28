@@ -16,10 +16,12 @@ import { inputKey } from "../store/uiStore.ts";
 import { Truncate } from "./Truncate.tsx";
 import { chipClass } from "./Chip.tsx";
 import {
-  sendCreateThread, sendListAgentGrid, sendListAgents, sendListProviders, sendListThreads, sendRun,
+  sendCreateThread, sendListAgentGrid, sendListAgents, sendListProviders, sendListThreads,
+  sendListWork, sendRun,
 } from "../lib/socket.ts";
 import { useThreadStore } from "../store/threadStore.ts";
 import { useAgentGridStore } from "../store/agentGridStore.ts";
+import { useWorkStore } from "../store/workStore.ts";
 import { openThread } from "../lib/threadNav.ts";
 import { openAgentDetail } from "../lib/agentNav.ts";
 import { relTime } from "../lib/format.ts";
@@ -94,6 +96,10 @@ export function CommandPalette() {
    * same exclusion, as the thread entries above.
    */
   const agentCards = useAgentGridStore((s) => s.cards).filter((c) => c.archived_at === null);
+  // §20s dispatch verb needs the LIVE fleet rather than the agent grid: the Cockpit is about agents
+  // that are already deployed, and offering to dispatch to a draft would be an entry that opens a
+  // composer with nothing to send to.
+  const fleet = useWorkStore((s) => s.fleet);
   // §4.7: reaching a thread never requires opening the tab at all. The list is the store's own
   // snapshot, so what the palette offers and what the tab shows can never be two different lists.
   // ACTIVE ROWS ONLY. The snapshot deliberately carries archived threads so the Archived chip has
@@ -333,6 +339,45 @@ export function CommandPalette() {
                     keyboard users do not have. Beside Agents and Threads rather than after the
                     thread verbs, so the three navigations read as a group. */}
                 <Item onSelect={run(() => useUiStore.getState().openNav("work"))}>Open the Cockpit</Item>
+                {/* §20: THE COCKPIT'S VERBS, REGISTERED. "An operator surface whose actions are
+                    unreachable from the palette is one the keyboard users will not adopt." Three
+                    of them, which is what §20 names: go to the Cockpit (above), show what is
+                    waiting, and dispatch to a named agent.
+
+                    "SHOW WHAT IS WAITING" IS THE ONE WORTH HAVING. It is the tab's only urgent
+                    question, and reaching it by hand is three controls — open the tab, switch the
+                    scope, press the `waiting` chip — of which the middle one is the one people
+                    forget, so they see their own waiting jobs and not the workspace's.
+
+                    THE FILTER IS SET BEFORE THE NAVIGATION, which is `CockpitView`'s own rule:
+                    asking unfiltered first renders the whole workspace's work for a frame, and on
+                    a busy workspace that is a list somebody starts reading before it is replaced. */}
+                <Item
+                  onSelect={run(() => {
+                    useWorkStore.getState().setFilters({ scope: "all", status: "waiting", agentId: null });
+                    useUiStore.getState().openNav("work");
+                    sendListWork();
+                  })}
+                >
+                  Show what is waiting
+                </Item>
+                {/* AND DISPATCHING TO A NAMED AGENT, which is a NAVIGATION rather than a dispatch:
+                    it opens the Cockpit filtered to that agent, with the composer pointed at it.
+                    The palette does not send the job — §8's gate is between the composer and the
+                    container for a reason, and a palette entry that dispatched would be a way to
+                    spend money without ever seeing what it was about to run on. */}
+                {query.trim() && fleet.length > 0 && (
+                  <>
+                    {fleet.slice(0, 5).map((card) => (
+                      <Item
+                        key={`cockpit-${card.agent_id}`}
+                        onSelect={run(() => useUiStore.getState().openCockpitForAgent(card.agent_id))}
+                      >
+                        Dispatch to <Truncate>{card.agent_name}</Truncate>
+                      </Item>
+                    ))}
+                  </>
+                )}
                 <Item onSelect={run(() => sendCreateThread())} kbd={keyHint("⌘N")}>New thread</Item>
                 {/* No chord: ⌘/ opens the composer's ⊕ menu as of the composer spec. A keycap on a row that
                     no longer answers to it is worse than no keycap. */}
