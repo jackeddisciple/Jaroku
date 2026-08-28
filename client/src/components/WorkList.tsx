@@ -138,11 +138,28 @@ function Row({ item, columns }: { item: WorkItemView; columns: RowColumns }) {
           )}
 
           {/* 3. AGENT NAME. Absent when the list is filtered to one agent, and the second thing to
-                 go under width pressure — both decided in `workRow.ts`, not here. */}
+                 go under width pressure — both decided in `workRow.ts`, not here.
+
+                 CAPPED AND TRUNCATED, WHICH `shrink-0` ALONE IS NOT. §6 calls this column
+                 `shrink-0` and it has to be, or a long name would collapse to nothing and the
+                 column would silently stop carrying information — but `shrink-0` with no ceiling
+                 does the opposite and just as badly. A workspace whose agent is called "an agent
+                 that takes a list of numbers and returns their mean copy" gave this column 364
+                 pixels of every row and squeezed the input to 110, which inverts §6's own
+                 sentence: the input "is the widest element and it takes the remaining space".
+                 Found by driving the app rather than by reading it — every fixture in this
+                 repository has a short agent name.
+
+                 §22 NAMES THE CASE: "Test with a display name at the truncation boundary."
+                 `Truncate` is what handles it, and a ceiling is what makes it reachable. */}
           {columns.agent && (
-            <span className="shrink-0 text-caption text-muted">
+            <Truncate
+              variant="prose"
+              className="max-w-[20ch] shrink-0 text-caption text-muted"
+              title={item.agent_name ?? undefined}
+            >
               {item.agent_name ?? "an agent that has been deleted"}
-            </span>
+            </Truncate>
           )}
 
           {/* 4. ACTOR, in the `all` view only, and the first thing to go. §6 puts it at `text-faint`
