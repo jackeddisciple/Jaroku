@@ -245,7 +245,7 @@ export class WorkDispatcher {
         error: detail,
         failureKind: "unauthorised",
       });
-      return { ok: false, stage: "failed", item, failureKind: "unauthorised", detail };
+      return { ok: false, stage: "failed", item: await this.ended(ctx, item), failureKind: "unauthorised", detail };
     }
 
     // --- 4. POST /run, and expect 202 --------------------------------------------------------
@@ -267,7 +267,7 @@ export class WorkDispatcher {
         error: started.detail,
         failureKind,
       });
-      return { ok: false, stage: "failed", item, failureKind, detail: started.detail };
+      return { ok: false, stage: "failed", item: await this.ended(ctx, item), failureKind, detail: started.detail };
     }
 
     // --- 5. from here the trace drives the state ---------------------------------------------
@@ -300,6 +300,24 @@ export class WorkDispatcher {
    * left of the budget. Ignoring it is how a control plane turns one overloaded container into a
    * retry storm, and `serve.py` is the thing that actually knows how long its own slots are held.
    */
+  /**
+   * The row as it now reads, after a failure has been written to it.
+   *
+   * THE CALLER BROADCASTS WHAT THIS RETURNS, which is the whole reason it exists. `finish` answers
+   * whether it moved the row, not what the row became, so returning the `item` captured at insert
+   * put a `queued` snapshot on the wire as the delta announcing a failure — and a delta that says
+   * `queued` about a job that has ended leaves every open Cockpit in the workspace showing it as in
+   * flight, under a Cancel button, until somebody reloads. The happy path already returns the live
+   * row and the suite asserts `running` on it; these two paths simply were not held to that.
+   *
+   * THE STALE ROW IS THE FALLBACK rather than a throw: the failure is already recorded and already
+   * the answer to the caller, so a read that comes back empty must not turn a reported failure into
+   * an exception on a path whose whole job is reporting failures.
+   */
+  private async ended(ctx: TenantContext, item: WorkItem): Promise<WorkItem> {
+    return (await this.deps.work.get(ctx, item.id)) ?? item;
+  }
+
   private async send(
     ctx: TenantContext,
     itemId: string,

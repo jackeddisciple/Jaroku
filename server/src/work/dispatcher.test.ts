@@ -320,6 +320,14 @@ console.log("\nfailed, with the row kept as evidence");
     check("...carrying the kind, so the card can offer the fix", rows.items[0]!.failure_kind === "unauthorised");
     check("...and an ended_at, so nothing counts it as in flight", rows.items[0]!.ended_at !== null);
     check("...leaving nothing against the concurrency cap", (await f.work.inFlight(f.ctx)) === 0);
+    // THE RETURNED ITEM IS THE ONE BROADCAST, so it has to read what the row reads. It used to be
+    // the snapshot taken at insert, which meant the delta announcing a failure said `queued` — and
+    // every open Cockpit in the workspace kept the job on screen as in flight, under a Cancel
+    // button, until somebody reloaded. Asserting the stored row alone never saw this.
+    check("...and the item the caller broadcasts says so too",
+      !out.ok && out.stage === "failed" && out.item.status === "failed", !out.ok && out.stage === "failed" ? out.item.status : "");
+    check("...with the kind and the ending on it",
+      !out.ok && out.stage === "failed" && out.item.failure_kind === "unauthorised" && out.item.ended_at !== null);
   }
 
   // THE CONTAINER IS NOT THERE. Port 1 on loopback answers nothing.
@@ -328,6 +336,9 @@ console.log("\nfailed, with the row kept as evidence");
     const out = await f.dispatcher.dispatch(f.ctx, { agentId: f.agentId, input: "hello" });
     check("a deployment that cannot be reached fails as unreachable",
       !out.ok && out.stage === "failed" && out.failureKind === "unreachable");
+    check("...and the item the caller broadcasts has ended, not queued",
+      !out.ok && out.stage === "failed" && out.item.status === "failed" && out.item.ended_at !== null,
+      !out.ok && out.stage === "failed" ? out.item.status : "");
   }
 
   await db.close();
