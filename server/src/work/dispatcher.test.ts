@@ -397,6 +397,34 @@ console.log("\nthe cap, on a workspace that is already busy");
     }
     check("...and writing no row", (await f.work.list(f.ctx, { scope: "all" })).items.length === 2);
 
+    {
+      // TEN AT ONCE, WHICH IS THE ONLY WAY TO SEE THIS. Every case above dispatches in turn, so
+      // each one's insert has landed before the next one counts — and a cap read before the write
+      // then looks correct. Sent together they all read the same figure, all find room, and all
+      // write: a cap of four admitted ten against the live server before the count moved inside
+      // the insert's own transaction. §6 sets the cap so Jaroku does not manufacture the 429s it
+      // then retries, and a cap that only holds when nobody is in a hurry does not do that.
+      const f2 = await fixture(db, stub.url);
+      const burst = new WorkDispatcher({
+        work: f2.work,
+        deployments: new DeployStore(db),
+        dispatch: new DeployDispatcher({ runs: deployRuns, endpoint: async () => ({ url: stub!.url, serveToken: "stub-token" }) }),
+        agentSlug: async () => f2.slug,
+        serveToken: async () => "stub-token",
+        controlPlaneUrl: () => controlPlaneUrl,
+        concurrency: () => 4,
+      });
+      const settled = await Promise.all(
+        Array.from({ length: 10 }, (_, i) => burst.dispatch(f2.ctx, { agentId: f2.agentId, input: `together ${i}` })),
+      );
+      const accepted = settled.filter((r) => r.ok).length;
+      const atCapacity = settled.filter((r) => !r.ok && r.stage === "refused" && r.refusal === "at_capacity").length;
+      const written = (await f2.work.list(f2.ctx, { scope: "all" })).items.length;
+      check(`ten simultaneous dispatches do not beat a cap of four (${accepted} accepted)`, accepted <= 4, String(accepted));
+      check(`...and the rest are refused by name (${atCapacity})`, accepted + atCapacity === 10, `${accepted}+${atCapacity}`);
+      check(`...leaving no more rows than the cap allows (${written})`, written <= 4, String(written));
+    }
+
     // A REFUSAL AT THE CAP IS NOT A 429 FROM THE CONTAINER, which is the whole reason the cap
     // exists: Jaroku must not manufacture the refusals it then retries. Nothing was sent.
     for (const item of (await f.work.list(f.ctx, { scope: "all" })).items) {

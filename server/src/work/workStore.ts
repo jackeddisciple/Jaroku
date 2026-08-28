@@ -116,6 +116,18 @@ export interface CreateWorkItem {
   runId: string;
   /** The clock, for a caller that has one — a backfill, a test. Defaults to now. */
   at?: string;
+  /**
+   * The most this workspace may have in flight, checked in the SAME transaction as the insert.
+   *
+   * IN HERE RATHER THAN AT THE CALL SITE, because a count read before an insert is a check that
+   * something else can invalidate before the write lands. The dispatcher used to read `inFlight`
+   * and then call this, and every `await` between the two is a window: ten sockets sending
+   * `dispatchWork` in the same tick all read the same figure, all found room, and all wrote — ten
+   * jobs against a cap of four, which is exactly the pile-on §6 set the cap to prevent.
+   *
+   * Omitted means unbounded, which is what a backfill or a test wants.
+   */
+  maxInFlight?: number;
 }
 
 /** What `finish` records. One call for every way a job can end. */
@@ -142,6 +154,20 @@ export interface ListWorkFilters {
 export interface WorkPage {
   items: WorkItem[];
   nextCursor: string | null;
+}
+
+/**
+ * Refused before a row exists, because the workspace already has as many jobs in flight as it may.
+ *
+ * THROWN FROM INSIDE THE INSERT'S TRANSACTION, which is the only place the answer cannot go stale
+ * between being read and being acted on. It carries what it saw so the caller's sentence can name
+ * both figures without asking again.
+ */
+export class WorkAtCapacity extends Error {
+  constructor(readonly inFlight: number, readonly cap: number) {
+    super(`this workspace has ${inFlight} job${inFlight === 1 ? "" : "s"} in flight and the limit is ${cap}`);
+    this.name = "WorkAtCapacity";
+  }
 }
 
 /** Refused before a row exists, with the figures, because §4 says refuse at the composer. */
@@ -251,6 +277,25 @@ export class WorkStore {
     // ordered on every read the tab makes, so a coin flip there is rows moving under a cursor
     // while somebody is looking at them.
     await this.db.scoped(ctx.workspaceId, async (tx: Queryable) => {
+      // THE CAP IS CHECKED IN HERE FOR THE SAME REASON THE SEQUENCE IS. Read outside, it is a
+      // figure that anything can invalidate before the insert lands — and it did: ten sockets
+      // dispatching in one tick each read the count before any of them had written, and a cap of
+      // four admitted all ten. Inside the transaction the read and the write cannot be parted.
+      //
+      // ONE PROCESS IS WHAT THIS SETTLES. Across replicas on Postgres two transactions can still
+      // each count under READ COMMITTED; that needs `withAdvisoryLock`, which §17.1 already names
+      // as the tool for exactly that, and it is not reached for here because Jaroku runs one
+      // relay today and a lock on the dispatch path would be a cost paid on every job.
+      if (input.maxInFlight !== undefined) {
+        const busy = await tx.get<{ n: unknown }>(
+          `SELECT COUNT(*) AS n FROM work_items
+            WHERE workspace_id = ? AND status IN ('queued', 'running', 'waiting')`,
+          [ctx.workspaceId],
+        );
+        const seen = asInt(busy?.n);
+        if (seen >= input.maxInFlight) throw new WorkAtCapacity(seen, input.maxInFlight);
+      }
+
       const top = await tx.get<{ n: unknown }>(
         `SELECT COALESCE(MAX(created_seq), 0) AS n FROM work_items WHERE workspace_id = ?`,
         [ctx.workspaceId],

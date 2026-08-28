@@ -36,7 +36,7 @@ import type { Deployment, DeployStore } from "../deployStore.ts";
 import { EgressPolicyError, resolveAndPin, type Resolver } from "../sandbox/egressPolicy.ts";
 import type { TenantContext } from "../db/tenant.ts";
 import {
-  WorkInputTooLarge, WorkStore, type WorkFailureKind, type WorkItem,
+  WorkAtCapacity, WorkInputTooLarge, WorkStore, type WorkFailureKind, type WorkItem,
 } from "./workStore.ts";
 
 /**
@@ -164,24 +164,11 @@ export class WorkDispatcher {
       };
     }
 
+    // THE CAP IS NOT READ HERE. It is handed to `create` and enforced inside the transaction that
+    // writes the row, because a count read at this line is a figure any of the other nine sockets
+    // dispatching in the same tick can invalidate before this one's insert lands — which is how a
+    // cap of four admitted ten. What is left here is the sentence, built from what the store saw.
     const cap = this.deps.concurrency?.() ?? DEFAULT_WORK_CONCURRENCY;
-    const inFlight = await this.deps.work.inFlight(ctx);
-    if (inFlight >= cap) {
-      return {
-        ok: false,
-        stage: "refused",
-        refusal: "at_capacity",
-        // BOTH NUMBERS, because they are not always the same one. This read "N jobs in flight,
-        // which is the limit", which is true only while the two are equal — and they part company
-        // the moment the cap is lowered under a workspace that is already busy, or jobs park in
-        // `waiting` on a person who never answers. A refusal reporting 1002 as the limit sends the
-        // operator looking for a ceiling that is not there, and buries the figure they would
-        // actually set `JAROKU_WORK_CONCURRENCY` to.
-        detail:
-          `this workspace has ${inFlight} job${inFlight === 1 ? "" : "s"} in flight and the limit is ` +
-          `${cap} — wait for one to finish, or raise ${WORK_CONCURRENCY_ENV}`,
-      };
-    }
 
     // THE URL, THROUGH THE SAME REFUSAL THE SANDBOX POLICY USES — §6's Bounds, "egress through
     // sandbox/egressPolicy.ts, reused not rewritten".
@@ -218,10 +205,26 @@ export class WorkDispatcher {
         deploymentId: deployment.id,
         runId,
         input: input.input,
+        maxInFlight: cap,
       });
     } catch (err) {
       if (err instanceof WorkInputTooLarge) {
         return { ok: false, stage: "refused", refusal: "input_too_large", detail: err.message };
+      }
+      if (err instanceof WorkAtCapacity) {
+        return {
+          ok: false,
+          stage: "refused",
+          refusal: "at_capacity",
+          // BOTH NUMBERS, because they are not always the same one. This once read "N jobs in
+          // flight, which is the limit", true only while the two are equal — and they part company
+          // the moment the cap is lowered under a busy workspace, or jobs park in `waiting` on
+          // somebody who never answers. A refusal reporting 1002 as the ceiling sends the operator
+          // looking for one that is not there, and buries the figure they would actually set.
+          detail:
+            `this workspace has ${err.inFlight} job${err.inFlight === 1 ? "" : "s"} in flight and ` +
+            `the limit is ${err.cap} — wait for one to finish, or raise ${WORK_CONCURRENCY_ENV}`,
+        };
       }
       throw err;
     }
