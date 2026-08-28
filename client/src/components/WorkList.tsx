@@ -24,7 +24,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { DESTRUCTIVE, FAILURE_SENTENCE } from "../lib/cockpitCopy.ts";
 import { cockpitCost, cockpitTime } from "../lib/cockpitFormat.ts";
-import { groupByDay, rowColumns, type RowColumns } from "../lib/workRow.ts";
+import { rowColumns, type RowColumns } from "../lib/workRow.ts";
+import { dayAt, flattenWork, workWindow } from "../lib/workWindow.ts";
 import { sendCancelWork, sendListWork, sendLoadWorkItem, sendRetryWork } from "../lib/socket.ts";
 import { ROW_HEIGHT, SPINE_X } from "../lib/cockpitLayout.ts";
 import { TYPE } from "../lib/tokens.ts";
@@ -194,24 +195,33 @@ function Row({ item, columns }: { item: WorkItemView; columns: RowColumns }) {
 }
 
 /**
- * §6's sticky day heading, in `TYPE.panelLabel`'s recipe.
+ * §6's day heading, in flow — the one the pinned bar above the list is a copy of.
  *
- * STICKY, WHICH IS THE WHOLE REASON IT IS A HEADING RATHER THAN A SEPARATOR. A reader forty rows
- * into a long day needs to know which day they are in without scrolling back, and `LAYER.sticky` is
- * the rung `tokens.ts` names for exactly this: "a sticky section header, pinned to an edge of its
- * own scroller".
+ * IT IS NOT `position: sticky`, AND THAT IS §18's DOING RATHER THAN §6's. §6 asks for a sticky day
+ * heading and CSS stickiness is the obvious way to get one; §18 then asks for the list to be
+ * virtualised, and the two cannot both be had the CSS way. A sticky element sticks within its
+ * nearest scrolling ancestor for as long as its own containing box is on screen — and under
+ * virtualisation the group's box is only as tall as the slice of it that is in the DOM, so a
+ * heading unsticks a few rows into a long day and then reappears. It looks like a rendering fault
+ * because it is one.
+ *
+ * SO THE STICKINESS MOVED UP A LEVEL. `WorkList` pins one heading itself, computed by `dayAt` from
+ * the flat array rather than from a box, and this heading stays in the flow where it belongs — it
+ * is what a reader scrolling past a day boundary actually sees move. Between them the reader always
+ * has the day in view, which is what §6 asked for, and neither depends on a box that is a lie.
  *
  * `TYPE.panelLabel`'s RECIPE AND NOT ITS OWN. §16: sentence case everywhere "except
  * `TYPE.panelLabel`, which is the caps recipe and the only caps in the app" — so a day heading is
  * one of the few places caps are correct, and it gets them by using the token rather than by
  * writing `uppercase` beside a size.
  *
- * ON THE CANVAS, NOT TRANSPARENT. A sticky element with no background lets the rows scroll THROUGH
- * it, which is the classic version of this bug and reads as text overlapping text.
+ * ONE ROW TALL, LIKE EVERY OTHER ENTRY, which is what lets `feedWindow` apply to the flat list
+ * unchanged. `workWindow.ts` argues that at length; the short version is that the alternative was a
+ * measurement cache, and that is the complexity `feedWindow.ts` exists to avoid.
  */
 function DayHeading({ label }: { label: string }) {
   return (
-    <li className={`sticky top-0 z-10 bg-canvas py-1.5 ${TYPE.panelLabel}`}>{label}</li>
+    <li style={{ height: ROW_HEIGHT }} className={`flex items-center bg-canvas ${TYPE.panelLabel}`}>{label}</li>
   );
 }
 
@@ -355,13 +365,44 @@ export function WorkList() {
 
   // §6's day grouping, computed once per render of the list rather than per row. `useMemo` because
   // the list can be ten thousand rows (§18) and the grouping walks all of them.
-  const days = useMemo(() => groupByDay(items), [items]);
+  // §18's flat list: headings and rows, every entry one row tall, so `feedWindow` applies to it
+  // unchanged. See `workWindow.ts` for why a heading is a row and why that is not a compromise.
+  const entries = useMemo(() => flattenWork(items), [items]);
+
+  /**
+   * §18's window, and the scroll offset it is computed from.
+   *
+   * THE OFFSET IS STATE RATHER THAN A REF, because the window has to be recomputed on every scroll
+   * frame and a ref does not re-render. It is the one piece of high-frequency state on this tab,
+   * and it is cheap: the handler does one assignment and the arithmetic below is four lines.
+   */
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewport, setViewport] = useState(0);
+  useEffect(() => {
+    if (!host || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) setViewport(entry.contentRect.height);
+    });
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, [host]);
+
+  const view = workWindow(entries.length, scrollTop, viewport);
+  const slice = entries.slice(view.start, view.end);
+  // §18's pinned heading — CSS `sticky` cannot survive virtualisation, because a group's box is
+  // only as tall as the slice of it that is in the DOM. `dayAt` answers from the data instead.
+  const pinnedDay = dayAt(entries, view.start);
 
   // THE LIST SCROLLS BACK TO THE TOP WHEN THE FILTER CHANGES, because a scroll position is a
   // position in a list and the list has been replaced. Left alone, somebody switching from a long
   // "Everyone's" to a short "Mine" lands below the end of the new one and reads it as empty.
+  //
+  // AND THE WINDOW'S OWN OFFSET GOES WITH IT. `scrollTo` fires a scroll event, but not before the
+  // next render — so a window computed from a stale offset would slice row four hundred of a list
+  // that now has six rows, and the first paint after a filter change would be blank.
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 });
+    setScrollTop(0);
   }, [filters.scope, filters.status, filters.agentId]);
 
   return (
@@ -377,26 +418,43 @@ export function WorkList() {
           about, at twice the size. */}
       <div
         ref={(el) => { scrollRef.current = el; setHost(el); }}
-        className={`scroll-fade min-h-0 flex-1 overflow-y-auto py-1 ${SPINE_X}`}
+        onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+        className={`relative scroll-fade min-h-0 flex-1 overflow-y-auto py-1 ${SPINE_X}`}
       >
         {items.length === 0 ? (
           <ZeroState />
         ) : (
           <>
-            {/* ONE `<ul>` PER DAY, and the heading inside it rather than between two lists. §12
-                calls the work list "a list" and its rows buttons; a heading floating between two
-                `<ul>`s is a label a screen reader reads outside the list it labels. */}
-            {days.map((day) => (
-              <ul key={day.key} className="flex flex-col">
-                {/* §22: A SINGLE ROW STILL GETS ITS HEADING. "A single row with no heading looks
-                    like a fragment." And a day with no items renders nothing at all, which falls
-                    out of deriving the groups from the items — see `groupByDay`. */}
-                <DayHeading label={day.label} />
-                {day.items.map((item) => (
-                  <Row key={item.id} item={item} columns={columns} />
-                ))}
-              </ul>
-            ))}
+            {/* §18's PINNED HEADING, which is what replaces CSS `sticky`. It is `aria-hidden`
+                because the real heading is in the list below it and a screen reader reading both
+                would announce every day twice; this one is for the eye, which is the only sense
+                stickiness was ever for. */}
+            {pinnedDay && (
+              <div
+                aria-hidden
+                className={`pointer-events-none absolute inset-x-0 top-0 z-10 bg-canvas py-1.5 ${SPINE_X} ${TYPE.panelLabel}`}
+              >
+                {pinnedDay}
+              </div>
+            )}
+
+            {/* THE SPACER PAIR, WHICH IS WHY THIS IS NOT A `transform`. A translated slice takes
+                its rows out of the scroller's own flow, so the scrollbar reports the height of six
+                rows over a list of ten thousand. Two spacers keep the scroller's own geometry
+                honest, which is what makes the thumb the right size and a page-down the right
+                distance — and `feedWindow` already returns both numbers for exactly this. */}
+            <div style={{ height: view.offsetTop }} aria-hidden />
+            <ul className="flex flex-col">
+              {slice.map((entry) => (
+                entry.kind === "day"
+                  // §22: A SINGLE ROW STILL GETS ITS HEADING. "A single row with no heading looks
+                  // like a fragment." And a day with no items renders nothing at all, which falls
+                  // out of deriving the groups from the items — see `groupByDay`.
+                  ? <DayHeading key={entry.key} label={entry.label} />
+                  : <Row key={entry.key} item={entry.item} columns={columns} />
+              ))}
+            </ul>
+            <div style={{ height: Math.max(0, view.totalHeight - view.end * ROW_HEIGHT) }} aria-hidden />
             {/* KEYSET, NOT INFINITE SCROLL. A list whose head moves every few seconds and that also
                 loads on scroll is a list that jumps under the reader; an explicit control is the
                 one that keeps the position somebody chose. */}

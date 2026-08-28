@@ -921,6 +921,20 @@ jobs:
           # day grouping, whose two rules are both about absence and both invisible on a busy
           # workspace: an empty day renders no heading, and a single row still renders one.
           npm run test:work-row
+          # AND THE WINDOWING, AT TEN THOUSAND ROWS BECAUSE FIFTY PASSES EVERY VERSION OF THIS CODE
+          # INCLUDING THE ONE THAT RENDERS ALL OF THEM. It is `feedWindow.ts` parameterised rather
+          # than copied — §18 asks for that by name, since a second virtualiser is a second set of
+          # the same three bugs — so what is asserted here is the Cockpit's own row height reaching
+          # the arithmetic, plus the one thing the feed does not have: a day heading. A heading is
+          # a ROW here, one row tall, which is what lets the module apply unchanged instead of
+          # growing the measurement cache it exists to avoid.
+          #
+          # It found a real one in the shared module on its first run: the bottom clamp bounded
+          # `end` and not `start`, so a scroll offset past the content — which is what a rubber-band
+          # overscroll reports — produced an inverted slice. The list renders nothing and the spacer
+          # above it is taller than the scroller. Fixed in `feedWindow.ts`, because the event feed
+          # has the same scroller and the same flick.
+          npm run test:work-window
           # THE COCKPIT'S VOICE, READ AS PROSE — the UI specification's §16 puts every string of
           # that tab in one module precisely so it can be, and this is what makes the reading
           # happen without a person. Its interesting assertions are ABSENCES, the same shape

@@ -80,9 +80,15 @@ export function feedWindow(
   }
   const first = Math.floor(Math.max(0, scrollTop) / rowHeight);
   const visible = Math.ceil(viewportHeight / rowHeight);
-  // Both sides, which is the half people forget — see the header.
-  const start = Math.max(0, first - overscan);
   const end = Math.min(total, first + visible + overscan);
+  // BOTH SIDES, which is the half people forget — see the header. And CLAMPED AT BOTH ENDS, which
+  // is the half the clamp itself was missing: `end` was bounded by `total` and `start` was not, so
+  // a scroll offset past the content — which is exactly what a rubber-band overscroll reports on
+  // macOS and iOS — produced `start > end`. That is an inverted slice: `slice` returns nothing, so
+  // the list goes blank, and `offsetTop` lands past `totalHeight`, so the spacer above it is taller
+  // than the scroller. The symptom is a feed that empties itself for a frame when somebody flicks
+  // past the end, which reads as the list having been lost rather than as having been over-scrolled.
+  const start = Math.min(Math.max(0, first - overscan), end);
   return { start, end, offsetTop: start * rowHeight, totalHeight };
 }
 
