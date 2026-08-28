@@ -2715,6 +2715,9 @@ function handleHostedMcpConfirmRequest(runId: string, payload: Record<string, un
   void workLifecycle.onConfirmRequested(runCtx, runId)
     .then((item) => broadcastWorkItem(runCtx, item))
     .catch((err) => console.error("[work] could not park a job on a confirmation:", (err as Error).message));
+  // AND THE CARD ABOVE THE ROW. `running` → `waiting` is the transition §9 built the strip's one
+  // ink fragment for; the card is counted on the server, so it does not move unless it is told.
+  scheduleFleetRefresh(runCtx);
   relay.broadcastMcp(runCtx, {
     type: "confirmRequest",
     runId,
@@ -5045,6 +5048,8 @@ function clearConfirms(runId: string, reason: string, nonce?: string): void {
     void workLifecycle.onConfirmResolved(contextForRun(p.runId), p.runId)
       .then((item) => broadcastWorkItem(contextForRun(p.runId), item))
       .catch((err) => console.error("[work] could not resume a waiting job:", (err as Error).message));
+    // The card counted it as waiting a moment ago; answered, it is running again.
+    scheduleFleetRefresh(contextForRun(p.runId));
   }
   // §3.3 counts a pending confirmation as blocked work, so one going away is a genuine state
   // transition and the list has to be told. Only when something actually cleared: this runs on
@@ -7335,6 +7340,36 @@ function scheduleListRefresh(ctx: TenantContext): void {
   // exit for, and the next boot's first snapshot is the same answer.
   timer.unref?.();
   pendingThreadBroadcasts.set(ctx.workspaceId, timer);
+}
+
+const pendingFleetBroadcasts = new Map<string, ReturnType<typeof setTimeout>>();
+
+/**
+ * The fleet strip, after something the TRACE did to a job.
+ *
+ * §9'S HARDEST LINE IS COUNTED ON THE SERVER, from `liveByAgent`, so a card cannot follow a job on
+ * its own — and `broadcastFleet` was only ever called from the four command handlers. A job parking
+ * on a confirmation arrives as a trace event, not a command, so the card went on saying "1 running"
+ * while the row beside it said `waiting` and the database agreed with the row. "1 waiting on you" is
+ * the only fragment on that strip rendered in ink, because it is the only one naming something a
+ * person has to do, and it was the one that never appeared until somebody left the tab and came
+ * back.
+ *
+ * COALESCED ON THE SAME TIMER `scheduleListRefresh` USES, and for the same reason: §5 asks for a
+ * delta rather than a board, and the fleet IS a board. A run of four steps would otherwise put four
+ * copies of the strip on the wire in a second. Debounced, a burst of transitions costs one.
+ */
+function scheduleFleetRefresh(ctx: TenantContext): void {
+  const existing = pendingFleetBroadcasts.get(ctx.workspaceId);
+  if (existing) clearTimeout(existing);
+  const timer = setTimeout(() => {
+    pendingFleetBroadcasts.delete(ctx.workspaceId);
+    void relay.broadcastFleet().catch((err) =>
+      console.error("[work] could not refresh the fleet:", (err as Error)?.message ?? err),
+    );
+  }, THREAD_BROADCAST_COALESCE_MS);
+  timer.unref?.();
+  pendingFleetBroadcasts.set(ctx.workspaceId, timer);
 }
 
 /**
@@ -10343,7 +10378,12 @@ onBothPools("event", ({ runId, event }) => {
         // to find what the agent actually said, and a read that overtook the write would find
         // nothing. It returns the item only when one moved — every local run in the product comes
         // through here and none of them is a work item — so the broadcast is a delta or nothing.
-        if (event.kind === "run_end") await broadcastWorkItem(runCtx, await workLifecycle.onRunEnd(runCtx, event.run));
+        if (event.kind === "run_end") {
+          await broadcastWorkItem(runCtx, await workLifecycle.onRunEnd(runCtx, event.run));
+          // A job ending takes it out of the card's live counts and into today's tally, so the
+          // strip is wrong until it is told — and nothing else is going to tell it.
+          scheduleFleetRefresh(runCtx);
+        }
         // What this run is executing on, cached for the steps that follow. A step does not
         // carry provider or model — the frozen schema puts them on the run — so without this
         // every metered step would be a second query on the one chain that must not become
