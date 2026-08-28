@@ -342,7 +342,13 @@ export function WorkDetail() {
         // §10: THE DETAIL PANEL GETS `LoadingLine`, not a skeleton. It opens on an id rather than on
         // a shape, so there is nothing whose geometry a skeleton could match — and the panel is
         // never a blank slide-over, because the line says what is happening.
-        <LoadingLine label="Reading the job…" />
+        //
+        // AND ONLY WHILE IT IS OPEN. This panel is MOUNTED ALWAYS and translated off-screen so the
+        // slide plays in both directions, which meant a closed Cockpit still held a turning arc:
+        // `!item` is true whenever nothing is open, so the loader animated for the whole life of
+        // the session, off screen, forever. §15's "no auto-refresh spinner" is about a spinner
+        // nobody asked for, and this was one that nobody could even see.
+        open && <LoadingLine label="Reading the job…" />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pt-3 pb-5">
           <MetadataLine item={item} />

@@ -41,7 +41,7 @@
 
 import { useEffect } from "react";
 
-import { HEADER, OFFLINE } from "../lib/cockpitCopy.ts";
+import { EMPTY, HEADER, OFFLINE } from "../lib/cockpitCopy.ts";
 import { CARD_HEIGHT, CARD_WIDTH, ROW_HEIGHT, SPINE_X } from "../lib/cockpitLayout.ts";
 import { sendListFleet, sendListWork } from "../lib/socket.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
@@ -121,8 +121,11 @@ function NothingLive() {
   return (
     <EmptyState
       icon={RocketIcon}
-      title="No agents are live yet"
-      hint="Deploy an agent from its Deploy panel and it will appear here, with everything it has been asked to do."
+      title={EMPTY.noAgents.title}
+      // THE HINT NAMES THE DEPLOY PANEL, which §10 asks for: this is the only state of the three
+      // whose answer is somewhere else in the product, so the sentence has to say where. The other
+      // two are answered by the composer below them and by the filter bar above them.
+      hint={EMPTY.noAgents.hint}
     />
   );
 }

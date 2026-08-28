@@ -961,6 +961,15 @@ jobs:
           # the duplicate "it settles in place" rules out. A client-minted reference the server
           # echoes is the only one that works, and these fixtures exercise it.
           npm run test:cockpit-optimistic
+          # THE THREE ZERO STATES, WHICH HAVE TO BE DISTINGUISHABLE BECAUSE THEY CALL FOR THREE
+          # DIFFERENT ACTIONS — deploy something, give it something to do, or undo a filter. So the
+          # suite renders all three and checks each does not carry the others' sentence: three
+          # wordings that differ by a word pass a per-state assertion and fail a person at a glance.
+          # Its subtlest case is the one §10 is actually worried about: the scope defaults to
+          # `mine`, so a member of a busy workspace who has touched nothing is looking at a FILTERED
+          # list, and telling them nothing has been asked of their agents over forty of a
+          # colleague's jobs is what sends them off to deploy a second agent.
+          npm run test:cockpit-empty
           # THE COCKPIT'S VOICE, READ AS PROSE — the UI specification's §16 puts every string of
           # that tab in one module precisely so it can be, and this is what makes the reading
           # happen without a person. Its interesting assertions are ABSENCES, the same shape

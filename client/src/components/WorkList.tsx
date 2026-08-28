@@ -22,7 +22,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { DESTRUCTIVE, FAILURE_SENTENCE, FILTERS, HEADER, LIVE, STATUS_WORD } from "../lib/cockpitCopy.ts";
+import { DESTRUCTIVE, EMPTY, FAILURE_SENTENCE, FILTERS, HEADER, LIVE, STATUS_WORD } from "../lib/cockpitCopy.ts";
 import { cockpitCost, cockpitTime } from "../lib/cockpitFormat.ts";
 import { rowColumns, type RowColumns } from "../lib/workRow.ts";
 import { dayAt, flattenWork, workWindow } from "../lib/workWindow.ts";
@@ -639,15 +639,25 @@ export function WorkList() {
 function ZeroState() {
   const filters = useWorkStore((s) => s.filters);
   const setFilters = useWorkStore((s) => s.setFilters);
+  // WHAT COUNTS AS FILTERED INCLUDES THE DEFAULT SCOPE, which is the subtle half. §8 defaults to
+  // `mine`, so a member of a busy workspace who has never touched a control is looking at a
+  // FILTERED list — and telling them "nothing has been asked of them yet" over forty of a
+  // colleague's jobs is the exact confusion §10 asks the three states to prevent.
   const filtered = filters.scope === "mine" || filters.status !== null || filters.agentId !== null;
 
+  // §10's SECOND STATE: live agents, nothing asked of them. A `line`, because the composer directly
+  // below it is the answer and a full-height illustration over a control that fixes it is theatre.
   if (!filtered) {
-    return <EmptyState size="line" title="Nothing has been asked of them yet" />;
+    return <EmptyState size="line" title={EMPTY.noWork.title} />;
   }
+
+  // §10's THIRD: narrowed to nothing. It "names the filter and offers to clear it", which is what
+  // makes it distinguishable at a glance from the second — the two call for different actions, and
+  // a reader who cannot tell which one they are looking at will go and deploy a second agent.
   return (
     <EmptyState
       size="line"
-      title="Nothing here matches the filter"
+      title={EMPTY.filtered.title}
       hint={
         <button
           type="button"
@@ -655,9 +665,9 @@ function ZeroState() {
             setFilters({ scope: "all", status: null, agentId: null });
             sendListWork();
           }}
-          className="underline-offset-2 hover:text-ink hover:underline"
+          className="underline-offset-2 hover:text-ink hover:underline focus-visible:outline-none focus-visible:shadow-focusring"
         >
-          show everything
+          {EMPTY.filtered.action}
         </button>
       }
     />
