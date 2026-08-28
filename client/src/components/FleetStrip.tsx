@@ -20,20 +20,22 @@
 // `restartsService` precisely so this can say it first — §9's own sentence is "A restart nobody was
 // warned about is how a control plane loses trust in one click."
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { CONNECTION_LABEL, FILTERS } from "../lib/cockpitCopy.ts";
-import { factsOf, fleetSentence, healthLine, needsReconnect } from "../lib/fleetSentence.ts";
-import { sendListWork, sendReconnectAgent } from "../lib/socket.ts";
+import { CONNECTION_LABEL, DESTRUCTIVE, FILTERS } from "../lib/cockpitCopy.ts";
+import { cockpitCost } from "../lib/cockpitFormat.ts";
+import { factsOf, fleetSentence, healthLine } from "../lib/fleetSentence.ts";
+import { sendKillAgent, sendListWork, sendReconnectAgent } from "../lib/socket.ts";
 import { ICON } from "../lib/tokens.ts";
 import { CARD_HEIGHT, CARD_WIDTH, SPINE_X } from "../lib/cockpitLayout.ts";
 import { useWorkStore } from "../store/workStore.ts";
 import type { FleetCardView } from "../types.ts";
-import { AgentOps } from "./AgentOps.tsx";
+import { LogPane } from "./AgentOps.tsx";
 import { AgentSparkline } from "./AgentSparkline.tsx";
 import { Capable } from "./Capable.tsx";
+import { CockpitDialog } from "./CockpitDialog.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
-import { GlobeIcon, PlugIcon } from "./panelIcons.tsx";
+import { GlobeIcon, KebabIcon, KeyIcon, PlugIcon } from "./panelIcons.tsx";
 import { Truncate } from "./Truncate.tsx";
 
 /**
@@ -46,74 +48,205 @@ import { Truncate } from "./Truncate.tsx";
  * agent is idle wears no colour at all rather than borrowing one.
  */
 function ConnectionDot({ card }: { card: FleetCardView }) {
-  if (needsReconnect(card.connection)) {
-    return <StatusDot state="error" icon={PlugIcon} size={ICON.xs} title={card.connection} />;
+  // THE SLOT IS ALWAYS THE SAME WIDTH, whatever is in it — including nothing. §Craft 3's spine
+  // runs through this glyph, and a `connected` card that rendered no box would start its name
+  // twelve pixels left of every other card's, which is the two-pixel disagreement at six times
+  // the size. §Craft 4's reserve-the-space rule, applied to a mark rather than to a hover.
+  const slot = (children: React.ReactNode, title: string): React.ReactElement => (
+    <span
+      className="flex shrink-0 items-center justify-center"
+      style={{ width: ICON.xs, height: ICON.xs }}
+      title={title}
+    >
+      {children}
+    </span>
+  );
+
+  switch (card.connection) {
+    case "unconnected":
+      // §9's table: `STATUS.neutral`, and Reconnect is the card's primary action. NEUTRAL RATHER
+      // THAN ERROR, which is the change from what this rendered before — an agent with no stored
+      // token has not failed at anything; it has not been finished. Painting it red files a setup
+      // step somebody has not done yet under "something went wrong".
+      return slot(<StatusDot state="neutral" icon={PlugIcon} size={ICON.xs} />, CONNECTION_LABEL.unconnected!);
+    case "unauthorised":
+      // §9's table: `STATUS.error`. THIS one is a failure — a token exists and the container
+      // refused it — and it is the only connection state that is. A key rather than a plug,
+      // because what is wrong is the credential and not the wire.
+      return slot(<StatusDot state="error" icon={KeyIcon} size={ICON.xs} />, CONNECTION_LABEL.unauthorised!);
+    case "public":
+      // §9's table: `STATUS.warn`, "and warn is the blue in this system, not an orange". A
+      // supported mode somebody chose, not a fault — which is exactly what `tokens.ts` argues
+      // §07's `info` is for, at length, in the comment §9 tells you to read before reaching here.
+      return slot(<StatusDot state="warn" icon={GlobeIcon} size={ICON.xs} />, CONNECTION_LABEL.public!);
+    case "connected":
+      // §9's table: "the quietest possible mark, or none. Healthy is not a thing to announce." So
+      // the slot is empty and holds its width — see above. A green tick on every working card
+      // would be twenty marks saying the thing that is true of every card worth reading.
+      return slot(null, "");
   }
-  if (card.connection === "public") {
-    // A WARNING STATE AND NOT A HEALTHY ONE. Anyone with the URL can spend the workspace's provider
-    // key, and a green tick beside that would be the product agreeing with it.
-    return <StatusDot state="warn" icon={GlobeIcon} size={ICON.xs} title="served publicly" />;
-  }
-  if (card.running > 0 || card.waiting > 0) {
-    return <StatusDot state="pending" pulse size={ICON.xs} title="working" />;
-  }
-  return <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-faint" title="idle" />;
 }
 
 /**
- * §9's restart warning, in the confirmation rather than in a doc.
+ * §4's one overflow control, and the reason there is exactly one.
  *
- * INLINE ON THE CARD RATHER THAN A MODAL, and that is a judgement about weight. A modal is what the
- * dispatch pre-flight gets, because that one spends money on a decision somebody is making for the
- * first time; this is a repair, pressed by somebody who already knows their agent is broken, and
- * putting a dialog in front of it would make the fix feel more dangerous than the fault. What the
- * two share is that the consequence is stated BEFORE the button that causes it.
+ * "RECONNECT, LOGS AND KILL LIVE BEHIND ONE OVERFLOW CONTROL ON THE CARD, NOT AS THREE VISIBLE
+ * BUTTONS. A strip of forty cards each showing three destructive-adjacent controls is a strip where
+ * somebody eventually presses Kill by accident." That is the whole argument and it is about scale
+ * rather than about tidiness: one card with three buttons is fine, and forty is a minefield.
  *
- * THE SENTENCE IS THE SAME ONE §17.2 REQUIRES OF ENVIRONMENT VARIABLES, deliberately: "it must be
- * worded identically, because two different sentences for the same consequence teach the user that
- * neither is precise."
+ * KILL IS LAST AND SEPARATED — §21: "Kill is never adjacent to a non-destructive control, and it is
+ * the last item behind the card's overflow, separated." The hairline above it is not decoration; it
+ * is the pixel that stops a mis-aimed press on Logs from landing on the thing that deletes somebody
+ * else's Railway service.
+ *
+ * TODAY'S SPEND LIVES HERE NOW — §4, which moved it off line three to make room for the health
+ * strip: "Today's spend for the agent moves to the card's overflow panel or the detail's metadata
+ * line — `tabular-nums`, an em dash when unknown, never `$0.00`." Both of the panel's figures go
+ * through `cockpitCost`, so the card, the row and the detail cannot disagree.
+ *
+ * A POPOVER AT `LAYER.menu`, DISMISSED BY AN OUTSIDE CLICK AND BY ESCAPE, which is the shape every
+ * other menu in this client takes — `Select.tsx` establishes it and says so. Not a `<details>`,
+ * because a disclosure that pushes the card taller would grow the strip and move the work list.
  */
-export const RESTART_WARNING =
-  "This will briefly take the agent offline: setting the token on Railway restarts the service, " +
-  "and any run in flight — including a paused one — loses its checkpoint.";
+function CardMenu({ card }: { card: FleetCardView }) {
+  const [open, setOpen] = useState(false);
+  const [logs, setLogs] = useState(false);
+  const [confirming, setConfirming] = useState<"reconnect" | "kill" | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+  const health = healthLine(card);
+  const spend = cockpitCost(card.spend_today, card.spend_complete);
 
-function ReconnectControl({ card }: { card: FleetCardView }) {
-  const [confirming, setConfirming] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent): void => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent): void => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
 
-  if (!confirming) {
-    return (
+  return (
+    <div ref={ref} className="relative z-20">
       <button
         type="button"
-        onClick={() => setConfirming(true)}
-        className="rounded-control border border-hair px-2 py-0.5 text-tiny text-ink transition-colors duration-fast hover:bg-active"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        // §12: EVERY ICON-ONLY CONTROL HAS AN ACCESSIBLE NAME, and this one names the agent —
+        // twenty identical "More" buttons in a strip is twenty controls a screen reader cannot
+        // tell apart.
+        aria-label={`More for ${card.agent_name}`}
+        title={`More for ${card.agent_name}`}
+        className="rounded-control p-0.5 text-faint transition-colors duration-fast hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
       >
-        Reconnect
+        <KebabIcon size={ICON.xs} />
       </button>
-    );
-  }
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="max-w-[26ch] text-tiny leading-[1.4] text-muted">{RESTART_WARNING}</span>
-      <div className="flex gap-2">
-        <button
-          type="button"
-          onClick={() => {
-            setConfirming(false);
-            sendReconnectAgent(card.deployment_id);
-          }}
-          className="rounded-control bg-accent px-2 py-0.5 text-tiny text-bg transition-opacity duration-fast hover:opacity-90"
+
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 top-full z-30 mt-1 w-[240px] rounded-card border border-edge bg-elevated p-1 shadow-floating"
         >
-          Reconnect anyway
-        </button>
-        <button
-          type="button"
-          onClick={() => setConfirming(false)}
-          className="rounded-control px-2 py-0.5 text-tiny text-muted transition-colors duration-fast hover:text-ink"
-        >
-          Cancel
-        </button>
-      </div>
+          {/* THE FACTS FIRST, THE VERBS AFTER. Somebody opening this menu is usually answering
+              "what is wrong with this agent" rather than reaching for a control, and putting the
+              probe and the spend above the actions means the commonest use of the menu costs no
+              press at all. */}
+          <div className="flex flex-col gap-0.5 px-2 py-1.5">
+            <div className="flex items-baseline justify-between gap-2 text-tiny">
+              <span className="text-muted">Today</span>
+              <span className="tabular-nums text-ink" title={spend.title ?? undefined}>
+                {spend.text}{spend.floor && <span className="text-faint">+</span>}
+              </span>
+            </div>
+            {/* THE PROBE'S ANSWER WITH ITS AGE, or nothing at all when nobody has asked — which is
+                a third state and not "unhealthy". A card reporting red because it had never been
+                probed would be the product accusing a working agent. */}
+            {health && <span className="text-tiny leading-[1.4] text-faint">{health}</span>}
+          </div>
+
+          <div className="my-1 border-t border-hair" />
+
+          <MenuItem onClick={() => setLogs((v) => !v)} expanded={logs}>
+            {logs ? "Hide logs" : "Logs"}
+          </MenuItem>
+
+          {/* §9: RECONNECT IS THE CARD'S PRIMARY ACTION WHEN IT IS UNCONNECTED, and it is offered
+              at every state rather than only then — a token can be rotated on Railway under a card
+              that still reads `connected`, and the repair has to be reachable before the first job
+              fails to prove it. */}
+          <Capable cmd="reconnectAgent">
+            <MenuItem onClick={() => { setOpen(false); setConfirming("reconnect"); }}>
+              {DESTRUCTIVE.reconnect.label}
+            </MenuItem>
+          </Capable>
+
+          {/* §21: LAST, AND SEPARATED. The hairline is the point — see this component's header. */}
+          <Capable cmd="killAgent">
+            <>
+              <div className="my-1 border-t border-hair" />
+              <MenuItem onClick={() => { setOpen(false); setConfirming("kill"); }} destructive>
+                {DESTRUCTIVE.kill.label}
+              </MenuItem>
+            </>
+          </Capable>
+
+          {logs && (
+            <div className="px-1 pb-1">
+              <LogPane card={card} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* §21's TWO DIALOGS, both through the app's own — see `CockpitDialog`. They live outside the
+          menu's `open` branch so that dismissing the menu to show the dialog does not unmount the
+          dialog with it. */}
+      <CockpitDialog
+        open={confirming === "reconnect"}
+        title={DESTRUCTIVE.reconnect.title}
+        body={DESTRUCTIVE.reconnect.warning}
+        confirmLabel={DESTRUCTIVE.reconnect.confirm}
+        onCancel={() => setConfirming(null)}
+        onConfirm={() => { setConfirming(null); sendReconnectAgent(card.deployment_id); }}
+      />
+      <CockpitDialog
+        open={confirming === "kill"}
+        title={DESTRUCTIVE.kill.title}
+        body={DESTRUCTIVE.kill.warning(card.agent_name)}
+        confirmLabel={DESTRUCTIVE.kill.confirm}
+        destructive
+        onCancel={() => setConfirming(null)}
+        onConfirm={() => { setConfirming(null); sendKillAgent(card.deployment_id); }}
+      />
     </div>
+  );
+}
+
+/** One row of the overflow menu. A component so the four cannot drift in padding or in tone. */
+function MenuItem({ children, onClick, destructive = false, expanded }: {
+  children: React.ReactNode;
+  onClick: () => void;
+  destructive?: boolean;
+  expanded?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      aria-expanded={expanded}
+      className={`w-full rounded-control px-2 py-1 text-left text-tiny transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+        destructive ? "text-err hover:bg-active" : "text-ink hover:bg-active"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -154,13 +287,12 @@ function FleetCard({ card, tabIndex, onArrow }: {
   const filters = useWorkStore((s) => s.filters);
   const setFilters = useWorkStore((s) => s.setFilters);
   const line = fleetSentence(factsOf(card));
-  const health = healthLine(card);
   const mine = filters.agentId === card.agent_id;
 
   return (
     <div
       role="listitem"
-      style={{ width: CARD_WIDTH, minHeight: CARD_HEIGHT }}
+      style={{ width: CARD_WIDTH, height: CARD_HEIGHT }}
       // `GLOW.hover`'s RUNG VIA THE HOVER BACKGROUND, AND `FOCUS_RING` UNMODIFIED — §4 asks for
       // both by name and forbids inventing a card-specific focus treatment. `focus-within` rather
       // than `focus-visible` because the ring belongs to the CARD and the focus lands on the button
@@ -254,25 +386,13 @@ function FleetCard({ card, tabIndex, onArrow }: {
         <AgentSparkline outcomes={card.outcomes} />
       </div>
 
-      {/* THE PROBE, THE OPS AND THE REPAIR — still in the flow, and still three visible controls.
-          §4 wants them behind one overflow, "not as three visible buttons", because "a strip of
-          forty cards each showing three destructive-adjacent controls is a strip where somebody
-          eventually presses Kill by accident". That is the next commit's, and the height above is
-          a MINIMUM rather than a fixed value until it lands — a card whose controls were removed
-          before their replacement existed would be a commit that made the tab worse to ship a
-          cleaner diff. */}
-      {(health || needsReconnect(card.connection)) && (
-        <div className="relative z-10 flex flex-col gap-1">
-          {health && <span className="text-tiny text-faint">{health}</span>}
-          {needsReconnect(card.connection) && (
-            <Capable cmd="reconnectAgent">
-              <ReconnectControl card={card} />
-            </Capable>
-          )}
-        </div>
-      )}
-      <div className="relative z-10">
-        <AgentOps card={card} />
+      {/* THE OVERFLOW, IN THE CORNER AND OUT OF THE FLOW. Absolutely positioned so it costs the
+          card no height — which is what lets the height above be exact rather than a minimum, and
+          therefore what lets the skeleton match it to the pixel (§Craft 1). It sits above the
+          card's own full-surface button in the stacking order, so pressing it opens the menu
+          instead of filtering the list. */}
+      <div className="absolute right-1.5 top-1.5">
+        <CardMenu card={card} />
       </div>
     </div>
   );

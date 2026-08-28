@@ -22,14 +22,13 @@
 // go of it and it may still be running and still costing money", which are different facts about
 // somebody's bill.
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 
-import { sendKillAgent, sendLoadAgentLogs } from "../lib/socket.ts";
+import { sendLoadAgentLogs } from "../lib/socket.ts";
 import { ICON } from "../lib/tokens.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { useWorkStore } from "../store/workStore.ts";
 import type { FleetCardView } from "../types.ts";
-import { Capable } from "./Capable.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { ChevronRightIcon, GaugeIcon } from "./panelIcons.tsx";
 
@@ -44,7 +43,7 @@ const FOLLOW_MS = 4_000;
  * arrives twice adds nothing and a poll that misses a beat catches up. What must never happen is a
  * page number.
  */
-function LogPane({ card }: { card: FleetCardView }) {
+export function LogPane({ card }: { card: FleetCardView }) {
   const logs = useWorkStore((s) => s.logs);
   const mine = logs?.deploymentId === card.deployment_id ? logs : null;
 
@@ -83,92 +82,6 @@ function LogPane({ card }: { card: FleetCardView }) {
           ))}
         </ul>
       )}
-    </div>
-  );
-}
-
-/**
- * Stop the agent for good.
- *
- * TWO PRESSES, AND THE SECOND ONE SAYS WHAT IT DESTROYS. This is the only control in the Cockpit
- * that removes something from the user's own hosting account, and it cannot be undone from here —
- * so unlike Reconnect, whose confirmation is about a consequence (a restart), this one's is about
- * the ACT. `Capable` is what makes it absent for a role that may not use it, rather than disabled:
- * an offer being refused invites somebody to work out what would enable it.
- */
-function KillControl({ card }: { card: FleetCardView }) {
-  const [confirming, setConfirming] = useState(false);
-
-  if (!confirming) {
-    return (
-      <button
-        type="button"
-        onClick={() => setConfirming(true)}
-        className="rounded-control px-2 py-0.5 text-tiny text-muted transition-colors duration-fast hover:bg-active hover:text-ink"
-      >
-        Stop
-      </button>
-    );
-  }
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="max-w-[26ch] text-tiny leading-[1.4] text-muted">
-        This deletes the Railway service. The agent stops serving, its URL stops answering, and
-        Jaroku cannot undo it.
-      </span>
-      <div className="flex gap-2">
-        <button
-          type="button"
-          onClick={() => {
-            setConfirming(false);
-            sendKillAgent(card.deployment_id);
-          }}
-          className="rounded-control border border-err/40 px-2 py-0.5 text-tiny text-err transition-colors duration-fast hover:bg-active"
-        >
-          Stop it for good
-        </button>
-        <button
-          type="button"
-          onClick={() => setConfirming(false)}
-          className="rounded-control px-2 py-0.5 text-tiny text-muted transition-colors duration-fast hover:text-ink"
-        >
-          Keep it
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/**
- * The ops row on a fleet card: the log pane's toggle and the kill.
- *
- * BEHIND A DISCLOSURE RATHER THAN ON THE CARD, because a strip is a GLANCE — §9's word — and two
- * controls per card on twenty cards is a control panel. The fleet's one line is what the card is
- * for; this is what somebody opens when that line has told them something is wrong.
- */
-export function AgentOps({ card }: { card: FleetCardView }) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-1">
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="rounded-control px-2 py-0.5 text-tiny text-muted transition-colors duration-fast hover:bg-active hover:text-ink"
-          aria-expanded={open}
-        >
-          {open ? "Hide logs" : "Logs"}
-        </button>
-        <Capable cmd="killAgent">
-          <KillControl card={card} />
-        </Capable>
-      </div>
-      {/* MOUNTED ONLY WHILE OPEN, unlike the detail panel, and the difference is what each costs
-          when hidden: the panel is a transition and this is a POLL. A log pane left mounted would
-          keep asking Railway about a container nobody is looking at, once every four seconds, per
-          card. */}
-      {open && <LogPane card={card} />}
     </div>
   );
 }
