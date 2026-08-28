@@ -288,7 +288,7 @@ import { RunEventBus } from "./sandbox/eventBus.ts";
 import { resolveRunTokenSigningKey, RunTokenRevocationList } from "./sandbox/runTokens.ts";
 import { registerControlPlaneRoutes } from "./sandbox/controlPlaneRoutes.ts";
 import { DeployRuns } from "./deployRuns.ts";
-import { DeployReconciler } from "./deployReconcile.ts";
+import { DeployReconciler, STOPPED_REPORTING } from "./deployReconcile.ts";
 import { sandboxImageRef } from "./sandbox/image.ts";
 import { FlyMachinesSandbox } from "./sandbox/flySandbox.ts";
 import { TraceIngestMetrics } from "./sandbox/traceIngestMetrics.ts";
@@ -6439,6 +6439,32 @@ const workLifecycle = new WorkLifecycle({
   work: workStore,
   steps: (ctx, runId) => store.stepsForRun(ctx, runId),
 });
+
+// THE JOBS A RESTART STRANDED, closed once at boot beside the run sweep that has always run.
+//
+// `reconcileInterruptedRuns` closes the RUN row at startup and nothing carried that across to the
+// job. The silence sweep cannot reach these either: it is arithmetic over `DeployRuns`' in-process
+// map, which a restart empties — so an item in flight at the moment the process died is never a
+// candidate again and reads `running` forever. `inFlight` counts exactly those statuses, so each
+// one permanently holds a `JAROKU_WORK_CONCURRENCY` slot; four of them, the default, and that
+// workspace can never dispatch again with nothing on screen saying why.
+//
+// `stopped_reporting` IS THE HONEST KIND, in §4's own words: the container stopped reporting, it
+// may have completed, and it may have spent money — all true of a container that outlived this
+// process. Not `agent_error`, which claims the agent raised and the trace has the failing step.
+//
+// HERE RATHER THAN IN THE BOOT LOOP ABOVE because `workStore` is constructed on this line's side
+// of the file; the workspace contexts are the same ones that loop resolved.
+for (const ctx of workspaceContexts) {
+  for (const item of await workStore.stranded(ctx)) {
+    await workStore.finish(ctx, item.id, {
+      status: "failed",
+      error: STOPPED_REPORTING,
+      failureKind: "stopped_reporting",
+    });
+    console.log(`[work] ${item.id} was in flight when the server restarted — closed as stopped_reporting`);
+  }
+}
 
 const workSnapshots = new WorkSnapshots({
   work: workStore,

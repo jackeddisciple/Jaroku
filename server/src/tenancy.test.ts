@@ -288,6 +288,12 @@ async function suite(label: string, db: Db): Promise<void> {
     "the per-agent live counts name none of B's agents",
   );
   check(await work.inFlight(A.workCtx) === 1, "and the concurrency cap counts one workspace's jobs");
+  // The boot sweep that closes what a restart stranded. Unscoped it would close B's jobs from A's
+  // pass over the workspace list — every workspace gets a pass, so the first one would take them all.
+  check(
+    (await work.stranded(A.workCtx)).every((w) => w.id !== B.workItemId),
+    "the stranded sweep sees none of B's jobs",
+  );
 
   // --- read by id --------------------------------------------------------------
 
@@ -629,7 +635,7 @@ const SCOPED_API: Record<string, string[]> = {
   // `hydrate` and `q` are absent for the reason the other stores' row-shapers are: they touch no
   // database and take no context, which is why `test:db-boundary` exempts them by name.
   WorkStore: [
-    "create", "get", "byRun", "list", "countsByStatus", "liveByAgent", "inFlight",
+    "create", "get", "byRun", "list", "countsByStatus", "liveByAgent", "inFlight", "stranded",
     "markRunning", "markWaiting", "markResumed", "finish", "attachRun",
   ],
   // The Activity tab's aggregates. §5.4 calls this the highest-risk surface in the product for the

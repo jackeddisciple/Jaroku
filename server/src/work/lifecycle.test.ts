@@ -300,6 +300,50 @@ console.log("\nthe container that stopped reporting");
   check("...so what it spent before it went is still readable", (await trace.stepsForRun(ctx, runId))[0]!.cost === 0.0001);
 }
 
+// --- what a RESTART strands, which no sweep in this process can see -------------------------------
+console.log("\na job that was in flight when the server restarted");
+{
+  const { item, runId } = await dispatched("running when the process died");
+  // The restart, as the boot sweep performs it: `reconcileInterruptedRuns` closes the RUN row and
+  // the in-memory registry is gone with the process, so nothing else will ever look at this job.
+  deployRuns.close(runId, "ended");
+  await trace.upsertRun(ctx, runRow(runId, "error", TraceStore.INTERRUPTED_BY_RESTART));
+
+  const stranded = await work.stranded(ctx);
+  check("the job is found: its run has ended and it has not", stranded.some((s) => s.id === item.id), String(stranded.length));
+  check("...and it was still counted against the concurrency cap until it was",
+    (await work.inFlight(ctx)) > 0);
+
+  for (const s of stranded) {
+    await work.finish(ctx, s.id, { status: "failed", error: STOPPED_REPORTING, failureKind: "stopped_reporting" });
+  }
+  const closed = await work.get(ctx, item.id);
+  check("closed as stopped_reporting, not agent_error", closed?.failure_kind === "stopped_reporting", closed?.failure_kind ?? "(none)");
+  check("...with the reason that says it may have completed and may have spent money", closed?.error === STOPPED_REPORTING);
+  check("...and the cap it was holding is released", (await work.inFlight(ctx)) === 0);
+  check("...and a second boot finds nothing left to close", (await work.stranded(ctx)).length === 0);
+}
+
+// A JOB WHOSE CONTAINER IS STILL REPORTING MUST NOT BE SWEPT, which is what makes the rule the run
+// rather than a clock: no ceiling to guess with, and nothing to get wrong about a slow node.
+{
+  const { item, runId } = await dispatched("still going");
+  await trace.upsertRun(ctx, runRow(runId, "running"));
+  check("a job whose run is still running is not stranded",
+    !(await work.stranded(ctx)).some((s) => s.id === item.id));
+  await work.finish(ctx, item.id, { status: "cancelled" });
+}
+
+// AND A JOB WHOSE RUN ROW IS NOT THERE AT ALL. `run_id` is deliberately not a foreign key, so an
+// item can outlive the run it names — an inner join left exactly those stuck in flight forever,
+// holding a concurrency slot, which is the failure this whole sweep exists to end.
+{
+  const { item } = await dispatched("its run row is gone");
+  check("an item whose run cannot be found is stranded too",
+    (await work.stranded(ctx)).some((s) => s.id === item.id));
+  await work.finish(ctx, item.id, { status: "failed", error: STOPPED_REPORTING, failureKind: "stopped_reporting" });
+}
+
 await db.close();
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 process.exitCode = fail === 0 ? 0 : 1;

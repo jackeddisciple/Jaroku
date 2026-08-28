@@ -421,6 +421,45 @@ export class WorkStore {
   }
 
   /**
+   * Items still in flight whose run has already ended. What a restart strands.
+   *
+   * THE SILENCE SWEEP CANNOT SEE THESE, and that is the whole reason this exists. `DeployRuns`
+   * keeps its open runs in a `Map` in this process, and the reconciliation sweep is arithmetic over
+   * that map — so a restart empties it, and an item that was in flight at the moment the process
+   * died is never a candidate again. `reconcileInterruptedRuns` closes the RUN row at boot and
+   * always has; nothing was carrying that across to the job, so the row read `running` forever.
+   *
+   * FOREVER IS NOT AN EXAGGERATION AND IT IS NOT COSMETIC: `inFlight` counts exactly these
+   * statuses, so each stranded job permanently consumes one of the workspace's
+   * `JAROKU_WORK_CONCURRENCY` slots. Four of them — the default — and that workspace can never
+   * dispatch again, with nothing on screen explaining why.
+   *
+   * THE RULE IS THE RUN, NOT A CLOCK. An item whose run has ended while the item has not is
+   * stranded by definition, whatever the reason, so this needs no ceiling to guess with and cannot
+   * close a job whose container is still reporting. A `run_id` is null only between insert and
+   * dispatch (§4), and those rows are deliberately excluded: nothing was ever started for them.
+   *
+   * LEFT JOIN, SO A MISSING RUN COUNTS AS ENDED. `work_items.run_id` is deliberately not a foreign
+   * key — see migration 063 — so an item can outlive the run it names, and an inner join would
+   * leave exactly those unsweepable forever. It also covers the rows this workspace cannot see the
+   * run for at all: the trace of a deployed run was once filed in the server's own workspace
+   * rather than the job's, and a scoped read must not reach across that boundary to find out.
+   */
+  async stranded(ctx: TenantContext): Promise<WorkItem[]> {
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT ${COLUMNS.split(",").map((c) => `w.${c.trim()}`).join(", ")}
+         FROM work_items w
+         LEFT JOIN runs r ON r.id = w.run_id AND r.workspace_id = w.workspace_id
+        WHERE w.workspace_id = ?
+          AND w.run_id IS NOT NULL
+          AND w.status IN ('queued', 'running', 'waiting')
+          AND (r.id IS NULL OR r.status <> 'running')`,
+      [ctx.workspaceId],
+    );
+    return rows.map((r) => this.hydrate(r));
+  }
+
+  /**
    * The container accepted it. `queued` → `running`, and the clock starts.
    *
    * GUARDED ON THE STATUS IT IS LEAVING, like every transition below. A container can push its
