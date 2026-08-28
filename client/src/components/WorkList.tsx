@@ -20,11 +20,13 @@
 // output is what the agent did about it; both are longer than a row, and the ellipsis is what says
 // so rather than a string that simply stops.
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import { fmtCost, fmtDuration } from "../lib/format.ts";
+import { DESTRUCTIVE, FAILURE_SENTENCE } from "../lib/cockpitCopy.ts";
+import { cockpitCost, cockpitTime } from "../lib/cockpitFormat.ts";
+import { groupByDay, rowColumns, type RowColumns } from "../lib/workRow.ts";
 import { sendCancelWork, sendListWork, sendLoadWorkItem, sendRetryWork } from "../lib/socket.ts";
-import { SPINE_X } from "../lib/cockpitLayout.ts";
+import { ROW_HEIGHT, SPINE_X } from "../lib/cockpitLayout.ts";
 import { TYPE } from "../lib/tokens.ts";
 import { useMcpStore } from "../store/mcpStore.ts";
 import { useWorkStore } from "../store/workStore.ts";
@@ -36,36 +38,44 @@ import { Truncate } from "./Truncate.tsx";
 import { WorkGlyph } from "./WorkGlyph.tsx";
 
 /**
- * What a failure kind means, in the operator's words rather than in the column's.
+ * §6's row: one line, six slots, vertically centred.
  *
- * `stopped_reporting` IS THE ONE THAT MATTERS MOST — §11.3 in as many words: the container went
- * quiet, it MAY have completed, and it MAY have spent money. Every other kind is a fact somebody
- * observed; this is the absence of one, and rendering it as "failed" would be a confident claim
- * about somebody's bill.
+ * ONE LINE AND NOT TWO. It was two — the input above a metadata line carrying the agent, the actor
+ * and the failure — and §6 replaces that with a single row whose columns shed under pressure. The
+ * difference is what the list is FOR: a two-line row is a compact card, forty of them is the wall
+ * §6 opens by ruling out, and a reader scanning for one job among forty is scanning down ONE line
+ * of input text rather than down an alternating pattern.
  *
- * `rejected` IS WORDED AS JAROKU'S BUG because it is one. Telling somebody their agent refused
- * something when Jaroku sent it something malformed points them at the wrong product.
+ * THE INPUT TAKES THE REMAINING SPACE, which §6 states and which is the reason the columns beside
+ * it are `shrink-0`: "This is the widest element and it takes the remaining space — the user
+ * recognises their own job by what they asked for, not by an id."
+ *
+ * ROW HEIGHT SITS ON THE LADDER — §6: `SPACE.tight` above and below `body`'s line height, which is
+ * `py-2` over `text-body`. It is also `ROW_HEIGHT` in `cockpitLayout.ts`, because §18 windows this
+ * list and a virtualiser over variable heights needs a measurement cache. So the height is a
+ * CONSTRAINT the row is built to rather than a number measured off it — one line, no wrapping,
+ * `Truncate` on the only element that can overflow.
+ *
+ * §Craft 4: THE SECONDARY CONTROLS' WIDTH IS RESERVED AT ALL TIMES. "A row's secondary controls
+ * appear on hover or focus, but their width is reserved in the row's layout at all times —
+ * appearing is an opacity change, never a reflow. A hover that nudges neighbouring content is the
+ * most common way a list stops feeling solid under the cursor." So the slot is a fixed width and
+ * only its opacity moves, and it holds that width for a role that cannot use the verb at all.
  */
-const FAILURE_SENTENCE: Record<string, string> = {
-  unauthorised: "the agent refused Jaroku's credential — reconnect it",
-  agent_error: "the agent raised — the trace has the failing step",
-  rejected: "Jaroku sent this agent something it refused. That is a bug in Jaroku",
-  unreachable: "the agent could not be reached",
-  stopped_reporting:
-    "the container stopped reporting. It may have completed, and it may have spent money — " +
-    "whatever steps are on the trace really happened",
-  busy: "the agent was already running as many jobs as it allows",
-};
-
-function Row({ item }: { item: WorkItemView }) {
+function Row({ item, columns }: { item: WorkItemView; columns: RowColumns }) {
   const openId = useWorkStore((s) => s.open?.id ?? s.openingId);
   const active = openId === item.id;
   const live = item.status === "queued" || item.status === "running" || item.status === "waiting";
+  const cost = cockpitCost(item.cost_usd, item.cost_complete);
+  const when = cockpitTime(item.created_at);
 
   return (
     <li>
       <div
-        className={`group flex items-center gap-3 border-b border-hair py-2 transition-colors duration-fast ${
+        style={{ height: ROW_HEIGHT }}
+        // §6: "Selection is a hairline-strength background at INTERACTION's active rung, and it
+        // persists while the detail panel is open so the reader can see where they are in the list."
+        className={`group flex items-center gap-3 border-b border-hair transition-colors duration-fast ${
           active ? "bg-active/50" : "hover:bg-active/30"
         }`}
       >
@@ -75,73 +85,94 @@ function Row({ item }: { item: WorkItemView }) {
         <button
           type="button"
           onClick={() => sendLoadWorkItem(item.id)}
-          className="flex min-w-0 flex-1 items-center gap-3 text-left"
+          className="flex min-w-0 flex-1 items-center gap-3 text-left focus-visible:outline-none focus-visible:shadow-focusring"
         >
+          {/* 1. STATUS GLYPH, fixed width at `ICON.xs`, and on the spine. §13: it never leaves. */}
           <WorkGlyph status={item.status} />
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <Truncate className={`min-w-0 ${TYPE.body}`} title={item.input_preview}>
-              {item.input_preview}
-            </Truncate>
-            <div className="flex min-w-0 items-baseline gap-1.5 text-tiny text-muted">
-              <span className="shrink-0">{item.agent_name ?? "an agent that has been deleted"}</span>
-              {/* WHO ASKED. §4's whole reason for a NOT NULL actor — the question the tab exists to
-                  answer — and it is rendered on every row rather than on hover, because a list
-                  where attribution is a hover state is a list nobody scans for attribution. */}
-              <span className="text-faint">·</span>
-              <span className="shrink-0">{item.created_by_name ?? "somebody who has left"}</span>
-              {item.failure_kind && (
-                <>
-                  <span className="text-faint">·</span>
-                  <Truncate className="min-w-0" title={FAILURE_SENTENCE[item.failure_kind] ?? item.failure_kind}>
-                    {FAILURE_SENTENCE[item.failure_kind] ?? item.failure_kind}
-                  </Truncate>
-                </>
-              )}
-            </div>
-          </div>
 
-          {/* THE FIGURES, RIGHT-ALIGNED AND TABULAR, so a column of them reads as a column.
-              `fmtCost` is the one place the null-versus-zero rule is spelled: `—` is unknown and
-              `$0.00` is free, and they are different claims. */}
-          <div className="hidden shrink-0 items-baseline gap-3 text-tiny tabular-nums text-muted sm:flex">
-            {item.duration_ms !== null && <span>{fmtDuration(item.duration_ms)}</span>}
-            <span className="w-[7ch] text-right">
-              {fmtCost(item.cost_usd)}
-              {/* A FLOOR SAYS SO — §11.1. Some call could not be priced, so the total is an
-                  undercount, and a confidently wrong number is what the rule exists to prevent. */}
-              {!item.cost_complete && <span className="text-faint">+</span>}
+          {/* 2. THE INPUT, one line, `variant="prose"`, at `body`. The widest element. */}
+          <Truncate variant="prose" className="min-w-0 flex-1 text-body text-ink" title={item.input_preview}>
+            {item.input_preview}
+          </Truncate>
+
+          {/* THE FAILURE'S SENTENCE, when there is one, between the input and the columns. It is
+              not one of §6's six and it is not a column: it appears on a minority of rows, it is
+              prose rather than a figure, and giving it a fixed slot would reserve width on every
+              successful row for something almost none of them has. §16: never "failed" alone —
+              six kinds exist so six things can be said. */}
+          {item.failure_kind && (
+            <Truncate className="hidden min-w-0 max-w-[28ch] shrink text-caption text-muted md:block"
+              title={FAILURE_SENTENCE[item.failure_kind]}>
+              {FAILURE_SENTENCE[item.failure_kind]}
+            </Truncate>
+          )}
+
+          {/* 3. AGENT NAME. Absent when the list is filtered to one agent, and the second thing to
+                 go under width pressure — both decided in `workRow.ts`, not here. */}
+          {columns.agent && (
+            <span className="shrink-0 text-caption text-muted">
+              {item.agent_name ?? "an agent that has been deleted"}
             </span>
-          </div>
+          )}
+
+          {/* 4. ACTOR, in the `all` view only, and the first thing to go. §6 puts it at `text-faint`
+                 because it is the least of the six: in `mine` it is always the reader. */}
+          {columns.actor && (
+            <span className="shrink-0 text-caption text-faint">
+              {item.created_by_name ?? "somebody who has left"}
+            </span>
+          )}
+
+          {/* 5. COST, tabular, or an em dash carrying the reason it is one. A FIXED WIDTH, so a
+                 column of them is a column: §17's "`tabular-nums` on every figure that can change
+                 in place" only aligns if the box does not resize around the digits. */}
+          {columns.cost && (
+            <span
+              className="w-[8ch] shrink-0 text-right text-caption tabular-nums text-muted"
+              title={cost.title ?? undefined}
+            >
+              {cost.text}
+              {/* A FLOOR SAYS SO. Some call could not be priced, so the total is an undercount, and
+                  a confidently wrong number is what the rule exists to prevent. */}
+              {cost.floor && <span className="text-faint">+</span>}
+            </span>
+          )}
+
+          {/* 6. TIME, relative, right-aligned, and it never leaves. The exact instant is the hover
+                 — §17 allows an absolute timestamp only where the reader arrived on purpose. */}
+          <span
+            className="w-[7ch] shrink-0 text-right text-caption tabular-nums text-muted"
+            title={when.title ?? undefined}
+          >
+            {when.text}
+          </span>
         </button>
 
-        {/* THE TWO VERBS, GATED BY WHAT THEY ARE RATHER THAN BY WHAT THEY LOOK LIKE. `Capable`
-            renders nothing at all for a role that cannot use them — §8's rule is ABSENT rather than
-            disabled or hidden, because a disabled control invites somebody to work out what would
-            enable it and a hidden one is a devtools panel away from being clicked. */}
         {/* §14: A WAITING JOB IS ANSWERED IN THE EXISTING MODAL, UNCHANGED, and the row's job is
             to say WHICH question rather than to ask it again. The modal is mounted at the
-            application root and is already on screen for anyone in this workspace — including a
-            tab that connected after the ask went out, which the relay now replays to.
+            application root and is already on screen for anyone in this workspace.
 
             THERE IS DELIBERATELY NO "ANSWER" BUTTON HERE. A second control that opened a second
-            copy of the dialog would be two places one question can be answered, which is what
-            §3 refuses on the Inbox's behalf — and it is worse than that here, because the two
-            would race for one nonce and the loser would report a failure for a question that had
-            been answered correctly. */}
+            copy of the dialog would be two places one question can be answered — §15's "no second
+            confirmation dialog beside the existing MCP modal" — and it is worse than a duplicated
+            surface, because the two would race for one nonce and the loser would report a failure
+            for a question that had been answered correctly. */}
         {item.status === "waiting" && <WaitingFor item={item} />}
 
-        <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity duration-fast focus-within:opacity-100 group-hover:opacity-100">
+        {/* THE VERB SLOT, whose WIDTH IS ALWAYS THERE — §Craft 4. See this component's header. */}
+        <div className="flex w-[68px] shrink-0 items-center justify-end pr-1 opacity-0 transition-opacity duration-fast focus-within:opacity-100 group-hover:opacity-100">
           {live ? (
             <Capable cmd="cancelWork">
               <button
                 type="button"
                 onClick={() => sendCancelWork(item.id)}
-                className="rounded-control px-2 py-0.5 text-tiny text-muted transition-colors duration-fast hover:bg-active hover:text-ink"
-                // A CANCEL IS A REQUEST READ AT A NODE BOUNDARY, and the title says so rather than
+                className="rounded-control px-2 py-0.5 text-tiny text-muted transition-colors duration-fast hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+                // §21: STOP IS INLINE, A SINGLE PRESS, NO DIALOG — "it is scoped to one item and
+                // the item is on screen". The title says what it actually does rather than
                 // promising a stop the graph has not made yet.
-                title="Ask the agent to stop at its next node boundary"
+                title={DESTRUCTIVE.stop.title}
               >
-                Cancel
+                {DESTRUCTIVE.stop.label}
               </button>
             </Capable>
           ) : (
@@ -149,7 +180,7 @@ function Row({ item }: { item: WorkItemView }) {
               <button
                 type="button"
                 onClick={() => sendRetryWork(item.id)}
-                className="rounded-control px-2 py-0.5 text-tiny text-muted transition-colors duration-fast hover:bg-active hover:text-ink"
+                className="rounded-control px-2 py-0.5 text-tiny text-muted transition-colors duration-fast hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
                 title="Ask the same thing again, as a new job, on whatever is live now"
               >
                 Retry
@@ -159,6 +190,28 @@ function Row({ item }: { item: WorkItemView }) {
         </div>
       </div>
     </li>
+  );
+}
+
+/**
+ * §6's sticky day heading, in `TYPE.panelLabel`'s recipe.
+ *
+ * STICKY, WHICH IS THE WHOLE REASON IT IS A HEADING RATHER THAN A SEPARATOR. A reader forty rows
+ * into a long day needs to know which day they are in without scrolling back, and `LAYER.sticky` is
+ * the rung `tokens.ts` names for exactly this: "a sticky section header, pinned to an edge of its
+ * own scroller".
+ *
+ * `TYPE.panelLabel`'s RECIPE AND NOT ITS OWN. §16: sentence case everywhere "except
+ * `TYPE.panelLabel`, which is the caps recipe and the only caps in the app" — so a day heading is
+ * one of the few places caps are correct, and it gets them by using the token rather than by
+ * writing `uppercase` beside a size.
+ *
+ * ON THE CANVAS, NOT TRANSPARENT. A sticky element with no background lets the rows scroll THROUGH
+ * it, which is the classic version of this bug and reads as text overlapping text.
+ */
+function DayHeading({ label }: { label: string }) {
+  return (
+    <li className={`sticky top-0 z-10 bg-canvas py-1.5 ${TYPE.panelLabel}`}>{label}</li>
   );
 }
 
@@ -279,6 +332,31 @@ export function WorkList() {
   const filters = useWorkStore((s) => s.filters);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  /**
+   * §13's width, measured on the CONTAINER rather than queried on the viewport.
+   *
+   * WHICH IT HAS TO BE HERE. The Cockpit sits beside a sidebar the user can drag, so a `md:` query
+   * would keep every column on a 1400px window while the pane holding them shrank to 400. That is
+   * the same reason `InboxView` and `AgentDetail` both measure their own content box rather than
+   * using a breakpoint prefix; the THRESHOLDS are still Tailwind's own, in `workRow.ts`, so §13's
+   * "do not add a breakpoint that is not already in the app's set" holds.
+   */
+  const [width, setWidth] = useState(0);
+  const [host, setHost] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!host || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) setWidth(entry.contentRect.width);
+    });
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, [host]);
+  const columns = rowColumns(width, filters);
+
+  // §6's day grouping, computed once per render of the list rather than per row. `useMemo` because
+  // the list can be ten thousand rows (§18) and the grouping walks all of them.
+  const days = useMemo(() => groupByDay(items), [items]);
+
   // THE LIST SCROLLS BACK TO THE TOP WHEN THE FILTER CHANGES, because a scroll position is a
   // position in a list and the list has been replaced. Left alone, somebody switching from a long
   // "Everyone's" to a short "Mine" lands below the end of the new one and reads it as empty.
@@ -297,16 +375,28 @@ export function WorkList() {
           `px-5` IS THE SPINE. It was `px-4`, which put every row's status glyph four pixels left of
           the word "Cockpit" and of the first fleet card — the two-pixel disagreement §Craft 3 is
           about, at twice the size. */}
-      <div ref={scrollRef} className={`scroll-fade min-h-0 flex-1 overflow-y-auto py-1 ${SPINE_X}`}>
+      <div
+        ref={(el) => { scrollRef.current = el; setHost(el); }}
+        className={`scroll-fade min-h-0 flex-1 overflow-y-auto py-1 ${SPINE_X}`}
+      >
         {items.length === 0 ? (
           <ZeroState />
         ) : (
           <>
-            <ul className="flex flex-col">
-              {items.map((item) => (
-                <Row key={item.id} item={item} />
-              ))}
-            </ul>
+            {/* ONE `<ul>` PER DAY, and the heading inside it rather than between two lists. §12
+                calls the work list "a list" and its rows buttons; a heading floating between two
+                `<ul>`s is a label a screen reader reads outside the list it labels. */}
+            {days.map((day) => (
+              <ul key={day.key} className="flex flex-col">
+                {/* §22: A SINGLE ROW STILL GETS ITS HEADING. "A single row with no heading looks
+                    like a fragment." And a day with no items renders nothing at all, which falls
+                    out of deriving the groups from the items — see `groupByDay`. */}
+                <DayHeading label={day.label} />
+                {day.items.map((item) => (
+                  <Row key={item.id} item={item} columns={columns} />
+                ))}
+              </ul>
+            ))}
             {/* KEYSET, NOT INFINITE SCROLL. A list whose head moves every few seconds and that also
                 loads on scroll is a list that jumps under the reader; an explicit control is the
                 one that keeps the position somebody chose. */}

@@ -61,6 +61,7 @@
     "test:work-delta": "tsx src/store/workDelta.test.ts",
     "test:fleet-sentence": "tsx src/lib/fleetSentence.test.ts",
     "test:work-glyphs": "tsx src/components/workGlyphs.test.ts",
+    "test:work-row": "tsx src/lib/workRow.test.ts",
     "test:cockpit-copy": "tsx src/lib/cockpitCopy.test.ts",
     "test:cockpit-format": "tsx src/lib/cockpitFormat.test.ts",
     "test:thread-store": "tsx src/store/threadStore.test.ts",

@@ -911,6 +911,16 @@ jobs:
           # table gives each status: exactly two of six move, `stream-pulse` and never Tailwind's
           # own, nothing invents a seventh colour, and every mark carries its word.
           npm run test:work-glyphs
+          # AND THE ROW'S COLUMNS, WHOSE SPECIFICATION IS AN ORDER RATHER THAN A SET — which is the
+          # thing a screenshot cannot show. Six columns at a comfortable width looks right and
+          # three at a narrow one looks right; what §13 specifies is the SEQUENCE between them,
+          # actor then agent then cost, and an implementation that sheds cost first passes every
+          # screenshot while removing the one figure the reader cannot reconstruct. So the suite
+          # walks the width downwards and asserts that a column, once gone, never comes back —
+          # which is also what catches two thresholds written the wrong way round. Beside it the
+          # day grouping, whose two rules are both about absence and both invisible on a busy
+          # workspace: an empty day renders no heading, and a single row still renders one.
+          npm run test:work-row
           # THE COCKPIT'S VOICE, READ AS PROSE — the UI specification's §16 puts every string of
           # that tab in one module precisely so it can be, and this is what makes the reading
           # happen without a person. Its interesting assertions are ABSENCES, the same shape
