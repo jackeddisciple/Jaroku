@@ -22,7 +22,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { DESTRUCTIVE, FAILURE_SENTENCE } from "../lib/cockpitCopy.ts";
+import { DESTRUCTIVE, FAILURE_SENTENCE, LIVE } from "../lib/cockpitCopy.ts";
 import { cockpitCost, cockpitTime } from "../lib/cockpitFormat.ts";
 import { rowColumns, type RowColumns } from "../lib/workRow.ts";
 import { dayAt, flattenWork, workWindow } from "../lib/workWindow.ts";
@@ -340,6 +340,9 @@ export function WorkList() {
   const items = useWorkStore((s) => s.items);
   const nextCursor = useWorkStore((s) => s.nextCursor);
   const filters = useWorkStore((s) => s.filters);
+  const pending = useWorkStore((s) => s.pending);
+  const admit = useWorkStore((s) => s.admitPending);
+  const setAtTop = useWorkStore((s) => s.setAtTop);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   /**
@@ -418,13 +421,55 @@ export function WorkList() {
           about, at twice the size. */}
       <div
         ref={(el) => { scrollRef.current = el; setHost(el); }}
-        onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+        onScroll={(e) => {
+          setScrollTop(e.currentTarget.scrollTop);
+          // §18: "AN ITEM ARRIVING WHILE THE READER IS ALREADY AT THE TOP INSERTS DIRECTLY." A
+          // small tolerance rather than `=== 0`, because a scroller can sit at a fractional offset
+          // after a wheel event and a reader two pixels down is, by any reading a person would
+          // give it, at the top. `ROW_HEIGHT / 2` is the tolerance: less than half a row means no
+          // row is meaningfully hidden above the fold.
+          setAtTop(e.currentTarget.scrollTop < ROW_HEIGHT / 2);
+        }}
         className={`relative scroll-fade min-h-0 flex-1 overflow-y-auto py-1 ${SPINE_X}`}
       >
         {items.length === 0 ? (
           <ZeroState />
         ) : (
           <>
+            {/* §18's PILL. "A new item arriving above the scroll position does not insert. It
+                increments a count, and a small pill — '3 new' — appears pinned at the top of the
+                list. Pressing it scrolls to the top and inserts them."
+
+                PINNED TO THE LIST AND NOT INSIDE A GROUP — §18 says so in as many words, and it is
+                why the pill is not one of the flattened entries: an entry could be scrolled past,
+                and a control announcing rows the reader has not seen must not itself be one of the
+                things they have to scroll to find.
+
+                ABOVE THE DAY HEADING IN THE STACKING ORDER, because for the frame after a press the
+                two occupy the same strip and the pill is the one being pressed.
+
+                NO ENTRANCE ANIMATION. §11: "Rows entering the list do not animate", and §Craft's
+                closing list rules out an entrance on every row. The pill appearing is a state
+                change the reader should notice, not a performance. */}
+            {pending.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  // ORDER MATTERS: admit first, then scroll. Admitting inserts the rows at the head
+                  // and pushes the reader's position down by exactly their height; scrolling first
+                  // would land at the top of the OLD list and then be shoved down again.
+                  admit();
+                  scrollRef.current?.scrollTo({ top: 0 });
+                  setScrollTop(0);
+                  setAtTop(true);
+                }}
+                title={LIVE.pillTitle}
+                className="absolute inset-x-0 top-0 z-20 mx-auto w-fit rounded-full border border-edge bg-elevated px-2.5 py-0.5 text-tiny tabular-nums text-ink shadow-floating transition-colors duration-fast hover:bg-active"
+              >
+                {LIVE.pill(pending.length)}
+              </button>
+            )}
+
             {/* §18's PINNED HEADING, which is what replaces CSS `sticky`. It is `aria-hidden`
                 because the real heading is in the list below it and a screen reader reading both
                 would announce every day twice; this one is for the eye, which is the only sense

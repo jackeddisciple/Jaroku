@@ -935,6 +935,16 @@ jobs:
           # above it is taller than the scroller. Fixed in `feedWindow.ts`, because the event feed
           # has the same scroller and the same flick.
           npm run test:work-window
+          # THE LIST NEVER MOVES UNDER THE READER — §18, and the property is an ABSENCE OF MOVEMENT,
+          # which is the hardest kind to see by looking. Every version of this rule renders a
+          # correct list: the rows are all there, all current, all in order. What differs is where
+          # they were a frame ago, so every case here pins an index and checks it survived. The
+          # tempting wrong version is one character shorter — updating a changed row by removing it
+          # and unshifting the new one produces exactly the right rows and reorders on every status
+          # change, which on a busy workspace shuffles the list under a cursor several times a
+          # second. Beside it the pill's own honesty: it holds the ROWS rather than a count, so
+          # pressing it cannot promise three and deliver two.
+          npm run test:work-live
           # THE COCKPIT'S VOICE, READ AS PROSE — the UI specification's §16 puts every string of
           # that tab in one module precisely so it can be, and this is what makes the reading
           # happen without a person. Its interesting assertions are ABSENCES, the same shape

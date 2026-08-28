@@ -26,6 +26,8 @@
 // workspace's own, because always-visible chrome must not move when a filter changes.
 
 import { create } from "zustand";
+
+import { admitPending, mergeDelta } from "../lib/workLive.ts";
 import type {
   FleetCardView, WorkCounts, WorkFilters, WorkItemDetailView, WorkItemView, WorkStatus,
 } from "../types.ts";
@@ -39,6 +41,26 @@ const DEFAULT_FILTERS: WorkFilters = { scope: "mine", status: null, agentId: nul
 
 interface WorkState {
   items: WorkItemView[];
+  /**
+   * §18's held arrivals: rows that came in while the reader was NOT at the top of the list.
+   *
+   * THE ROWS AND NOT A COUNT — the argument is in `lib/workLive.ts`. A counter would have to
+   * re-ask the server when the pill was pressed, and between the count and the fetch a job can
+   * finish or leave the filter, so the pill would promise three and deliver two.
+   */
+  pending: WorkItemView[];
+  /**
+   * Whether the reader is at the top of the list, as the list itself reports it.
+   *
+   * ON THE STORE BECAUSE THE DELTA NEEDS IT AND THE DELTA ARRIVES ON A SOCKET. The alternative is
+   * for the view to intercept every transition, which would put the rule inside a component and
+   * run it only while that component was mounted — and a Cockpit somebody has navigated away from
+   * still receives deltas, which is exactly when the held rows matter.
+   *
+   * IT DEFAULTS TO TRUE, because a list nobody has scrolled is at its top, and a first delta that
+   * was held back would show a "1 new" pill over a list with nothing above it.
+   */
+  atTop: boolean;
   /** Null when there is no further page. */
   nextCursor: string | null;
   counts: WorkCounts;
@@ -92,6 +114,10 @@ interface WorkState {
    * answer one question would be two stores that have to be reset in the right order.
    */
   noteItem: (item: WorkItemView, viewerId?: string | null) => void;
+  /** §18: the pill was pressed — everything held becomes visible, at the head, in one step. */
+  admitPending: () => void;
+  /** The list reporting where the reader is. See `atTop`. */
+  setAtTop: (atTop: boolean) => void;
   setFleet: (fleet: FleetCardView[], anyLive: boolean) => void;
   openItem: (item: WorkItemDetailView) => void;
   openingItem: (itemId: string | null) => void;
@@ -137,6 +163,8 @@ export function matchesScope(item: WorkItemView, filters: WorkFilters, viewerId:
 
 export const useWorkStore = create<WorkState>((set) => ({
   items: [],
+  pending: [],
+  atTop: true,
   nextCursor: null,
   counts: NO_COUNTS,
   workspaceCounts: NO_COUNTS,
@@ -153,6 +181,16 @@ export const useWorkStore = create<WorkState>((set) => ({
   setSnapshot: (s) =>
     set({
       items: s.items,
+      // §18: A SNAPSHOT REPLACES EVERYTHING, INCLUDING WHAT WAS HELD BACK — see `resetPending`'s
+      // note. A fresh page already contains whatever was waiting, so carrying the held rows across
+      // would either duplicate them or leave a pill offering rows the page has in it. The filter
+      // change is the clearest case: the reader asked a different question, and the three jobs
+      // behind the pill were answers to the old one.
+      pending: [],
+      // AND THE READER IS AT THE TOP OF IT, because the list scrolls back to the top on a filter
+      // change. A stale `false` here would hold the first arrival on the new page behind a pill
+      // over a list that is not scrolled.
+      atTop: true,
       nextCursor: s.nextCursor,
       counts: s.counts,
       workspaceCounts: s.workspaceCounts,
@@ -216,23 +254,30 @@ export const useWorkStore = create<WorkState>((set) => ({
         workspaceCounts[item.status] = workspaceCounts[item.status] + 1;
       }
 
-      // A DELTA CAN ADD A ROW AND IT CAN REMOVE ONE, which is the half that is easy to leave out
-      // and is what makes the list live rather than a page that ages.
+      // A DELTA CAN ADD A ROW, UPDATE ONE, REMOVE ONE — OR HOLD ONE BACK, which is §18's addition
+      // and the reason the four cases live in `lib/workLive.ts` rather than here. The rule they
+      // implement is "never move content under the reader", and its hardest case is the ordinary
+      // one: a job dispatched by a colleague while somebody is reading row twenty must not insert
+      // at the head, because inserting moves row twenty.
       //
-      // ADDING: a job dispatched by anybody — including this client — arrives as a delta for a row
-      // the page does not hold, and a store that only ever UPDATED would show it after the next
-      // snapshot and not before. At the HEAD, because the list is newest-first and a job that has
-      // just come into existence is the newest thing in it.
-      //
-      // REMOVING: a row that stops matching has LEFT the filter. A job filtered to `running` that
-      // succeeds is no longer part of the answer to the question on screen, and leaving it there
-      // would make the list a record of what once matched rather than what does.
-      if (at < 0) return belongs ? { items: [item, ...prev.items], open, counts, workspaceCounts } : { open, counts, workspaceCounts };
-      const items = [...prev.items];
-      if (!belongs) items.splice(at, 1);
-      else items[at] = item;
-      return { items, open, counts, workspaceCounts };
+      // `atTop` IS THE VIEW'S ANSWER AND ARRIVES ON THE STORE. A store that read a scroll offset
+      // would be a store that cannot be tested and a rule whose answer depends on when it is
+      // asked; the list owns its scroller and writes what it knows.
+      const merged = mergeDelta(
+        { items: prev.items, pending: prev.pending },
+        item,
+        { belongs, atTop: prev.atTop },
+      );
+      return { items: merged.items, pending: merged.pending, open, counts, workspaceCounts };
     }),
+
+  admitPending: () =>
+    set((prev) => {
+      const merged = admitPending({ items: prev.items, pending: prev.pending });
+      return { items: merged.items, pending: merged.pending };
+    }),
+
+  setAtTop: (atTop) => set({ atTop }),
 
   setFleet: (fleet, anyLive) => set({ fleet, anyLive }),
   openItem: (open) => set({ open, openingId: null }),
