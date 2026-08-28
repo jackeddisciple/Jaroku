@@ -22,16 +22,18 @@
 
 import { useState } from "react";
 
+import { CONNECTION_LABEL, FILTERS } from "../lib/cockpitCopy.ts";
 import { factsOf, fleetSentence, healthLine, needsReconnect } from "../lib/fleetSentence.ts";
 import { sendListWork, sendReconnectAgent } from "../lib/socket.ts";
-import { ICON, TYPE } from "../lib/tokens.ts";
-import { CARD_WIDTH, SPINE_X } from "../lib/cockpitLayout.ts";
+import { ICON } from "../lib/tokens.ts";
+import { CARD_HEIGHT, CARD_WIDTH, SPINE_X } from "../lib/cockpitLayout.ts";
 import { useWorkStore } from "../store/workStore.ts";
 import type { FleetCardView } from "../types.ts";
 import { AgentOps } from "./AgentOps.tsx";
+import { AgentSparkline } from "./AgentSparkline.tsx";
 import { Capable } from "./Capable.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
-import { AlertTriangleIcon, GlobeIcon, PlugIcon } from "./panelIcons.tsx";
+import { GlobeIcon, PlugIcon } from "./panelIcons.tsx";
 import { Truncate } from "./Truncate.tsx";
 
 /**
@@ -115,6 +117,34 @@ function ReconnectControl({ card }: { card: FleetCardView }) {
   );
 }
 
+/**
+ * §4's card. Three lines, one button, and a health strip where a status page would put a figure.
+ *
+ * THE WHOLE CARD IS THE BUTTON — §4, and it is a change from the header-only target this had. "A
+ * hit area smaller than the thing it describes is a control people miss", and a card whose top
+ * third was clickable and whose bottom two thirds were not is a control that teaches people the
+ * card is not a control. Pressing it FILTERS the work list to this agent; it does not navigate,
+ * because §4 says so and because navigating away from a console to see one agent's work is the
+ * arrangement the Cockpit exists instead of.
+ *
+ * THE FILTER IS VISIBLE AND UNDOABLE. §4: "The filter appears as a removable chip above the list,
+ * so the user can see why the list shrank and can undo it in one press. A list that silently
+ * filtered is a list the user thinks is broken." Pressing the same card again clears it, so the
+ * card is a toggle rather than a one-way trip.
+ *
+ * LINE THREE IS THE SPARKLINE AND NOT A SPEND FIGURE — §4 and §Craft 5. `AgentSparkline` is reused
+ * AS-IS: the last ~20 outcomes, each bar individually clickable, a failed bar opening directly on
+ * its failing step through the server-resolved mapping. Its eleven-pixels-of-bar-two-of-gap sizing
+ * and its drop-old-bars-first behaviour under width pressure are its own and are not re-derived
+ * here. "This is what separates the card from a status page: it is dense, factual and a working
+ * control, not a decoration." Today's spend moved to the overflow panel, where §4 sends it.
+ *
+ * A BAR IS A BUTTON INSIDE A BUTTON, and that is why the strip is rendered OUTSIDE the card's own
+ * button rather than inside it. A nested button is invalid markup and, worse, a hit area that
+ * swallows its parent's click — the bug the Inbox's `view_evidence` control had. The card's button
+ * is absolutely positioned to fill the card behind the content, so the whole surface is the target
+ * and the sparkline sits above it in the stacking order with its own clicks intact.
+ */
 function FleetCard({ card }: { card: FleetCardView }) {
   const filters = useWorkStore((s) => s.filters);
   const setFilters = useWorkStore((s) => s.setFilters);
@@ -124,68 +154,110 @@ function FleetCard({ card }: { card: FleetCardView }) {
 
   return (
     <div
-      style={{ width: CARD_WIDTH }}
-      className={`flex shrink-0 flex-col gap-1.5 rounded-card border px-3 py-2.5 transition-colors duration-fast ${
-        mine ? "border-accent bg-active/40" : "border-hair bg-elevated hover:bg-active/30"
+      style={{ width: CARD_WIDTH, minHeight: CARD_HEIGHT }}
+      // `GLOW.hover`'s RUNG VIA THE HOVER BACKGROUND, AND `FOCUS_RING` UNMODIFIED — §4 asks for
+      // both by name and forbids inventing a card-specific focus treatment. `focus-within` rather
+      // than `focus-visible` because the ring belongs to the CARD and the focus lands on the button
+      // filling it; a ring drawn on the button alone would sit inside the card's own border.
+      //
+      // A FIXED HEIGHT, WHICH IS §Craft 1 RATHER THAN A MAGIC NUMBER. Three lines is the anatomy
+      // §4 states, so the card's height is a consequence of that anatomy and is declared once in
+      // `cockpitLayout.ts` — where the skeleton reads it too, so the two cannot differ by the one
+      // pixel that makes a whole surface read as unfinished.
+      className={`relative flex shrink-0 flex-col gap-1.5 overflow-hidden rounded-card border px-3 py-2.5 transition-colors duration-fast focus-within:shadow-focusring ${
+        mine ? "border-accent bg-active/40" : "border-hair bg-panel hover:bg-active/30"
       }`}
     >
-      {/* THE WHOLE HEADER IS THE FILTER CONTROL, because a hit area smaller than the thing it
-          describes is a control people miss — the same reason the Inbox pointer strip is one
-          button. Clicking it filters the list below to this agent; clicking again clears it, so
-          the card is a toggle rather than a one-way trip somebody has to find their way back from. */}
+      {/* THE TARGET, FILLING THE CARD AND SITTING BEHIND IT. `absolute inset-0` rather than a
+          wrapper, so the sparkline's own twenty buttons are siblings rather than descendants —
+          see the note above on why a bar cannot be nested inside this. */}
       <button
         type="button"
         onClick={() => {
           setFilters({ agentId: mine ? null : card.agent_id });
           sendListWork();
         }}
-        className="flex items-center gap-2 text-left"
-        title={mine ? "Show every agent's work" : `Show only ${card.agent_name}'s work`}
-      >
+        className="absolute inset-0 z-0 rounded-card focus-visible:outline-none"
+        aria-pressed={mine}
+        title={mine ? FILTERS.clearAgent : FILTERS.agentChip(card.agent_name)}
+        aria-label={mine ? FILTERS.clearAgent : FILTERS.agentChip(card.agent_name)}
+      />
+
+      {/* LINE ONE — IDENTITY. §4: the display name at `TYPE_SCALE.title`'s rung and
+          `WEIGHT.semibold`, wrapped in `Truncate`, with the connection glyph to its left. The rung
+          carries its own weight — `typeScale.ts` generates the Tailwind step with 600 on it — so
+          `text-title` is the whole decision and needs no weight class beside it.
+
+          IT WAS `TYPE.title`, WHICH IS `text-label`. That token is named for the JOB (the name of
+          the thing a row is about) and spells §02's Label rung, 13px/500 — one rung below what §4
+          asks for here. On a glance card the name is the thing the eye lands on first and it was
+          the same size as the version chip beside it. */}
+      <div className="pointer-events-none relative z-10 flex items-center gap-2">
         <ConnectionDot card={card} />
-        <Truncate className={`min-w-0 ${TYPE.title}`} title={card.agent_name}>
+        <Truncate className="min-w-0 text-title text-ink" title={card.agent_name}>
           {card.agent_name}
         </Truncate>
-        {/* The deployed version, when the row records one. NULL IS NOT ZERO AND NOT "v1": a
-            deployment written before migration 041 has no record of which version it ran, and
-            guessing one would be a confident lie about somebody's production. */}
-        {card.version !== null && (
-          <span className="shrink-0 text-tiny text-faint tabular-nums">v{card.version}</span>
-        )}
-      </button>
+        {/* §9: A WORD BESIDE THE COLOUR, because colour is never the only signal and `warn` is a
+            blue somebody could read as decoration. It replaces the version rather than joining it:
+            on a 248px card at the title rung there is room for one trailing mark, and which
+            version a public endpoint is serving is a smaller fact than that it is public. */}
+        {card.connection === "public" ? (
+          <span className="shrink-0 text-tiny text-warn">{CONNECTION_LABEL.public}</span>
+        ) : card.version !== null ? (
+          // The deployed version, when the row records one. NULL IS NOT ZERO AND NOT "v1": a
+          // deployment written before migration 041 has no record of which version it ran, and
+          // guessing one would be a confident lie about somebody's production.
+          <span className="shrink-0 text-tiny tabular-nums text-faint">v{card.version}</span>
+        ) : null}
+      </div>
 
-      {/* ONE STRING, NOT WEIGHTED PARTS. It used to be fragments each carrying an emphasis, so
+      {/* LINE TWO — THE SENTENCE. §4: `TYPE_SCALE.caption`, `text-muted`. "This is the whole point
+          of the card and §5 specifies it."
+
+          ONE STRING, NOT WEIGHTED PARTS. It used to be fragments each carrying an emphasis, so
           "1 waiting on you" could be rendered ink against a muted rest — and §5 replaces that
           arrangement with PRECEDENCE: the clause a person can act on is the one that comes first
           and the one that is never trimmed, so its prominence is its POSITION. Which is also what
-          §Craft's accent rule wants, since a second weight on a card that already carries a
-          connection glyph and a name is a third thing competing to be looked at first. */}
-      <div className="text-tiny leading-[1.5] text-muted">{line}</div>
+          §Craft 6's accent rule wants, since a second weight on a card that already carries a
+          connection glyph and a name is a third thing competing to be looked at first.
 
-      {/* A PUBLIC URL SAYS SO EVEN WHEN THE AGENT IS WORKING, which is why this sits under the
-          sentence rather than replacing it: the state is real and so is the warning. */}
-      {card.connection === "public" && (
-        <div className="flex items-baseline gap-1 text-tiny text-muted">
-          <span className="shrink-0 text-warn" aria-hidden>
-            <AlertTriangleIcon size={ICON.badge} />
-          </span>
-          <span>anyone with the URL can spend this workspace&rsquo;s provider key</span>
+          `truncate` RATHER THAN WRAPPING, because the card's height is fixed and a sentence that
+          wrapped would push the sparkline out of the box. Three clauses fit at this width; §27
+          asks to be told if they do not, and the answer is in this file's own note. */}
+      <div className="pointer-events-none relative z-10 truncate text-caption text-muted" title={line}>
+        {line}
+      </div>
+
+      {/* LINE THREE — THE HEALTH STRIP. Its height is reserved whether or not there are bars, which
+          is §Craft 1: "a figure that arrives later has its space reserved from the first paint".
+          `AgentSparkline` renders nothing at all for an agent that has never run — deliberately,
+          because a row of grey placeholders would claim twenty runs that never happened — so
+          without the reserved box a card would grow by fourteen pixels the moment its first run
+          landed, and the whole strip would step down with it. */}
+      <div className="relative z-10 flex h-[14px] items-end">
+        <AgentSparkline outcomes={card.outcomes} />
+      </div>
+
+      {/* THE PROBE, THE OPS AND THE REPAIR — still in the flow, and still three visible controls.
+          §4 wants them behind one overflow, "not as three visible buttons", because "a strip of
+          forty cards each showing three destructive-adjacent controls is a strip where somebody
+          eventually presses Kill by accident". That is the next commit's, and the height above is
+          a MINIMUM rather than a fixed value until it lands — a card whose controls were removed
+          before their replacement existed would be a commit that made the tab worse to ship a
+          cleaner diff. */}
+      {(health || needsReconnect(card.connection)) && (
+        <div className="relative z-10 flex flex-col gap-1">
+          {health && <span className="text-tiny text-faint">{health}</span>}
+          {needsReconnect(card.connection) && (
+            <Capable cmd="reconnectAgent">
+              <ReconnectControl card={card} />
+            </Capable>
+          )}
         </div>
       )}
-
-      {/* THE PROBE'S ANSWER, WITH ITS AGE. Absent when nobody has asked, which is a third state and
-          not "unhealthy" — see `healthLine`. */}
-      {health && <span className="text-tiny text-faint">{health}</span>}
-
-      {/* HEALTH, LOGS AND KILL — the three things people still open the Railway dashboard for. Part 1
-          built all three and left them with no caller; this is where they surface. */}
-      <AgentOps card={card} />
-
-      {needsReconnect(card.connection) && (
-        <Capable cmd="reconnectAgent">
-          <ReconnectControl card={card} />
-        </Capable>
-      )}
+      <div className="relative z-10">
+        <AgentOps card={card} />
+      </div>
     </div>
   );
 }

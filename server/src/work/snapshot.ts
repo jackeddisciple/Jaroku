@@ -139,6 +139,38 @@ export interface FleetCardView {
    */
   health: HealthState | null;
   health_stale_ms: number | null;
+  /**
+   * The last ~20 run outcomes, oldest first — line three of the card, and §Craft 5's whole point.
+   *
+   * THE SAME SHAPE THE AGENTS GRID ALREADY SENDS, from the same aggregate, because it is drawn by
+   * the same component. `AgentSparkline` renders each outcome as an individually clickable bar and
+   * opens a failed one directly on its failing step through the step mapping the server resolved —
+   * so this carries `failed_step_id` for exactly the bars that have one, and the card gets a dense,
+   * factual, working control where a status page would put a spend figure.
+   *
+   * EMPTY IS A REAL ANSWER AND NOT A GAP. An agent that has never run has no bars, and the
+   * component renders nothing rather than twenty grey placeholders claiming runs that never
+   * happened. The card reserves the line's height regardless — §Craft 1 — so the absence costs no
+   * layout shift when the first run lands.
+   */
+  outcomes: AgentRunBar[];
+}
+
+/**
+ * One recent run, as the sparkline draws it and clicks through to it.
+ *
+ * DECLARED HERE AND MATCHING `wsRelay.ts`'s, rather than imported from it, for the reason every
+ * other view type in this file is declared locally: this module is the shape of what the `work`
+ * channel sends, and reaching into the relay's own payload types would make the two channels'
+ * definitions one — which is exactly the coupling that makes a change to one break the other for
+ * reasons nobody can see from either file.
+ */
+export interface AgentRunBar {
+  run_id: string;
+  outcome: "ok" | "error" | "running" | "paused";
+  started_at: string;
+  /** Where a failed bar opens the trace. Null when nothing recorded a failing step. */
+  failed_step_id: string | null;
 }
 
 export interface WorkSnapshotPayload {
@@ -211,6 +243,27 @@ export interface WorkSnapshotDeps {
   hasServeToken: (ctx: TenantContext, serviceId: string) => Promise<boolean>;
   /** The last health answer for a deployment, if anything has asked. Never a fresh probe. */
   cachedHealth?: (deploymentId: string) => { state: HealthState; staleMs: number } | undefined;
+  /**
+   * The last ~20 run outcomes per agent, keyed by the agent's SLUG — line three of the fleet card.
+   *
+   * INJECTED RATHER THAN QUERIED HERE, which is the same decision `agentNames`, `actorNames` and
+   * `deployments` already record. The aggregate that answers this is `Store.agentRunFacts`, and it
+   * is a window function plus a batched failing-step lookup that the Agents grid already runs for
+   * its own sparkline — so asking for it here reuses that read rather than writing a second copy
+   * of a `ROW_NUMBER() OVER (PARTITION BY …)` which would then have to be kept in step with it.
+   * §Craft 5 is explicit that the step-to-trace mapping is reused and not re-derived; this is the
+   * server half of the same instruction.
+   *
+   * KEYED BY SLUG BECAUSE `runs.agent_id` IS ONE, exactly as `deployments.agent_id` is. Everything
+   * else the Cockpit holds is keyed by uuid, so the join is the caller's for the same reason the
+   * deployment map's is — a map keyed by slug and read with a uuid matches nothing, which renders
+   * every card with an empty sparkline and looks like a workspace that has never run anything.
+   *
+   * OPTIONAL, AND ABSENT MEANS NO BARS RATHER THAN AN ERROR. A caller that has not wired it — an
+   * older fixture, a suite about tenancy — gets cards with empty strips, which is a state the card
+   * already has to render for an agent that has never run.
+   */
+  runOutcomes?: (ctx: TenantContext) => Promise<Map<string, AgentRunBar[]>>;
   /** A scoped handle, for the two grouped aggregate reads. */
   scoped: (ctx: TenantContext) => Queryable;
   now?: () => number;
@@ -286,12 +339,13 @@ export class WorkSnapshots {
    * into a second Agents grid, which §3 spends a paragraph saying this must not be.
    */
   async fleet(ctx: TenantContext): Promise<FleetPayload> {
-    const [agents, deployments, live, today, lastJob] = await Promise.all([
+    const [agents, deployments, live, today, lastJob, outcomes] = await Promise.all([
       this.deps.agentNames(ctx),
       this.deps.deployments(ctx),
       this.deps.work.liveByAgent(ctx),
       this.todayByAgent(ctx),
       this.lastJobByAgent(ctx),
+      this.deps.runOutcomes?.(ctx) ?? Promise.resolve(new Map<string, AgentRunBar[]>()),
     ]);
 
     const cards: FleetCardView[] = [];
@@ -318,6 +372,12 @@ export class WorkSnapshots {
         spend_complete: at?.complete ?? true,
         health: health?.state ?? null,
         health_stale_ms: health?.staleMs ?? null,
+        // BY SLUG, WHICH IS WHAT `deployment.agent_id` HOLDS. `runs.agent_id` and
+        // `deployments.agent_id` are both the text slug from migration 002; the loop above is
+        // keyed by uuid because everything else here is. This is the one line where the two
+        // spellings meet, and it is the line that renders every strip empty if it is written with
+        // `agentId` instead.
+        outcomes: outcomes.get(deployment.agent_id) ?? [],
       });
     }
     cards.sort((a, b) => a.agent_name.localeCompare(b.agent_name));

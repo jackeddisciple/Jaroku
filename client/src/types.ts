@@ -2388,6 +2388,14 @@ export interface FleetCardView {
   /** Null means NOBODY HAS ASKED, which is a third state and not unhealthy — §10. */
   health: DeployHealthState | null;
   health_stale_ms: number | null;
+  /**
+   * The last ~20 run outcomes, oldest first — line three of the fleet card.
+   *
+   * THE AGENTS GRID'S OWN SHAPE, deliberately, because the same component draws both. `AgentRunBar`
+   * is declared once above for the grid and reused here rather than restated: a second identical
+   * interface would be a second thing to keep in step with a payload that already travels.
+   */
+  outcomes: AgentRunBar[];
 }
 
 export type WorkCounts = Record<WorkStatus, number>;

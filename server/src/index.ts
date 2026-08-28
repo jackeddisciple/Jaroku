@@ -280,7 +280,7 @@ import { WorkStore, isWorkStatus, type WorkItem } from "./work/workStore.ts";
 import { WorkDispatcher, workConcurrencyFromEnv } from "./work/dispatcher.ts";
 import { WorkActions } from "./work/actions.ts";
 import { WorkLifecycle } from "./work/lifecycle.ts";
-import { WorkSnapshots } from "./work/snapshot.ts";
+import { WorkSnapshots, type AgentRunBar as WorkRunBar } from "./work/snapshot.ts";
 import { DeployManager, planDeploy, type DeployManagerDeps } from "./deployManager.ts";
 import { RailwayApi, RailwayError, RAILWAY_ENV_KEY } from "./railwayApi.ts";
 import { sandboxKind } from "./sandbox/runSandbox.ts";
@@ -6509,6 +6509,45 @@ const workSnapshots = new WorkSnapshots({
   // per-render fetch, and a snapshot builder that probed would make twenty outbound requests to
   // URLs Jaroku does not own every time somebody opened the tab.
   cachedHealth: (deploymentId) => deployOps.cachedHealth(deploymentId),
+  // §Craft 5's health strip, from the aggregate the Agents grid already runs.
+  //
+  // `agentRunFacts` IS THE SAME READ, NOT A SECOND ONE. It is a `ROW_NUMBER() OVER (PARTITION BY
+  // agent_id)` that takes the last N per agent in one statement — the read that would otherwise be
+  // the N+1 behind twenty bars on every card — and `firstFailedStepFor` is the batched lookup that
+  // makes a red bar open on its failing step. Both already exist and both are already argued in
+  // `store.ts`; writing a Cockpit-shaped copy of either is how two sparklines start disagreeing
+  // about which step a failure began at.
+  //
+  // THE FAILING-STEP LOOKUP IS SKIPPED ENTIRELY WHEN NOTHING FAILED, which in a healthy workspace
+  // is every time — the same short-circuit the grid takes, for the same reason.
+  //
+  // KEYED BY SLUG, unlike the two maps above it, because `runs.agent_id` is the text slug and the
+  // fleet builder reads it with `deployment.agent_id`, which is the same spelling. The join that
+  // the other lookups do here is deliberately NOT done: doing it would convert this map to uuids
+  // and then the builder would have to convert back.
+  runOutcomes: async (ctx) => {
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const facts = await store.agentRunFacts(ctx, since, OUTCOME_WINDOW);
+    const bars = new Map<string, WorkRunBar[]>();
+    for (const [slug, fact] of facts) {
+      bars.set(slug, fact.recent.map((r) => ({
+        run_id: r.runId,
+        outcome: r.outcome,
+        started_at: r.startedAt,
+        failed_step_id: null,
+      })));
+    }
+    const failed = [...bars.values()].flat().filter((b) => b.outcome === "error").map((b) => b.run_id);
+    if (failed.length > 0) {
+      const firstFailures = await store.firstFailedStepFor(ctx, failed);
+      for (const list of bars.values()) {
+        for (const bar of list) {
+          if (bar.outcome === "error") bar.failed_step_id = firstFailures.get(bar.run_id) ?? null;
+        }
+      }
+    }
+    return bars;
+  },
   scoped: (ctx) => store.database().forWorkspace(ctx.workspaceId),
 });
 

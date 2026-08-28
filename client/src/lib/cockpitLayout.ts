@@ -65,6 +65,27 @@ export const SPINE_X = "px-5";
 export const CARD_WIDTH = 248;
 
 /**
+ * How tall one fleet card is — the sum of §4's three lines, not a number somebody liked.
+ *
+ * IT IS DERIVED FROM THE ANATOMY and written out so the arithmetic is checkable: the identity line
+ * is `TYPE_SCALE.title`'s 22px line height, the sentence is `caption`'s 16, the health strip is
+ * `AgentSparkline`'s own 14, two `gap-1.5` gaps are 6 each, and `py-2.5` adds 10 above and below
+ * with the card's hairline either side. 22 + 16 + 14 + 12 + 20 + 2 = 86.
+ *
+ * WHY IT IS DECLARED AT ALL, given that a flex column would compute it: §Craft 1. "Every skeleton's
+ * geometry matches its final content EXACTLY: the same row height, the same column widths, the same
+ * card width." A skeleton that guessed at the card's height produces the one pixel of jump that
+ * whole section says makes a surface read as unfinished — and the only way two files agree on a
+ * number is for there to be one number.
+ *
+ * AND BECAUSE LINE THREE CAN BE EMPTY. An agent that has never run has no bars, and
+ * `AgentSparkline` renders nothing rather than twenty grey placeholders claiming runs that never
+ * happened — so without a height the card would grow when its first run landed and take the whole
+ * strip down with it.
+ */
+export const CARD_HEIGHT = 86;
+
+/**
  * How tall one work row is.
  *
  * FIXED FOR THE VIRTUALISER'S SAKE — §18 windows this list with `feedWindow.ts`, and a window over

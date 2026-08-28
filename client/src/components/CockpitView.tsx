@@ -42,7 +42,7 @@
 import { useEffect } from "react";
 
 import { HEADER, OFFLINE } from "../lib/cockpitCopy.ts";
-import { CARD_WIDTH, ROW_HEIGHT, SPINE_X } from "../lib/cockpitLayout.ts";
+import { CARD_HEIGHT, CARD_WIDTH, ROW_HEIGHT, SPINE_X } from "../lib/cockpitLayout.ts";
 import { sendListFleet, sendListWork } from "../lib/socket.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
@@ -232,8 +232,8 @@ function CockpitSkeleton() {
             key={i}
             // THE CARD'S OWN WIDTH, imported rather than guessed — §Craft 1. A skeleton one pixel
             // off its content is the jump that makes a whole surface read as unfinished.
-            style={{ width: CARD_WIDTH }}
-            className="h-[76px] shrink-0 rounded-card bg-active/60"
+            style={{ width: CARD_WIDTH, height: CARD_HEIGHT }}
+            className="shrink-0 rounded-card bg-active/60"
           />
         ))}
       </div>

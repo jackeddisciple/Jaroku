@@ -38,7 +38,7 @@ const card = (patch: Partial<FleetCardView> = {}): FleetCardView => ({
   agent_id: "a", agent_name: "billing_bot", deployment_id: "d", url: "https://x.up.railway.app",
   version: 7, provider: "anthropic", model: "claude-haiku-4-5", connection: "connected",
   running: 0, waiting: 0, queued: 0,
-  jobs_today: 0, last_job_at: null, spend_today: 0, spend_complete: true,
+  jobs_today: 0, last_job_at: null, spend_today: 0, spend_complete: true, outcomes: [],
   health: null, health_stale_ms: null,
   ...patch,
 });
