@@ -24,6 +24,7 @@ import { useEffect, useRef } from "react";
 
 import { fmtCost, fmtDuration } from "../lib/format.ts";
 import { sendCancelWork, sendListWork, sendLoadWorkItem, sendRetryWork } from "../lib/socket.ts";
+import { SPINE_X } from "../lib/cockpitLayout.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { useMcpStore } from "../store/mcpStore.ts";
 import { useWorkStore } from "../store/workStore.ts";
@@ -98,7 +99,7 @@ function Row({ item }: { item: WorkItemView }) {
   return (
     <li>
       <div
-        className={`group flex items-center gap-3 border-b border-hair px-2 py-2 transition-colors duration-fast ${
+        className={`group flex items-center gap-3 border-b border-hair py-2 transition-colors duration-fast ${
           active ? "bg-active/50" : "hover:bg-active/30"
         }`}
       >
@@ -244,7 +245,7 @@ function Filters() {
   };
 
   return (
-    <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-hair px-6 py-2">
+    <div className={`flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-hair py-2 ${SPINE_X}`}>
       <div className="flex items-center gap-1">
         {(["mine", "all"] as const).map((scope) => (
           <button
@@ -322,7 +323,15 @@ export function WorkList() {
   return (
     <>
       <Filters />
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-1">
+      {/* §3C: THE ONLY REGION ON THIS TAB THAT SCROLLS VERTICALLY, and it says so at both edges.
+          `.scroll-fade` is `index.css`'s own 16px mask, opted into by class exactly as that file
+          intends — a hard cut at the top of a list whose head moves every few seconds reads as the
+          list having ended rather than as it continuing above.
+
+          `px-5` IS THE SPINE. It was `px-4`, which put every row's status glyph four pixels left of
+          the word "Cockpit" and of the first fleet card — the two-pixel disagreement §Craft 3 is
+          about, at twice the size. */}
+      <div ref={scrollRef} className={`scroll-fade min-h-0 flex-1 overflow-y-auto py-1 ${SPINE_X}`}>
         {items.length === 0 ? (
           <ZeroState />
         ) : (

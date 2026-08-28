@@ -1,82 +1,121 @@
-// The full-screen Cockpit (§3–§11): a two-region operator console, and deliberately not a fifth list.
+// The full-screen Cockpit — §2's console, and deliberately not a fifth list.
 //
-// FIVE TABS, FIVE GENUINELY DIFFERENT LAYOUTS. Threads is rows, Agents is a card grid, the Inbox is
-// a severity board, Activity is figure-led cards, and this is a STRIP over a LIST with a detail
-// panel sliding in from the right. §9 asks for exactly that shape and the reason is what the strip
-// and the list each answer: the strip is "what is live", a glance across the fleet that fits on one
-// line per agent; the list is "what is happening to the jobs I gave it", which is rows. Neither
-// reads as the other and folding them together would produce a list of agents with jobs nested
-// under it — which is the Agents tab with extra steps.
+// FIVE TABS, FIVE GENUINELY DIFFERENT SILHOUETTES. Threads is a row list, Agents is a card grid
+// with a density toggle, the Inbox is a severity board with a rail, Activity is figure-led cards.
+// §2: "A fifth list would make the app feel like it has five of the same screen." So this one is a
+// CONSOLE — a horizontal band of live objects across the top, a dense record below it, and a
+// detail that slides over rather than navigates away.
 //
-// IT IS WORK-FIRST, WHICH IS THE DECISION §3 SPENDS A PARAGRAPH ON. One list across every agent,
-// because the operator asks "what is happening", not "how is agent four". There is deliberately no
-// work list inside Agent detail: a second place a job can be dealt with is the mistake the Inbox
-// already refused, so what goes there is a POINTER — "3 running, 1 waiting on you" — that opens
-// this tab filtered to that agent.
+// THE SHAPE MATCHES THE QUESTION. The eye goes to the band to see WHAT IS ALIVE, then down to the
+// record to see WHAT HAPPENED, and a job's detail must not cost the reader their place in the
+// list — "an operator scanning forty rows who loses scroll position on every click will stop
+// clicking". Every one of the three regions below exists because of one clause of that sentence.
 //
-// THE TWO REGIONS ARE ONE SCROLL AND THE STRIP DOES NOT MOVE. A fleet card is a glance and a glance
-// that scrolls away is a glance somebody has to go and find; the strip scrolls HORIZONTALLY inside
-// itself when the fleet is wider than the pane, which is what keeps a workspace with twenty agents
-// from pushing the work list off the bottom of the screen.
+// AND WHAT IT MUST NOT RESEMBLE, which §2 spends as many words on: not the Inbox board, because
+// work items are graded by TIME and a severity column would imply a triage that does not exist
+// here; not the Agents grid, because fleet cards are a strip and they are glances rather than
+// summaries; and not a table with sortable headers, because sorting is time descending, always,
+// and a column-sorted table invites the reader to reorganise a record whose only true order is the
+// order it happened in.
+//
+// ─── THE ALIGNMENT SPINE ────────────────────────────────────────────────────────────────────────
+//
+// §Craft 3 names one habit as "the single habit that separates a screen that reads as designed
+// from one that reads as assembled": the header's label, the fleet card and the work row's status
+// glyph sit on the same left edge. `SPINE` below is that edge, and it is a rung of the existing
+// ladder rather than a number — `SPACE.section`, 20px, which is what `px-5` already spells and
+// what the Inbox's header already uses.
+//
+// ONE OF THE THREE CANNOT BE ON IT TO THE PIXEL, and saying so is better than pretending. A fleet
+// card is a bordered box with its own padding, so its NAME sits inset by that border and padding;
+// putting the name itself at 20px would mean a card whose text begins on its own border. What
+// shares the spine is the card's LEFT EDGE and its connection glyph — which puts the card's glyph,
+// the row's glyph and the header's label on one line, and makes the card's name align with the
+// row's input text rather than with the label above it. That is the strongest alignment a bordered
+// card admits, and it is a better one than the literal reading: the two glyphs a reader's eye
+// crosses in the same downward glance are the pair that had to agree.
 //
 // NO SPINNERS, AND `loaded` IS A DISTINCT STATE FROM EMPTY. "We have not been told yet" renders a
-// line, and "there is nothing" renders one of §11.4's three zero states — collapsing them would put
-// "Nothing has been asked of them yet" in front of somebody whose jobs are still on the wire.
+// skeleton and "there is nothing" renders one of §10's three zero states — collapsing them would
+// put "Nothing has been asked of them yet" in front of somebody whose jobs are still on the wire.
 
 import { useEffect } from "react";
 
+import { HEADER, OFFLINE } from "../lib/cockpitCopy.ts";
+import { CARD_WIDTH, ROW_HEIGHT, SPINE_X } from "../lib/cockpitLayout.ts";
 import { sendListFleet, sendListWork } from "../lib/socket.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { useWorkStore } from "../store/workStore.ts";
-import { EmptyState, LoadingLine } from "./EmptyState.tsx";
+import { EmptyState } from "./EmptyState.tsx";
 import { FleetStrip } from "./FleetStrip.tsx";
 import { WorkComposer } from "./WorkComposer.tsx";
 import { WorkDetail } from "./WorkDetail.tsx";
 import { WorkList } from "./WorkList.tsx";
-import { GaugeIcon, RocketIcon } from "./panelIcons.tsx";
+import { RefreshIcon, RocketIcon } from "./panelIcons.tsx";
 
 /**
- * The header: what this tab is, and the one number that says whether it needs somebody.
+ * §3A's header bar, which is the Inbox's header — copied literally rather than approximated.
+ *
+ * "TWO HEADERS THAT ARE NEARLY THE SAME ARE WORSE THAN TWO THAT ARE IDENTICAL OR TWO THAT ARE
+ * OBVIOUSLY DIFFERENT." Every value here is `InboxView`'s: `border-b border-hair`, `px-5 py-3`,
+ * `TYPE.panelLabel`, a `text-tiny tabular-nums text-faint` count, the reconnecting notice, and the
+ * refresh control pushed right by `ml-auto`. The previous version of this header had `px-6 pt-5
+ * pb-3`, no bottom border and an icon beside the label — four small disagreements with the tab one
+ * click away, which is exactly the "nearly the same" §3 rules out.
  *
  * NO RANGE CONTROL AND NO SEARCH. Activity's header carries a range because every figure on that
- * page describes one window; nothing here is aggregated over a window — a job is a job — so a
- * control that filtered by time would be inventing a question the surface does not ask. The filters
- * that DO belong here are the list's, and they sit on the list.
+ * page describes one window; nothing here is aggregated over a window — a job is a job. The
+ * filters that DO belong to this tab are the list's, and they sit on the list.
+ *
+ * AND NO AUTO-REFRESH SPINNER — §15. The channel pushes. A spinner that turns on a live surface is
+ * decoration, and the refresh here is a way to CHECK rather than a thing that is happening.
  */
 function Header() {
   const counts = useWorkStore((s) => s.counts);
-  const live = useWorkStore((s) => s.anyLive);
+  const connected = useTraceStore((s) => s.connection === "open");
+
+  // THE SUM OF THE PAGE'S OWN COUNTS, which is the Inbox's `counts.all` under a different name.
+  // Scope-aware, because the chips beside the list are: a header figure computed workspace-wide
+  // over a list showing one person's jobs is the promise `counts` was made scope-aware to keep.
+  const total = Object.values(counts).reduce((sum, n) => sum + n, 0);
 
   return (
-    <div className="flex shrink-0 items-baseline gap-3 px-6 pt-5 pb-3">
-      <span className="text-faint" aria-hidden>
-        <GaugeIcon size={ICON.sm} />
-      </span>
-      <h1 className={TYPE.panelLabel}>Cockpit</h1>
-      {/* ONE SENTENCE OF REAL STATE, in the same spirit §9 asks of a fleet card. "Cockpit" alone
-          says what the tab is called; this says whether it needs anybody, which is the thing
-          somebody opened it to find out. Rendered only when there is something to say — an empty
-          workspace gets the zero state below instead of a row of zeroes. */}
-      {live && (
-        <span className="text-caption text-muted tabular-nums">
-          {counts.running} running
-          {counts.waiting > 0 && <span className="text-ink"> · {counts.waiting} waiting on you</span>}
-          {counts.queued > 0 && <> · {counts.queued} queued</>}
+    <div className={`flex shrink-0 items-center gap-3 border-b border-hair py-3 ${SPINE_X}`}>
+      <span className={TYPE.panelLabel}>{HEADER.label}</span>
+      <span className="text-tiny tabular-nums text-faint">{total}</span>
+      {!connected && (
+        // §10's offline treatment, and it is the Inbox's own so the two tabs say it identically.
+        <span className="text-tiny text-muted" title={OFFLINE.hint}>
+          {OFFLINE.header}
         </span>
       )}
+      {/* ASK AGAIN. A full-snapshot channel that goes stale — a transition nothing broadcast, a
+          frame dropped during a reconnect — otherwise has no remedy but reloading the page. BOTH
+          reads, because they answer on different clocks and the relay volunteers only one of them. */}
+      <button
+        type="button"
+        onClick={() => { sendListWork(); sendListFleet(); }}
+        disabled={!connected}
+        className="ml-auto rounded-control p-1.5 text-faint transition-colors hover:bg-active hover:text-ink active:bg-chrome disabled:pointer-events-none disabled:opacity-40"
+        title={HEADER.refresh}
+        aria-label={HEADER.refresh}
+      >
+        <RefreshIcon size={ICON.xs} />
+      </button>
     </div>
   );
 }
 
 /**
- * §11.4's first zero state: no live agents at all.
+ * §10's first zero state: no live agents at all.
  *
- * "Blocking 0 should feel like an achievement; no live agents should feel like a NEXT STEP." So
- * this one is the full treatment with a route out of it, and the two below it are not — the
- * difference between a workspace that has not started and one that is simply idle.
+ * THE ONLY `full` EMPTY STATE IN THE TAB, and §10 says why: "it is a genuine state of the product,
+ * not a gap that clears in ten seconds." The other two are `line`, because a full-height
+ * illustration for a condition that resolves itself is theatre — `EmptyState`'s own file makes the
+ * same argument at greater length.
  */
 function NothingLive() {
   return (
@@ -101,12 +140,11 @@ export function CockpitView() {
   // its own note gives: a reconnect leaves this tab holding a fleet from before the drop with no
   // way to know it is stale.
   //
-  // BOTH READS, and they are two because they answer on different clocks — see §5. Only the LIST
-  // arrives unprompted: the relay volunteers `work/snapshot` on connect so the badge is right on
-  // frame one, and volunteers no `fleet` at all. So a mount-only ask left the strip empty for the
-  // whole of the next workspace — `loaded` came back true from the volunteered snapshot while
-  // `anyLive` stayed false, and the tab said "No agents are live yet" over a workspace with three
-  // of them. The switch is the case that has to re-ask, because the view never unmounts across it.
+  // BOTH READS, and they are two because they answer on different clocks. Only the LIST arrives
+  // unprompted: the relay volunteers `work/snapshot` on connect so the badge is right on frame
+  // one, and volunteers no `fleet` at all. So a mount-only ask left the strip empty for the whole
+  // of the next workspace — `loaded` came back true from the volunteered snapshot while `anyLive`
+  // stayed false, and the tab said "No agents are live yet" over a workspace with three of them.
   useEffect(() => {
     // A POINTER'S FILTER IS APPLIED BEFORE THE READ, not after it. An Agent detail's strip and the
     // Inbox both open this tab already narrowed, and asking unfiltered first would render the
@@ -119,58 +157,99 @@ export function CockpitView() {
   }, [takeCockpitAgentIntent, setFilters, workspaceId, connected]);
 
   return (
-    // `relative`, BECAUSE THE DETAIL PANEL SLIDES OVER THIS REGION RATHER THAN OVER THE WINDOW. It
-    // is the same containment the trace's step detail uses: an overlay positioned against the
-    // viewport would cover the sidebar, which §2's layout law says is untouched by a full-screen
-    // destination.
-    <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-canvas">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-canvas">
       <Header />
 
-      {/* THE REFUSAL IS A STRIP RATHER THAN A TOAST, and it stays until the next snapshot clears it.
-          Four of this tab's six verbs spend money or stop something, so a refusal that faded after
-          three seconds is one somebody presses the button again after. */}
+      {/* §10: ERRORS GO WHERE THE INBOX'S GO — a `text-tiny text-err` strip under the header, with
+          the same bottom hairline. NOT A TOAST: "a toast for a dispatch failure disappears before
+          the user has read which job failed", and four of this tab's verbs spend money or stop
+          something. It stays until the next snapshot clears it. */}
       {error && (
-        <div className="mx-6 mb-3 shrink-0 rounded-control border border-hair bg-elevated px-3 py-2 text-caption text-ink">
-          {error}
-        </div>
+        <div className={`shrink-0 border-b border-hair py-2 text-tiny text-err ${SPINE_X}`}>{error}</div>
       )}
 
-      <div className="flex min-h-0 flex-1 flex-col">
+      {/* §3B: THE STRIP, DIRECTLY UNDER THE HEADER, and it is `shrink-0` so it never gives up
+          height to the list. It renders whatever the fleet holds — including nothing, while the
+          first snapshot is on the wire — because a strip that appeared only once it had cards
+          would be a region arriving after the one below it and moving the whole list down. */}
+      {loaded && anyLive && <FleetStrip />}
+
+      {/* §3C AND §3D IN ONE CONTAINER, which is the load-bearing bit of geometry on this screen.
+          `relative` HERE AND NOT ON THE VIEW ROOT: §3D says the detail slides over the WORK LIST,
+          "not over the fleet strip and never over the sidebar". Anchored to the root it covered
+          the header and the strip as well — so the glance the strip exists to be disappeared
+          behind the panel opened FROM it. The sidebar is untouched either way, because a
+          full-screen destination is contained by §2's layout law rather than by the viewport. */}
+      <div className="relative flex min-h-0 flex-1 flex-col">
         {!loaded ? (
-          <LoadingLine label="Reading what is live…" />
+          <CockpitSkeleton />
         ) : !anyLive ? (
           <NothingLive />
         ) : (
-          <FleetAndWork />
+          <>
+            <WorkList />
+            {/* §8: THE COMPOSER SITS AT THE BOTTOM OF THE WORK LIST REGION, in the flow rather
+                than floating. It is the one control on this tab that CREATES something, and
+                putting it above the record would make the tab read as a form with a history under
+                it rather than as a console with a way to act. */}
+            <WorkComposer />
+          </>
         )}
-      </div>
 
-      {/* MOUNTED ALWAYS AND TRANSLATED OFF-SCREEN WHEN CLOSED, so the transition plays in both
-          directions — the same mechanism `StepDetailPanel` uses. A panel that unmounted would
-          appear instantly and leave slowly, which reads as two different controls. */}
-      <WorkDetail />
+        {/* MOUNTED ALWAYS AND TRANSLATED OFF-SCREEN WHEN CLOSED, so the transition plays in both
+            directions — the same mechanism `StepDetailPanel` uses. A panel that unmounted would
+            appear instantly and leave slowly, which reads as two different controls. It is mounted
+            outside the three branches above for a second reason: a citation opens a job by id,
+            with no list in between, and a panel that lived inside the `anyLive` branch could not
+            be opened in a workspace whose last agent had just been killed. */}
+        <WorkDetail />
+      </div>
     </div>
   );
 }
 
 /**
- * The two regions, once there is a fleet to render.
+ * §10's loading state: a skeleton, not a spinner.
  *
- * SPLIT OUT SO THE SHELL ABOVE READS AS A SHELL, which is the same separation `ActivityView` and
- * `ActivityDashboard` draw and for the same reason: the shell is a mechanism — mount, refuse,
- * decide which of three states to show — and the composition below is a layout. Keeping them apart
- * is what lets the strip and the list land in commits of their own.
+ * THE INBOX'S PATTERN, AT THIS TAB'S SHAPE — "a heading bar and two blocks at the shape of the
+ * content". What is skeletoned is the strip and the first few rows, because those are what will
+ * be there; the detail panel gets `LoadingLine` instead, since it opens on an id rather than on a
+ * shape.
+ *
+ * AND ITS GEOMETRY IS THE CONTENT'S, WHICH IS §Craft 1's WHOLE POINT: "every skeleton's geometry
+ * matches its final content exactly: the same row height, the same column widths, the same card
+ * width". One pixel of jump on a busy list is what makes a surface read as unfinished, and it is
+ * the cheapest thing in this document to get right — it costs nothing but discipline in the
+ * markup. The real dimensions are imported from the components rather than repeated here, so the
+ * two cannot drift and `test:cockpit-craft` can hold them to each other.
  */
-function FleetAndWork() {
+function CockpitSkeleton() {
   return (
-    <>
-      <FleetStrip />
-      <WorkList />
-      {/* THE COMPOSER SITS AT THE BOTTOM, under the list rather than over it, which is where every
-          other input in this product is. It is the one control on this tab that CREATES something,
-          and putting it above the work would make the tab read as a form with a history under it
-          rather than as a console with a way to act. */}
-      <WorkComposer />
-    </>
+    <div aria-hidden className="flex min-h-0 flex-1 flex-col">
+      <div className={`flex shrink-0 gap-3 border-b border-hair py-2 ${SPINE_X}`}>
+        {[0, 1, 2].map((i) => (
+          <div
+            key={i}
+            // THE CARD'S OWN WIDTH, imported rather than guessed — §Craft 1. A skeleton one pixel
+            // off its content is the jump that makes a whole surface read as unfinished.
+            style={{ width: CARD_WIDTH }}
+            className="h-[76px] shrink-0 rounded-card bg-active/60"
+          />
+        ))}
+      </div>
+      <div className={`flex flex-col py-1 ${SPINE_X}`}>
+        {[0, 1, 2, 3, 4].map((i) => (
+          // AND THE ROW'S OWN HEIGHT, for the same reason and from the same module. The glyph slot
+          // and the figure column are reserved at their real widths too, so nothing beside them
+          // moves when the real row lands — §Craft 4's rule applied to the wait rather than to a
+          // hover.
+          <div key={i} style={{ height: ROW_HEIGHT }} className="flex items-center gap-3">
+            <div style={{ width: ICON.xs, height: ICON.xs }} className="shrink-0 rounded-full bg-active/60" />
+            <div className="h-3 min-w-0 flex-1 rounded-chip bg-active/50" />
+            <div className="h-3 w-[7ch] shrink-0 rounded-chip bg-active/40" />
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

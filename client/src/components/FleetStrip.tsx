@@ -25,6 +25,7 @@ import { useState } from "react";
 import { factsOf, fleetSentence, healthLine, needsReconnect } from "../lib/fleetSentence.ts";
 import { sendListWork, sendReconnectAgent } from "../lib/socket.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
+import { CARD_WIDTH, SPINE_X } from "../lib/cockpitLayout.ts";
 import { useWorkStore } from "../store/workStore.ts";
 import type { FleetCardView } from "../types.ts";
 import { AgentOps } from "./AgentOps.tsx";
@@ -123,7 +124,8 @@ function FleetCard({ card }: { card: FleetCardView }) {
 
   return (
     <div
-      className={`flex w-[248px] shrink-0 flex-col gap-1.5 rounded-card border px-3 py-2.5 transition-colors duration-fast ${
+      style={{ width: CARD_WIDTH }}
+      className={`flex shrink-0 flex-col gap-1.5 rounded-card border px-3 py-2.5 transition-colors duration-fast ${
         mine ? "border-accent bg-active/40" : "border-hair bg-elevated hover:bg-active/30"
       }`}
     >
@@ -194,10 +196,21 @@ export function FleetStrip() {
 
   return (
     <div className="shrink-0 border-b border-hair">
-      {/* `overflow-x-auto` ON THE TRACK AND NOT ON THE PAGE. §9's layout law is that wide content
+      {/* `overflow-x-auto` ON THE TRACK AND NOT ON THE PAGE. §3B's layout law is that wide content
           scrolls inside its own container; a strip that widened the page would put a horizontal
-          scrollbar under the work list, which is the one region that must not move sideways. */}
-      <div className="flex gap-3 overflow-x-auto px-6 py-3">
+          scrollbar under the work list, which is the one region that must not move sideways. The
+          scrollbar is the app's own thin one — `index.css` states the rule this tab inherits:
+          nothing in this product is drawn by the OS.
+
+          `py-2` IS `SPACE.tight` AND THE HEIGHT IS THE CARD'S. §3B: "Height is set by its cards,
+          not fixed by a magic number — one card's height, plus padding." Nothing here names a
+          height, so a card that grows by a line takes the strip with it rather than being clipped
+          by a number somebody chose against last week's card.
+
+          `px-5` IS THE SPINE. §Craft 3: the first card's left edge lines up with the word
+          "Cockpit" above it and with the work row's status glyph below it. It was `px-6` against a
+          `px-6` header, which agreed with itself and with nothing else in the app. */}
+      <div className={`flex gap-3 overflow-x-auto py-2 ${SPINE_X}`}>
         {fleet.map((card) => (
           <FleetCard key={card.deployment_id} card={card} />
         ))}
@@ -207,7 +220,7 @@ export function FleetStrip() {
           something replaces it rather than fading, because "the service is restarting" is a
           sentence somebody may want to still be there when they look back. */}
       {notice && (
-        <div className="border-t border-hair px-6 py-1.5 text-tiny text-muted">{notice}</div>
+        <div className={`border-t border-hair py-1.5 text-tiny text-muted ${SPINE_X}`}>{notice}</div>
       )}
     </div>
   );

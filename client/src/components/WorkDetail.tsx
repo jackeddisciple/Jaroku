@@ -19,6 +19,7 @@
 
 import { useEffect } from "react";
 
+import { DETAIL } from "../lib/cockpitCopy.ts";
 import { fmtCost, fmtDuration, fmtTokens } from "../lib/format.ts";
 import { selectRun } from "../lib/selection.ts";
 import { sendCancelWork, sendLoadRun, sendRetryWork } from "../lib/socket.ts";
@@ -108,15 +109,42 @@ export function WorkDetail() {
   };
 
   return (
+    // §3D, and every value in this class list is one of its clauses.
+    //
+    // `z-30` IS `LAYER.menu`, WHICH IS THE POPOVER RUNG. §3D: "It sits at the popover rung of
+    // LAYER." It was `z-20` — `LAYER.panel` — which is the rung a pane sliding over its own COLUMN
+    // sits at, and this slides over a region that itself contains a composer and a filter bar.
+    //
+    // `bg-elevated` AND `border-l border-edge` AND `shadow-floating` TOGETHER, never the shadow
+    // alone: `tokens.ts` states that rule in the elevation block and §3D restates it, and it is
+    // "the difference between 'floating' and 'a drawn rectangle'". On a light page the shadow is
+    // the half that separates and the hairline is the half that would otherwise read as a drawn
+    // box; either alone is a mistake, it is simply the other one carrying the weight.
+    //
+    // `max-w-[92%]` IS §13'S NARROW BEHAVIOUR, and `w-[420px]` is §3D's "comfortable reading
+    // measure, capped so that on a wide monitor it does not become a second page". At the narrowest
+    // supported width the cap wins and the panel is effectively full-width over the list, which is
+    // what §13 asks for in place of "a slide-over at a fraction of a narrow column".
+    //
+    // NO SCRIM AND NO FOCUS TRAP — §3D and §12 both. "This is a panel, not a modal, and the
+    // difference matters: a modal says deal with this now, and a work item's detail never does."
+    // The list stays interactive behind it, which is the whole reason it is an overlay rather than
+    // a navigation.
+    //
+    // `duration-base` BOTH WAYS. §11: the panel slides in on MOTION's standard duration and out on
+    // the same one — "an asymmetric close reads as a glitch" — and 180ms is the one thing in this
+    // tab §Craft 2 allows to reach for `base` rather than `fast`, because it is the one thing with
+    // real distance to cover.
     <div
-      className={`absolute top-0 right-0 bottom-0 z-20 flex w-[420px] max-w-[92%] flex-col border-l border-edge bg-elevated shadow-floating transition-transform duration-base ease-state ${
+      className={`absolute top-0 right-0 bottom-0 z-30 flex w-[420px] max-w-[92%] flex-col border-l border-edge bg-elevated shadow-floating transition-transform duration-base ease-state ${
         open ? "translate-x-0" : "pointer-events-none translate-x-full"
       }`}
       aria-hidden={!open}
       role="complementary"
+      aria-label={DETAIL.label}
     >
       <div className="flex shrink-0 items-center gap-2 px-4 py-3">
-        <span className={TYPE.panelLabel}>Job</span>
+        <span className={TYPE.panelLabel}>{DETAIL.label}</span>
         <button
           type="button"
           onClick={close}
