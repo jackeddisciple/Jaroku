@@ -27,7 +27,7 @@
 
 import { create } from "zustand";
 
-import { admitPending, mergeDelta } from "../lib/workLive.ts";
+import { admitPending, mergeDelta, refuseOptimistic, settleOptimistic } from "../lib/workLive.ts";
 import type {
   FleetCardView, WorkCounts, WorkFilters, WorkItemDetailView, WorkItemView, WorkStatus,
 } from "../types.ts";
@@ -118,6 +118,12 @@ interface WorkState {
   admitPending: () => void;
   /** The list reporting where the reader is. See `atTop`. */
   setAtTop: (atTop: boolean) => void;
+  /** §19: draw a row the moment confirm is pressed, before the server has agreed to anything. */
+  drawOptimistic: (item: WorkItemView) => void;
+  /** §19: the server accepted — the placeholder becomes the real row, at its own index. */
+  settleOptimistic: (ref: string, real: WorkItemView) => void;
+  /** §19: the server refused — the placeholder becomes a failed row rather than vanishing. */
+  refuseOptimistic: (ref: string, reason: string) => void;
   setFleet: (fleet: FleetCardView[], anyLive: boolean) => void;
   openItem: (item: WorkItemDetailView) => void;
   openingItem: (itemId: string | null) => void;
@@ -275,6 +281,52 @@ export const useWorkStore = create<WorkState>((set) => ({
     set((prev) => {
       const merged = admitPending({ items: prev.items, pending: prev.pending });
       return { items: merged.items, pending: merged.pending };
+    }),
+
+  /**
+   * §19: a row appears the moment confirm is pressed, before the server has agreed to anything.
+   *
+   * AT THE HEAD ALWAYS, regardless of `atTop`. §18's rule protects the reader from rows OTHER
+   * people cause; this row is the one they just made, and holding their own job behind a pill
+   * would be the surface refusing to show somebody the thing they did.
+   *
+   * AND THE COUNTS MOVE WITH IT, because a `queued` row that is on screen and not in the chip
+   * above it is the two halves of one screen disagreeing — which is the same argument `noteItem`
+   * makes for every other transition. They are corrected by the next snapshot either way.
+   */
+  drawOptimistic: (item) =>
+    set((prev) => ({
+      items: [item, ...prev.items],
+      counts: { ...prev.counts, queued: prev.counts.queued + 1 },
+      workspaceCounts: { ...prev.workspaceCounts, queued: prev.workspaceCounts.queued + 1 },
+    })),
+
+  settleOptimistic: (ref, real) =>
+    set((prev) => {
+      const merged = settleOptimistic({ items: prev.items, pending: prev.pending }, ref, real);
+      return { items: merged.items, pending: merged.pending };
+    }),
+
+  refuseOptimistic: (ref, reason) =>
+    set((prev) => {
+      const merged = refuseOptimistic({ items: prev.items, pending: prev.pending }, ref, reason);
+      // THE COUNTS FOLLOW THE ROW. It left `queued` and became `failed`, and a chip still counting
+      // it as queued would offer a filter that no longer contains it.
+      const moved = merged.items !== prev.items;
+      return {
+        items: merged.items,
+        pending: merged.pending,
+        counts: moved
+          ? { ...prev.counts, queued: Math.max(0, prev.counts.queued - 1), failed: prev.counts.failed + 1 }
+          : prev.counts,
+        workspaceCounts: moved
+          ? {
+              ...prev.workspaceCounts,
+              queued: Math.max(0, prev.workspaceCounts.queued - 1),
+              failed: prev.workspaceCounts.failed + 1,
+            }
+          : prev.workspaceCounts,
+      };
     }),
 
   setAtTop: (atTop) => set({ atTop }),

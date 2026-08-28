@@ -945,6 +945,22 @@ jobs:
           # second. Beside it the pill's own honesty: it holds the ROWS rather than a count, so
           # pressing it cannot promise three and deliver two.
           npm run test:work-live
+          # THE COMPOSER'S SITUATION, WHOSE PROPERTY IS PRECEDENCE AND NOT CORRECTNESS. Six fixtures
+          # each with one thing wrong pass against ANY ordering of the branches — including one that
+          # tells a reader with no permission to pick an agent first, which is a path ending in the
+          # refusal they were not told about. So every case sets several things wrong at once and
+          # asserts which is spoken. Beside it §23's clause that is easiest to lose: the status is
+          # null when nothing is happening, because "a composer that reports idle is noise".
+          npm run test:cockpit-composer
+          # AND §19's OPTIMISTIC DISPATCH, whose whole subject is one question: "did it run or not".
+          # A row that appears and then vanishes asks it. A row that settles by being removed and
+          # re-added asks a smaller version, since the reader watching the row they just made sees
+          # it move. The hard part is identity — an optimistic row has no server id, and both
+          # plausible answers are wrong: matching by (agent, input, time) breaks the first time
+          # somebody sends the same job twice on purpose, and inserting beside the placeholder is
+          # the duplicate "it settles in place" rules out. A client-minted reference the server
+          # echoes is the only one that works, and these fixtures exercise it.
+          npm run test:cockpit-optimistic
           # THE COCKPIT'S VOICE, READ AS PROSE — the UI specification's §16 puts every string of
           # that tab in one module precisely so it can be, and this is what makes the reading
           # happen without a person. Its interesting assertions are ABSENCES, the same shape

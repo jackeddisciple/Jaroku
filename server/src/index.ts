@@ -6574,13 +6574,18 @@ async function broadcastWorkItem(ctx: TenantContext, item: WorkItem | undefined)
 }
 
 async function handleWorkCommand(ctx: TenantContext, cmd: WorkCommand): Promise<void> {
-  const fail = (message: string, itemId?: string): void =>
-    relay.sendWork(ctx, ctx.requestId, { type: "error", message, itemId });
+  const fail = (message: string, itemId?: string, clientRef?: string): void =>
+    relay.sendWork(ctx, ctx.requestId, { type: "error", message, itemId, clientRef });
   try {
     switch (cmd.cmd) {
       case "dispatchWork": {
+        // §19's REFERENCE, ECHOED ON BOTH ANSWERS. The client drew a row the moment confirm was
+        // pressed and cannot match the acknowledgement to it by an id that did not exist yet; this
+        // is the only value both sides can agree names that press. Read defensively like every
+        // other field of an untrusted command, and simply absent when the client did not send one.
+        const clientRef = typeof cmd.clientRef === "string" ? cmd.clientRef : undefined;
         if (typeof cmd.agentId !== "string" || typeof cmd.input !== "string" || !cmd.input.trim()) {
-          return fail("a job needs an agent and something to do");
+          return fail("a job needs an agent and something to do", undefined, clientRef);
         }
         const out = await workDispatcher.dispatch(ctx, { agentId: cmd.agentId, input: cmd.input });
         if (!out.ok) {
@@ -6588,8 +6593,13 @@ async function handleWorkCommand(ctx: TenantContext, cmd: WorkCommand): Promise<
           // is already visible in what happened to the board: a refusal wrote no row, so the
           // sentence is all there is; a failure wrote one, and the delta below puts it on the list
           // beside the message.
+          //
+          // THE REFERENCE GOES WITH IT EITHER WAY, so §19's "on refusal it does not vanish" holds:
+          // the client's placeholder becomes a failed row carrying this sentence. Without the echo
+          // the row would sit at `queued` for ever, which is the worst of the three outcomes —
+          // worse than vanishing, because it claims a job is waiting that nothing will ever run.
           if (out.stage === "failed") await broadcastWorkItem(ctx, out.item);
-          return fail(out.detail);
+          return fail(out.detail, undefined, clientRef);
         }
         // TO THE ASKER, because it is navigation — the composer clears and the detail panel opens
         // on the new job. Broadcasting it would move every open Cockpit in the workspace.
@@ -6597,7 +6607,11 @@ async function handleWorkCommand(ctx: TenantContext, cmd: WorkCommand): Promise<
         // what came back — two fields a row deliberately does not carry, because a page of fifty
         // rows carrying full inputs and outputs is a page of fifty customer emails on the wire.
         // Sending the row shape here left the panel with an empty "What was asked".
-        relay.sendWork(ctx, ctx.requestId, { type: "dispatched", item: await workSnapshots.detail(ctx, out.item) });
+        relay.sendWork(ctx, ctx.requestId, {
+          type: "dispatched",
+          item: await workSnapshots.detail(ctx, out.item),
+          clientRef,
+        });
         await broadcastWorkItem(ctx, out.item);
         await relay.broadcastFleet();
         return;

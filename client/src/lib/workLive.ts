@@ -133,3 +133,130 @@ export function admitPending(list: LiveList): LiveList {
 export function resetPending(items: WorkItemView[]): LiveList {
   return { items, pending: [] };
 }
+
+// ─── §19: OPTIMISTIC DISPATCH ───────────────────────────────────────────────────────────────────
+//
+// "Between the user pressing confirm and the server acknowledging, something must be on screen, and
+// WHAT IT IS MATTERS." Three rules, and the third is the one the whole section turns on.
+//
+//   A ROW APPEARS IMMEDIATELY, at `queued`, at the top, "marked as not yet acknowledged in a way
+//   that is visible but quiet — reduced opacity is enough".
+//
+//   ON ACKNOWLEDGEMENT IT SETTLES, IN PLACE, WITH NO MOTION. "It was already in the right
+//   position." So the acknowledgement replaces the placeholder at its own index and does not
+//   insert a second row beside it — which is what a naive implementation does, because the real
+//   row arrives with a different id.
+//
+//   ON REFUSAL IT DOES NOT VANISH. "It becomes a failed row carrying the refusal reason. A row that
+//   appears and then disappears makes the user wonder whether the job ran, and 'DID IT RUN OR NOT'
+//   is the one question this tab exists to never leave open."
+//
+// THE ID IS THE PROBLEM AND `client_ref` IS THE ANSWER. The optimistic row has no server id — the
+// row does not exist yet — so the acknowledgement cannot be matched to it by id. It is matched by a
+// reference this client minted and sent with the dispatch, which the server echoes back on the
+// `dispatched` event. Without that the only options are to guess by (agent, input, time), which is
+// wrong the moment somebody sends the same job twice on purpose, or to leave the placeholder and
+// insert the real row beside it, which is the duplicate §19's "settles in place" rules out.
+
+/** A row this client has drawn before the server has agreed to it. */
+export interface OptimisticRow {
+  /** The reference sent with the dispatch and echoed on the answer. Never a server id. */
+  ref: string;
+  item: WorkItemView;
+  /** What the server said when it refused, or null while it has not answered. */
+  refusal: string | null;
+}
+
+/**
+ * Whether a row is one this client drew and the server has not answered for.
+ *
+ * READ FROM THE ID rather than carried as a field, because the id is what everything else keys on:
+ * a row whose id is a client reference is by construction one no server has seen. The prefix makes
+ * that legible in a devtools panel and impossible to collide with a uuid.
+ */
+export const OPTIMISTIC_PREFIX = "pending:";
+
+export function isOptimistic(item: WorkItemView): boolean {
+  return item.id.startsWith(OPTIMISTIC_PREFIX);
+}
+
+/** A row to draw immediately, at `queued`, from what the composer already knows. */
+export function optimisticRow(input: {
+  ref: string;
+  agentId: string;
+  agentName: string | null;
+  deploymentId: string;
+  createdBy: string;
+  createdByName: string | null;
+  text: string;
+}): WorkItemView {
+  return {
+    id: `${OPTIMISTIC_PREFIX}${input.ref}`,
+    agent_id: input.agentId,
+    agent_name: input.agentName,
+    deployment_id: input.deploymentId,
+    run_id: null,
+    created_by: input.createdBy,
+    created_by_name: input.createdByName,
+    input_preview: input.text,
+    status: "queued",
+    output_preview: null,
+    error: null,
+    failure_kind: null,
+    created_at: new Date().toISOString(),
+    started_at: null,
+    ended_at: null,
+    // NULL AND NOT ZERO, exactly as a real row would be: nothing has been priced because nothing
+    // has run. A `$0.00` here would be the one made-up figure on the tab whose argument is that its
+    // numbers are real.
+    cost_usd: null,
+    tokens: null,
+    duration_ms: null,
+    cost_complete: true,
+  };
+}
+
+/**
+ * The server answered — the placeholder becomes the real row, AT ITS OWN INDEX.
+ *
+ * IN PLACE, WHICH IS §19's "it settles, in place, with no motion. It was already in the right
+ * position." The tempting wrong version removes the placeholder and unshifts the real row: it
+ * produces a correct list and moves every row below it by one, at the exact moment the reader is
+ * watching the row they just created.
+ *
+ * AND IT FALLS BACK TO AN ORDINARY ARRIVAL. A `dispatched` answer with no placeholder to replace is
+ * a job this client did not send — a retry from the detail panel, a second window — and the honest
+ * thing is to treat it as what it is rather than to drop it.
+ */
+export function settleOptimistic(list: LiveList, ref: string, real: WorkItemView): LiveList {
+  const id = `${OPTIMISTIC_PREFIX}${ref}`;
+  const at = list.items.findIndex((i) => i.id === id);
+  if (at < 0) {
+    const have = list.items.some((i) => i.id === real.id);
+    return have ? list : { items: [real, ...list.items], pending: list.pending };
+  }
+  const items = [...list.items];
+  items[at] = real;
+  return { items, pending: list.pending };
+}
+
+/**
+ * The server refused — the placeholder BECOMES A FAILED ROW rather than vanishing.
+ *
+ * §19: "A row that appears and then disappears makes the user wonder whether the job ran, and 'did
+ * it run or not' is the one question this tab exists to never leave open." So the row stays, at its
+ * own index, wearing `failed` and carrying the reason the server gave.
+ *
+ * `failure_kind` IS DELIBERATELY LEFT NULL. The six kinds describe what happened to a job that
+ * reached a container; a dispatch the server would not accept never did, so claiming one of them
+ * would be filing a refusal under a category that does not fit. The row carries the server's own
+ * sentence in `error` instead, which the detail panel renders under "What went wrong".
+ */
+export function refuseOptimistic(list: LiveList, ref: string, reason: string): LiveList {
+  const id = `${OPTIMISTIC_PREFIX}${ref}`;
+  const at = list.items.findIndex((i) => i.id === id);
+  if (at < 0) return list;
+  const items = [...list.items];
+  items[at] = { ...items[at]!, status: "failed", error: reason, ended_at: new Date().toISOString() };
+  return { items, pending: list.pending };
+}

@@ -1802,7 +1802,7 @@ export type ClientCommand =
   | { cmd: "listWork"; scope?: "mine" | "all"; status?: WorkStatus; agentId?: string; cursor?: string | null }
   | { cmd: "loadWorkItem"; itemId: string }
   | { cmd: "listFleet" }
-  | { cmd: "dispatchWork"; agentId: string; input: string }
+  | { cmd: "dispatchWork"; agentId: string; input: string; clientRef?: string }
   | { cmd: "cancelWork"; itemId: string }
   | { cmd: "retryWork"; itemId: string }
   | { cmd: "reconnectAgent"; deploymentId: string }
@@ -2433,10 +2433,17 @@ export type WorkMessage =
    */
   | { type: "item"; item: WorkItemView | WorkItemDetailView }
   | { type: "fleet"; cards: FleetCardView[]; anyLive: boolean }
-  /** A dispatch this client asked for was accepted. To the asker, because it is navigation. */
-  | { type: "dispatched"; item: WorkItemDetailView }
+  /**
+   * A dispatch this client asked for was accepted. To the asker, because it is navigation.
+   *
+   * `clientRef` IS §19's ECHO. The client drew a row the moment confirm was pressed, before any id
+   * existed, and this is what matches the answer to that row so it can settle IN PLACE rather than
+   * being joined by a duplicate. See `lib/workLive.ts`.
+   */
+  | { type: "dispatched"; item: WorkItemDetailView; clientRef?: string }
   | { type: "logs"; deploymentId: string; lines: RuntimeLogLine[]; cursor: string | null }
-  | { type: "error"; message: string; itemId?: string }
+  /** `clientRef` is present when the refusal answers a dispatch, so §19's row can fail rather than vanish. */
+  | { type: "error"; message: string; itemId?: string; clientRef?: string }
   | { type: "notice"; message: string; itemId?: string };
 
 // --- the Activity tab (§1–§10) ------------------------------------------------------------------

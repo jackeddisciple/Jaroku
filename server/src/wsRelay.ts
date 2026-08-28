@@ -2440,7 +2440,24 @@ export type ListWorkCommand = {
 };
 export type LoadWorkItemCommand = { cmd: "loadWorkItem"; itemId: string };
 export type ListFleetCommand = { cmd: "listFleet" };
-export type DispatchWorkCommand = { cmd: "dispatchWork"; agentId: string; input: string };
+export type DispatchWorkCommand = {
+  cmd: "dispatchWork";
+  agentId: string;
+  input: string;
+  /**
+   * A reference the CLIENT minted, echoed back on the answer — §19s optimistic dispatch.
+   *
+   * IT IS NOT AN ID AND THE SERVER NEVER STORES IT. The client draws a row the moment confirm is
+   * pressed, before any id exists, and the acknowledgement has to be matched to that row: by id is
+   * impossible, and by (agent, input, time) is wrong the first time somebody sends the same job
+   * twice on purpose. So the client says which press this is and the server repeats it back.
+   *
+   * OPTIONAL, because a command without one is still a valid dispatch — a retry from the detail
+   * panel has no placeholder to settle, and the client treats an unmatched answer as an ordinary
+   * arrival.
+   */
+  clientRef?: string;
+};
 export type CancelWorkCommand = { cmd: "cancelWork"; itemId: string };
 export type RetryWorkCommand = { cmd: "retryWork"; itemId: string };
 /** §9's Reconnect: mint a fresh serve token, set it on Railway, store it. Restarts the service. */
@@ -2521,11 +2538,17 @@ export type WorkEvent =
    * detail panel opens on the new job — and broadcasting it would move every open Cockpit in the
    * workspace to a job somebody else just started.
    */
-  | { type: "dispatched"; item: unknown }
+  | { type: "dispatched"; item: unknown; clientRef?: string }
   /** One window of a container's runtime log, and the cursor that continues it. */
   | { type: "logs"; deploymentId: string; lines: unknown[]; cursor: string | null }
-  /** A refusal, on the channel that asked, so the surface waiting on an answer gets one. */
-  | { type: "error"; message: string; itemId?: string }
+  /**
+   * A refusal, on the channel that asked, so the surface waiting on an answer gets one.
+   *
+   * `clientRef` IS ECHOED WHEN THE REFUSAL ANSWERS A DISPATCH, so §19's optimistic row can become a
+   * failed row carrying the reason rather than vanishing. Without it that row sits at `queued` for
+   * ever, which is worse than vanishing: it claims a job is waiting that nothing will ever run.
+   */
+  | { type: "error"; message: string; itemId?: string; clientRef?: string }
   | { type: "notice"; message: string; itemId?: string };
 
 // --- the Activity tab: what the whole workspace is doing ----------------------------------------

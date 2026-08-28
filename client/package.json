@@ -64,6 +64,8 @@
     "test:work-row": "tsx src/lib/workRow.test.ts",
     "test:work-window": "tsx src/lib/workWindow.test.ts",
     "test:work-live": "tsx src/lib/workLive.test.ts",
+    "test:cockpit-composer": "tsx src/lib/cockpitComposer.test.ts",
+    "test:cockpit-optimistic": "tsx src/lib/cockpitOptimistic.test.ts",
     "test:cockpit-copy": "tsx src/lib/cockpitCopy.test.ts",
     "test:cockpit-format": "tsx src/lib/cockpitFormat.test.ts",
     "test:thread-store": "tsx src/store/threadStore.test.ts",

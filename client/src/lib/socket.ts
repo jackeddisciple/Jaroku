@@ -577,13 +577,25 @@ function dispatch(msg: ServerMessage): void {
         // NAVIGATION, WHICH IS WHY IT IS ANSWERED TO THIS SOCKET AND NOT BROADCAST: the composer
         // clears and the detail panel opens on the job that was just started.
         w.openItem(msg.item);
+        // §19: IT SETTLES THE ROW THE COMPOSER ALREADY DREW, in place and with no motion — "it was
+        // already in the right position". `settleOptimistic` falls back to an ordinary arrival when
+        // there is no placeholder to replace, which is what a retry from the detail panel produces.
+        if (msg.clientRef) w.settleOptimistic(msg.clientRef, msg.item);
         // AND IT JOINS THE LIST BY THE SAME RULE AS ANY OTHER DELTA. A job dispatched while the
         // page is filtered to `failed` does not belong on it, and the panel opening is the
         // navigation that answers the dispatch — not a row appearing under a filter it fails.
-        w.noteItem(msg.item, useSessionStore.getState().user?.id ?? null);
+        else w.noteItem(msg.item, useSessionStore.getState().user?.id ?? null);
       }
       else if (msg.type === "logs") w.setLogs({ deploymentId: msg.deploymentId, lines: msg.lines, cursor: msg.cursor });
-      else if (msg.type === "error") w.setError(msg.message);
+      else if (msg.type === "error") {
+        w.setError(msg.message);
+        // §19: ON REFUSAL THE ROW DOES NOT VANISH — it becomes a failed row carrying the reason.
+        // "A row that appears and then disappears makes the user wonder whether the job ran, and
+        // 'did it run or not' is the one question this tab exists to never leave open." The strip
+        // above the list says it too, because §10 requires the refusal to be somewhere that does
+        // not scroll away; the row is what somebody finds later.
+        if (msg.clientRef) w.refuseOptimistic(msg.clientRef, msg.message);
+      }
       else if (msg.type === "notice") w.setNotice(msg.message);
       break;
     }
@@ -1991,8 +2003,14 @@ export function sendLoadWorkItem(itemId: string): void {
   send({ cmd: "loadWorkItem", itemId });
 }
 
-export function sendDispatchWork(agentId: string, input: string): boolean {
-  return send({ cmd: "dispatchWork", agentId, input });
+/**
+ * `clientRef` IS §19's OPTIMISTIC HANDLE and it is optional here for one reason: a caller that does
+ * not draw a row does not need one. The composer always passes it; a future caller that dispatches
+ * without a placeholder gets the old behaviour, where the answer joins the list as an ordinary
+ * arrival.
+ */
+export function sendDispatchWork(agentId: string, input: string, clientRef?: string): boolean {
+  return send({ cmd: "dispatchWork", agentId, input, clientRef });
 }
 
 export function sendCancelWork(itemId: string): boolean {
