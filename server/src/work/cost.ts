@@ -104,6 +104,27 @@ export async function costsForItems(
         GROUP BY run_id`,
       [ctx.workspaceId, ...chunk],
     );
+    // A RUN WITH NO STEPS PRODUCES NO ROW HERE, so the seeded `NO_COST` stands — and for a job
+    // still on its way that is the right answer. For one that has ENDED it is not: the gate this
+    // file states is "whether the model is in the table rather than whether the sum came out
+    // empty", and an ended job with nothing on its trace is priced-and-free, not unknown. A run
+    // cancelled before its first node is exactly that, and leaving it null put `—` on the row
+    // while the fleet card beside it — which already gates on the model — read `$0.00` for the
+    // same facts. Two surfaces disagreeing about one number is the drift §11 exists to prevent.
+    const answered = new Set(rows.map((r) => String(r.run_id)));
+    for (const runId of chunk) {
+      if (answered.has(runId)) continue;
+      const item = byRun.get(runId);
+      if (!item || !item.ended_at) continue;
+      const model = modelFor(item);
+      out.set(item.id, {
+        cost_usd: model && isPriced(model) ? 0 : null,
+        tokens: 0,
+        duration_ms: durationOf(item),
+        cost_complete: true,
+      });
+    }
+
     for (const row of rows) {
       const item = byRun.get(String(row.run_id));
       if (!item) continue;

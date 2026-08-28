@@ -221,6 +221,32 @@ console.log("\na job with no steps at all");
   check("a queued job reports no cost rather than zero", cost.cost_usd === null && cost.tokens === null);
   check("...and is not flagged as incomplete, because nothing is missing", cost.cost_complete === true);
 }
+{
+  // AN ENDED JOB WITH NO STEPS IS A DIFFERENT QUESTION FROM ONE THAT HAS NOT RUN. "Nothing has
+  // happened yet" is unknown; "it ran and nothing was on the trace" is priced-and-free, and the
+  // gate this file states is the model rather than whether the sum came out empty. A run cancelled
+  // before its first node is exactly this shape — and while it read null, the row showed `—` next
+  // to a fleet card reading `$0.00` for the same facts.
+  const cancelled = await job({
+    deploymentId: HAIKU_DEPLOYMENT,
+    steps: [],
+    ending: { status: "error", runCost: 0, work: "cancelled", error: "Cancelled: the run was stopped at a node boundary" },
+  });
+  const cost = await costOf(cancelled);
+  check("a job cancelled before its first node cost zero, not unknown", cost.cost_usd === 0, String(cost.cost_usd));
+  check("...and its duration is still its own wall clock", cost.duration_ms === 4_000, String(cost.duration_ms));
+  check("...and nothing is missing from the total", cost.cost_complete === true);
+}
+{
+  // THE MODEL IS STILL THE GATE. The same ending on an unpriced deployment stays null, because
+  // there is no table entry to make "free" a fact rather than a guess.
+  const unpriced = await job({
+    deploymentId: UNPRICED_DEPLOYMENT,
+    steps: [],
+    ending: { status: "error", runCost: 0, work: "cancelled", error: "Cancelled: the run was stopped at a node boundary" },
+  });
+  check("...but an unpriced model ending with no steps is still unknown", (await costOf(unpriced)).cost_usd === null);
+}
 
 // --- 6. the statement count, for one job and for forty --------------------------------------------
 
