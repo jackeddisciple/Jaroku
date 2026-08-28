@@ -371,15 +371,36 @@ export class WorkStore {
    * blocked on a human decision is blocked whoever typed it — and a badge that only counted your
    * own would go to zero while a colleague's job sat waiting for anybody to answer.
    */
-  async countsByStatus(ctx: TenantContext): Promise<Record<WorkStatus, number>> {
+  async countsByStatus(
+    ctx: TenantContext,
+    filters: Pick<ListWorkFilters, "scope" | "agentId"> = {},
+  ): Promise<Record<WorkStatus, number>> {
+    // UNDER THE SAME SCOPE AS THE PAGE, because these numbers are rendered ON the filter chips that
+    // set the status — so a chip is a promise about what clicking it will show. Workspace-wide, the
+    // promise is false under the DEFAULT scope: §8 defaults to `mine`, and a workspace with more
+    // than one person then offers "341" over a list of nobody else's jobs. The chip strip's own
+    // rule — "a chip that is present is a chip with something behind it" — is the thing this keeps
+    // true. `status` is deliberately NOT applied: every chip needs its own count, including the
+    // ones that are not the current filter.
+    const where: string[] = ["workspace_id = ?"];
+    const params: unknown[] = [ctx.workspaceId];
+    if (filters.scope !== "all" && ctx.actorUserId) {
+      where.push("created_by = ?");
+      params.push(ctx.actorUserId);
+    }
+    if (filters.agentId) {
+      where.push("agent_id = ?");
+      params.push(filters.agentId);
+    }
     const rows = await this.q(ctx).all<{ status: string; n: unknown }>(
-      `SELECT status, COUNT(*) AS n FROM work_items WHERE workspace_id = ? GROUP BY status`,
-      [ctx.workspaceId],
+      `SELECT status, COUNT(*) AS n FROM work_items WHERE ${where.join(" AND ")} GROUP BY status`,
+      params,
     );
     const out = Object.fromEntries(WORK_STATUSES.map((s) => [s, 0])) as Record<WorkStatus, number>;
     for (const r of rows) if (isWorkStatus(r.status)) out[r.status] = asInt(r.n);
     return out;
   }
+
 
   /**
    * Per-agent counts of what is live and what is waiting, for the fleet strip's one sentence.

@@ -71,8 +71,13 @@ const item = (patch: Partial<WorkItemView> & { id: string }): WorkItemView => ({
 const MINE: WorkFilters = { scope: "mine", status: null, agentId: null };
 
 /** Put the store in a known state. Each case starts from a page, not from whatever the last left. */
-const seed = (items: WorkItemView[], filters: WorkFilters = MINE, counts: WorkCounts = NO_COUNTS): void => {
-  useWorkStore.getState().setSnapshot({ items, nextCursor: null, counts, filters });
+const seed = (
+  items: WorkItemView[],
+  filters: WorkFilters = MINE,
+  counts: WorkCounts = NO_COUNTS,
+  workspaceCounts: WorkCounts = counts,
+): void => {
+  useWorkStore.getState().setSnapshot({ items, nextCursor: null, counts, workspaceCounts, filters });
 };
 
 const ids = (): string[] => useWorkStore.getState().items.map((i) => i.id);
@@ -142,13 +147,22 @@ console.log("\nthe counts move with the row, because they feed the badge\n");
   check("the old status is decremented", c.running === 0, String(c.running));
   check("...and the new one raised", c.waiting === 1, String(c.waiting));
 
-  // A DELTA FOR A ROW WE DID NOT HOLD IS AN ARRIVAL, and that is true whether or not it is on the
-  // page: the counts are the WORKSPACE's, so a colleague's job going to `waiting` must light the
-  // badge for everybody even though it never appears on a page filtered to `mine`.
-  seed([], undefined, NO_COUNTS);
+  // A COLLEAGUE'S JOB MOVES THE BADGE AND NOT THE CHIPS, which is the whole reason they are two
+  // numbers. The badge is the workspace's — a confirmation blocks whoever can answer it, not the
+  // person who dispatched it — while the chips describe the list under them, and a chip that
+  // counted a job the page will never show is a chip promising something clicking it cannot give.
+  seed([], undefined, NO_COUNTS, NO_COUNTS);
   useWorkStore.getState().noteItem(item({ id: "theirs", created_by: THEM, status: "waiting" }), ME);
-  check("a job that never joins the page still counts", useWorkStore.getState().counts.waiting === 1);
-  check("...and still does not join it", ids().length === 0, ids().join(","));
+  check("a colleague's job lights the badge", useWorkStore.getState().workspaceCounts.waiting === 1);
+  check("...without moving the chips over a page filtered to mine",
+    useWorkStore.getState().counts.waiting === 0, String(useWorkStore.getState().counts.waiting));
+  check("...and still does not join the page", ids().length === 0, ids().join(","));
+
+  // AND UNDER "EVERYONE'S" THE SAME DELTA MOVES BOTH, because the page is then about that job too.
+  seed([], { scope: "all", status: null, agentId: null }, NO_COUNTS, NO_COUNTS);
+  useWorkStore.getState().noteItem(item({ id: "theirs", created_by: THEM, status: "waiting" }), ME);
+  check("under Everyone's, a colleague's job moves the chips as well",
+    useWorkStore.getState().counts.waiting === 1 && useWorkStore.getState().workspaceCounts.waiting === 1);
 
   // Re-sending the same transition must not count it twice. Deltas are re-broadcast on a
   // reconnect, and a badge that climbed on every duplicate would be a badge nobody trusted.

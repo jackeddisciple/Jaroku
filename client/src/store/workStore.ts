@@ -19,9 +19,11 @@
 // broadcast one payload to everybody: the alternative is a per-recipient snapshot, which is what
 // the Inbox needs and what this deliberately avoids.
 //
-// THE COUNTS ARE NEVER DERIVED FROM `items`. They arrive with the snapshot and are the WORKSPACE's
-// whatever the page is narrowed to — a count of the page would go to zero the moment somebody
-// filtered, and the sidebar badge is drawn from the same numbers.
+// THE COUNTS ARE NEVER DERIVED FROM `items`, which would go to zero the moment somebody paged or
+// filtered by status. They arrive with the snapshot, counted under the page's SCOPE — they are
+// rendered on the chips that set the status, so a chip is a promise about what clicking it shows.
+// The sidebar badge is deliberately NOT drawn from them: it has `workspaceCounts`, the whole
+// workspace's own, because always-visible chrome must not move when a filter changes.
 
 import { create } from "zustand";
 import type {
@@ -40,6 +42,14 @@ interface WorkState {
   /** Null when there is no further page. */
   nextCursor: string | null;
   counts: WorkCounts;
+  /**
+   * The same six counts for the WHOLE workspace — the sidebar badge, and only it.
+   *
+   * NOT READ OFF `counts`, which follows the list's scope. A badge that moved because somebody
+   * switched the Cockpit to "Mine" would be reporting a filter rather than the workspace, and
+   * being true while nobody is looking at the tab is the one thing a badge is for.
+   */
+  workspaceCounts: WorkCounts;
   /** The filters the page in hand answers for, echoed by the server. */
   filters: WorkFilters;
   fleet: FleetCardView[];
@@ -71,7 +81,7 @@ interface WorkState {
   /** The last thing that went right, for the sentence a reconnect or a kill has to say. */
   notice: string | null;
 
-  setSnapshot: (s: { items: WorkItemView[]; nextCursor: string | null; counts: WorkCounts; filters: WorkFilters }) => void;
+  setSnapshot: (s: { items: WorkItemView[]; nextCursor: string | null; counts: WorkCounts; workspaceCounts: WorkCounts; filters: WorkFilters }) => void;
   /** A second page, appended. The cursor is what makes this an append rather than a replace. */
   appendPage: (s: { items: WorkItemView[]; nextCursor: string | null }) => void;
   /**
@@ -105,8 +115,22 @@ interface WorkState {
  * and leaving it there would make the list a record of what once matched.
  */
 export function matchesFilters(item: WorkItemView, filters: WorkFilters, viewerId: string | null): boolean {
-  if (filters.scope === "mine" && viewerId && item.created_by !== viewerId) return false;
+  if (!matchesScope(item, filters, viewerId)) return false;
   if (filters.status && item.status !== filters.status) return false;
+  return true;
+}
+
+/**
+ * The same rule WITHOUT the status test — what the chip counts are counted over.
+ *
+ * THE STATUS IS LEFT OUT ON PURPOSE. Each chip carries its own status's count, including the five
+ * that are not the current filter, so counting under `filters.status` would leave every chip but
+ * one reading zero. Scope and agent DO apply: those narrow which jobs the page is about at all, and
+ * a count that ignored them is the workspace-wide number that made a chip promise 341 over a list
+ * of nobody else's work.
+ */
+export function matchesScope(item: WorkItemView, filters: WorkFilters, viewerId: string | null): boolean {
+  if (filters.scope === "mine" && viewerId && item.created_by !== viewerId) return false;
   if (filters.agentId && item.agent_id !== filters.agentId) return false;
   return true;
 }
@@ -115,6 +139,7 @@ export const useWorkStore = create<WorkState>((set) => ({
   items: [],
   nextCursor: null,
   counts: NO_COUNTS,
+  workspaceCounts: NO_COUNTS,
   filters: DEFAULT_FILTERS,
   fleet: [],
   anyLive: false,
@@ -130,6 +155,7 @@ export const useWorkStore = create<WorkState>((set) => ({
       items: s.items,
       nextCursor: s.nextCursor,
       counts: s.counts,
+      workspaceCounts: s.workspaceCounts,
       // THE SERVER'S ECHO WINS OVER WHAT THE CLIENT ASKED FOR, and that is what makes a late
       // snapshot droppable rather than confusing: the page in hand is described by the filters it
       // was built under, not by whatever the person has since clicked.
@@ -170,11 +196,24 @@ export const useWorkStore = create<WorkState>((set) => ({
       // THE PREVIOUS STATUS COMES FROM THE ROW WE HELD, and a delta for a row we did not hold is
       // treated as an arrival: that is what a dispatch is, and it is also what a job entering a
       // filter we are showing looks like. Either way the new status is one more than it was.
+      // THE COUNTS FOLLOW THE SCOPE THE PAGE IS UNDER, because they are rendered on the chips that
+      // set the status — so a delta for somebody else's job must not move the numbers over a list
+      // that will never show it. `inScope` is `matchesFilters` without the status test, which is
+      // the point: a chip needs its own count whatever the current status filter is.
       const counts = { ...prev.counts };
       const before = at < 0 ? null : prev.items[at]!.status;
-      if (before !== item.status) {
+      const inScope = matchesScope(item, prev.filters, viewerId);
+      if (inScope && before !== item.status) {
         if (before) counts[before] = Math.max(0, counts[before] - 1);
         counts[item.status] = counts[item.status] + 1;
+      }
+
+      // THE BADGE'S NUMBERS MOVE FOR ANYBODY'S JOB, for the reason their own field exists: a
+      // confirmation blocks the workspace, not the person who happened to dispatch it.
+      const workspaceCounts = { ...prev.workspaceCounts };
+      if (before !== item.status) {
+        if (before) workspaceCounts[before] = Math.max(0, workspaceCounts[before] - 1);
+        workspaceCounts[item.status] = workspaceCounts[item.status] + 1;
       }
 
       // A DELTA CAN ADD A ROW AND IT CAN REMOVE ONE, which is the half that is easy to leave out
@@ -188,11 +227,11 @@ export const useWorkStore = create<WorkState>((set) => ({
       // REMOVING: a row that stops matching has LEFT the filter. A job filtered to `running` that
       // succeeds is no longer part of the answer to the question on screen, and leaving it there
       // would make the list a record of what once matched rather than what does.
-      if (at < 0) return belongs ? { items: [item, ...prev.items], open, counts } : { open, counts };
+      if (at < 0) return belongs ? { items: [item, ...prev.items], open, counts, workspaceCounts } : { open, counts, workspaceCounts };
       const items = [...prev.items];
       if (!belongs) items.splice(at, 1);
       else items[at] = item;
-      return { items, open, counts };
+      return { items, open, counts, workspaceCounts };
     }),
 
   setFleet: (fleet, anyLive) => set({ fleet, anyLive }),

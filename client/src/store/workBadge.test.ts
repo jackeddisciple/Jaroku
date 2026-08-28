@@ -86,14 +86,20 @@ console.log("\nthe sidebar draws it from here and nowhere else");
   // NARROWED TO READS OFF THE WORK STORE, because `counts.running` also names the agent list's own
   // tallies further down this file and those have nothing to do with this badge. What a drifted
   // badge would have to look like is a selector reaching into the work store's counts.
-  const drifted = sidebar.match(/useWorkStore\(\(s\) => s\.counts\.\w+\)/g) ?? [];
+  const drifted = sidebar.match(/useWorkStore\(\(s\) => s\.(workspaceC|c)ounts\.\w+\)/g) ?? [];
   check(
     `no status count is read off the work store directly (${drifted.join(", ") || "none is"})`,
     drifted.length === 0,
   );
   // AND THE POSITIVE HALF OF THE SAME RULE: a sidebar that imported `workBadgeCount` and then
   // rendered something else would satisfy both checks above and still be wrong.
-  check("...and the badge is drawn through it", /workBadgeCount\(s\.counts\)/.test(sidebar));
+  //
+  // OFF `workspaceCounts`, NOT `counts`. The latter follows the Cockpit's scope, so a badge drawn
+  // from it would drop to nothing the moment somebody switched that tab to "Mine" — reporting a
+  // filter instead of the workspace, on the one piece of chrome whose job is being right while
+  // nobody is looking at the tab.
+  check("...and the badge is drawn through it", /workBadgeCount\(s\.workspaceCounts\)/.test(sidebar));
+  check("...off the workspace's counts rather than the page's", !/workBadgeCount\(s\.counts\)/.test(sidebar));
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

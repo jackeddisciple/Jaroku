@@ -132,8 +132,27 @@ export interface WorkSnapshotPayload {
   items: WorkItemView[];
   /** Null when there is no further page. */
   nextCursor: string | null;
-  /** The whole workspace's counts, whatever filter this page is under. */
+  /**
+   * The counts UNDER THIS PAGE'S SCOPE, because they are rendered on the chips that set the status.
+   *
+   * A chip is a promise about what clicking it will show, and workspace-wide numbers broke that
+   * promise under the default scope — §8 defaults to `mine`, so in any workspace with two people
+   * the strip offered counts for jobs the list would not show. `status` is not applied: every chip
+   * carries its own count, including for the status that is not currently selected.
+   */
   counts: Record<WorkStatus, number>;
+  /**
+   * The same six counts for the WHOLE workspace — the sidebar badge, and only it.
+   *
+   * SEPARATE FROM `counts` because always-visible chrome must not move when somebody toggles a
+   * filter on a tab they are not looking at, and because anyone who can answer a confirmation can
+   * answer it whoever asked for the job.
+   *
+   * THE WHOLE SHAPE RATHER THAN THE ONE NUMBER THE BADGE READS, so `workBadgeCount` stays a
+   * function over `WorkCounts` with one definition — and so `test:work-badge`, which §9 asks for
+   * by name, keeps every case that says which statuses must NOT light it.
+   */
+  workspaceCounts: Record<WorkStatus, number>;
   /**
    * The filters this page ANSWERS FOR, echoed back.
    *
@@ -189,9 +208,15 @@ export class WorkSnapshots {
 
   /** One page of the work list, with the workspace's counts and the filters it answers for. */
   async list(ctx: TenantContext, filters: ListWorkFilters = {}): Promise<WorkSnapshotPayload> {
-    const [page, counts, agents, actors, deployments] = await Promise.all([
+    // NARROWED, so the chips describe the list under them; and WHOLE, for the badge, which is
+    // always-visible chrome and must not move because a filter changed on a tab nobody is looking
+    // at. The second read is skipped when the page is already the whole workspace, which is what
+    // "Everyone's" with no agent filter means — the two answers are then the same answer.
+    const wholeWorkspace = filters.scope === "all" && !filters.agentId;
+    const [page, counts, workspaceCounts, agents, actors, deployments] = await Promise.all([
       this.deps.work.list(ctx, filters),
-      this.deps.work.countsByStatus(ctx),
+      this.deps.work.countsByStatus(ctx, filters),
+      wholeWorkspace ? Promise.resolve(null) : this.deps.work.countsByStatus(ctx, { scope: "all" }),
       this.deps.agentNames(ctx),
       this.deps.actorNames(ctx),
       this.deps.deployments(ctx),
@@ -206,6 +231,7 @@ export class WorkSnapshots {
       items: page.items.map((item) => view(item, costs.get(item.id), agents, actors)),
       nextCursor: page.nextCursor,
       counts,
+      workspaceCounts: workspaceCounts ?? counts,
       filters: {
         scope: filters.scope === "all" ? "all" : "mine",
         status: filters.status ?? null,

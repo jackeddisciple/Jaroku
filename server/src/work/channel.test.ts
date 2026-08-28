@@ -188,16 +188,36 @@ console.log("\na snapshot carries the filter it answers for");
   check("...and names who asked for it", all.items.find((i) => i.id === theirs.id)?.created_by_name !== null);
   check("...echoing the filter it answers for", all.filters.scope === "all");
 
-  // THE COUNTS ARE THE WORKSPACE'S WHATEVER THE FILTER IS, which is what makes the badge right on a
-  // page that is narrowed. A count of the page would go to zero the moment somebody filtered.
-  check("the counts are the workspace's, not the page's",
-    mine.counts.queued === all.counts.queued && mine.counts.running === all.counts.running);
+  // TWO SETS OF COUNTS, BECAUSE THEY ANSWER TWO QUESTIONS.
+  //
+  // `counts` is rendered ON the chips that set the status, so it follows the page's scope: a chip
+  // is a promise about what clicking it will show, and workspace-wide numbers break that promise
+  // under the DEFAULT scope — §8 defaults to `mine`, so any workspace with two people offered a
+  // count for jobs the list would never render.
+  //
+  // `workspaceCounts` is the sidebar badge, which is always-visible chrome: it must not move
+  // because somebody toggled a filter on a tab they are not looking at, and a confirmation blocks
+  // the workspace rather than whoever happened to dispatch it.
+  check("the chips' counts follow the page's scope", mine.counts.queued < all.counts.queued,
+    `${mine.counts.queued} vs ${all.counts.queued}`);
   check("...and cover all six statuses", WORK_STATUSES.every((s) => typeof mine.counts[s] === "number"));
+  check("the badge's counts are the workspace's on both pages",
+    mine.workspaceCounts.queued === all.workspaceCounts.queued &&
+      mine.workspaceCounts.running === all.workspaceCounts.running);
+  check("...and on the narrowed page they are the whole workspace, not the page",
+    mine.workspaceCounts.queued === all.counts.queued);
 
   const filtered = await snapshots.list(ctx, { scope: "all", status: "succeeded" });
   check("a status filter narrows the page", filtered.items.every((i) => i.status === "succeeded"));
   check("...and is echoed", filtered.filters.status === "succeeded");
-  check("...while the counts stay the workspace's", filtered.counts.running === all.counts.running);
+  // THE STATUS IS NOT APPLIED TO THE COUNTS, and that is what keeps five of the six chips from
+  // reading zero the moment somebody clicks the sixth.
+  check("...while every chip keeps its own count", filtered.counts.running === all.counts.running);
+  check("...and the badge is untouched by it", filtered.workspaceCounts.waiting === all.workspaceCounts.waiting);
+
+  const byAgent = await snapshots.list(ctx, { scope: "all", agentId: theirs.agent_id });
+  check("an agent filter narrows the chips too", byAgent.counts.queued <= all.counts.queued);
+  check("...but never the badge", byAgent.workspaceCounts.queued === all.workspaceCounts.queued);
 }
 
 // --- 4. the fleet is its own read ------------------------------------------------------------------

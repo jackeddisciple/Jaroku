@@ -3590,9 +3590,11 @@ export class WsRelay {
         // first renders no badge for as long as that takes — which is the moment somebody decides
         // there is nothing waiting.
         //
-        // THE DEFAULT FILTER, WHICH IS `mine`, because that is what the tab opens on. The counts in
-        // it are the workspace's whatever the filter is — see `countsByStatus` — so the badge is
-        // right even though the page is narrowed.
+        // THE DEFAULT FILTER, WHICH IS `mine`, because that is what the tab opens on. `counts` in it
+        // is narrowed to match — it is drawn on the chips that filter the page — and the badge
+        // reads `workspaceCounts` instead, which is the whole workspace's whatever the page shows.
+        // That is what makes this snapshot enough: the badge is right on frame one without the
+        // client asking a second question.
         this.sendTo(ws, {
           channel: "work",
           type: "snapshot",

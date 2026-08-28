@@ -404,7 +404,7 @@ function NavRail() {
    * over and is the Inbox's to raise; not `queued`, which is a moment. `waiting` is the only
    * state where a HUMAN is the blocker, and that is the only thing a badge should ever mean.
    */
-  const waitingOnYou = useWorkStore((s) => workBadgeCount(s.counts));
+  const waitingOnYou = useWorkStore((s) => workBadgeCount(s.workspaceCounts));
 
   return (
     <div className="flex w-10 shrink-0 flex-col items-center gap-0.5 py-2">

@@ -27,7 +27,7 @@ import { useWorkStore, workBadgeCount } from "../store/workStore.ts";
 import { ChevronRightIcon, GaugeIcon } from "./panelIcons.tsx";
 
 export function CockpitPointer() {
-  const waiting = useWorkStore((s) => workBadgeCount(s.counts));
+  const waiting = useWorkStore((s) => workBadgeCount(s.workspaceCounts));
   const openCockpit = useUiStore((s) => s.openCockpitForAgent);
 
   if (waiting === 0) return null;

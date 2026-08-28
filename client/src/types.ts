@@ -2402,7 +2402,10 @@ export type WorkMessage =
       type: "snapshot";
       items: WorkItemView[];
       nextCursor: string | null;
+      /** Counted under this page's SCOPE, because they are rendered on the chips that filter it. */
       counts: WorkCounts;
+      /** The same six for the whole workspace — the sidebar badge, which no filter may move. */
+      workspaceCounts: WorkCounts;
       filters: WorkFilters;
     }
   /**

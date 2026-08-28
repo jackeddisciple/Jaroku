@@ -235,7 +235,13 @@ console.log("\nfilters, counts and transitions");
   check("...and by agent finds one of them", (await store.list(ctx, { scope: "all", agentId })).items.length === 1);
 
   check("two in flight", (await store.inFlight(ctx)) === 2);
-  check("both queued", (await store.countsByStatus(ctx)).queued === 2);
+  // THE COUNTS FOLLOW THE SAME SCOPE THE LIST DOES, because they are rendered on the chips that
+  // filter it: workspace-wide numbers over a `mine` page promise jobs that clicking will not show.
+  check("both queued, asked for the whole workspace", (await store.countsByStatus(ctx, { scope: "all" })).queued === 2);
+  check("...and only one of them is mine", (await store.countsByStatus(ctx, { scope: "mine" })).queued === 1);
+  check("...which is what an unasked scope means, matching `list`", (await store.countsByStatus(ctx)).queued === 1);
+  check("...and narrowing to one agent narrows them too",
+    (await store.countsByStatus(ctx, { scope: "all", agentId })).queued === 1);
 
   check("a queued item starts running", (await store.markRunning(ctx, mine.id)) === true);
   check("...and starting it twice is a no-op", (await store.markRunning(ctx, mine.id)) === false);
