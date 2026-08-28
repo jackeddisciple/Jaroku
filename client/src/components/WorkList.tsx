@@ -630,8 +630,19 @@ export function WorkList() {
             {/* §18's PINNED HEADING, which is what replaces CSS `sticky`. It is `aria-hidden`
                 because the real heading is in the list below it and a screen reader reading both
                 would announce every day twice; this one is for the eye, which is the only sense
-                stickiness was ever for. */}
-            {pinnedDay && (
+                stickiness was ever for.
+
+                AND ONLY ONCE THE LIST HAS BEEN SCROLLED. At the very top the in-flow heading is
+                already at the top of the list, so pinning a copy over it drew "TODAY" twice, four
+                pixels apart — the scroller's own `py-1` being the offset between them. A sticky
+                element does not have this problem because it IS the in-flow element; a pinned copy
+                has to earn its place by there being something it is replacing.
+
+                `scrollTop > 0` RATHER THAN A COMPARISON AGAINST THE FIRST HEADING'S OFFSET. The
+                moment the list moves at all, the in-flow heading has begun sliding under this one
+                and the two are doing the job between them — which is exactly what sticky looks
+                like. At rest there is nothing above the first heading to replace. */}
+            {pinnedDay && scrollTop > 0 && (
               <div
                 aria-hidden
                 className={`pointer-events-none absolute inset-x-0 top-0 z-10 bg-canvas py-1.5 ${SPINE_X} ${TYPE.panelLabel}`}
