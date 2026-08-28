@@ -27,6 +27,8 @@ import { useEffect } from "react";
 
 import { sendListFleet, sendListWork } from "../lib/socket.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
+import { useSessionStore } from "../store/sessionStore.ts";
+import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { useWorkStore } from "../store/workStore.ts";
 import { EmptyState, LoadingLine } from "./EmptyState.tsx";
@@ -92,11 +94,19 @@ export function CockpitView() {
   const error = useWorkStore((s) => s.error);
   const setFilters = useWorkStore((s) => s.setFilters);
   const takeCockpitAgentIntent = useUiStore((s) => s.takeCockpitAgentIntent);
+  const workspaceId = useSessionStore((s) => s.workspaceId);
+  const connected = useTraceStore((s) => s.connection === "open");
 
-  // BOTH READS ON MOUNT, and they are two because they answer on different clocks — see §5. The
-  // list arrives on connect as well (the relay sends it in the initial snapshot, so the badge is
-  // right on frame one), and asking again here is what makes the page correct after a tab has been
-  // open through a workspace switch or a reconnect.
+  // ONE ASK PER (WORKSPACE, CONNECTION), which is `ActivityView`'s rule and is here for the reason
+  // its own note gives: a reconnect leaves this tab holding a fleet from before the drop with no
+  // way to know it is stale.
+  //
+  // BOTH READS, and they are two because they answer on different clocks — see §5. Only the LIST
+  // arrives unprompted: the relay volunteers `work/snapshot` on connect so the badge is right on
+  // frame one, and volunteers no `fleet` at all. So a mount-only ask left the strip empty for the
+  // whole of the next workspace — `loaded` came back true from the volunteered snapshot while
+  // `anyLive` stayed false, and the tab said "No agents are live yet" over a workspace with three
+  // of them. The switch is the case that has to re-ask, because the view never unmounts across it.
   useEffect(() => {
     // A POINTER'S FILTER IS APPLIED BEFORE THE READ, not after it. An Agent detail's strip and the
     // Inbox both open this tab already narrowed, and asking unfiltered first would render the
@@ -106,7 +116,7 @@ export function CockpitView() {
     if (intent !== null) setFilters({ agentId: intent, scope: "all" });
     sendListWork();
     sendListFleet();
-  }, [takeCockpitAgentIntent, setFilters]);
+  }, [takeCockpitAgentIntent, setFilters, workspaceId, connected]);
 
   return (
     // `relative`, BECAUSE THE DETAIL PANEL SLIDES OVER THIS REGION RATHER THAN OVER THE WINDOW. It
