@@ -84,6 +84,13 @@ async function snapshot(ctx: TenantContext): Promise<{ threads: ThreadView[]; co
       // the honest empty answers: no spend recorded, nothing unpriced, nothing said.
       cost_usd: null,
       cost_known: true,
+      // And Part 3's two beside them, on the same argument: nothing in this suite is about what
+      // asking costs, so the honest answer is that nothing has been asked. `mode` is the harness's
+      // one real choice — every thread it builds is a build thread, which is what the rows it
+      // stands in for are.
+      ask_cost_usd: null,
+      ask_cost_known: true,
+      mode: "build",
       preview: null,
       live_run_ids: [],
       live_eval_ids: [],

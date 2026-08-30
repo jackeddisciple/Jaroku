@@ -32,6 +32,11 @@ const row = (status: ThreadStatus, fragment: string | null, archived = false): T
   fragment,
   cost_usd: null,
   cost_known: true,
+  // Part 3's three, at their empty values: nothing asked, and a build thread — which is what
+  // every row these fixtures stand in for is.
+  ask_cost_usd: null,
+  ask_cost_known: true,
+  mode: "build",
   preview: null,
   live_run_ids: [],
   live_eval_ids: [],

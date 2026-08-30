@@ -552,8 +552,73 @@ export class BillingRepository {
     );
     for (const r of direct) add(String(r["thread_id"]), Number(r["usd"] ?? 0), asInt(r["unpriced"]));
 
+    // AND A THIRD WAY, WHICH ARRIVED WITH PART 3'S OPERATE THREADS. A job an operate conversation
+    // dispatched is bound to it as a `work` item, not as a `run` one — §5: "a work item carries
+    // `ref_id` = the `work_items.id`, exactly as a run item carries a run id" — so the first query
+    // above cannot see it. Its trace is reachable in one more hop, through `work_items.run_id`.
+    //
+    // WITHOUT THIS, AN OPERATE THREAD SHOWED THE COST OF ASKING AND NOT THE COST OF DOING: a
+    // conversation that spent four pence on questions and eleven pounds on jobs would have rendered
+    // fourpence, which is the confidently-short figure this method's own header is about. The
+    // `LEFT JOIN` is not needed — a work item with no run never reached the container and has no
+    // usage rows to find.
+    const viaWork = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT ti.thread_id AS thread_id,
+              COALESCE(SUM(u.cost_usd), 0) AS usd,
+              COUNT(CASE WHEN u.cost_usd IS NULL THEN 1 END) AS unpriced
+         FROM usage_events u
+         JOIN work_items w ON w.workspace_id = u.workspace_id AND w.run_id = u.run_id
+         JOIN thread_items ti ON ti.workspace_id = u.workspace_id
+                             AND ti.kind = 'work' AND ti.ref_id = w.id
+        WHERE u.workspace_id = ? AND u.run_id IS NOT NULL
+        GROUP BY ti.thread_id`,
+      [ctx.workspaceId],
+    );
+    for (const r of viaWork) add(String(r["thread_id"]), Number(r["usd"] ?? 0), asInt(r["unpriced"]));
+
     return new Map(
       [...totals].map(([threadId, t]) => [threadId, { usd: t.usd, costKnown: t.unpriced === 0 }]),
+    );
+  }
+
+  /**
+   * What ASKING has cost, per thread — Part 3 §10.
+   *
+   * SEPARATE FROM THE TOTAL ABOVE RATHER THAN INSTEAD OF IT, and §10 says why in terms of the
+   * AGENT rather than the thread: "it is the same model on every question, and folding it into the
+   * agent's figure would add a constant to each and make a cheap agent look expensive." The same
+   * argument applies one level down. A conversation's total is what the conversation cost, which is
+   * the honest number for a bill; but "of which fourpence was me asking" is the number that tells
+   * somebody whether the questions are worth what they cost, and it cannot be recovered from a
+   * total.
+   *
+   * IT IS ALREADY SEPARATE FROM `spendByAgent` AND THAT IS BY CONSTRUCTION, not by a filter here:
+   * `meterPlatformCall` writes these rows with no `run_id`, and `spendByAgent` groups through
+   * `runs` — so an explain lands in that method's null-agent bucket, beside the generations and the
+   * judge verdicts, exactly as §10 asks. It still counts toward true spend and toward the ceiling,
+   * because it is in this table like everything else.
+   *
+   * `kind = 'llm.explain'` IS THE WHOLE FILTER. Both callers of the explainer meter under that kind
+   * — the build composer's answers and Part 3's — because they are the same model on the same key,
+   * and a second kind for the second caller would be a second thing to remember to add up.
+   */
+  async askSpendByThread(
+    ctx: TenantContext,
+  ): Promise<Map<string, { usd: number; costKnown: boolean }>> {
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT thread_id,
+              COALESCE(SUM(cost_usd), 0) AS usd,
+              COUNT(CASE WHEN cost_usd IS NULL THEN 1 END) AS unpriced
+         FROM usage_events
+        WHERE workspace_id = ? AND thread_id IS NOT NULL AND kind = 'llm.explain'
+        GROUP BY thread_id`,
+      [ctx.workspaceId],
+    );
+    return new Map(
+      rows.map((r) => [
+        String(r["thread_id"]),
+        { usd: Number(r["usd"] ?? 0), costKnown: asInt(r["unpriced"]) === 0 },
+      ]),
     );
   }
 

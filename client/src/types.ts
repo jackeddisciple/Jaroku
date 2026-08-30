@@ -980,6 +980,25 @@ export interface ThreadView {
    */
   cost_usd: number | null;
   cost_known: boolean;
+  /**
+   * Part 3 §10: how much of `cost_usd` was ASKING rather than doing.
+   *
+   * A SUBSET OF `cost_usd`, NOT A SECOND TOTAL — adding the two double-counts, and that is the
+   * mistake a reader makes at a glance, which is why it is said here as well as on the server's
+   * copy. Null where nobody has asked anything, which is every build thread, so the figure is
+   * absent rather than `$0.00` on the same rule as the total above it.
+   */
+  ask_cost_usd: number | null;
+  /** False when a question ran on an unpriced model, so the ask figure is a floor. */
+  ask_cost_known: boolean;
+  /**
+   * What this conversation is for (migration 065).
+   *
+   * `build` is plans, generations, proposals, diffs, Apply and Undo. `operate` is questions
+   * answered from the record and commands dispatched to a live deployment. The list marks the
+   * second visibly and the thread view branches on it rather than forking.
+   */
+  mode: "build" | "operate";
   /** The last thing the USER said. Their own intent is what makes a session recognisable (§4.3). */
   preview: string | null;
   /**

@@ -2147,6 +2147,30 @@ export interface ThreadView {
   /** False when something in this thread ran on an unpriced model. See `cost_usd`. */
   cost_known: boolean;
   /**
+   * Part 3 §10: how much of `cost_usd` was ASKING rather than doing.
+   *
+   * SHOWN RATHER THAN QUIETLY BILLED, which is §10's own instruction — "a conversation that quietly
+   * bills is the thing this product's whole cost story exists against". It is a SUBSET of
+   * `cost_usd` and not a second total: a client that added the two would double-count, and the
+   * comment is here because that is the mistake somebody makes at a glance.
+   *
+   * Null on every thread where nobody has asked anything, which is every build thread and every
+   * operate thread that has only dispatched — so the figure is absent rather than `$0.00`, on the
+   * same rule as `cost_usd` above it.
+   */
+  ask_cost_usd: number | null;
+  /** False when a question ran on an unpriced model, so the ask figure is a floor. */
+  ask_cost_known: boolean;
+  /**
+   * What this conversation is for (migration 065).
+   *
+   * ON THE ROW because §11 asks for it in two places at once: the Threads list marks an operate
+   * thread visibly ("a conversation that only exists behind one door is a conversation people
+   * forget they have"), and the thread view branches on it rather than forking. One field answers
+   * both, and neither has to infer the mode from which item kinds happen to be present.
+   */
+  mode: "build" | "operate";
+  /**
    * §4.3's preview: the last thing the USER said, never Jaroku's reply.
    *
    * "The user's own intent is what makes a thread recognisable; the assistant's response is not" —

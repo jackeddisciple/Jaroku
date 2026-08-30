@@ -7212,11 +7212,15 @@ async function threadSnapshot(ctx: TenantContext): Promise<ThreadSnapshot> {
   // both used to fetch their own copy — so a snapshot cost two full listings of the workspace's
   // threads and two full reads of a table that only ever grows.
   const [rows, items] = await Promise.all([threadStore.list(ctx), threadStore.allItems(ctx)]);
-  const [derived, spend, agents, deletedAgents] = await Promise.all([
+  const [derived, spend, askSpend, agents, deletedAgents] = await Promise.all([
     threadFactsFor(ctx, { rows, items }),
     // Cumulative, never "this period" — §4.3's cost column is a fact about the session. See
     // `spendByThread`.
     billing.spendByThread(ctx),
+    // Part 3 §10's "show it": the SUBSET of the figure above that was spent on questions. One more
+    // grouped statement, in the same parallel round, and constant in the number of threads — the
+    // same shape as the read beside it, which is what keeps a snapshot's cost flat.
+    billing.askSpendByThread(ctx),
     agentRepo.list(ctx),
     // §3.2 is a JOIN, not a stored fact — see `noteAgentDeleted`. An agent's deletion is soft and
     // reverses itself when its directory comes back, so the row has to be able to stop being
@@ -7249,6 +7253,7 @@ async function threadSnapshot(ctx: TenantContext): Promise<ThreadSnapshot> {
     const entry = derived.get(row.id);
     const { status, fragment } = deriveThreadStatus(entry?.facts ?? { ...NO_FACTS, archivedAt: row.archived_at });
     const cost = spend.get(row.id);
+    const askCost = askSpend.get(row.id);
     // Only when it moved. A read that wrote every row would turn opening the tab into one UPDATE
     // per thread, and `setStatus` refuses `archived` anyway — that one follows the timestamp.
     if (status !== row.status) moved.set(status, [...(moved.get(status) ?? []), row.id]);
@@ -7292,6 +7297,11 @@ async function threadSnapshot(ctx: TenantContext): Promise<ThreadSnapshot> {
       // sentences.
       cost_usd: cost ? cost.usd : null,
       cost_known: cost ? cost.costKnown : true,
+      // §10, ON THE SAME THREE-CASE RULE as the line above it: null is "nobody has asked anything
+      // here", which is every build thread, and a figure with `ask_cost_known: false` is a floor.
+      ask_cost_usd: askCost ? askCost.usd : null,
+      ask_cost_known: askCost ? askCost.costKnown : true,
+      mode: row.mode,
       preview: entry?.preview ?? null,
       // §4.3.3. Empty and null respectively for anything not running, so a client has nothing to
       // increment and nothing to extrapolate from — which is exactly what a thread whose cost has
