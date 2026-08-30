@@ -692,19 +692,31 @@ export class ThreadStore {
    * the one they are working in is the one they touched last, and putting a new message into a
    * six-week-old session would be a worse guess than any.
    */
+  /**
+   * ...AND THE MODE IS PART OF "AN AGENT'S THREAD", which it did not use to be.
+   *
+   * Without the filter, opening an operate conversation on an agent somebody had been BUILDING
+   * would return the build thread — and the first question asked in it would be a message in a
+   * thread whose mode admits plan cards and diffs. It would look right until the answer arrived
+   * beside an Apply button. The mode of the thread being reused has to match the mode being asked
+   * for, and where it does not, a new one is opened.
+   *
+   * `build` BY DEFAULT, so every caller that predates Part 3 asks exactly the question it used to.
+   */
   async ensureForAgent(
     ctx: TenantContext,
     agentId: string,
     agentName: string,
+    mode: ThreadMode = "build",
   ): Promise<string> {
     const row = await this.q(ctx).get<Record<string, unknown>>(
       `SELECT id FROM threads
-        WHERE workspace_id = ? AND agent_id = ? AND archived_at IS NULL
+        WHERE workspace_id = ? AND agent_id = ? AND archived_at IS NULL AND mode = ?
         ORDER BY last_activity_at DESC LIMIT 1`,
-      [ctx.workspaceId, agentId],
+      [ctx.workspaceId, agentId, mode],
     );
     if (row) return String(row["id"]);
-    return (await this.create(ctx, { agentId, agentName, title: agentName })).id;
+    return (await this.create(ctx, { agentId, agentName, title: agentName, mode })).id;
   }
 
   /**

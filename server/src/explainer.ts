@@ -65,12 +65,51 @@ export async function streamExplain(
    * nothing asked for one, and the request is then exactly the one that shipped.
    */
   effort?: EffortPlan | null,
+  /**
+   * A different kind of question, asked under different rules (Part 3 §7.2).
+   *
+   * ONE OPTIONAL ARGUMENT RATHER THAN A SECOND ENGINE, which is §7.2's instruction — "this is the
+   * answering engine and you are not writing a second one". Everything either side of it is the
+   * part worth not duplicating: the key resolution that makes a workspace's own credential count,
+   * the raw-context degradation, the usage report that arrives BEFORE `onDone`, and the error path
+   * that still hands back the facts. What genuinely differs between explaining a trace step and
+   * answering from the record is the instruction and who is asking, so those are the arguments.
+   *
+   * Omitted means the explain call that shipped, byte for byte — the same discipline as `effort`
+   * being spread rather than set.
+   */
+  ask?: {
+    /** The rules. `prompt.ts` owns every one of them — see `CONVERSATION_SYSTEM`. */
+    system?: string;
+    /**
+     * Who is asking, for the one label in the user message that names them.
+     *
+     * IT IS NOT COSMETIC. The message says "Developer's question", and the developer who built an
+     * agent and the operator who runs it want different answers to the same words — one is owed a
+     * stack trace and the other is owed "yes, at 10:04". A prompt that called an operator a
+     * developer would be quietly asking for the wrong register on every question.
+     */
+    askedBy?: string;
+    /**
+     * A last paragraph, after the question.
+     *
+     * WHERE THE RULES THAT CARRY DATA GO. `system` cannot hold the agent's display name without
+     * changing per agent, which costs the prompt cache on every question; this can, because it is
+     * part of the message anyway. Last rather than first because the instructions most likely to be
+     * dropped on a long context are the ones furthest from the end — see `conversationClosing`.
+     */
+    closing?: string;
+  },
 ): Promise<void> {
   // `apiKey` counts as a key. Without this, a workspace running entirely on its own credential
   // — no platform key configured at all — would get the raw-context fallback for every
   // explanation, on a deployment where an explanation was perfectly affordable.
   if (!apiKey && !hasAnthropicKey()) {
     // No key — the factual context IS the answer (no LLM synthesis available).
+    // THE FACTS AS FACTS, WHICH IS A BETTER ANSWER THAN AN ERROR AND — for the record-answering
+    // caller — a strictly more honest one than a synthesised paragraph. §7.2 calls this degradation
+    // a feature here rather than a fallback, and it is what makes the whole answering path
+    // replayable at zero cost.
     cb.onDelta(`(No Anthropic key set — showing the raw context.)\n\n${context}`);
     cb.onDone();
     return;
@@ -83,8 +122,12 @@ export async function streamExplain(
       // and the budget inside it was already validated against THIS call's max_tokens by the adapter,
       // not against whatever the model could theoretically produce.
       ...(effort?.thinking?.type === "enabled" ? { thinking: effort.thinking } : {}),
-      system: SYSTEM,
-      messages: [{ role: "user", content: `Context:\n${context}\n\nDeveloper's question: ${question}` }],
+      system: ask?.system ?? SYSTEM,
+      messages: [{
+        role: "user",
+        content: `Context:\n${context}\n\n${ask?.askedBy ?? "Developer"}'s question: ${question}`
+          + (ask?.closing ? `\n\n${ask.closing}` : ""),
+      }],
     });
     stream.on("text", (t: string) => cb.onDelta(t));
     const final = await stream.finalMessage();

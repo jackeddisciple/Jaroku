@@ -699,3 +699,201 @@ ${selected}${envNote}
 ${mcp}${plan}
 Emit the files now, starting with agent.py. Output files only — no commentary.`;
 }
+
+// --- the operate conversation's answer (Part 3 §7.3) ------------------------------------------
+//
+// THE FOURTH PROMPT, AND IT IS HERE FOR THE REASON THE OTHER THREE ARE. This module exists so that
+// every system and user prompt in the product sits in one file and cannot drift; a prompt written
+// beside the code that calls it is one that stops matching the three it was meant to resemble the
+// first time somebody edits one of them.
+//
+// WHAT MAKES THIS ONE DIFFERENT FROM `explainer.ts`'s OWN SYSTEM PROMPT. That one explains a trace
+// step, a graph node or an agent's files to the developer who built it, and its grounding is code.
+// This one answers "did that email go out?" and its grounding is a RECORD — rows in `work_items`
+// with ids somebody can click. So the rules it has to state are different in kind: not "do not
+// propose code changes" but "every claim about what happened cites the row it came from, and where
+// there is no row the answer is that there is no row".
+//
+// §3 IS THE WHOLE OF WHY THE RULES BELOW ARE THIS BLUNT. A deployed agent remembers nothing —
+// `build_initial_state(user_input) -> dict`, every run from nothing — so the agent cannot answer a
+// question about itself and Jaroku has to. The record is the only memory there is. A model given
+// this material and no instruction would happily reconstruct a plausible afternoon, and a plausible
+// afternoon is the single worst thing this product could ship.
+
+/**
+ * The rules the answering model works under. Sent as the system prompt.
+ *
+ * WRITTEN AS PROHIBITIONS WHERE IT MATTERS, because the failure mode is fluency. "Ground your
+ * answer in the context" is advice; "if the record does not contain it, say that the record does
+ * not contain it, and do not say what you think probably happened" is a rule with a wrong answer
+ * on the other side of it, which is what a model needs in order to refuse.
+ *
+ * IT NAMES NO AGENT AND CARRIES NO PERSONALITY (§8). The display name arrives in the user message
+ * because it is data — a value from `agents.display_name` falling back to the slug — and a system
+ * prompt that interpolated it would be a prompt that changes per agent, which costs the cache on
+ * every question and, worse, invites somebody to add a sentence about what this agent is "like".
+ */
+export const CONVERSATION_SYSTEM = `You answer questions about what an automated agent has done, on behalf of the person who operates it.
+
+WHAT YOU ARE WORKING FROM. You are given a RECORD: a list of jobs the agent was asked to do, each with an id, a status, what was asked, what came back, when, and what it cost. That record is the only source of truth available to you. The agent itself remembers nothing between jobs, so nothing can be recalled, inferred from habit, or reconstructed — if it is not in the record below, it did not reach you and you do not know it.
+
+THE RULES, IN ORDER OF HOW MUCH DAMAGE BREAKING THEM DOES:
+
+1. NEVER STATE ANYTHING THE RECORD DOES NOT SHOW. No inference about what "probably" happened, no filling a gap with what would be reasonable, no summarising an absence as if it were a finding. If the record does not answer the question, say plainly that there is no record of it. "I have no record of that" is a complete and correct answer and you should give it without apology or hedging.
+
+2. EVERY CLAIM ABOUT WHAT HAPPENED CITES THE JOB IT CAME FROM, using the exact marker [work:<id>] with the id copied character for character from the record. Put the citation immediately after the claim it supports. A sentence that asserts something happened and carries no citation is a mistake. Framing — "here is what I found", "three of those failed" as a lead-in to cited detail — needs no citation, but anything a person could act on does.
+
+3. NEVER INVENT AN ID. Cite only ids that appear in the record below. If you cannot support a sentence with one of them, remove the sentence.
+
+4. SPEAK AS THE AGENT ONLY WHERE A RECORD BACKS IT. You may answer in the first person — "Yes, I sent it at 10:04 [work:...]" — when a job says so. Where the record is silent, say "I have no record of that", never "I don't think so" (an inference) and never "I didn't" (a claim). Where the record is ambiguous, say what is there and then what is missing, in that order.
+
+5. UNKNOWN IS NOT ZERO. A job whose cost is unknown is unknown, never free. Do not add up costs that are marked unknown, and if a total is described as partial, say that it is a floor rather than a total.
+
+6. DO NOT PROPOSE CODE CHANGES and do not offer to run anything. This conversation answers questions; a job is dispatched by the person, through a confirmation they see first.
+
+HOW TO WRITE IT. A few sentences, plainly, answering the question that was asked. No preamble, no restating the question, no bullet list unless you are genuinely listing several jobs. You are talking to the person who runs this agent and is deciding what to do next.`;
+
+/**
+ * How much of a job's prose the rendered record shows.
+ *
+ * SEPARATE FROM THE FACT PACK'S OWN TRIM, and deliberately equal to it rather than derived from it:
+ * the pack bounds what is READ out of the database and this bounds what is WRITTEN into a prompt,
+ * and a future change to either has a reason of its own. The pack's cap is about memory and query
+ * cost; this one is about a context window.
+ */
+const RECORD_FIELD_CHARS = 400;
+
+/** A value that is genuinely unknown, spelled the way every other surface spells it. */
+const UNKNOWN = "unknown";
+
+function money(cost: number | null, complete: boolean): string {
+  // §10 AND §11: unknown is `null` rendered as a word, never `$0.00`. A partial total says so
+  // rather than presenting itself as a confident figure — the `+` the client renders, in words.
+  if (cost === null) return UNKNOWN;
+  return complete ? `$${cost.toFixed(4)}` : `at least $${cost.toFixed(4)} (some calls were unpriced)`;
+}
+
+function duration(ms: number | null): string {
+  if (ms === null) return UNKNOWN;
+  return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+}
+
+function field(label: string, value: string | null): string {
+  if (value === null) return "";
+  const t = value.trim();
+  if (!t) return "";
+  const cut = t.length > RECORD_FIELD_CHARS ? `${t.slice(0, RECORD_FIELD_CHARS)}…(trimmed)` : t;
+  // ONE LINE PER FIELD, and newlines inside a value flattened, so a job whose output is a
+  // multi-line traceback cannot look like several jobs.
+  return `\n  ${label}: ${cut.replace(/\s*\n\s*/g, " ⏎ ")}`;
+}
+
+/**
+ * What a `FactPack` looks like when it is read rather than queried.
+ *
+ * THE SHAPE IS DECLARED HERE STRUCTURALLY RATHER THAN IMPORTED, which is the one thing in this file
+ * that will look like an oversight and is not. `prompt.ts` has no imports outside `connectors.ts`
+ * and `mcpRegistry.ts` — it is the module every prompt lives in, and making it depend on the work
+ * subsystem would mean the generation prompt's module graph included the Cockpit's stores. A
+ * structural parameter costs a duplicated field list and buys a file that still builds a system
+ * prompt for an agent that has never been deployed.
+ */
+export interface RecordForPrompt {
+  agents: readonly { id: string; name: string }[];
+  items: readonly {
+    id: string;
+    agent_name: string;
+    status: string;
+    failure_kind: string | null;
+    input: string;
+    output: string | null;
+    error: string | null;
+    created_at: string;
+    ended_at: string | null;
+    duration_ms: number | null;
+    cost_usd: number | null;
+    cost_complete: boolean;
+    run_id: string | null;
+    trace_reviewed: boolean;
+  }[];
+  counts: Record<string, number>;
+  truncation: { by_count: boolean; by_bytes: boolean; total: number };
+}
+
+/**
+ * The record, rendered for a model to read.
+ *
+ * EXPORTED SEPARATELY FROM THE USER PROMPT because it is also what the no-key path streams. §7.2:
+ * `streamExplain` "degrades to raw context when there is no API key", and that degradation is a
+ * FEATURE here rather than a fallback — with no key the user gets the facts as facts instead of an
+ * error, which is a strictly more honest answer than a synthesised one and is the only reason the
+ * whole path is testable for free.
+ *
+ * THE EMPTY CASE IS A SENTENCE, NOT AN EMPTY LIST. §7.5's test is that an agent with an empty record
+ * produces "nothing is recorded" rather than a plausible summary, and the surest way to get that is
+ * for the material itself to say so in words a model cannot read as an invitation to fill a gap.
+ */
+export function renderRecord(rec: RecordForPrompt): string {
+  const who = rec.agents.map((a) => a.name).join(", ") || "this agent";
+  if (rec.items.length === 0) {
+    return `RECORD FOR: ${who}
+
+THE RECORD IS EMPTY. There are no jobs recorded for this agent at all — not none matching the question, none whatsoever. Nothing has been asked of it through Jaroku, or everything that was has been removed by data retention.
+
+There is therefore nothing you can report about what this agent has or has not done. Say that there is no record, and stop. Do not describe what the agent might do, might have done, or is for.`;
+  }
+
+  const totals = Object.entries(rec.counts)
+    .filter(([, n]) => n > 0)
+    .map(([status, n]) => `${n} ${status}`)
+    .join(", ");
+
+  // WHAT IS MISSING IS STATED, because §7.5 only holds if "there is no more" and "there is more and
+  // it did not fit" are different sentences. A model told nothing about the boundary will describe
+  // the newest forty jobs as though they were all of them.
+  const bound = rec.truncation.by_count || rec.truncation.by_bytes
+    ? `\n\nTHIS IS THE MOST RECENT ${rec.items.length} OF ${rec.truncation.total} JOBS, newest first. Older jobs exist and are NOT shown. If the question is about something that is not here, say that it is not in the jobs you can see and that there are older ones — do not conclude it never happened.`
+    : `\n\nTHIS IS THE COMPLETE RECORD — all ${rec.truncation.total} job(s), newest first. If something is not here, it did not happen through Jaroku.`;
+
+  const jobs = rec.items.map((i) => {
+    const head = `[work:${i.id}] ${i.status}${i.failure_kind ? ` (${i.failure_kind})` : ""} · ${i.created_at}`;
+    return head
+      + field("agent", i.agent_name)
+      + field("asked", i.input)
+      + field("result", i.output)
+      + field("error", i.error)
+      + `\n  took: ${duration(i.duration_ms)} · cost: ${money(i.cost_usd, i.cost_complete)}`
+      + (i.status === "failed"
+        ? `\n  trace: ${i.run_id ? (i.trace_reviewed ? "opened by somebody" : "NOT yet opened by anybody") : "none recorded"}`
+        : "");
+  }).join("\n\n");
+
+  return `RECORD FOR: ${who}
+
+TOTALS ACROSS THE WHOLE RECORD: ${totals || "none"}.${bound}
+
+JOBS:
+
+${jobs}`;
+}
+
+/**
+ * The name the answer may speak as, and the two rules that need it in front of the question.
+ *
+ * A CLOSING PARAGRAPH RATHER THAN A WHOLE USER MESSAGE, because `streamExplain` owns the shape of
+ * that message and there must be one shape: context, then who is asking, then what they asked. A
+ * second assembly here would be a second answer to "what does a user message look like", and the
+ * two would drift the first time either was edited.
+ *
+ * LAST RATHER THAN FIRST, which is the one thing about its placement that is a decision. The rules
+ * that matter most — cite everything, invent nothing — are the ones a model is most likely to drop
+ * on a long context, and the end of the message is the position it reads last.
+ *
+ * THE DISPLAY NAME IS DATA AND ARRIVES HERE (§8). `agents.display_name` falling back to `slug` —
+ * the same COALESCE migration 044 uses when it snapshots a name — and where an agent has no display
+ * name the conversation does not invent a personality for it, which is why this says only that the
+ * name may be used and says nothing at all about what the agent is like.
+ */
+export function conversationClosing(agentName: string): string {
+  return `You may answer as "${agentName}" in the first person where a job in the record supports it. Where no job in the record supports it, say you have no record of it. Cite every claim with [work:<id>].`;
+}

@@ -545,6 +545,11 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   loadAgentFiles: "agent:read",
   loadAgentGraph: "agent:read",
   explain: "agent:read",
+  // A QUESTION ABOUT WHAT AN AGENT HAS DONE IS A READ, and it is `agent:read` rather than anything
+  // stronger for the reason Part 3 §3 makes it possible to say at all: a question never touches the
+  // container. No dispatch, no run, no spend on the agent's key. It reads `work_items` and answers
+  // from them, so it is the same authority as opening the Cockpit and reading the same rows by eye.
+  askRecord: "agent:read",
 
   /**
    * The agent lifecycle: archive, restore, rename.
@@ -965,6 +970,11 @@ export const COMMAND_AGENT_CAPABILITY: Record<string, AgentCapability> = {
   loadAgentGraph: "view",
   loadAgentVersion: "view",
   explain: "view",
+  // `view`, beside `explain`, and NOT beside `dispatchWork`. The whole of Part 3's classifier exists
+  // so that a question and a command are different things; making them the same capability would
+  // put them back together at the only layer that is actually enforced, and somebody with read
+  // access to an agent would be unable to ask what it had done.
+  askRecord: "view",
   // The datasets belonging to an agent, and what a comparison would cost. Both are reads, and the
   // second is the estimate the entitlement gate deliberately leaves ungated for the same reason: a
   // workspace at its limit has to be able to find out what going over would cost, and a person who

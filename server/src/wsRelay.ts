@@ -1383,6 +1383,29 @@ export type GithubAttachment =
   | { kind: "sinceSync" }
   | { kind: "pr" };
 
+/**
+ * A question about what an agent has done, answered from the record (Part 3 §7).
+ *
+ * A COMMAND OF ITS OWN RATHER THAN A FOURTH `ExplainSubject`, and the reason is §3 rather than
+ * tidiness. `explain` grounds its answer in an agent's CODE — the step you selected, the node you
+ * clicked, the prompt and tools on disk — and reaches for `agentProjectFiles` to do it. This
+ * grounds its answer in the RECORD, and the whole product promise is that the two are never
+ * confused: a question about what happened must not be answerable from what the agent is capable
+ * of. Two commands with two context builders is what makes that a property of the code.
+ *
+ * It answers on the REPLY channel, which is the one thing it does share with `explain`: prose
+ * streaming into a conversation is a thing this product already does, and a second channel for it
+ * would be a second set of client-side plumbing for the same three events.
+ */
+export type AskRecordCommand = {
+  cmd: "askRecord";
+  /** The agent's uuid. The thread is bound to one; §12's modules are not, but this command is. */
+  agentId: string;
+  question: string;
+  /** The operate thread this was asked in. See RunCommand.threadId. */
+  threadId?: string;
+};
+
 export type ExplainCommand = {
   cmd: "explain";
   agentId: string;
@@ -1426,6 +1449,7 @@ export type ClientCommand =
   | CancelRunCommand
   | BranchRunCommand
   | ExplainCommand
+  | AskRecordCommand
   | EvalCommand
   | McpCommand
   | ListInboxCommand
@@ -1493,6 +1517,7 @@ export type ForwardedCommand =
   | CancelRunCommand
   | BranchRunCommand
   | ExplainCommand
+  | AskRecordCommand
   | EvalCommand
   | McpCommand
   | ProviderCommand
@@ -3049,6 +3074,11 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   edit: "edit", applyEdit: "edit", undoEdit: "edit", discardEdit: "edit",
   pauseRun: "debug", resumeRun: "debug", cancelRun: "debug", branchRun: "debug",
   explain: "reply",
+  // THE SAME CHANNEL AS `explain`, because a refusal has to arrive where the answer would have.
+  // An operate thread renders prose from `reply`; sending the refusal anywhere else would leave the
+  // conversation with a question in it and no reply of any kind, which reads as Jaroku having
+  // silently ignored somebody.
+  askRecord: "reply",
   createDataset: "eval", renameDataset: "eval", deleteDataset: "eval", listDatasets: "eval",
   loadDataset: "eval", addExample: "eval", updateExample: "eval", deleteExample: "eval",
   promoteTestInput: "eval", startEval: "eval", cancelEval: "eval", loadRubric: "eval",
@@ -3975,6 +4005,12 @@ export class WsRelay {
           } else if (msg.cmd === "branchRun" && typeof msg.fromRunId === "string" && typeof msg.atSeq === "number") {
             void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "explain" && typeof msg.agentId === "string" && typeof msg.question === "string") {
+            void withContext((ctx) => this.onCommand?.(msg, ctx));
+          // BESIDE `explain` AND VALIDATED THE SAME WAY, because it is the same shape of thing —
+          // an agent and a sentence — and a different destination. What it must not be is folded
+          // INTO `explain`: see `AskRecordCommand` for why a question about what happened and a
+          // question about what the code does are two commands.
+          } else if (msg.cmd === "askRecord" && typeof msg.agentId === "string" && typeof msg.question === "string") {
             void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "listMcpServers") {
             void this.answer(ws, async (ctx) => ({

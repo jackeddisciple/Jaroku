@@ -159,7 +159,9 @@ import {
 import { openCheckpointStore } from "./checkpoints/store.ts";
 import { introspectGraph, introspectGraphCached, type GraphResult } from "./graphIntrospect.ts";
 import { streamExplain, EXPLAIN_MODEL, EXPLAIN_MAX_TOKENS } from "./explainer.ts";
-import type { ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCommand, InboxCommand, ProviderSnapshot } from "./wsRelay.ts";
+import { buildFactPack, type FactPack, type PackDeps } from "./work/factPack.ts";
+import { CONVERSATION_SYSTEM, conversationClosing, renderRecord } from "./prompt.ts";
+import type { AskRecordCommand, ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCommand, InboxCommand, ProviderSnapshot } from "./wsRelay.ts";
 import type { ListWorkCommand, WorkCommand, WorkSnapshotWire } from "./wsRelay.ts";
 import { loadRuntimeEnv } from "./env.ts";
 import { installLogRedaction, protectEnv, protectSecret } from "./obs/log.ts";
@@ -4683,6 +4685,7 @@ async function dispatchCommand(cmd: ForwardedCommand, ctx: TenantContext): Promi
     else if (cmd.cmd === "cancelRun") void cancelRun(ctx, cmd.runId);
     else if (cmd.cmd === "branchRun") void branchRun(ctx, cmd.fromRunId, cmd.atSeq, cmd.editNode, cmd.editedState);
     else if (cmd.cmd === "explain") explainAgent(ctx, cmd);
+    else if (cmd.cmd === "askRecord") void answerFromRecord(ctx, cmd);
     else if (AGENT_COMMAND_NAMES.has(cmd.cmd)) void handleAgentCommand(ctx, cmd as AgentCommand);
     else if (MCP_COMMAND_NAMES.has(cmd.cmd)) void handleMcpCommand(ctx, cmd as McpCommand);
     else if (DEPLOY_COMMAND_NAMES.has(cmd.cmd)) void handleDeployCommand(ctx, cmd as DeployChannelCommand);
@@ -4716,6 +4719,11 @@ const COMMAND_RATE_ACTIONS: Partial<Record<string, RateAction>> = {
   planAgent: "agent.plan",
   edit: "agent.edit",
   explain: "agent.explain",
+  // THE SAME BUCKET AS `explain`, and that is the decision rather than a shortcut: both spend one
+  // call on `JAROKU_EXPLAIN_MODEL` and neither touches an agent's own key. A separate bucket would
+  // let somebody exhaust one and keep spending through the other, on the same model, at the same
+  // price — which is two limits adding up to no limit.
+  askRecord: "agent.explain",
   run: "run.start",
   branchRun: "run.start",
   resumeRun: "run.start",
@@ -12159,6 +12167,157 @@ ${attached}`;
     },
     onError: (message) => { explaining = false; replyOut({ type: "error", agentId: cmd.agentId, message }); },
   }, explainKey, replyEffort);
+}
+
+// --- answering from the record (Part 3 §7) ----------------------------------------------------
+//
+// §3'S FIRST CONSEQUENCE, ENFORCED BY WHAT THIS FUNCTION CAN REACH. "A question never touches the
+// container. No dispatch, no run, no provider spend on the agent's key, no latency. It is a read
+// against the record." Nothing below calls the dispatch client, the run pool or the deploy layer —
+// it reads `work_items` through the fact pack and hands the result to the same explainer the build
+// composer uses.
+//
+// IT STREAMS ON THE REPLY CHANNEL, which is what makes "reuse the thread rendering" true on the
+// server side as well as the client's: `started` / `delta` / `done` / `error` is prose arriving in
+// a conversation, and this product already has exactly one way to do that.
+
+/**
+ * The two workspace-wide reads the fact pack takes as dependencies.
+ *
+ * BOTH ARE THE CALLER'S, which is what keeps the pack at three statements — see its header. The
+ * models come from every deployment this workspace has, not only the current ones, because a job
+ * ran on the deployment that was live WHEN IT RAN and pricing it against today's would be a
+ * different claim. A deployment that has since been REMOVED is absent from that list and its jobs
+ * therefore price as unknown, which is the honest answer and the same one every other surface
+ * gives for a model it cannot look up.
+ */
+function packDeps(): PackDeps {
+  return {
+    modelByDeployment: async (ctx) =>
+      new Map((await deployStore.list(ctx)).map((d) => [d.id, d.model])),
+    // THE INBOX'S OWN SIGNAL for whether a failure has been looked at — see `WorkFactRow`. One
+    // workspace-scoped statement, and deliberately not a second definition of "reviewed": the only
+    // thing in this system that decides a trace has been opened is `noteTraceOpened`.
+    unreviewedRunIds: async (ctx) => {
+      const out = new Set<string>();
+      for (const item of await inboxStore.listOpen(ctx)) {
+        if (item.type !== "unreviewed_failures") continue;
+        const ids = item.payload["run_ids"];
+        if (Array.isArray(ids)) for (const id of ids) if (typeof id === "string") out.add(id);
+      }
+      return out;
+    },
+  };
+}
+
+/**
+ * The record for one agent, ready to be read.
+ *
+ * SEPARATE FROM THE HANDLER so that the classifier's label, the answer and the test all go through
+ * one path — and so that §12 stays reachable: this takes a LIST of agents, because "who can do X?"
+ * is Part 4 and the modules underneath it must not assume a single agent id.
+ */
+async function recordFor(
+  ctx: TenantContext,
+  agents: readonly { id: string; name: string }[],
+): Promise<FactPack> {
+  return buildFactPack(ctx, store.database().forWorkspace(ctx.workspaceId), packDeps(), { agents });
+}
+
+/**
+ * §7, in the order §7 states: collect the facts, then answer from them.
+ *
+ * THE SINGLE SLOT IS `explaining`, SHARED WITH `explainAgent` RATHER THAN A SECOND FLAG. Both write
+ * `replyContext` and `replyThread`, which are module state, so two of them in flight would file one
+ * answer under the other's session. A flag of its own would make that possible while looking like
+ * care.
+ */
+async function answerFromRecord(ctx: TenantContext, cmd: AskRecordCommand): Promise<void> {
+  const question = typeof cmd.question === "string" ? cmd.question.trim() : "";
+  if (!question) {
+    relay.broadcastReply(ctx, { type: "error", agentId: cmd.agentId, message: "ask something" });
+    return;
+  }
+  if (explaining) {
+    // To the asker's scope, like `explainAgent`'s: the answer still streaming belongs to somebody
+    // else, and an answer from the record quotes what an agent was asked to do back to the reader.
+    relay.broadcastReply(ctx, { type: "error", agentId: cmd.agentId, message: "already answering — one at a time" });
+    return;
+  }
+
+  // THE AGENT IS RESOLVED BEFORE ANYTHING ELSE, and an id this workspace does not own resolves to
+  // ABSENT rather than to a refusal — the rule `WorkStore`'s header states, for the reason it
+  // states: a refusal confirms the id exists, which turns the socket into an enumeration oracle.
+  const agent = await agentRepo.byId(ctx, cmd.agentId);
+  if (!agent) {
+    relay.broadcastReply(ctx, { type: "error", agentId: cmd.agentId, message: "there is no such agent" });
+    return;
+  }
+  // §8: THE DISPLAY NAME, FALLING BACK TO THE SLUG — the same COALESCE migration 044 uses when it
+  // snapshots one. An agent with no display name gets its slug and no personality.
+  const agentName = agent.display_name ?? agent.slug;
+
+  replyContext = ctx;
+  explaining = true;
+  try {
+    // AN OPERATE THREAD, NOT WHICHEVER THREAD THIS AGENT LAST HAD. `ensureForAgent` filters on mode
+    // for exactly this call: reusing a build thread would put the answer beside an Apply button.
+    replyThread = cmd.threadId && (await threadStore.get(ctx, cmd.threadId))
+      ? cmd.threadId
+      : await threadStore.ensureForAgent(ctx, agent.id, agentName, "operate");
+
+    // THE QUESTION IS WHAT SOMEBODY SAID, so it is the thread's message and therefore §4.3's
+    // preview — "did that email go out?" is exactly the line that makes a conversation recognisable
+    // a week later.
+    const turn = await noteUserMessage(ctx, replyThread, question);
+    relay.broadcastReply(ctx, { type: "started", agentId: cmd.agentId, question }, replyThread);
+
+    const pack = await recordFor(ctx, [{ id: agent.id, name: agentName }]);
+    const record = renderRecord(pack);
+    const askKey = await providerKeys.platformKey(ctx);
+    const effort = await effortForThread(ctx, replyThread, EXPLAIN_MODEL, EXPLAIN_MAX_TOKENS);
+    const settle = await openVariant(ctx, turn, EXPLAIN_MODEL, "anthropic", effort);
+    const thread = replyThread;
+
+    await streamExplain(
+      record,
+      question,
+      {
+        onDelta: (text) => relay.broadcastReply(ctx, { type: "delta", agentId: cmd.agentId, text }, thread),
+        onUsage: (u) => {
+          // §10: ATTRIBUTED TO THE THREAD, and metered as the platform's own thinking rather than
+          // as the agent's spend — see `meterPlatformCall` and the `llm.explain` kind it shares
+          // with the build composer's answers, which is the same model on the same key.
+          meterPlatformCall(ctx, "llm.explain", {
+            model: u.model,
+            inputTokens: u.input,
+            outputTokens: u.output,
+            cacheReadTokens: u.cacheRead,
+            cacheWriteTokens: u.cacheWrite,
+            payer: askKey ? "workspace" : "platform",
+            threadId: thread,
+          });
+          settle({ tokensIn: u.input, tokensOut: u.output });
+        },
+        onDone: () => relay.broadcastReply(ctx, { type: "done", agentId: cmd.agentId }, thread),
+        onError: (message) => relay.broadcastReply(ctx, { type: "error", agentId: cmd.agentId, message }, thread),
+      },
+      askKey,
+      effort,
+      // §7.3: THE RULES COME FROM `prompt.ts`, WITH THE OTHER THREE, so they cannot drift. Not one
+      // sentence of instruction is written in this file.
+      { system: CONVERSATION_SYSTEM, askedBy: "Operator", closing: conversationClosing(agentName) },
+    );
+  } catch (err) {
+    const message = (err as Error)?.message ?? String(err);
+    console.error(`[ask] answering from the record failed: ${message}`);
+    relay.broadcastReply(ctx, { type: "error", agentId: cmd.agentId, message });
+  } finally {
+    // RELEASED IN A `finally`, unlike the explain path's, because everything above it is awaited:
+    // a throw between claiming the slot and starting the stream would otherwise leave the whole
+    // conversation surface answering "one at a time" until a restart.
+    explaining = false;
+  }
 }
 
 // Kick off one run on startup unless suppressed (set JAROKU_NO_AUTORUN=1 to just serve).

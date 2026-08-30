@@ -100,15 +100,15 @@ export interface WorkFactRow {
   trace_reviewed: boolean;
 }
 
-/** How many of the agent's jobs are in each state, across the whole record rather than the page. */
-export interface PackCounts {
-  queued: number;
-  running: number;
-  waiting: number;
-  succeeded: number;
-  failed: number;
-  cancelled: number;
-}
+/**
+ * How many of the agent's jobs are in each state, across the whole record rather than the page.
+ *
+ * KEYED BY `WorkStatus` RATHER THAN LISTED OUT, so that adding a seventh status to migration 063's
+ * CHECK is a compiler error here rather than a status that silently counts as nothing. `Record`
+ * also makes this readable by `prompt.ts`, which takes the record structurally and must not import
+ * the work subsystem — see `RecordForPrompt`.
+ */
+export type PackCounts = Record<WorkStatus, number>;
 
 /** Why a pack stops where it does. Both false means the pack IS the record. */
 export interface PackTruncation {
