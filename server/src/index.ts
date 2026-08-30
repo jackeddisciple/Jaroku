@@ -6596,6 +6596,10 @@ async function handleWorkCommand(ctx: TenantContext, cmd: WorkCommand): Promise<
         if (typeof cmd.agentId !== "string" || typeof cmd.input !== "string" || !cmd.input.trim()) {
           return fail("a job needs an agent and something to do", undefined, clientRef);
         }
+        // §6: THE SAME DISPATCH, WHOEVER ASKED FOR IT. The operate thread's composer sends this
+        // command, through the pre-flight gate the Cockpit already puts in front of it, and reaches
+        // the same dispatcher, the same store, the same run token and the same trace. Nothing below
+        // this line knows a conversation exists.
         const out = await workDispatcher.dispatch(ctx, { agentId: cmd.agentId, input: cmd.input });
         if (!out.ok) {
           // A REFUSAL AND A FAILURE ARE BOTH REPORTED TO THE ASKER, and the difference between them
@@ -6616,6 +6620,22 @@ async function handleWorkCommand(ctx: TenantContext, cmd: WorkCommand): Promise<
         // what came back — two fields a row deliberately does not carry, because a page of fifty
         // rows carrying full inputs and outputs is a page of fifty customer emails on the wire.
         // Sending the row shape here left the panel with an empty "What was asked".
+        // AND THEN, AND ONLY THEN, THE NOTE THAT IT HAPPENED IN A CONVERSATION (§5).
+        //
+        // AFTER THE DISPATCH RATHER THAN BEFORE IT, which is the ordering the rest of this file
+        // keeps: a `work` item is the statement that a job happened here, and a job that was refused
+        // did not happen. Writing the binding first would leave an operate thread carrying a
+        // reference to a job that never existed, and §9's ladder would read it as work in flight
+        // for ever — the row would go on saying `running` with nothing behind it.
+        //
+        // FLOATED AND CAUGHT, like every other `noteThreadItem` call: the job is dispatched, the
+        // money is committed, and a conversation that could not record it is not a reason to tell
+        // somebody their dispatch failed. A BUILD thread id is refused by the store here — see
+        // `KINDS_BY_MODE` — and lands in that catch as a logged line, which is the enforcement
+        // working rather than an error path.
+        if (typeof cmd.threadId === "string" && cmd.threadId) {
+          noteThreadItem(ctx, cmd.threadId, { kind: "work", refId: out.item.id });
+        }
         relay.sendWork(ctx, ctx.requestId, {
           type: "dispatched",
           item: await workSnapshots.detail(ctx, out.item),

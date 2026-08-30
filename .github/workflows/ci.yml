@@ -498,6 +498,14 @@ jobs:
           # bound as a `work` item, so the join that predates Part 3 could not see it and a
           # conversation that spent fourpence asking and eleven pounds doing rendered fourpence.
           npm run test:convo-spend
+          # §13'S NEGATIVE DIRECTION, and its three verbs fail in three different places — which is
+          # why one suite covers all three rather than trusting that scoping one implies the others.
+          # The read is a scoped WHERE and answers ABSENT rather than forbidden. The write is the one
+          # that was open: `thread_items.thread_id` references `threads(id)`, the id ALONE, so the
+          # foreign key does NOT stop one workspace writing into another's conversation and the store
+          # has to. And "gone" and "not yours" answer with the same sentence, because a refusal that
+          # told them apart would confirm an id exists somewhere.
+          npm run test:convo-tenancy
 
       # THE INBOX DESTINATION, in a step of its own from its first suite — the same reason the two
       # steps above are separate rather than appended to whichever step had room. A reader looking

@@ -2525,6 +2525,21 @@ export type DispatchWorkCommand = {
    * arrival.
    */
   clientRef?: string;
+  /**
+   * The operate thread this command was given in — Part 3 §6.
+   *
+   * IT CHANGES NOTHING ABOUT THE DISPATCH, and that is the point. §6: "A command in an operate
+   * thread is an ordinary `dispatchWork`. Same command, same store, same run token, same trace,
+   * same work item. There is no third way to execute an agent, and this part must not become one."
+   * So this is not a route — it is a note about where the job came from, written as a `work` item
+   * AFTER the dispatch the Cockpit's composer already performs.
+   *
+   * OPTIONAL, AND ABSENT IS THE ORDINARY CASE. The Cockpit's own composer sends no thread, because
+   * a job dispatched from the fleet strip did not happen in a conversation. A `threadId` naming a
+   * BUILD thread is refused by the store — a build thread cannot hold a work item — which is the
+   * enforcement rather than a check here.
+   */
+  threadId?: string;
 };
 export type CancelWorkCommand = { cmd: "cancelWork"; itemId: string };
 export type RetryWorkCommand = { cmd: "retryWork"; itemId: string };

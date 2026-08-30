@@ -137,6 +137,19 @@ export const KINDS_BY_MODE: Record<ThreadMode, ReadonlySet<ThreadItemKind>> = {
  * like a proposal that has not arrived yet — and a caller that wants to handle this (the composer,
  * which should never have routed there) needs to tell it apart from a database being down.
  */
+/**
+ * The thread is not in this workspace — because it never was, or because it is gone.
+ *
+ * ONE SENTENCE FOR BOTH, deliberately. See `addItem` for why the distinction is the thing worth not
+ * making, and `loadThread`'s "no such thread in this workspace" for the same wording one layer up.
+ */
+export class ThreadNotHere extends Error {
+  constructor(readonly threadId: string) {
+    super("no such thread in this workspace");
+    this.name = "ThreadNotHere";
+  }
+}
+
 export class ThreadModeRefusal extends Error {
   constructor(readonly mode: ThreadMode, readonly kind: ThreadItemKind) {
     super(`a ${mode} thread cannot hold a ${kind} item`);
@@ -570,13 +583,21 @@ export class ThreadStore {
       `SELECT mode FROM threads WHERE workspace_id = ? AND id = ?`,
       [ctx.workspaceId, threadId],
     );
-    // A thread that is not there is left to the foreign key, which is the one thing that can say so
-    // authoritatively — refusing here would turn a race with a concurrent delete into a mode error,
-    // which is a sentence about the wrong problem.
-    if (owner) {
-      const mode = isThreadMode(owner["mode"]) ? owner["mode"] : "build";
-      if (!KINDS_BY_MODE[mode].has(item.kind)) throw new ThreadModeRefusal(mode, item.kind);
-    }
+    // A THREAD THIS WORKSPACE DOES NOT HAVE IS REFUSED HERE, and leaving it to the foreign key is
+    // exactly what does not work. `thread_items.thread_id` references `threads(id)` — the id ALONE,
+    // globally unique — so an insert naming another tenant's thread satisfies the constraint
+    // perfectly. What it also does is skip the mode check above, because the scoped SELECT found
+    // nothing: a caller passing a foreign thread id got an item written with no mode enforcement at
+    // all. The row is inert (it lands in the caller's own workspace and no derivation reads it), but
+    // "inert" is not the property this store is supposed to have, and §13 asks for the opposite
+    // claim in so many words — a pass for A cannot write into a thread in B.
+    //
+    // AND IT IS THE SAME SENTENCE FOR "GONE" AND "NOT YOURS", which is this codebase's rule
+    // everywhere an id crosses a tenant boundary: a refusal that distinguished them would confirm
+    // that the id exists somewhere, which turns the socket into an enumeration oracle.
+    if (!owner) throw new ThreadNotHere(threadId);
+    const mode = isThreadMode(owner["mode"]) ? owner["mode"] : "build";
+    if (!KINDS_BY_MODE[mode].has(item.kind)) throw new ThreadModeRefusal(mode, item.kind);
     // The monotonic clock, not the wall one — see `nextItemIso`. These rows are ordered by nothing
     // else, so two written in the same millisecond would have no defined order on either driver.
     const now = nextItemIso();

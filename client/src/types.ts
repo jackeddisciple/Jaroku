@@ -1823,7 +1823,12 @@ export type ClientCommand =
   | { cmd: "listWork"; scope?: "mine" | "all"; status?: WorkStatus; agentId?: string; cursor?: string | null }
   | { cmd: "loadWorkItem"; itemId: string }
   | { cmd: "listFleet" }
-  | { cmd: "dispatchWork"; agentId: string; input: string; clientRef?: string }
+  // `threadId` ON A DISPATCH IS A NOTE ABOUT WHERE IT CAME FROM, never a route: an operate thread's
+  // command is the SAME `dispatchWork` the Cockpit composer sends, through the same pre-flight gate,
+  // and the id is what binds the resulting job back into the conversation as a `work` item.
+  | { cmd: "dispatchWork"; agentId: string; input: string; clientRef?: string; threadId?: string }
+  // A question about what an agent has done, answered from the record. Never touches the container.
+  | { cmd: "askRecord"; agentId: string; question: string; threadId?: string }
   | { cmd: "cancelWork"; itemId: string }
   | { cmd: "retryWork"; itemId: string }
   | { cmd: "reconnectAgent"; deploymentId: string }
