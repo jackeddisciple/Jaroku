@@ -9,9 +9,10 @@
 //   npm run test:migrate
 
 import { DatabaseSync } from "node:sqlite";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { loadMigrations, migrate, type MigrationTarget } from "./migrate.ts";
 import { sqliteMigrationTarget } from "./sqlite.ts";
 
@@ -189,6 +190,124 @@ console.log("\nrefusing");
   check(versions(db).join(",") === "1", "the good one before it stayed applied");
   check(!tables(db).includes("b"), "the broken one's half-finished work was rolled back");
   check(!versions(db).includes(2), "and it is not recorded as applied");
+}
+
+
+// --- 066, against a database with something in it ---------------------------------------------
+//
+// §14 ASKS FOR THIS BY NAME: "the CHECK-constraint rebuild is the risky migration here. Run it
+// against a populated database, both dialects, and confirm indexes and foreign keys survived."
+// Everything above this line runs against invented two-line migrations, which is the right way to
+// test the RUNNER and cannot see anything about the schema it carries. This section runs the real
+// files.
+//
+// WHY IT IS POPULATED RATHER THAN EMPTY, and it is the whole point. `DROP TABLE thread_items`
+// performs an implicit `DELETE FROM`, and five tables reference it `ON DELETE CASCADE` — so on an
+// empty database the naive rebuild and the correct one are indistinguishable, and every assertion
+// about indexes and constraints passes either way. The rows below are what tell them apart: a note,
+// a pin, a rating, an attachment and a variant, each of which the naive version deletes on its way
+// past and leaves a schema nothing would complain about.
+//
+// APPLIED IN TWO PASSES — everything up to 065, then 066 alone — because that is what a deployment
+// does. Migrating an empty database in one go would let 066 run against a `thread_items` that was
+// created moments earlier in the same session; here it runs against one that already holds rows.
+{
+  const real = join(fileURLToPath(new URL("../..", import.meta.url)), "migrations", "sqlite");
+  const upTo = (limit: number): string => {
+    const dir = mkdtempSync(join(tmpdir(), "jaroku-066-"));
+    dirs.push(dir);
+    for (const f of readdirSync(real)) {
+      if (!f.endsWith(".sql") || Number(f.slice(0, 3)) > limit) continue;
+      copyFileSync(join(real, f), join(dir, f));
+    }
+    return dir;
+  };
+
+  const { t, db } = target();
+  await migrate(t, upTo(65), quiet);
+
+  const WS = "00000000-0000-4000-8000-0000000000aa";
+  const USER = "00000000-0000-4000-8000-0000000000bb";
+  const THREAD = "00000000-0000-4000-8000-0000000000cc";
+  const TURN = "00000000-0000-4000-8000-0000000000dd";
+  const now = "2026-01-01T00:00:00.000Z";
+  db.exec(`
+    INSERT INTO workspaces (id, slug, name, kind, plan, created_at)
+      VALUES ('${WS}', 'parity', 'Parity', 'personal', 'free', '${now}');
+    INSERT INTO users (id, external_id, email, created_at)
+      VALUES ('${USER}', 'ext-parity', 'parity@example.com', '${now}');
+    INSERT INTO threads (id, workspace_id, agent_id, agent_name_snapshot, title, title_is_custom,
+                         created_by, created_at, last_activity_at, status)
+      VALUES ('${THREAD}', '${WS}', NULL, 'tracey', 'Tracey', 0, '${USER}', '${now}', '${now}', 'idle');
+    INSERT INTO thread_items (id, workspace_id, thread_id, kind, ref_id, role, body, created_at)
+      VALUES ('${TURN}', '${WS}', '${THREAD}', 'message', NULL, 'user', 'did that mail go out?', '${now}');
+    INSERT INTO turn_attachments (id, workspace_id, turn_id, kind, ref, resolved_at, token_estimate)
+      VALUES ('a1', '${WS}', '${TURN}', 'file', '{}', '${now}', 7);
+    INSERT INTO turn_variants (id, workspace_id, turn_id, ordinal, created_at)
+      VALUES ('v1', '${WS}', '${TURN}', 1, '${now}');
+    INSERT INTO turn_notes (id, workspace_id, turn_id, author_id, body, created_at, updated_at)
+      VALUES ('n1', '${WS}', '${TURN}', '${USER}', 'a note', '${now}', '${now}');
+    INSERT INTO turn_pins (workspace_id, conversation_id, turn_id, user_id, created_at)
+      VALUES ('${WS}', '${THREAD}', '${TURN}', '${USER}', '${now}');
+    INSERT INTO turn_feedback (workspace_id, turn_id, user_id, rating, reasons, comment, created_at, updated_at)
+      VALUES ('${WS}', '${TURN}', '${USER}', 1, '[]', NULL, '${now}', '${now}');
+  `);
+
+  await migrate(t, upTo(66), quiet);
+
+  const one = (sql: string): number => Number((db.prepare(sql).get() as { n: number | bigint }).n);
+  // THE ROWS THE CASCADE WOULD HAVE TAKEN. Five assertions, one per referencing table, because a
+  // rebuild that got four of them out of the way and forgot the fifth is a rebuild that loses one
+  // feature's data and passes any test that only counted the parent's rows.
+  check(one(`SELECT COUNT(*) n FROM thread_items`) === 1, "066: the item survived the rebuild");
+  check(one(`SELECT COUNT(*) n FROM turn_attachments`) === 1, "066: its attachment was not cascaded away");
+  check(one(`SELECT COUNT(*) n FROM turn_variants`) === 1, "066: its variant was not cascaded away");
+  check(one(`SELECT COUNT(*) n FROM turn_notes`) === 1, "066: its note was not cascaded away");
+  check(one(`SELECT COUNT(*) n FROM turn_pins`) === 1, "066: its pin was not cascaded away");
+  check(one(`SELECT COUNT(*) n FROM turn_feedback`) === 1, "066: its rating was not cascaded away");
+
+  const idx = (db.prepare(
+    `SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='thread_items' ORDER BY name`,
+  ).all() as { name: string }[]).map((r) => r.name);
+  check(idx.includes("thread_items_thread"), "066: thread_items_thread was recreated");
+  check(idx.includes("thread_items_ref"), "066: thread_items_ref was recreated — §5's reverse lookup");
+  // THE ONE 059'S HEADER WARNS ABOUT. Its absence is not an error at any statement: it is five
+  // foreign keys pointing at a pair of columns with nothing unique behind them.
+  check(idx.includes("thread_items_ws_id_unique"), "066: the unique index five foreign keys need was recreated");
+
+  const dupe = ((): string => {
+    try {
+      db.exec(`INSERT INTO thread_items (id, workspace_id, thread_id, kind, created_at)
+               VALUES ('${TURN}', '${WS}', '${THREAD}', 'message', '${now}')`);
+      return "";
+    } catch (e) { return (e as Error).message; }
+  })();
+  check(dupe !== "", "066: and it still refuses a second row for the same (workspace, id)");
+
+  // THE WIDENING ITSELF, from both directions: the seventh word is accepted and an eighth is not.
+  // Only the second of those could pass on a table whose CHECK had been dropped and not replaced.
+  db.exec(`INSERT INTO thread_items (id, workspace_id, thread_id, kind, ref_id, created_at)
+           VALUES ('w1', '${WS}', '${THREAD}', 'work', 'some-work-item', '${now}')`);
+  check(one(`SELECT COUNT(*) n FROM thread_items WHERE kind = 'work'`) === 1, "066: a work item may be written into a thread");
+  const bogus = ((): string => {
+    try {
+      db.exec(`INSERT INTO thread_items (id, workspace_id, thread_id, kind, created_at)
+               VALUES ('x1', '${WS}', '${THREAD}', 'nonsense', '${now}')`);
+      return "";
+    } catch (e) { return (e as Error).message; }
+  })();
+  check(bogus.includes("CHECK"), "066: and the CHECK still refuses a kind that is not one of the seven");
+
+  // AND THE FOREIGN KEYS THEMSELVES, asked of the database rather than inferred from the schema
+  // text. `foreign_key_check` walks every row of every referencing table and reports the ones whose
+  // parent is missing — which is the assertion that would fail if the rename had left the five
+  // children pointing at something that no longer resolves.
+  check(
+    (db.prepare(`PRAGMA foreign_key_check`).all() as unknown[]).length === 0,
+    "066: every foreign key in the database still resolves",
+  );
+
+  db.close();
 }
 
 for (const d of dirs) rmSync(d, { recursive: true, force: true });

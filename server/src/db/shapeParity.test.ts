@@ -208,6 +208,85 @@ async function workRoundTrip(db: { run: (sql: string, params?: unknown[]) => Pro
   );
 }
 
+
+// --- the conversation's own two columns, which 065 and 066 just moved --------------------------
+//
+// §14 ASKS FOR THIS SUITE BY NAME over the CHECK rebuild, and the reason it belongs HERE rather
+// than only in `test:migrate` is that the two dialects reach the widened constraint by completely
+// different routes: Postgres drops the constraint and adds a wider one, SQLite writes the whole
+// table out again. Two mechanisms are two chances to end up somewhere different, and "they end up
+// in the same place" is the one claim this file exists to check rather than assert.
+//
+// ALL SEVEN KINDS, not just the new one. `work` alone would pass against a table whose CHECK had
+// been dropped and never replaced — the widening's real claim is that the other six still fit, and
+// on SQLite those six are rows COPIED by the rebuild rather than merely permitted by it.
+//
+// AND `threads.mode` BESIDE THEM, because 065's default is a claim about existing rows: the thread
+// seeded below names no mode, so what comes back says whether `DEFAULT 'build'` actually fired on
+// both drivers rather than leaving a null one of them tolerates.
+const ITEM_FIELDS = ["id", "thread_id", "kind", "ref_id", "role", "body", "created_at"] as const;
+
+const KINDS = ["message", "plan", "generation", "proposal", "run", "eval", "work"] as const;
+
+const threadIds = {
+  thread: randomUUID(),
+  items: KINDS.map(() => randomUUID()),
+};
+
+async function threadRoundTrip(
+  db: {
+    run: (sql: string, params?: unknown[]) => Promise<unknown>;
+    all: <T>(sql: string, params?: unknown[]) => Promise<T[]>;
+    get: <T>(sql: string, params?: unknown[]) => Promise<T | undefined>;
+  },
+): Promise<{ items: Record<string, unknown>[]; mode: unknown; refused: string }> {
+  const at = "2026-02-03T11:00:00.000Z";
+  // NO `mode` IN THE COLUMN LIST, deliberately — this is the INSERT the version before 065 wrote,
+  // and the default is what has to make it legal.
+  await db.run(
+    `INSERT INTO threads (id, workspace_id, agent_id, agent_name_snapshot, title, title_is_custom,
+                          created_by, created_at, last_activity_at, status)
+     VALUES (?, ?, ?, 'parity_agent', 'Parity', ?, ?, ?, ?, 'idle')`,
+    [threadIds.thread, LOCAL_WORKSPACE_ID, workIds.agent, 0, workIds.user, at, at],
+  );
+  for (let i = 0; i < KINDS.length; i++) {
+    await db.run(
+      `INSERT INTO thread_items (id, workspace_id, thread_id, kind, ref_id, role, body, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        threadIds.items[i], LOCAL_WORKSPACE_ID, threadIds.thread, KINDS[i],
+        KINDS[i] === "message" ? null : `ref-${KINDS[i]}`,
+        KINDS[i] === "message" ? "user" : null,
+        KINDS[i] === "message" ? 'did that mail go out? — "yes", she said' : null,
+        // One millisecond apart so the ordering below is the rows' own and not the planner's.
+        `2026-02-03T11:00:0${i}.000Z`,
+      ],
+    );
+  }
+  // THE NEGATIVE HALF, asked of each driver in its own words. A rebuild that lost the constraint
+  // and a constraint-alter that never landed both look exactly like a successful insert here.
+  let refused = "";
+  try {
+    await db.run(
+      `INSERT INTO thread_items (id, workspace_id, thread_id, kind, created_at)
+       VALUES (?, ?, ?, 'nonsense', ?)`,
+      [randomUUID(), LOCAL_WORKSPACE_ID, threadIds.thread, at],
+    );
+  } catch (err) {
+    refused = (err as Error).message;
+  }
+  const items = await db.all<Record<string, unknown>>(
+    `SELECT ${ITEM_FIELDS.join(", ")} FROM thread_items
+      WHERE workspace_id = ? AND thread_id = ? ORDER BY created_at ASC`,
+    [LOCAL_WORKSPACE_ID, threadIds.thread],
+  );
+  const row = await db.get<{ mode: unknown }>(
+    `SELECT mode FROM threads WHERE workspace_id = ? AND id = ?`,
+    [LOCAL_WORKSPACE_ID, threadIds.thread],
+  );
+  return { items, mode: row?.mode, refused };
+}
+
 const tmp = mkdtempSync(join(tmpdir(), "jaroku-parity-"));
 const sqlite = new SqliteDb(join(tmp, "parity.db"));
 await migrate(sqlite.migrationTarget(), join(MIGRATIONS, "sqlite"), () => {});
@@ -261,6 +340,28 @@ const ran = await withScratchPostgres(async (pg) => {
   check(
     typeof workA?.created_seq === "number" && typeof workB?.created_seq === "number",
     "created_seq is a number on both — the tie-break every ordered read applies",
+  );
+
+  console.log("\nthread items");
+  const itemsA = await threadRoundTrip(sqlite);
+  const itemsB = await threadRoundTrip(pg);
+  check(
+    itemsA.items.length === KINDS.length && itemsB.items.length === KINDS.length,
+    `all seven kinds are writable on both drivers (sqlite: ${itemsA.items.length}, pg: ${itemsB.items.length})`,
+  );
+  for (let i = 0; i < KINDS.length; i++) {
+    const ia = JSON.stringify(pick(itemsA.items[i] ?? {}, ITEM_FIELDS));
+    const ib = JSON.stringify(pick(itemsB.items[i] ?? {}, ITEM_FIELDS));
+    check(ia === ib, `a '${KINDS[i]}' item reads back identically on both drivers`);
+    if (ia !== ib) console.log(`       sqlite: ${ia}\n       pg:     ${ib}`);
+  }
+  check(
+    itemsA.refused !== "" && itemsB.refused !== "",
+    `and both still refuse an eighth kind (sqlite: ${itemsA.refused ? "refused" : "ACCEPTED"}, pg: ${itemsB.refused ? "refused" : "ACCEPTED"})`,
+  );
+  check(
+    itemsA.mode === "build" && itemsB.mode === "build",
+    `a thread inserted without naming a mode is a build thread on both (sqlite: ${String(itemsA.mode)}, pg: ${String(itemsB.mode)})`,
   );
   return true;
 });
