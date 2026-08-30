@@ -22,6 +22,9 @@ import {
 import {
   agentCapabilityFor, can, capabilityFor, roleFor, withArticle, type AgentCapability,
 } from "./auth/capabilities.ts";
+// TYPE-ONLY. The relay describes what a reply carries; resolving a citation is `work/citations.ts`'s
+// job and happens before the event is built, so nothing here imports its code.
+import type { CitationView } from "./work/citations.ts";
 
 export type RunCommand = {
   cmd: "run";
@@ -1596,7 +1599,20 @@ export type ReplyEvent =
    * every one before §5.4 had a writer — so a reader that treats it as optional stays correct for
    * every turn already in a thread.
    */
-  | { type: "done"; agentId: string; usage?: unknown }
+  /**
+   * §7.4'S CITATIONS, ON `done` RATHER THAN ON EACH `delta`.
+   *
+   * A marker can be split across two deltas — a stream has no obligation to break on anything —
+   * so a client that turned text into chips as it arrived would render half a citation and then a
+   * stray bracket. What it renders instead is the marker as plain text while the answer streams,
+   * and chips once the answer is complete and the server has said which ids are real.
+   *
+   * ONLY RESOLVABLE IDS ARE HERE. An id the model invented is deliberately absent, which leaves it
+   * on screen as the bare text it always was — §7.4's "a sentence with nothing behind it is visibly
+   * a sentence with nothing behind it". Absent on every reply that cited nothing, so the build
+   * composer's answers are byte-identical to what they were.
+   */
+  | { type: "done"; agentId: string; usage?: unknown; citations?: CitationView[] }
   | { type: "error"; agentId: string; message: string };
 
 // Eval rides its own channel too, parallel to trace/gen/edit/debug/reply.

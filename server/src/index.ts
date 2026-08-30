@@ -160,6 +160,7 @@ import { openCheckpointStore } from "./checkpoints/store.ts";
 import { introspectGraph, introspectGraphCached, type GraphResult } from "./graphIntrospect.ts";
 import { streamExplain, EXPLAIN_MODEL, EXPLAIN_MAX_TOKENS } from "./explainer.ts";
 import { buildFactPack, type FactPack, type PackDeps } from "./work/factPack.ts";
+import { citableFrom, resolveCitations } from "./work/citations.ts";
 import { CONVERSATION_SYSTEM, conversationClosing, renderRecord } from "./prompt.ts";
 import type { AskRecordCommand, ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCommand, InboxCommand, ProviderSnapshot } from "./wsRelay.ts";
 import type { ListWorkCommand, WorkCommand, WorkSnapshotWire } from "./wsRelay.ts";
@@ -12274,6 +12275,13 @@ async function answerFromRecord(ctx: TenantContext, cmd: AskRecordCommand): Prom
 
     const pack = await recordFor(ctx, [{ id: agent.id, name: agentName }]);
     const record = renderRecord(pack);
+    // WHAT MAY BE CITED IS EXACTLY WHAT WENT IN. Built from the pack rather than from the
+    // workspace, so §7.5's "not in the pack, not in the answer" has a mechanical meaning one layer
+    // below the prompt — see `citableFrom`.
+    const citable = citableFrom(pack.items);
+    // The answer as it accumulates, because a citation marker can be split across two deltas and
+    // there is nothing to parse until the whole thing has arrived.
+    let answer = "";
     const askKey = await providerKeys.platformKey(ctx);
     const effort = await effortForThread(ctx, replyThread, EXPLAIN_MODEL, EXPLAIN_MAX_TOKENS);
     const settle = await openVariant(ctx, turn, EXPLAIN_MODEL, "anthropic", effort);
@@ -12283,7 +12291,10 @@ async function answerFromRecord(ctx: TenantContext, cmd: AskRecordCommand): Prom
       record,
       question,
       {
-        onDelta: (text) => relay.broadcastReply(ctx, { type: "delta", agentId: cmd.agentId, text }, thread),
+        onDelta: (text) => {
+          answer += text;
+          relay.broadcastReply(ctx, { type: "delta", agentId: cmd.agentId, text }, thread);
+        },
         onUsage: (u) => {
           // §10: ATTRIBUTED TO THE THREAD, and metered as the platform's own thinking rather than
           // as the agent's spend — see `meterPlatformCall` and the `llm.explain` kind it shares
@@ -12299,7 +12310,22 @@ async function answerFromRecord(ctx: TenantContext, cmd: AskRecordCommand): Prom
           });
           settle({ tokensIn: u.input, tokensOut: u.output });
         },
-        onDone: () => relay.broadcastReply(ctx, { type: "done", agentId: cmd.agentId }, thread),
+        onDone: () => {
+          const { cited, invented } = resolveCitations(answer, citable);
+          // AN INVENTED CITATION IS LOGGED AND NOT SENT. It stays on screen as the bare text it
+          // always was, which is §7.4's whole point — and the line here is the only measurement
+          // anybody has of how often the rules are not holding.
+          if (invented.length > 0) {
+            console.warn(`[ask] the answer cited ${invented.length} id(s) not in the pack: ${invented.join(", ")}`);
+          }
+          relay.broadcastReply(
+            ctx,
+            // ABSENT RATHER THAN EMPTY when nothing resolved, so an answer that cited nothing is
+            // the same event shape the build composer's replies have always been.
+            { type: "done", agentId: cmd.agentId, ...(cited.length > 0 ? { citations: cited } : {}) },
+            thread,
+          );
+        },
         onError: (message) => relay.broadcastReply(ctx, { type: "error", agentId: cmd.agentId, message }, thread),
       },
       askKey,
