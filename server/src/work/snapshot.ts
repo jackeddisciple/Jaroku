@@ -86,7 +86,22 @@ export interface WorkItemDetailView extends WorkItemView {
 
 /** One compact card in the strip across the top. */
 export interface FleetCardView {
+  /** The agent's UUID. What `dispatchWork` and `askRecord` take — see `work_items.agent_id`. */
   agent_id: string;
+  /**
+   * ...AND ITS SLUG, because this is the surface where both spellings meet.
+   *
+   * `deployments.agent_id` and `runs.agent_id` are the slug (migration 002); `work_items.agent_id`
+   * is the uuid, because §4 wanted a real foreign key. The THREADS channel calls the slug "the
+   * agent id" too — `threadSnapshot` sends it deliberately, so a row's chip can select the agent —
+   * which means a conversation and a fleet card name the same agent with two different strings.
+   *
+   * Part 3 is what made that a bug rather than a curiosity: the operate composer has a thread (slug)
+   * and needs the card (uuid) to show the pre-flight gate and to dispatch. Matching on one spelling
+   * found nothing and the send button did nothing AND SAID NOTHING, which is the worst of the three
+   * outcomes. Carrying both is one field and ends the question.
+   */
+  agent_slug: string;
   agent_name: string;
   deployment_id: string;
   url: string | null;
@@ -356,6 +371,9 @@ export class WorkSnapshots {
       const health = this.deps.cachedHealth?.(deployment.id);
       cards.push({
         agent_id: agentId,
+        // `deployment.agent_id` IS THE SLUG — see the note on `outcomes` below, which is the other
+        // line in this object where the two spellings meet.
+        agent_slug: deployment.agent_id,
         agent_name: agents.get(agentId) ?? "an agent that has been deleted",
         deployment_id: deployment.id,
         url: deployment.url,

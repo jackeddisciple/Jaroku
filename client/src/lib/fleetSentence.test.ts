@@ -35,7 +35,7 @@ const ago = (ms: number): string => new Date(Date.now() - ms).toISOString();
 const MINUTE = 60_000;
 
 const card = (patch: Partial<FleetCardView> = {}): FleetCardView => ({
-  agent_id: "a", agent_name: "billing_bot", deployment_id: "d", url: "https://x.up.railway.app",
+  agent_id: "a", agent_slug: "billing_bot", agent_name: "billing_bot", deployment_id: "d", url: "https://x.up.railway.app",
   version: 7, provider: "anthropic", model: "claude-haiku-4-5", connection: "connected",
   running: 0, waiting: 0, queued: 0,
   jobs_today: 0, last_job_at: null, spend_today: 0, spend_complete: true, outcomes: [],

@@ -1112,7 +1112,11 @@ export function BuildPane({
    * refuses rather than opening a gate with blanks in it.
    */
   const operateCard = useWorkStore((s) =>
-    s.fleet.find((c) => c.agent_id === activeThread?.agent_id) ?? null);
+    // MATCHED ON THE SLUG, because that is what a thread's `agent_id` holds — the threads channel
+    // deliberately sends the slug so a row's chip can select the agent, while the card's own
+    // `agent_id` is the uuid `dispatchWork` needs. Matching uuid to slug found nothing, so the
+    // gate never opened and the send control did nothing and said nothing.
+    s.fleet.find((c) => c.agent_slug === activeThread?.agent_id) ?? null);
   /**
    * §6's classification, recomputed live like the build composer's — and for a sharper reason. The
    * label has to be on screen WHILE somebody types, which is what rules out anything with a round
@@ -1420,7 +1424,8 @@ export function BuildPane({
    */
   const dispatchOperate = (): void => {
     const trimmed = text.trim();
-    const agentId = activeThread?.agent_id ?? activeAgentId;
+    // The card's uuid, for the same reason `submit` uses it — see the note there.
+    const agentId = operateCard?.agent_id ?? null;
     if (!trimmed || !agentId) return;
     setOperateGated(false);
     // CLEARED ON PRESS, like the Cockpit's own composer, and for the same reason: leaving the text
@@ -1453,7 +1458,11 @@ export function BuildPane({
      */
     if (operating) {
       if (busy) return;
-      const agentId = activeThread?.agent_id ?? activeAgentId;
+      // THE CARD'S UUID, NOT THE THREAD'S SLUG. Both commands below resolve the agent by uuid —
+      // `askRecord` because a fact pack is scoped by `work_items.agent_id`, `dispatchWork` because
+      // that is the column it writes. Passing the slug reaches `agentRepo.byId`, finds nothing, and
+      // answers "there is no such agent" about an agent that is right there on the card.
+      const agentId = operateCard?.agent_id ?? null;
       if (!agentId) return;
       if (operateRoute.kind === "command") {
         // THE GATE, NOT THE DISPATCH. §6: an ambiguous message classified as a command still meets
@@ -1716,6 +1725,7 @@ export function BuildPane({
     running: activeRun?.status === "running",
     failedStepSeq: selectedStep?.error ? selectedStep.seq : null,
     contextLabel,
+    operating,
   });
 
   // An empty thread on a screen this pane owns. The one case where the composer is not the
@@ -1773,7 +1783,25 @@ export function BuildPane({
           />
         )}
         {turns.length === 0 && emptySlot}
-        {turns.length === 0 && !emptySlot &&
+        {/* PART 3 §11: THE EMPTY STATE OF AN OPERATE THREAD IS NOT THE BUILD ONE. Both sentences
+            below are about writing code — "describe the agent you want", "describe a change" — and
+            an operate conversation can do neither. An empty state is the one piece of copy a person
+            reads before they have decided anything, so it is the last place the surface may
+            misdescribe itself. */}
+        {turns.length === 0 && !emptySlot && operating && (
+          <EmptyState
+            icon={WrenchIcon}
+            title={`Ask ${activeThread?.agent_name ?? "this agent"} what it has been doing`}
+            hint={
+              <>
+                Questions are answered from the record — the jobs this agent was given and what
+                became of them — and never by asking the agent, which remembers nothing between
+                runs. Give it a job instead and you will see exactly what is about to happen first.
+              </>
+            }
+          />
+        )}
+        {turns.length === 0 && !emptySlot && !operating &&
           (mode === "generate" ? (
             <EmptyState
               icon={SparklesIcon}
@@ -1967,8 +1995,13 @@ export function BuildPane({
           />
         )}
 
-        {/* context chip + live routing hint (Chat mode) — so the one composer stays transparent */}
-        {(contextLabel || text.trim() || moment.status) && (
+        {/* context chip + live routing hint (Chat mode) — so the one composer stays transparent.
+            `operating` IS IN THIS CONDITION BECAUSE §6 SAYS THE LABEL IS ALWAYS VISIBLE, and the row
+            it lives in was gated on there being something to say — a context chip, some text, a
+            status. On an empty operate composer none of those is true, so the destination label was
+            absent at exactly the moment somebody is deciding what to type, which is the one moment
+            it exists for. */}
+        {(contextLabel || text.trim() || moment.status || operating) && (
           <div className="mb-2 flex items-center gap-2 text-tiny">
             {/* What the app is doing. The routing hint on the right says where a message would go;
                 this says what is going on regardless of whether anything has been typed. */}

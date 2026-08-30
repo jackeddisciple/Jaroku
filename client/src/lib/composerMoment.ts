@@ -38,6 +38,15 @@ export type ComposerSituation = {
   failedStepSeq: number | null;
   /** The composer's existing context label — a selected step or graph node. */
   contextLabel: string | null;
+  /**
+   * This is an OPERATE conversation (Part 3 §11), so nothing typed here changes code.
+   *
+   * IT IS THE FIRST RUNG BELOW TEST MODE rather than a branch at the bottom, because every sentence
+   * beneath it is about building: "describe a change", "a plan is waiting", "fix step #4". Placed
+   * lower, an operate composer would inherit whichever of those happened to match first — which is
+   * how a box that dispatches to a live container ends up inviting somebody to describe a change.
+   */
+  operating?: boolean;
 };
 
 export type ComposerMoment = {
@@ -58,6 +67,16 @@ export type ComposerMoment = {
  */
 export function composerMoment(s: ComposerSituation): ComposerMoment {
   const agent = s.agentName ?? "this agent";
+
+  // AN OPERATE THREAD HAS TWO DESTINATIONS AND NEITHER IS AN EDIT, so it says what it can actually
+  // do. The destination LABEL above the box says which of the two this particular sentence takes;
+  // this says what the box is for at all.
+  if (s.operating) {
+    return {
+      placeholder: `Ask ${agent} what it has done, or give it a job — ${keyHint("⌘↵")} to send`,
+      status: null,
+    };
+  }
 
   if (s.mode === "test") {
     if (!s.canRun) {

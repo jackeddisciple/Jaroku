@@ -2395,7 +2395,16 @@ export interface WorkItemDetailView extends WorkItemView {
 }
 
 export interface FleetCardView {
+  /** The agent's UUID. What `dispatchWork` and `askRecord` take. */
   agent_id: string;
+  /**
+   * ...and its slug, because the threads channel calls THAT "the agent id".
+   *
+   * A conversation and a fleet card name the same agent with two different strings — see the
+   * server's copy for why both are real — so the operate composer, which has a thread and needs a
+   * card, matches on this one.
+   */
+  agent_slug: string;
   agent_name: string;
   deployment_id: string;
   url: string | null;
@@ -2473,7 +2482,9 @@ export type WorkMessage =
    * existed, and this is what matches the answer to that row so it can settle IN PLACE rather than
    * being joined by a duplicate. See `lib/workLive.ts`.
    */
-  | { type: "dispatched"; item: WorkItemDetailView; clientRef?: string }
+  // `threadId` when the job happened in an operate conversation — the server's own answer, set only
+  // when the `thread_items` row was written, so an open thread can show it without a reload.
+  | { type: "dispatched"; item: WorkItemDetailView; clientRef?: string; threadId?: string }
   | { type: "logs"; deploymentId: string; lines: RuntimeLogLine[]; cursor: string | null }
   /** `clientRef` is present when the refusal answers a dispatch, so §19's row can fail rather than vanish. */
   | { type: "error"; message: string; itemId?: string; clientRef?: string }

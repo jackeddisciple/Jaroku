@@ -585,6 +585,19 @@ function dispatch(msg: ServerMessage): void {
         // page is filtered to `failed` does not belong on it, and the panel opening is the
         // navigation that answers the dispatch — not a row appearing under a filter it fails.
         else w.noteItem(msg.item, useSessionStore.getState().user?.id ?? null);
+        // PART 3 §6: AND THE CONVERSATION IT HAPPENED IN, if it happened in one.
+        //
+        // `threadId` IS THE SERVER'S ANSWER RATHER THAN THE CLIENT'S CLAIM — it is present only when
+        // the `thread_items` row was actually written — so an open operate thread puts the job on
+        // screen immediately rather than showing nothing until somebody navigates away and back. A
+        // dispatch from the Cockpit's own composer carries none and this does nothing.
+        if (msg.threadId) {
+          useChatStore.getState().workDispatched({
+            threadId: msg.threadId,
+            workItemId: (msg.item as { id: string }).id,
+            input: (msg.item as { input?: string }).input ?? "",
+          });
+        }
       }
       else if (msg.type === "logs") w.setLogs({ deploymentId: msg.deploymentId, lines: msg.lines, cursor: msg.cursor });
       else if (msg.type === "error") {

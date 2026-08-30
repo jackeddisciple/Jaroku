@@ -2630,7 +2630,19 @@ export type WorkEvent =
    * detail panel opens on the new job — and broadcasting it would move every open Cockpit in the
    * workspace to a job somebody else just started.
    */
-  | { type: "dispatched"; item: unknown; clientRef?: string }
+  /**
+   * `threadId` WHEN THE JOB HAPPENED IN A CONVERSATION (Part 3 §6).
+   *
+   * Absent for a dispatch from the Cockpit's own composer, which did not happen in one. Present so
+   * an OPEN operate thread can put the job on screen without a reload — the alternative is a
+   * confirmed dispatch that appears to do nothing until somebody navigates away and back, which is
+   * the same shape of bug as a control that does nothing at all.
+   *
+   * THE SERVER'S OWN ANSWER, not the client's claim echoed back: it is set only when the binding
+   * actually succeeded, so a thread that refused the item — a build thread cannot hold one — gets
+   * no turn rather than one describing a row that is not there.
+   */
+  | { type: "dispatched"; item: unknown; clientRef?: string; threadId?: string }
   /** One window of a container's runtime log, and the cursor that continues it. */
   | { type: "logs"; deploymentId: string; lines: unknown[]; cursor: string | null }
   /**

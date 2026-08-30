@@ -264,6 +264,16 @@ interface ChatState {
     citations?: { id: string; status: string; agent_name: string; created_at: string }[];
   }) => void;
   replyError: (e: In & { agentId: string; message: string }) => void;
+  /**
+   * A job this conversation just dispatched — Part 3 §6.
+   *
+   * IT IS NOT AN OPTIMISTIC ROW. The Cockpit's list draws one because it has a placeholder to
+   * settle; here the server has already written the `thread_items` row by the time it answers, and
+   * the answer carries the id. So this appends a real turn about a real row rather than a promise
+   * of one, and there is nothing to reconcile if the dispatch is refused — a refusal carries no
+   * thread and reaches this not at all.
+   */
+  workDispatched: (e: In & { workItemId: string; input: string }) => void;
 }
 
 /** The turns a message belongs to. A message with no session reads and writes `pending`. */
@@ -698,6 +708,22 @@ export const useChatStore = create<ChatState>((set) => ({
           ...(citations && citations.length > 0 ? { citations } : {}),
         })),
       };
+    }),
+
+  workDispatched: ({ threadId, workItemId, input }) =>
+    set((s) => {
+      if (!threadId) return {};
+      const turns = turnsIn(s, threadId);
+      // IDEMPOTENT ON THE WORK ITEM ID, because a reload can hydrate the same row and this can
+      // arrive for a job the conversation already holds — two chips for one job is a row of noise
+      // pointing at one thing.
+      if (turns.some((t) => t.role === "jaroku" && t.kind === "work" && t.workItemId === workItemId)) return {};
+      return putTurns(s, threadId, [
+        ...turns,
+        // WHAT WAS ASKED, kept for this session only. A reload rebuilds the turn from the
+        // `thread_items` row, which stores a reference and no prose — see `hydrate`.
+        { id: turnId(), role: "jaroku" as const, kind: "work" as const, workItemId, input },
+      ]);
     }),
 
   replyError: ({ threadId, agentId, message }) =>

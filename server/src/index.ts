@@ -6633,13 +6633,29 @@ async function handleWorkCommand(ctx: TenantContext, cmd: WorkCommand): Promise<
         // somebody their dispatch failed. A BUILD thread id is refused by the store here — see
         // `KINDS_BY_MODE` — and lands in that catch as a logged line, which is the enforcement
         // working rather than an error path.
+        //
+        // AWAITED HERE, UNLIKE EVERY OTHER `noteThreadItem` CALL, and only because the answer is
+        // part of the reply: the client is told which conversation the job landed in so it can put
+        // it on screen, and a floated write would mean saying so before knowing. It is still
+        // caught — a conversation that could not record a dispatched job is not a reason to tell
+        // somebody their dispatch failed, so the answer simply carries no thread.
+        let boundTo: string | undefined;
         if (typeof cmd.threadId === "string" && cmd.threadId) {
-          noteThreadItem(ctx, cmd.threadId, { kind: "work", refId: out.item.id });
+          try {
+            await threadStore.addItem(ctx, cmd.threadId, { kind: "work", refId: out.item.id });
+            boundTo = cmd.threadId;
+            scheduleListRefresh(ctx);
+          } catch (err) {
+            // A BUILD THREAD ID LANDS HERE, which is the store's enforcement working rather than an
+            // error path — see `KINDS_BY_MODE`.
+            console.error(`[work] could not record a job in ${cmd.threadId}:`, (err as Error)?.message ?? err);
+          }
         }
         relay.sendWork(ctx, ctx.requestId, {
           type: "dispatched",
           item: await workSnapshots.detail(ctx, out.item),
           clientRef,
+          ...(boundTo ? { threadId: boundTo } : {}),
         });
         await broadcastWorkItem(ctx, out.item);
         await relay.broadcastFleet();
@@ -7511,7 +7527,25 @@ async function handleThreadCommand(ctx: TenantContext, cmd: ThreadCommand): Prom
       // The name is snapshotted at creation (§3.2), so it has to be resolved now rather than at
       // read time. A slug that names no agent in THIS workspace resolves to null and the thread is
       // created without one, which is the same outcome as not naming an agent at all.
-      const agent = agentId ? await agentRepo.bySlug(ctx, agentId) : undefined;
+      /**
+       * BY SLUG, THEN BY UUID — the seam the Cockpit is the first surface to sit on.
+       *
+       * `WorkDispatcher.liveDeployment` has the same paragraph and it is worth repeating here
+       * because this is where it bit: everything on the threads channel calls the SLUG "the agent
+       * id" — the snapshot deliberately sends the slug so the row's chip can select the agent — and
+       * everything on the WORK channel calls the uuid that, because `work_items.agent_id` is a real
+       * foreign key to `agents(id)`. A fleet card carries the uuid, because `dispatchWork` needs
+       * one, and it is also the thing §11 asks to open a conversation from.
+       *
+       * Resolved by slug first, so nothing about the existing callers changes, then by id. Without
+       * the second lookup a press on a fleet card opened a thread with NO AGENT — a uuid matches no
+       * slug, `agent` came back undefined, and the row was created unbound. It looked like a
+       * working button: a conversation appeared, it just was not about anything, and every press
+       * added another one.
+       */
+      const agent = agentId
+        ? ((await agentRepo.bySlug(ctx, agentId)) ?? (await agentRepo.byId(ctx, agentId)))
+        : undefined;
       const mode = cmd.mode === "operate" ? "operate" as const : "build" as const;
       /**
        * AN OPERATE THREAD IS FOUND BEFORE IT IS MADE, and a build thread is always new.
