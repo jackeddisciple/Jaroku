@@ -240,6 +240,23 @@ export class UsageMeter {
       runId?: string | null;
       /** `workspace` when the call went out on the workspace's own key. Defaults to us. */
       payer?: Payer;
+      /**
+       * The conversation that caused the call — the column migration 044 added for exactly this.
+       *
+       * IT WAS MISSING FROM THIS SHAPE AND THE CALLER WAS PASSING IT ANYWAY. `meterPlatformCall`
+       * declares `threadId` in its own signature and hands its argument straight to this method;
+       * structural typing accepts an object with an extra property when it arrives as a variable
+       * rather than as a literal, so the field was dropped here in silence. Every plan, generation,
+       * edit and explanation therefore wrote `thread_id = NULL`, and `spendByThread`'s second query
+       * — the one whose whole job is the platform's own thinking, which carries no run to
+       * attribute through — matched nothing. The per-thread cost column has been showing agents'
+       * runs only since it shipped, which is a figure that is confidently short rather than wrong,
+       * and is the failure mode that file's own header warns about.
+       *
+       * Null for a call that belongs to no conversation, which is the judge: an eval is a batch of
+       * runs and its verdicts attribute through those.
+       */
+      threadId?: string | null;
     },
   ): Promise<boolean> {
     const cost = costFor(call.model, {
@@ -252,6 +269,7 @@ export class UsageMeter {
       kind,
       idempotencyKey: call.idempotencyKey ?? usageKey(kind, randomUUID()),
       runId: call.runId ?? null,
+      threadId: call.threadId ?? null,
       // Every platform-side call is Anthropic's: planning, generation, the fix loop, explain and
       // the judge are all Anthropic-only (see providers.ts's `powers_jaroku`). Recorded rather
       // than left null so a future second provider is a change to this line and not a schema

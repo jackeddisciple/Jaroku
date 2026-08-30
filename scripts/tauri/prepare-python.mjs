@@ -26,7 +26,7 @@
 // Run it with `npm run tauri:python` from the repository root. `tauri:build` runs it first.
 
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -107,6 +107,23 @@ mkdirSync(BIN, { recursive: true });
 mkdirSync(INTERPRETERS, { recursive: true });
 
 copyFileSync(binary, join(BIN, `uv${exe}`));
+/**
+ * ...AND MADE WRITABLE, WHICH IS NOT COSMETIC.
+ *
+ * `copyFileSync` preserves the source's mode, and a Homebrew-installed `uv` is `r-xr-xr-x` — no
+ * write bit for anybody, including its owner. Tauri's build script copies `resources/` into
+ * `target/<profile>/` on every build, and the SECOND build then tries to overwrite a destination it
+ * cannot write:
+ *
+ *     error: failed to run custom build command for `jaroku`
+ *     Permission denied (os error 13)
+ *
+ * with no path in the message. The first build succeeds, which is what makes this expensive: it
+ * looks like something the developer did between the two, and the obvious suspects — a version
+ * bump, a lock file, a running app holding the sidecar — are all wrong. `0o755` is the mode this
+ * file would have if it had been downloaded rather than copied from a package manager's cellar.
+ */
+chmodSync(join(BIN, `uv${exe}`), 0o755);
 console.log(`uv          ${join("bin", `uv${exe}`)}  <- ${binary}`);
 
 // `--no-bin` and `--no-registry` because both write OUTSIDE the install directory — a shim into

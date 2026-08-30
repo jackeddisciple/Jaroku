@@ -22,6 +22,7 @@ import { randomUUID } from "node:crypto";
 
 import { openTestSqlite, testContext } from "../db/testDb.ts";
 import { BillingRepository } from "../db/repositories/billing.ts";
+import { UsageMeter } from "../billing/usage.ts";
 import { ThreadStore } from "../threadStore.ts";
 import type { Db } from "../db/db.ts";
 import type { TenantContext } from "../db/tenant.ts";
@@ -208,6 +209,53 @@ console.log("\nand a job dispatched from an operate thread is not invisible");
   // somebody's invoice.
   check("...so the ask is never larger than the total",
     (ask.get(op.id)?.usd ?? 0) <= (byThread.get(op.id)?.usd ?? 0));
+  await db.close();
+}
+
+console.log("\nand it survives the path production actually takes");
+{
+  /**
+   * THROUGH `UsageMeter.meterModelCall` RATHER THAN `BillingRepository.record`.
+   *
+   * Everything above this block writes rows through the repository, which is the right level for
+   * asserting what the AGGREGATES do — and is one level below where the bug was. `meterPlatformCall`
+   * declares `threadId` and hands its argument to `meterModelCall`, whose parameter type did not
+   * have the field; structural typing accepts an object with an extra property when it arrives as a
+   * variable, so it compiled, and every plan, generation, edit and explanation wrote
+   * `thread_id = NULL` in silence. The per-thread cost column had been showing agents' runs only
+   * since it shipped.
+   *
+   * So this asserts the seam, not the store: a call metered the way production meters one lands in
+   * the thread it names.
+   */
+  const db = await openTestSqlite();
+  const billing = new BillingRepository(db);
+  const meter = new UsageMeter(billing, async () => null);
+  const threads = new ThreadStore(db);
+  const agentId = await seedAgent(db, "tracey");
+  const op = await threads.create(ctx, { agentId, agentName: "Tracey", title: "ops", mode: "operate" });
+
+  await meter.meterModelCall(ctx, "llm.explain", {
+    model: "claude-haiku-4-5",
+    inputTokens: 900,
+    outputTokens: 120,
+    payer: "platform",
+    threadId: op.id,
+  });
+
+  // THE COLUMN ITSELF, read directly. `recentEvents` does not select `thread_id` — it is a feed of
+  // what was spent, not of what caused it — and asserting through an aggregate would pass against a
+  // NULL that some other row happened to cover. The claim is about this column on this row.
+  const row = await db.get<{ thread_id: string | null }>(
+    `SELECT thread_id FROM usage_events WHERE workspace_id = ? AND kind = 'llm.explain'`,
+    [ctx.workspaceId],
+  );
+  check("a metered explain names the thread it happened in", row?.thread_id === op.id,
+    `thread_id=${String(row?.thread_id)}`);
+  const ask = await billing.askSpendByThread(ctx);
+  check("...so the ask figure finds it", (ask.get(op.id)?.usd ?? 0) > 0, String(ask.get(op.id)?.usd));
+  const byThread = await billing.spendByThread(ctx);
+  check("...and so does the thread's total", (byThread.get(op.id)?.usd ?? 0) > 0);
   await db.close();
 }
 
