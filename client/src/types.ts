@@ -1052,7 +1052,9 @@ export interface ThreadItemView {
    * next time the thread was opened. This is the id the server knows a turn by.
    */
   id: string;
-  kind: "run" | "eval" | "plan" | "generation" | "proposal" | "message";
+  // `work` is the one kind an operate thread adds (migration 066). `ref_id` is a `work_items.id`,
+  // exactly as a `run` item's is a run id — the conversation stores a reference and never a copy.
+  kind: "run" | "eval" | "plan" | "generation" | "proposal" | "message" | "work";
   ref_id: string | null;
   role: "user" | null;
   body: string | null;

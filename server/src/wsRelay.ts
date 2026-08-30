@@ -2235,7 +2235,10 @@ const EMPTY_THREADS: ThreadSnapshot = {
  * wire shape is, and so a column added to `thread_items` is a deliberate decision to send.
  */
 export interface ThreadItemView {
-  kind: "run" | "eval" | "plan" | "generation" | "proposal" | "message";
+  // `work` ARRIVES WITH MIGRATION 066 and is the one kind an operate thread adds. It carries a
+  // `work_items.id` in `ref_id`, exactly as `run` carries a run id — a reference, never a copy, so
+  // the status the Cockpit renders for it stays the owner's and cannot go stale in a conversation.
+  kind: "run" | "eval" | "plan" | "generation" | "proposal" | "message" | "work";
   ref_id: string | null;
   role: "user" | null;
   body: string | null;

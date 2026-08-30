@@ -29,6 +29,7 @@
     "test:agent-adversarial": "tsx src/agentAdversarial.test.ts",
     "test:thread-title": "tsx src/threadTitle.test.ts",
     "test:thread-archive": "tsx src/threadArchive.test.ts",
+    "test:thread-mode": "tsx src/threadMode.test.ts",
     "test:rls": "tsx src/db/rls.test.ts",
     "test:db-boundary": "tsx src/db/boundary.test.ts",
     "test:object-keys": "tsx src/storage/keys.test.ts",

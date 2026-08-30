@@ -63,6 +63,16 @@ export interface Thread {
   /** Null means active. The only way a thread leaves the default list. */
   archived_at: string | null;
   status: ThreadStatus;
+  /**
+   * What this conversation is for. Decided when the row is opened and never afterwards.
+   *
+   * THERE IS NO `setMode`, deliberately. A thread that changed mode would be a thread holding items
+   * its new mode forbids — every proposal in a build thread turned operate, every work item in an
+   * operate thread turned build — so the enforcement below would be true of new writes and false of
+   * everything already in the row. The mode is a property of why the conversation was opened, and
+   * opening another one is cheap.
+   */
+  mode: ThreadMode;
 }
 
 /**
@@ -71,7 +81,68 @@ export interface Thread {
  * `message` is the only one with prose of its own; the other five are pointers at rows or at
  * in-memory state that already exists somewhere else.
  */
-export type ThreadItemKind = "message" | "plan" | "generation" | "proposal" | "run" | "eval";
+export type ThreadItemKind =
+  | "message" | "plan" | "generation" | "proposal" | "run" | "eval" | "work";
+
+/**
+ * What a conversation is FOR, and therefore what may be written into it (migration 065).
+ *
+ * `build` is what existed before Part 3: plan cards, generation, proposals, diffs, Apply and Undo.
+ * `operate` is questions answered from the record and commands dispatched to a live deployment.
+ */
+export type ThreadMode = "build" | "operate";
+
+export const THREAD_MODES: readonly ThreadMode[] = ["build", "operate"];
+
+export function isThreadMode(v: unknown): v is ThreadMode {
+  return typeof v === "string" && (THREAD_MODES as readonly string[]).includes(v);
+}
+
+/**
+ * Which item kinds each mode admits — the CHECK constraint the database cannot express.
+ *
+ * ENFORCED HERE RATHER THAN REQUESTED IN A COMMENT, which is the whole point. §4: "A thread's mode
+ * decides which item kinds may be written into it, and that is enforced by the store rather than by
+ * a comment." The two directions it protects are not symmetric and both are real:
+ *
+ *   AN OPERATE THREAD MUST NEVER HOLD A `proposal`, because the client renders a proposal as a diff
+ *   card with Apply and Undo on it. Somebody running real jobs against a live container is then one
+ *   mis-click from rewriting the agent's code — and the control would be there because a row said
+ *   so, not because anybody meant it to be.
+ *
+ *   A BUILD THREAD MUST NEVER HOLD A `work`, because a real job appearing mid-diff is the same
+ *   confusion from the other side: the build surface's whole vocabulary is "nothing has happened
+ *   yet, here is what would", and a row that already spent money in somebody's container does not
+ *   belong in that sentence.
+ *
+ * `message` AND `run` ARE IN BOTH, and that is not laziness. A message is what somebody said, which
+ * is the one thing every conversation has; and a run is an execution, which both modes genuinely
+ * produce — build mode runs an agent locally to see what it does, operate mode's work items each
+ * carry one. `eval` is build-only for the same reason `plan` is: an evaluation is something you do
+ * to an agent you are still shaping.
+ *
+ * A `Set` PER MODE RATHER THAN A PREDICATE, so the answer to "what may go in an operate thread" is
+ * a value somebody can read and a test can enumerate, rather than a branch somebody has to run.
+ */
+export const KINDS_BY_MODE: Record<ThreadMode, ReadonlySet<ThreadItemKind>> = {
+  build: new Set<ThreadItemKind>(["message", "plan", "generation", "proposal", "run", "eval"]),
+  operate: new Set<ThreadItemKind>(["message", "run", "work"]),
+};
+
+/**
+ * The store refused to write an item into a thread whose mode does not admit it.
+ *
+ * AN ERROR RATHER THAN A SILENT SKIP, and a named one rather than a string. A skip would make the
+ * two guarantees above unobservable — the diff card simply would not appear, which looks exactly
+ * like a proposal that has not arrived yet — and a caller that wants to handle this (the composer,
+ * which should never have routed there) needs to tell it apart from a database being down.
+ */
+export class ThreadModeRefusal extends Error {
+  constructor(readonly mode: ThreadMode, readonly kind: ThreadItemKind) {
+    super(`a ${mode} thread cannot hold a ${kind} item`);
+    this.name = "ThreadModeRefusal";
+  }
+}
 
 export interface ThreadItem {
   /**
@@ -106,6 +177,8 @@ export interface NewThread {
   /** Omitted for a thread opened before anything has been said — see `UNTITLED`. */
   title?: string;
   createdBy?: string | null;
+  /** Omitted means `build`, which is what every caller that predates Part 3 wants. */
+  mode?: ThreadMode;
 }
 
 /**
@@ -171,7 +244,7 @@ function nextItemIso(): string {
 // Explicit rather than `SELECT *`: `workspace_id` is on every row and belongs on none of the
 // snapshots a client receives. The same reason the MCP registry lists its columns out.
 const COLUMNS = `id, agent_id, agent_name_snapshot, title, title_is_custom, created_by,
-                 created_at, last_activity_at, archived_at, status`;
+                 created_at, last_activity_at, archived_at, status, mode`;
 
 export class ThreadStore {
   /** Shares the trace store's database: same file, single writer. See TraceStore.database(). */
@@ -224,8 +297,8 @@ export class ThreadStore {
       // session through it, could not work there at all. It went unseen because every thread suite
       // opens SQLite: the same shape as migration 044's COALESCE, and the same lesson.
       `INSERT INTO threads (id, workspace_id, agent_id, agent_name_snapshot, title,
-                            title_is_custom, created_by, created_at, last_activity_at, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle')`,
+                            title_is_custom, created_by, created_at, last_activity_at, status, mode)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?)`,
       [
         id,
         ctx.workspaceId,
@@ -240,6 +313,11 @@ export class ThreadStore {
         t.createdBy ?? ctx.actorUserId ?? null,
         now,
         now,
+        // BOUND RATHER THAN DEFAULTED BY THE COLUMN, so this statement says what it is writing.
+        // Migration 065's `DEFAULT 'build'` exists for the INSERTs of the version still serving
+        // during a rolling deploy; a statement in the current version that relied on it would be
+        // one that silently opens a build thread the day somebody adds a third mode.
+        t.mode ?? "build",
       ],
     );
     return (await this.get(ctx, id))!;
@@ -477,6 +555,28 @@ export class ThreadStore {
     threadId: string,
     item: { kind: ThreadItemKind; refId?: string | null; role?: "user" | null; body?: string | null },
   ): Promise<string> {
+    // §4'S ENFORCEMENT, AND IT IS A READ RATHER THAN A PARAMETER.
+    //
+    // The obvious cheaper version takes the mode from the caller, and it is the version that does
+    // not enforce anything: the caller that would write a proposal into an operate thread is
+    // exactly the caller that would pass `"build"` for it, because it believes it is in a build
+    // thread. The mode has to come from the row.
+    //
+    // ONE INDEXED PRIMARY-KEY READ, on a path that already issues two statements (this insert and
+    // the touch below). It is scoped like every other read here, so a thread id belonging to
+    // another workspace resolves to no row and is refused as absent — never as forbidden, which
+    // would confirm the id exists.
+    const owner = await this.q(ctx).get<Record<string, unknown>>(
+      `SELECT mode FROM threads WHERE workspace_id = ? AND id = ?`,
+      [ctx.workspaceId, threadId],
+    );
+    // A thread that is not there is left to the foreign key, which is the one thing that can say so
+    // authoritatively — refusing here would turn a race with a concurrent delete into a mode error,
+    // which is a sentence about the wrong problem.
+    if (owner) {
+      const mode = isThreadMode(owner["mode"]) ? owner["mode"] : "build";
+      if (!KINDS_BY_MODE[mode].has(item.kind)) throw new ThreadModeRefusal(mode, item.kind);
+    }
     // The monotonic clock, not the wall one — see `nextItemIso`. These rows are ordered by nothing
     // else, so two written in the same millisecond would have no defined order on either driver.
     const now = nextItemIso();
