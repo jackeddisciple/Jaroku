@@ -35,6 +35,19 @@
 //
 //   5. IDLE. Nothing outstanding, and the row shows no state fragment at all.
 //
+// PART 3 ADDS NO RUNG. §9 asks for a `waiting` work item to be `needs_you`, a running one to be
+// `running`, and a failure nobody has looked at to be `errored` — which is the ladder above,
+// unchanged, with three more facts fed into rungs that already exist. That is the difference
+// between extending a derivation and putting a second one beside it: an operate thread is graded
+// against the same five rungs in the same order, so the glyph means the same thing on both kinds
+// of conversation and `archived` still wins over all of it.
+//
+// AND THE ONE THING THAT LOOKS LIKE A NEW RUNG AND IS NOT. "A failed job nobody has looked at" is
+// rung 2, not a sixth: `lastEndedInError` already means "the last thing with an outcome went wrong
+// and nothing came after it", and nothing coming after it is what "nobody has looked at" amounts
+// to in a conversation. A failure with later work on top of it stays rung 3, exactly as a failed
+// STEP in the middle of a thread does — §9 says work items reproduce that shape and they do.
+//
 // THE FRAGMENT IS DERIVED HERE TOO, from the same facts, and that is deliberate rather than scope
 // creep: §4.3 defines it as "the single most decision-relevant fact, CONTEXTUAL TO STATUS", so it
 // is the same decision as the glyph rendered as words. Deriving it anywhere else would mean a row
@@ -158,7 +171,13 @@ export function isBlocked(f: ThreadFacts): boolean {
     f.awaitingPlans > 0 ||
     f.pendingConfirms > 0 ||
     f.rejectedGenerations > 0 ||
-    f.failedSteps > 0
+    f.failedSteps > 0 ||
+    // §9'S TWO. A job parked on a confirmation is the deployed twin of `pendingConfirms` and is
+    // blocked in exactly the same sense — a container is halted and a person is the only thing that
+    // can move it. A job that failed and was followed by other work is unresolved work, which is
+    // what `failedSteps` means one layer down.
+    f.waitingWork > 0 ||
+    f.failedWork > 0
   );
 }
 
@@ -191,10 +210,18 @@ export function deriveThreadStatus(f: ThreadFacts): DerivedStatus {
     return { status: "needs_you", fragment: blockedFragment(f) };
   }
 
-  if (f.liveRuns > 0 || f.evalProgress !== null) {
+  if (f.liveRuns > 0 || f.runningWork > 0 || f.evalProgress !== null) {
     return {
       status: "running",
-      fragment: f.evalProgress ? `eval ${f.evalProgress.done}/${f.evalProgress.total}` : "running",
+      // THE EVAL'S NUMBERS FIRST, because they are the only ones with a denominator. Then the job
+      // count, because "2 jobs running" is a fact about the real world that "running" is not — and
+      // an operate thread's whole reason to exist is that somebody wants to know what their agent
+      // is doing right now. A build thread has no work items, so it reads exactly as it did.
+      fragment: f.evalProgress
+        ? `eval ${f.evalProgress.done}/${f.evalProgress.total}`
+        : f.runningWork > 0
+          ? `${f.runningWork} job${f.runningWork === 1 ? "" : "s"} running`
+          : "running",
     };
   }
 
@@ -208,11 +235,23 @@ function blockedFragment(f: ThreadFacts): string {
   if (f.pendingDiff) return diffFragment(f.pendingDiff);
   // Before the plan, because a refused generation is a thing that already ran and cost money.
   if (f.rejectedGenerations > 0) return "generation rejected";
+  // ABOVE `pendingConfirms`, AND THE TWO NEVER MEET IN PRACTICE. They are the same event on the two
+  // kinds of run — a high-impact call halting a graph — and a thread has work items or run items
+  // and not both, so this ordering decides nothing today. It is written in the order it would
+  // matter if that ever stopped being true: the halted graph on the far side of a deployment is
+  // holding a container somebody is paying for, and the local one is holding this process.
+  if (f.waitingWork > 0) {
+    return f.waitingWork === 1 ? "job waiting on you" : `${f.waitingWork} jobs waiting on you`;
+  }
   // Before the plan too: a confirmation is halting a graph on a timer, and the plan is not.
   if (f.pendingConfirms > 0) {
     return f.pendingConfirms === 1 ? "confirmation waiting" : `${f.pendingConfirms} confirmations waiting`;
   }
   if (f.awaitingPlans > 0) return "plan awaiting";
+  // BEFORE THE FAILED STEPS, because a failed JOB is something that did not happen in the world and
+  // a failed step is something that did not happen inside a graph. The person reading this row
+  // decides what to do next, and "the refund did not go out" outranks "a node threw".
+  if (f.failedWork > 0) return `${f.failedWork} job${f.failedWork === 1 ? "" : "s"} failed`;
   return `${f.failedSteps} failed step${f.failedSteps === 1 ? "" : "s"}`;
 }
 

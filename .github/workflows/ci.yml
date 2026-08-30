@@ -458,6 +458,12 @@ jobs:
           # thread is a diff card with Apply on it in front of somebody who came to ask a question
           # about a live container. Both look completely correct in a screenshot of the other mode.
           npm run test:thread-mode
+          # §9'S RUNGS, and the half of the suite that could not be a fixture: a ladder can be
+          # perfect and never fire, because what turns a `work` item into a fact is the COLLECTOR.
+          # Its sharpest pair is a failure with later work on top of it against a failure that was
+          # the last thing to happen — unresolved work and a thread that stopped, which are two
+          # different glyphs and look identical in a screenshot of either one alone.
+          npm run test:thread-status-work
 
       # THE INBOX DESTINATION, in a step of its own from its first suite — the same reason the two
       # steps above are separate rather than appended to whichever step had room. A reader looking
