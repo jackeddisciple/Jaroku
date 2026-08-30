@@ -16,6 +16,12 @@
 import type { ThreadFacts, PendingDiff } from "./threadStatus.ts";
 import { NO_FACTS } from "./threadStatus.ts";
 import type { ThreadItem } from "./threadStore.ts";
+// TYPE-ONLY, AND THE CLOSED SET ITSELF RATHER THAN A COPY OF IT. `RunFact` below narrows the run
+// statuses to the three it cares about and writes them out; this does not, because all six work
+// statuses are load-bearing here — `waiting` and `running` are two different rungs of the ladder and
+// the three terminal ones decide whether the thread stopped. A literal union repeated here would be
+// a second spelling of migration 063's CHECK, and the one that goes stale is always the copy.
+import type { WorkStatus } from "./work/workStore.ts";
 
 /** What a run's own row says about how it went. */
 export interface RunFact {
@@ -46,6 +52,25 @@ export interface EvalFact {
   liveRunIds: string[];
 }
 
+/**
+ * What a work item's own row says about it (§9).
+ *
+ * ONE FIELD, AND THAT IS THE DISCIPLINE RATHER THAN AN OVERSIGHT. "Ownership from `thread_items`,
+ * liveness from the owner" is this file's whole rule, and a work item is the case where breaking it
+ * would be most tempting: the row already holds the input, the output, the failure kind and the
+ * timings, and copying any of them into a fact would give the thread list something to render
+ * without a second read. It would also be a status that goes stale — a job that finished a second
+ * after the snapshot was built would go on saying `waiting` until something else moved the thread.
+ * The conversation stores a reference; the answer to "is it still waiting" is `work_items.status`
+ * and nothing else.
+ *
+ * Missing from the map means the item is gone — swept by retention, or written by a workspace this
+ * read cannot see — and the collector skips it, exactly as it skips a run it cannot find.
+ */
+export interface WorkFact {
+  status: WorkStatus;
+}
+
 /** Everything the collector reads, gathered by the caller. */
 export interface FactsInput {
   threads: { id: string; agent_id: string | null; archived_at: string | null }[];
@@ -55,6 +80,14 @@ export interface FactsInput {
   runs: Map<string, RunFact>;
   /** evalId -> progress. Missing means finished and swept. */
   evals: Map<string, EvalFact>;
+  /**
+   * workItemId -> what its row says. Missing means the job is gone.
+   *
+   * OPTIONAL, so that every existing caller compiles and behaves as it did. A caller that has no
+   * work items to report is not making a claim that there are none — it is a caller from before
+   * this feature — and an empty map read from an absent field says exactly that.
+   */
+  work?: Map<string, WorkFact>;
   /** Proposal ids the editor is still holding, with their sizes. §4.3's `+42−11`. */
   proposals: Map<string, PendingDiff>;
   /** Plan ids awaiting a Generate or a revision. */
@@ -189,6 +222,39 @@ export function collectThreadFacts(input: FactsInput): Map<string, ThreadDerivat
         break;
       }
 
+      /**
+       * §9, and the whole of it: the item says a job happened in this conversation, and everything
+       * about what became of it is read from the owner.
+       *
+       * THE THREE OUTCOMES MAP ONTO RUNGS THAT ALREADY EXIST rather than onto new ones. `waiting` is
+       * something waiting on a person, which is what `needs_you` has always meant; `queued` and
+       * `running` are work in flight, which is `running`; and a failure is either unresolved work or
+       * a thread that stopped, which is the distinction `lastOutcome` below already draws for runs.
+       *
+       * `queued` COUNTS AS RUNNING, deliberately. From the conversation's point of view a job that
+       * has been accepted and not yet started is in flight — nothing is waiting on the person who
+       * asked for it, and the honest thing for the row to say is that something is happening.
+       *
+       * `cancelled` ENDS THE THREAD WITHOUT ERRORING IT. Somebody asked for it to stop and it
+       * stopped, so there is nothing outstanding and nothing went wrong; a cancelled job rendering a
+       * red ✕ would report a decision as a fault.
+       */
+      case "work": {
+        const job = item.ref_id ? input.work?.get(item.ref_id) : undefined;
+        if (!job) break;
+        if (job.status === "waiting") f.waitingWork++;
+        else if (job.status === "queued" || job.status === "running") f.runningWork++;
+        else if (job.status === "failed") f.failedWork++;
+        // WHAT CAME LAST, on the same map the run branch writes to, because a conversation that
+        // ran a job and then asked a question about it has to be able to stop being errored — and
+        // "nothing was retried after it" is exactly "no later item succeeded", whichever kind the
+        // later item was.
+        if (job.status !== "queued" && job.status !== "running" && job.status !== "waiting") {
+          lastOutcome.set(item.thread_id, job.status === "failed" ? "error" : "ok");
+        }
+        break;
+      }
+
       case "proposal": {
         const diff = item.ref_id ? input.proposals.get(item.ref_id) : undefined;
         if (!diff) break;
@@ -213,7 +279,15 @@ export function collectThreadFacts(input: FactsInput): Map<string, ThreadDerivat
 
   for (const [threadId, outcome] of lastOutcome) {
     const entry = out.get(threadId);
-    if (entry) entry.facts.lastEndedInError = outcome === "error";
+    if (!entry) continue;
+    entry.facts.lastEndedInError = outcome === "error";
+    // AND THE FAILURE THAT IS THE STOP IS NOT ALSO ONE OF THE OUTSTANDING ONES. Without this a
+    // thread whose only job failed would be both `errored` and carrying `1 job failed` — the ladder
+    // would answer correctly, because `lastEndedInError` is the higher rung, but the fragment beside
+    // the glyph would be counting the very thing the glyph is about. `failedSteps` never had this
+    // problem because a run's failed STEPS are a different quantity from the run's own outcome; a
+    // work item is one job with one outcome, so the two would be the same event counted twice.
+    if (outcome === "error" && entry.facts.failedWork > 0) entry.facts.failedWork--;
   }
 
   return out;

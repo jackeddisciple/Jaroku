@@ -7110,13 +7110,22 @@ async function threadFactsFor(
 ): Promise<Map<string, ThreadDerivation>> {
   const rows = loaded?.rows ?? (await threadStore.list(ctx));
   const items = loaded?.items ?? (await threadStore.allItems(ctx));
-  const [runs, unfinishedEvals, deployedBySlug, agents] = await Promise.all([
+  const [runs, work, unfinishedEvals, deployedBySlug, agents] = await Promise.all([
     // ONLY THE RUNS SOME THREAD OWNS. The derivation looks up nothing else, and the ids are right
     // here in the items — so this is an indexed lookup rather than a scan of every run in the
     // workspace plus a GROUP BY over every errored run's steps.
     store.runOutcomes(
       ctx,
       items.filter((i) => i.kind === "run" && i.ref_id).map((i) => i.ref_id!),
+    ),
+    // AND ONLY THE JOBS SOME THREAD OWNS, on exactly the same argument. §9 closes the loop between
+    // a work item and the conversation it happened in, and the only thing the derivation may read
+    // about one is its status — see `WorkFact`. This is added to the existing `Promise.all` rather
+    // than awaited beside it so a snapshot still costs one round of parallel reads; it is one more
+    // statement per snapshot, and it is constant in the number of agents and of threads.
+    workStore.statusesFor(
+      ctx,
+      items.filter((i) => i.kind === "work" && i.ref_id).map((i) => i.ref_id!),
     ),
     evalStore.unfinishedEvalRuns(ctx),
     deployStore.currentByAgent(ctx),
@@ -7167,6 +7176,11 @@ async function threadFactsFor(
     threads: rows,
     items,
     runs: runs as Map<string, RunFact>,
+    // The map from the read above, turned into the one-field facts the collector takes. A `Map` of
+    // statuses is what the store answers with and a `Map` of facts is what the collector reads;
+    // the shapes are deliberately not the same type, so that widening `WorkFact` later cannot
+    // silently start carrying whatever the store happened to return.
+    work: new Map([...work].map(([id, status]) => [id, { status }])),
     evals,
     proposals,
     plans,

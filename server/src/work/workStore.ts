@@ -342,6 +342,41 @@ export class WorkStore {
   }
 
   /**
+   * What became of a named set of jobs, as one statement per two hundred ids.
+   *
+   * FOR THE THREAD DERIVATION, WHICH KNOWS THE IDS ALREADY. `threadFacts.ts` walks a workspace's
+   * `thread_items` and has every `work` row's `ref_id` in hand; what it needs is the one column it
+   * is not allowed to cache. So this is an indexed lookup by primary key rather than a scan of the
+   * workspace's jobs, which is the same shape `TraceStore.runOutcomes` takes beside it and for the
+   * same reason: a snapshot is built on every message, run start and thread command, and a read
+   * proportional to how much work a workspace has ever done would grow into the socket's hot path.
+   *
+   * STATUS AND NOTHING ELSE. §9's rule is "ownership from `thread_items`, liveness from the owner",
+   * and the temptation this refuses is returning the whole row — the derivation would then be able
+   * to render an input or an error without a second read, and the conversation would be holding a
+   * copy of a thing that changes.
+   *
+   * CHUNKED AT TWO HUNDRED, matching `costsForItems` and the retention sweep, because a parameter
+   * list has a limit on both drivers. Scoped like every read here, so an id from another workspace
+   * is simply absent from the answer rather than refused — which is what makes a thread that
+   * somehow references a foreign job read as a thread whose job is gone.
+   */
+  async statusesFor(ctx: TenantContext, ids: readonly string[]): Promise<Map<string, WorkStatus>> {
+    const out = new Map<string, WorkStatus>();
+    const unique = [...new Set(ids)];
+    for (let i = 0; i < unique.length; i += 200) {
+      const chunk = unique.slice(i, i + 200);
+      const rows = await this.q(ctx).all<{ id: string; status: string }>(
+        `SELECT id, status FROM work_items
+          WHERE workspace_id = ? AND id IN (${chunk.map(() => "?").join(", ")})`,
+        [ctx.workspaceId, ...chunk],
+      );
+      for (const r of rows) if (isWorkStatus(r.status)) out.set(String(r.id), r.status);
+    }
+    return out;
+  }
+
+  /**
    * One keyset page of the work list, newest first.
    *
    * KEYSET AND NOT OFFSET, for the reason the runtime log window is a timestamp rather than a

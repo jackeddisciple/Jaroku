@@ -78,6 +78,28 @@ export interface ThreadFacts {
   failedSteps: number;
   /** Runs, generations or evals in flight and attributed to this thread. */
   liveRuns: number;
+  /**
+   * Jobs this conversation gave a deployed agent that are parked on a person's answer (§9).
+   *
+   * THE SAME THING AS `pendingConfirms`, SEEN FROM THE OTHER SIDE. A high-impact MCP call halting a
+   * graph is what produces both: on a local run the confirm queue knows about it and the run item
+   * carries it, and on a deployed run the container's request moved `work_items.status` to
+   * `waiting`. They are counted separately rather than added together because they are collected
+   * from different places and an operate thread has only the second — merging them would mean a
+   * single number nothing could explain the provenance of.
+   */
+  waitingWork: number;
+  /** Jobs of this conversation the container is executing right now. Cost is ticking. */
+  runningWork: number;
+  /**
+   * Jobs that failed and were not the last thing to happen here.
+   *
+   * THE SAME DISTINCTION `failedSteps` DRAWS, and §9 says work items reproduce it exactly: a job
+   * that failed and was followed by one that worked is unresolved work, and a thread whose LAST job
+   * failed is a thread that stopped. The second is `lastEndedInError`, which the collector sets from
+   * the same items — so a failure is counted here or read as a stop, never both.
+   */
+  failedWork: number;
   /** The eval this thread started, if one is part-way through. */
   evalProgress: EvalProgress | null;
   /**
@@ -101,6 +123,9 @@ export const NO_FACTS: ThreadFacts = {
   rejectedGenerations: 0,
   failedSteps: 0,
   liveRuns: 0,
+  waitingWork: 0,
+  runningWork: 0,
+  failedWork: 0,
   evalProgress: null,
   lastEndedInError: false,
   deployed: false,
