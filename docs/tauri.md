@@ -210,9 +210,9 @@ Tauri does not cross-compile the bundles; each is built on its own platform. `bu
 
 | Platform | Produces | Notes |
 |---|---|---|
-| macOS | `Jaroku.app`, `Jaroku_0.3.3_<arch>.dmg` | `minimumSystemVersion: 11.0`. Build on the architecture you are shipping, or pass `--target aarch64-apple-darwin` / `x86_64-apple-darwin` |
-| Windows | `Jaroku_0.3.3_x64-setup.exe` (NSIS) | `installMode: currentUser`, so no administrator prompt. WebView2's bootstrapper is embedded rather than downloaded |
-| Linux | `jaroku_0.3.3_amd64.deb`, `Jaroku_0.3.3_amd64.AppImage` | `.deb` depends on `libwebkit2gtk-4.1-0`, `libgtk-3-0`, `libayatana-appindicator3-1` |
+| macOS | `Jaroku.app`, `Jaroku_0.3.11_<arch>.dmg` | `minimumSystemVersion: 11.0`. Build on the architecture you are shipping, or pass `--target aarch64-apple-darwin` / `x86_64-apple-darwin` |
+| Windows | `Jaroku_0.3.11_x64-setup.exe` (NSIS) | `installMode: currentUser`, so no administrator prompt. WebView2's bootstrapper is embedded rather than downloaded |
+| Linux | `jaroku_0.3.11_amd64.deb`, `Jaroku_0.3.11_amd64.AppImage` | `.deb` depends on `libwebkit2gtk-4.1-0`, `libgtk-3-0`, `libayatana-appindicator3-1` |
 
 Artefacts land in `src-tauri/target/release/bundle/`.
 
@@ -406,7 +406,7 @@ journey if your buttons link straight at it. Nobody browses to a repository; the
 on your site and a file arrives.
 
 **Every artefact is therefore published twice.** Tauri names its output after the version —
-`Jaroku_0.3.3_aarch64.dmg` — which is right for an archive and useless for a button, because
+`Jaroku_0.3.11_aarch64.dmg` — which is right for an archive and useless for a button, because
 every release would break every link on the site. The workflow uploads a second copy under a name
 that never changes, so a download button can point at one URL for the life of the product:
 
@@ -524,7 +524,7 @@ bundle works" are different claims, and only the first has been earned.
 
 This is the half `tauri dev` cannot reach, and all of it ran:
 
-- **The installer** — `Jaroku_0.3.3_x64-setup.exe`, 78 MB, per-user, no administrator prompt. It
+- **The installer** — `Jaroku_0.3.11_x64-setup.exe`, 78 MB, per-user, no administrator prompt. It
   installs to `%LOCALAPPDATA%\Jaroku` with `jaroku.exe`, `jaroku-node.exe` (the sidecar, renamed
   by Tauri from its target-triple name) and both resource trees intact.
 - **Extraction ran.** `payload::ensure` wrote `%APPDATA%\jarokupp` with `server/` and `runtime/`

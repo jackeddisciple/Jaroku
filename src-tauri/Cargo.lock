@@ -1894,7 +1894,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "jaroku"
-version = "0.3.3"
+version = "0.3.11"
 dependencies = [
  "keyring",
  "libc",

@@ -506,6 +506,17 @@ jobs:
           # has to. And "gone" and "not yours" answer with the same sentence, because a refusal that
           # told them apart would confirm an id exists somewhere.
           npm run test:convo-tenancy
+          # THE RECORDED ANSWER, AND THE TWO THINGS THAT MAKE IT SAFE TO HAVE. §13 asks for the
+          # fixture and for one property of it — that a forgotten variable cannot feed stale text
+          # into a real answer quietly. This one is louder than the other three because its failure
+          # is worse and in a different direction: a stale PLAN corrupts a generation somebody then
+          # looks at, and a stale ANSWER is a paragraph about what an agent did, in the product's
+          # voice, with citations on it, where the reader is the last check. So it is inert under
+          # NODE_ENV=production whatever the variable says, and it says in its own first line that
+          # it was replayed. Beside it §9's other half, read off the component: the confirmation
+          # modal must not be able to tell which surface opened it, which is a property of what it
+          # imports.
+          npm run test:convo-replay
 
       # THE INBOX DESTINATION, in a step of its own from its first suite — the same reason the two
       # steps above are separate rather than appended to whichever step had room. A reader looking

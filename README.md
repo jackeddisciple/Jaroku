@@ -56,6 +56,7 @@ the case where somebody should be able to fix one agent and not every other one.
 - [MCP servers](#mcp-servers)
 - [GitHub](#github)
 - [Deploying an agent](#deploying-an-agent)
+- [Talking to an agent](#talking-to-an-agent)
 - [The React client](#the-react-client)
 - [WebSocket protocol](#websocket-protocol)
 - [Configuration](#configuration)
@@ -2273,6 +2274,123 @@ correct, but it does mean the strip is not a health monitor and does not claim t
 `test:work-tenancy` and `test:rls` are the two suites that need Postgres to mean anything; there is
 no Postgres on the machine this was built on, so CI is the first place the RLS half of them ever
 runs.
+
+
+---
+
+## Talking to an agent
+
+The Cockpit gives you a list. A list is not how a person asks *"did that email go out?"* — so a
+thread can now be a conversation **about an agent's work** rather than about its code.
+
+**Most of it already existed.** `threads` binds to an agent, carries a name snapshot that outlives
+the agent, has `needs_you` in its status CHECK, and already lets an execution appear inside a
+conversation as an item with a `ref_id`. So this is not a chat surface bolted on: it is a `mode`
+column on the table that already held conversations, and one more item kind beside the six.
+
+```
+threads.mode = 'build'                    threads.mode = 'operate'
+  plan cards, generation, proposals,        questions answered from the record,
+  diffs, Apply, Undo                        commands dispatched to a live deployment
+  item kinds: message plan generation       item kinds: message run work
+              proposal run eval
+```
+
+Which kinds may be written into which mode is enforced in `ThreadStore.addItem`, not in a comment.
+An operate thread cannot hold a `proposal`, so it cannot render Apply — somebody running real work
+is never one mis-click from rewriting the agent's code, and that is a property of the store rather
+than of the component.
+
+### The one law
+
+**A deployed agent does not remember anything.** The contract is
+`build_initial_state(user_input) -> dict`; every run begins from nothing. So **the agent never
+answers a question about itself. Jaroku does.** The record — `work_items`, `runs`, `steps`,
+`deployments` — is the memory, and it is the only memory. Two consequences, both enforced in code:
+
+- **A question never touches the container.** No dispatch, no run, no spend on the agent's key, no
+  latency. `answerFromRecord` has no dispatch client to call.
+- **When the record does not contain the answer, the answer is that it does not.** An empty fact
+  pack renders as a *sentence* saying the record is empty, not as an empty list — an empty list is
+  an invitation, and a model handed one writes fluently about an agent it knows nothing about.
+
+### Question or command
+
+Every message in an operate thread is one of two things, and getting it wrong is not symmetric: a
+question mistaken for a command spends real money. Classification is deterministic — keyword and
+pattern heuristics in `client/src/lib/operateIntent.ts`, no per-message model call, because the
+label has to be on screen while somebody types.
+
+It is a **second** classifier, not an extension of `lib/intent.ts`. That table routes into six
+destinations that all change or explain an agent's *code*; this one has two, and one of them is a
+live container. `npm run test:thread-classify` prints its accuracy on a corpus of 105 phrasings and
+holds one hard rule at any figure: no question in the corpus may be routed to a container.
+
+The label is visible **before** sending — always, including on an empty composer: *"This will run
+Tracey"* versus *"This reads the record"*. An ambiguous message classified as a command still meets
+Part 2's existing pre-flight gate, which is the answer to classification uncertainty; there is no
+second confirmation dialog beside it, and both composers render the same `WorkGate`.
+
+### How a question gets answered
+
+1. **A fact pack**, built by `server/src/work/factPack.ts` — recent work items with status, timing
+   and outcome, what is waiting, what failed and whether the trace was opened, and cost summed from
+   `steps` and never from `runs.cost`. Bounded by count *and* by bytes, ordered
+   `created_at DESC, created_seq DESC`. Three statements whatever the agent list holds.
+2. **Answered through `explainer.ts`** — the same engine the build composer uses, given different
+   rules rather than rewritten. With no key it degrades to streaming the facts as facts, which here
+   is a feature rather than a fallback.
+3. **The prompt lives in `prompt.ts`** with the other three, so the four cannot drift.
+4. **Every claim cites a work item**, as `[work:<id>]`, and the chip opens the Part 2 work detail.
+   A citation resolves only against the pack the model was handed — so another workspace's real job
+   id fails exactly as an invented one does, and an invented one stays visible as bare text rather
+   than being quietly stripped.
+
+### Cost
+
+Asking costs money, and the conversation says so. The explainer's spend is attributed to
+`usage_events.thread_id` and counted **separately** from the agent's own provider spend — it is the
+same model on every question, and folding it into an agent's figure would add a constant to each
+and make a cheap agent look expensive. It still counts toward true spend and toward the ceiling.
+`ask_cost_usd` on a thread is a *subset* of `cost_usd`, never a second total.
+
+### Out of scope, deliberately
+
+> **Talking to more than one agent at once.** *"Who can do X?"* is a dispatcher across agents, and
+> it is a genuinely different problem: it has to choose, and choosing wrong spends money on the
+> wrong container. It is also the thing a voice surface needs first, because nobody in a car
+> remembers ten agent names. That is Part 4, and this part must not make it harder — keep
+> classification and the fact pack in modules that do not assume a single agent id.
+>
+> **Voice and calls.** Part 5, and it sits on Part 4.
+>
+> **Memory beyond the record.** No summarisation of old conversations into durable "facts about this
+> agent", no vector store, nothing that can outlive what a row says. The moment an answer comes from
+> something other than a record, §3 stops being true.
+>
+> **Editing an agent from an operate thread.** Ever. That is what build mode is.
+
+### Suites
+
+| Suite | What it proves |
+|---|---|
+| `test:thread-mode` | an operate thread refuses a `plan`, `generation` or `proposal` at the store, and a build thread refuses a `work` |
+| `test:thread-classify` | question versus command across a real corpus, including the ones that read like both; the label matches what happens |
+| `test:convo-facts` | the pack is bounded, scoped, tie-broken on `created_seq`, and costs the same statements for one agent and forty |
+| `test:convo-honesty` | an empty record produces "nothing is recorded", never a plausible summary |
+| `test:convo-citations` | every claim carries a resolvable `work_items.id`; another workspace's is impossible |
+| `test:thread-status-work` | `waiting` → `needs_you`, running → `running`, an unreviewed failure → `errored`, and `archived` still wins |
+| `test:convo-spend` | explainer usage is attributed to `usage_events.thread_id` and counted apart from the agent's |
+| `test:convo-tenancy` | a pass for A cannot read, ask in, or dispatch from a thread in B |
+| `test:convo-replay` | the recorded answer is inert in production and says in the prose that it was replayed |
+
+### Still owed
+
+`JAROKU_EXPLAIN_FIXTURE` replays a recorded answer so the whole path is exercisable for free. It is
+deliberately less quiet than the other three fixtures: it is ignored under `NODE_ENV=production`,
+and a replayed answer says so in its own first line. A stale plan corrupts a generation somebody
+then looks at; a stale *answer* is a sentence about what an agent did, in the product's voice, with
+citations on it, and the reader is the last check.
 
 ---
 

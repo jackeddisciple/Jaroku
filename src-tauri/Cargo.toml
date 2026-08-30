@@ -14,7 +14,7 @@ name = "jaroku"
 # that number has not moved since v0.0.1 and names the Node package rather than the product. The
 # updater compares this against what the manifest advertises, so it has to be the number a user
 # would recognise as "the version of Jaroku I am running".
-version = "0.3.3"
+version = "0.3.11"
 description = "Jaroku, as a desktop application"
 edition = "2021"
 rust-version = "1.77.2"

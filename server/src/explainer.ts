@@ -7,6 +7,8 @@
 // concise, grounded answer; without a key it degrades to streaming the factual context itself, so
 // "explain" always produces something useful (and is testable on the free path).
 
+import { existsSync, readFileSync } from "node:fs";
+
 import { anthropicClient } from "./claude.ts";
 import type { EffortPlan } from "./effort.ts";
 
@@ -25,6 +27,51 @@ const SYSTEM =
 export function hasAnthropicKey(): boolean {
   return Boolean(process.env.ANTHROPIC_API_KEY);
 }
+
+/**
+ * A recorded answer, replayed instead of calling the model — §13's fixture.
+ *
+ * WHAT IT IS FOR. The whole answering path — the fact pack, the prompt, the stream, the citation
+ * resolution, the spend attribution, the turn in the thread — is exercisable at zero cost if the
+ * one part that costs money can be replayed. `JAROKU_GEN_FIXTURE`, `JAROKU_EDIT_FIXTURE` and
+ * `JAROKU_PLAN_FIXTURE` already work this way and this is the fourth.
+ *
+ * AND THE WARNING §13 ASKS ABOUT, WHICH IS NOT THE SAME WARNING. `planner.ts` says its fixture is
+ * the LOUD one because a stale plan feeds a REAL generation — "a forgotten env var silently
+ * corrupts genuine output". This one is worse in a different direction: a stale ANSWER is a
+ * sentence about what somebody's agent did, delivered in the product's own voice, with citations
+ * on it. There is no downstream step to notice; the person reading it is the last check.
+ *
+ * SO IT REFUSES TO BE QUIET IN TWO WAYS THE OTHER THREE DO NOT:
+ *
+ *   IT IS OFF UNDER `NODE_ENV=production`, unconditionally, whatever the variable says. A
+ *   development convenience that can be turned on in production by an environment variable is a
+ *   way to make a deployment answer every question with the same recorded paragraph.
+ *
+ *   IT SAYS SO IN THE ANSWER ITSELF, not only in the log. The other three replay into a card
+ *   somebody can see is canned; this one replays into prose, where a console line nobody is
+ *   watching is the only difference between a fixture and a fact.
+ */
+export function explainFixture(env: NodeJS.ProcessEnv = process.env): string | null {
+  const path = env["JAROKU_EXPLAIN_FIXTURE"];
+  if (!path) return null;
+  if (env["NODE_ENV"] === "production") {
+    console.warn(
+      "[explain] JAROKU_EXPLAIN_FIXTURE is set and is being IGNORED: this is a production process, " +
+        "and a recorded answer served as a real one is a sentence about somebody's agent that nothing " +
+        "downstream can catch.",
+    );
+    return null;
+  }
+  if (!existsSync(path)) {
+    console.warn(`[explain] JAROKU_EXPLAIN_FIXTURE points at ${path}, which does not exist — calling the model.`);
+    return null;
+  }
+  return path;
+}
+
+/** The prefix a replayed answer carries, so a fixture cannot be mistaken for an answer. */
+export const FIXTURE_NOTICE = "(replayed from JAROKU_EXPLAIN_FIXTURE — not a real answer)";
 
 /** What one explain call consumed. The SDK reports `input` EXCLUSIVE of the cached counts. */
 export interface ExplainUsage {
@@ -101,6 +148,21 @@ export async function streamExplain(
     closing?: string;
   },
 ): Promise<void> {
+  // THE FIXTURE IS CHECKED BEFORE THE KEY, so a recorded answer replays whether or not one is
+  // configured — which is the point of having it: the path is exercisable on a laptop with no
+  // credential and in CI with no network, and it is the same path either way.
+  const fixture = explainFixture();
+  if (fixture) {
+    console.warn(
+      `[explain] JAROKU_EXPLAIN_FIXTURE is set — replaying ${fixture}; the question is ignored and ` +
+        `the model is NOT being called. Unset it for real answers.`,
+    );
+    // THE NOTICE IS PART OF THE ANSWER. See `explainFixture` for why this one says so in the prose
+    // and the other three fixtures do not: there is no card around it to look canned.
+    cb.onDelta(`${FIXTURE_NOTICE}\n\n${readFileSync(fixture, "utf8")}`);
+    cb.onDone();
+    return;
+  }
   // `apiKey` counts as a key. Without this, a workspace running entirely on its own credential
   // — no platform key configured at all — would get the raw-context fallback for every
   // explanation, on a deployment where an explanation was perfectly affordable.

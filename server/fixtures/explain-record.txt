@@ -1,0 +1,5 @@
+Yes — that went out. The invoice to Acme was sent at 10:04 and the job finished cleanly [work:0189d0d4-1c2a-4a1b-8c1e-6f6b1f5a0aa1].
+
+Two other jobs ran this morning. One is still waiting on you: it stopped before calling a tool that sends mail and needs an answer before it can continue [work:0189d0d4-1c2a-4a1b-8c1e-6f6b1f5a0aa2]. The third failed with an SMTP authentication error and nobody has opened its trace yet [work:0189d0d4-1c2a-4a1b-8c1e-6f6b1f5a0aa3].
+
+I have no record of anything being sent to Northwind — if that was asked for, it did not go through Jaroku.

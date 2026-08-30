@@ -8,6 +8,80 @@ release notes and the commits in that release's range.
 
 ---
 
+## v0.3.11 : Talking To An Agent — The Per-Agent Conversation, On The Record
+
+The Cockpit gives you a list, and a list is not how a person asks *"did that email go out?"* This
+release makes a thread a conversation about an agent's **work** rather than about its code — and it
+does so by adding one column and one item kind to the table that already held conversations, not by
+building a second one.
+
+The rule underneath it is the reason it is worth anything. **A deployed agent remembers nothing** —
+`build_initial_state(user_input) -> dict`, every run from nothing — so the agent never answers a
+question about itself. Jaroku does, from `work_items`, and where the record is silent the answer is
+that it is silent. Asking the container instead would return a confident invention, which is the
+single worst thing this product could ship.
+
+### Added
+
+- **`threads.mode`** — `build` or `operate` — and `thread_items.kind` gains `work`. Which kinds may
+  be written into which mode is enforced in `ThreadStore.addItem` rather than requested in a
+  comment: an operate thread cannot hold a `proposal`, so it cannot render Apply, so nobody running
+  real work is one mis-click from rewriting the agent's code.
+- **A fact pack, assembled by code before anything is asked to write prose.** Recent jobs with
+  status, timing and outcome; what is waiting; what failed and whether the trace was opened; cost
+  summed from `steps` and never `runs.cost`. Bounded by count *and* by bytes — thirty jobs whose
+  agent answers with a document are under the item cap and over the budget — and three statements
+  whether it is asked about one agent or forty.
+- **A fourth prompt in `prompt.ts`**, and no second answering engine: `streamExplain` takes different
+  rules rather than being rewritten. With no key it streams the facts as facts, which here is a
+  feature rather than a fallback and is what makes the whole path testable for free.
+- **Citations that resolve only against the pack the model was handed.** `[work:<id>]` becomes a chip
+  that opens the Part 2 work detail. Another workspace's *real* job id fails exactly as an invented
+  one does — there is no cross-tenant check in the path to forget — and an invented one stays on
+  screen as bare text rather than being quietly stripped.
+- **A second classifier, deliberately not an extension of `lib/intent`.** Question or command, by
+  keyword and pattern, with the destination label always visible before sending: *"This will run
+  Tracey"* versus *"This reads the record"*. A question mistaken for a command spends real money and
+  the reverse costs a rephrase, so a question mark outranks a bare imperative and nothing undecided
+  reaches a container. `test:thread-classify` prints the number: 105/105 on its corpus.
+- **A command in an operate thread is an ordinary `dispatchWork`** — same store, same run token, same
+  trace, same work item, same pre-flight gate, which both composers now render from one component.
+  There is no third way to execute an agent.
+- **`threadStatus.ts` gains no rung.** A `waiting` job is `needs_you`, a running one is `running`, a
+  failure nothing came after is `errored` — the ladder that existed, with three more facts fed into
+  it, so `archived` still wins over all of them.
+- **What asking costs is attributed to `usage_events.thread_id` and shown**, counted apart from the
+  agent's own provider spend: it is the same model on every question, and folding it in would add a
+  constant to each and make a cheap agent look expensive.
+- **Nine suites, all in CI**: `test:thread-mode`, `test:thread-status-work`, `test:convo-facts`,
+  `test:convo-citations`, `test:convo-honesty`, `test:convo-spend`, `test:convo-tenancy`,
+  `test:convo-replay` and `test:thread-classify`.
+
+### Fixed
+
+- **Dropping `thread_items` to widen its CHECK would have deleted every note, pin, rating,
+  attachment and variant in the database.** Five tables reference it `ON DELETE CASCADE`, and
+  SQLite's `DROP TABLE` performs an implicit delete that fires foreign-key actions — so the obvious
+  rebuild leaves a schema that is correct in every respect a test would check and a database missing
+  a feature's data. The children's rows step aside first. `test:migrate` runs the migration against
+  a populated database and asserts all five survived.
+- **A `work` item is bound to its conversation, and the per-thread cost join could not see it.** An
+  operate thread's job is a `work` item, not a `run` one, so `spendByThread` reported what asking
+  cost and not what doing cost — fourpence on a conversation that had spent eleven pounds.
+- **`thread_items.thread_id` references `threads(id)` — the id alone**, so a foreign key could not
+  stop one workspace writing into another's conversation, and the mode check above it was skipped
+  for exactly that case. The store refuses it now, with the same sentence for "gone" and "not
+  yours".
+
+### Not in this release, deliberately
+
+Talking to more than one agent at once — *"who can do X?"* is a dispatcher that has to choose, and
+choosing wrong spends money on the wrong container. Voice and calls, which sit on it. Any memory
+beyond the record: no summarisation into durable "facts about this agent", no vector store, nothing
+that can outlive what a row says. And editing an agent from an operate thread, ever.
+
+---
+
 ## v0.3.10 : The Production Bridge and the Cockpit — Post-Ship Control of Live Agents
 
 A deployed agent used to be a black box. It emitted no trace, reported no cost, could not be paused
