@@ -479,6 +479,16 @@ jobs:
           # id is REPORTED rather than stripped: a filter that removed it would leave a fluent
           # sentence with no visible defect, which is the failure the citations exist to expose.
           npm run test:convo-citations
+          # THE ONE THAT PROTECTS THE REST — §13's own words. It cannot assert what a model will say
+          # and does not pretend to; what it asserts is every mechanical thing between the database
+          # and the model, which is where this fails silently. An empty pack renders as a SENTENCE
+          # saying the record is empty rather than as an empty list, because an empty list is an
+          # invitation: a model handed no jobs and no statement about their absence writes about the
+          # agent in general terms, fluently, and every word of it is invented. Beside it the rules
+          # read off `CONVERSATION_SYSTEM` itself — a prompt is code that is never compiled, and the
+          # only thing that notices a deleted paragraph is something that looks for it — and the
+          # no-key floor, where the worst answer this feature can give is the facts as facts.
+          npm run test:convo-honesty
 
       # THE INBOX DESTINATION, in a step of its own from its first suite — the same reason the two
       # steps above are separate rather than appended to whichever step had room. A reader looking

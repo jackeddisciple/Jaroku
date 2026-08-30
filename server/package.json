@@ -33,6 +33,7 @@
     "test:thread-status-work": "tsx src/threadStatusWork.test.ts",
     "test:convo-facts": "tsx src/work/factPack.test.ts",
     "test:convo-citations": "tsx src/work/citations.test.ts",
+    "test:convo-honesty": "tsx src/work/honesty.test.ts",
     "test:rls": "tsx src/db/rls.test.ts",
     "test:db-boundary": "tsx src/db/boundary.test.ts",
     "test:object-keys": "tsx src/storage/keys.test.ts",
