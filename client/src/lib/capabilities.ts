@@ -123,6 +123,11 @@ export const COMMAND_CAPABILITY: Record<string, string> = {
   loadAgentFiles: "agent:read",
   loadAgentGraph: "agent:read",
   explain: "agent:read",
+  // A question about what an agent HAS DONE is a read, and the same read as opening the Cockpit and
+  // looking at the same rows: Part 3 §3 makes it one, because a question never touches the
+  // container. Mirrored from the server's table — the client's copy is advisory and is used to hide
+  // controls, never trusted.
+  askRecord: "agent:read",
   listAgentGrid: "agent:read",
   loadAgentDetail: "agent:read",
   loadAgentVersion: "agent:read",
@@ -481,6 +486,10 @@ export const COMMAND_AGENT_CAPABILITY: Record<string, AgentCapability> = {
   loadAgentGraph: "view",
   loadAgentVersion: "view",
   explain: "view",
+  // `view`, beside `explain`, and deliberately NOT beside `dispatchWork`. The whole of Part 3's
+  // classifier exists so that a question and a command are different things; giving them one
+  // capability would put them back together at the layer that is actually enforced.
+  askRecord: "view",
   listDatasets: "view",
   estimateEval: "view",
   getActivityFeed: "view",

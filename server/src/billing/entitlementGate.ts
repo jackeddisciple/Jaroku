@@ -156,6 +156,13 @@ export const COMMAND_ENTITLEMENT: Record<string, EntitlementKind | typeof NO_ENT
   loadAgentGraph: NO_ENTITLEMENT,
   loadAgentVersion: NO_ENTITLEMENT,
   explain: NO_ENTITLEMENT,
+  // A QUESTION ANSWERED FROM THE RECORD, and `NO_ENTITLEMENT` beside `explain` is the decision. It
+  // has no tier dimension to count: there is no such thing as a workspace's Nth question, the way
+  // there is an Nth agent or an Nth seat. What it does cost is a model call, and that is bounded
+  // where every other model call is — the rate limiter's `agent.explain` bucket, which it shares
+  // with `explain` because it is the same model on the same key, and the spend ceiling underneath
+  // both. Two limits on one call is the arrangement that adds up to no limit.
+  askRecord: NO_ENTITLEMENT,
   diagnoseFile: NO_ENTITLEMENT,
   planAgent: NO_ENTITLEMENT,
   discardPlan: NO_ENTITLEMENT,
