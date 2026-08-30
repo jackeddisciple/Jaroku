@@ -242,7 +242,22 @@ function CitationChip({ cite }: { cite: { id: string; status: string; agent_name
   return (
     <button
       type="button"
-      onClick={() => sendLoadWorkItem(cite.id)}
+      /**
+       * TWO STORES, ONE ACTION — the same shape `openThread` takes, and for the same reason.
+       *
+       * `sendLoadWorkItem` opens the Part 2 work detail, and that panel lives on the COCKPIT
+       * surface; a chip pressed from a conversation fired the command and nothing appeared, because
+       * the panel it opens was not on screen. Navigating as well is what makes the citation
+       * clickable in the sense §7.4 means — "the user can open the item and check" — rather than
+       * clickable in the sense that it responds to a press.
+       *
+       * The order matters once: the item is requested first so the panel it opens is already
+       * loading when the destination renders, rather than appearing empty for a frame.
+       */
+      onClick={() => {
+        sendLoadWorkItem(cite.id);
+        useUiStore.getState().openNav("work");
+      }}
       title={`${cite.agent_name} — ${cite.status}. Open this job.`}
       className="mx-0.5 inline-flex max-w-full items-center gap-1 rounded-control border border-hair bg-elevated px-1.5 py-0.5 align-baseline text-tiny text-muted transition-colors duration-fast hover:border-edge hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
     >
