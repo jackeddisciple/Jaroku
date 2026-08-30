@@ -1340,6 +1340,17 @@ jobs:
           # load-bearing assertion is that the pressed chip MOVES: hardcoding it on the first passes
           # a count and lies on four filters out of five.
           npm run test:thread-filter-a11y
+          # PART 3'S SECOND CLASSIFIER, AND IT IS SECOND ON PURPOSE — §6: "Do not extend
+          # `lib/intent`'s table; a real job must never be routable into `edit`." That table routes
+          # into six destinations that all change or explain an agent's CODE; this one has two, and
+          # one of them is a live container.
+          #
+          # It PRINTS ITS ACCURACY per bucket, because §16 asks for a number rather than a claim, and
+          # it fails on a floor rather than on perfection — a corpus that had to be 100% is a corpus
+          # somebody keeps green by deleting the hard cases. Beside the accuracy is a HARD rule at
+          # any figure: a command read as a question costs a rephrase, and a question read as a
+          # command reaches somebody's customer. The second is not allowed at all.
+          npm run test:thread-classify
           # AND THE OTHER HALF OF THAT SWEEP: an agent card's sparkline bars were real buttons at
           # 3×12px — under a tenth of this client's own HIT_TARGET — each one its own stop in the tab
           # order, so eight cards put dozens of three-pixel controls between a keyboard and the far

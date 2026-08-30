@@ -33,6 +33,7 @@
     "test:palette-keys": "tsx src/components/paletteKeys.test.ts",
     "test:mod-key": "tsx src/lib/modKey.test.ts",
     "test:thread-filter-a11y": "tsx src/components/threadFilterA11y.test.ts",
+    "test:thread-classify": "tsx src/lib/operateIntent.test.ts",
     "test:sparkline-hits": "tsx src/components/sparklineHits.test.ts",
     "test:credential-gate": "tsx src/components/credentialGate.test.ts",
     "test:graph-error": "tsx src/lib/graphError.test.ts",
