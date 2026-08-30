@@ -25,7 +25,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CONNECTION_LABEL, DESTRUCTIVE, FILTERS, OFFLINE } from "../lib/cockpitCopy.ts";
 import { cockpitCost } from "../lib/cockpitFormat.ts";
 import { factsOf, fleetSentence, healthLine } from "../lib/fleetSentence.ts";
-import { sendKillAgent, sendListWork, sendReconnectAgent } from "../lib/socket.ts";
+import { sendCreateThread, sendKillAgent, sendListWork, sendReconnectAgent } from "../lib/socket.ts";
 import { ICON } from "../lib/tokens.ts";
 import { CARD_HEIGHT, CARD_WIDTH, SPINE_X } from "../lib/cockpitLayout.ts";
 import { useTraceStore } from "../store/traceStore.ts";
@@ -36,7 +36,7 @@ import { AgentSparkline } from "./AgentSparkline.tsx";
 import { Capable } from "./Capable.tsx";
 import { CockpitDialog } from "./CockpitDialog.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
-import { GlobeIcon, KebabIcon, KeyIcon, PlugIcon } from "./panelIcons.tsx";
+import { GlobeIcon, HashIcon, KebabIcon, KeyIcon, PlugIcon } from "./panelIcons.tsx";
 import { Truncate } from "./Truncate.tsx";
 
 /**
@@ -350,6 +350,31 @@ function FleetCard({ card, tabIndex, onArrow }: {
             blue somebody could read as decoration. It replaces the version rather than joining it:
             on a 248px card at the title rung there is room for one trailing mark, and which
             version a public endpoint is serving is a smaller fact than that it is public. */}
+        {/* PART 3 §11'S ENTRY POINT: "An operate thread opens from a Cockpit fleet card — Part 2's
+            card already carries the agent's name and state, and this is the natural thing to press."
+            A CONTROL ON THE CARD RATHER THAN THE CARD ITSELF, because the card is already a press
+            with a meaning — it filters the list to this agent — and taking that over would break
+            Part 2 to add Part 3. It is also not in the ⋯ menu beside it: this is the feature's front
+            door, and a front door in an overflow menu is a feature people never find.
+
+            `pointer-events-auto` AND `z-10`, because the whole card is covered by an absolute
+            target sitting behind this row; without both, the press underneath wins and pressing
+            "talk to it" filters the list instead. */}
+        <button
+          type="button"
+          onClick={(e) => {
+            // The card's own target is BEHIND this one rather than around it, so this does not
+            // bubble into it — but a stray parent handler added later would, and a control whose
+            // press also filters the list is the one bug this whole comment is about.
+            e.stopPropagation();
+            sendCreateThread(card.agent_id, card.agent_name, "operate");
+          }}
+          title={`Ask ${card.agent_name} what it has been doing, or give it a job`}
+          aria-label={`Open the conversation with ${card.agent_name}`}
+          className="pointer-events-auto relative z-10 flex shrink-0 items-center rounded-control p-0.5 text-faint transition-colors duration-fast hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+        >
+          <HashIcon size={ICON.xs} />
+        </button>
         {card.connection === "public" ? (
           <span className="shrink-0 text-tiny text-warn">{CONNECTION_LABEL.public}</span>
         ) : card.version !== null ? (

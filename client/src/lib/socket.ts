@@ -1750,8 +1750,20 @@ export function sendLoadThread(threadId: string): void {
 // snapshot, so a client never patches its own state — which makes a dropped write invisible unless
 // the sender says so. The view uses this to write §3.4's notice only about an archive that actually
 // happened, rather than about one it hoped for.
-export function sendCreateThread(agentId?: string | null, title?: string): boolean {
-  return send({ cmd: "createThread", agentId, title });
+export function sendCreateThread(
+  agentId?: string | null,
+  title?: string,
+  /**
+   * Which kind of conversation (migration 065). Omitted means `build`, which is every existing
+   * caller.
+   *
+   * `operate` IS FOUND BEFORE IT IS MADE, server-side — see the handler. Pressing an agent's card
+   * is navigation rather than creation, and a row per press would scatter one agent's operational
+   * history across thirty conversations.
+   */
+  mode?: "build" | "operate",
+): boolean {
+  return send({ cmd: "createThread", agentId, title, ...(mode ? { mode } : {}) });
 }
 
 export function sendRenameThread(threadId: string, title: string): boolean {

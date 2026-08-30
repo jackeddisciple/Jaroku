@@ -7512,11 +7512,32 @@ async function handleThreadCommand(ctx: TenantContext, cmd: ThreadCommand): Prom
       // read time. A slug that names no agent in THIS workspace resolves to null and the thread is
       // created without one, which is the same outcome as not naming an agent at all.
       const agent = agentId ? await agentRepo.bySlug(ctx, agentId) : undefined;
-      const thread = await threadStore.create(ctx, {
-        agentId: agent?.id ?? null,
-        agentName: agent ? (agent.display_name ?? agent.slug) : null,
-        title: typeof cmd.title === "string" ? cmd.title : undefined,
-      });
+      const mode = cmd.mode === "operate" ? "operate" as const : "build" as const;
+      /**
+       * AN OPERATE THREAD IS FOUND BEFORE IT IS MADE, and a build thread is always new.
+       *
+       * §11: an operate conversation opens from a Cockpit fleet card, which is a thing somebody
+       * presses whenever they want to ask their agent something. Making a row per press would turn
+       * a week of asking into thirty conversations in a list whose whole job is to be scannable —
+       * and it would scatter one agent's operational history across all of them, so the thread that
+       * says what happened yesterday is not the one open today.
+       *
+       * `ensureForAgent` is the same call every dispatch already makes to find its session, now
+       * filtered by mode: it takes the most recently active unarchived thread of that mode, and
+       * opens one only when there is none. The build path keeps making a new row per press, which
+       * is what New Thread means there.
+       */
+      const thread = mode === "operate" && agent
+        ? (await threadStore.get(
+            ctx,
+            await threadStore.ensureForAgent(ctx, agent.id, agent.display_name ?? agent.slug, "operate"),
+          ))!
+        : await threadStore.create(ctx, {
+            agentId: agent?.id ?? null,
+            agentName: agent ? (agent.display_name ?? agent.slug) : null,
+            title: typeof cmd.title === "string" ? cmd.title : undefined,
+            mode,
+          });
       console.log(`[threads] opened ${thread.id}${agent ? ` on ${agent.slug}` : ""}`);
       // ONE SNAPSHOT, READ TWICE. The broadcast is the list and the answer below is one row of the
       // same list — building each from its own `threadSnapshot` meant a create cost two full scans

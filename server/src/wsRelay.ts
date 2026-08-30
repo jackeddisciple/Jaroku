@@ -2088,6 +2088,15 @@ export type CreateThreadCommand = {
   agentId?: string | null;
   /** Optional: a thread with nothing said in it is "Untitled thread" until the first message. */
   title?: string;
+  /**
+   * Which kind of conversation to open (migration 065). Omitted means `build`.
+   *
+   * `operate` IS REUSED RATHER THAN OPENED EACH TIME, and that asymmetry is deliberate — see the
+   * handler. Pressing a fleet card is navigation, not creation: somebody who presses it three times
+   * in an afternoon means the same conversation each time, where somebody pressing New Thread on the
+   * build surface means a new one.
+   */
+  mode?: "build" | "operate";
 };
 export type RenameThreadCommand = { cmd: "renameThread"; threadId: string; title: string };
 export type ArchiveThreadCommand = { cmd: "archiveThread"; threadId: string };

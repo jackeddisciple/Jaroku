@@ -279,6 +279,29 @@ export function ThreadRow({
             {agentChipLabel(thread)}
           </Chip>
         </span>
+        {/* PART 3 §11'S MARKER. "It also appears in the Threads list, VISIBLY MARKED as an operate
+            thread, because a conversation that only exists behind one door is a conversation people
+            forget they have."
+
+            A WORD RATHER THAN A COLOUR OR A GLYPH, for two reasons this palette already states.
+            Colour is never the only signal, and the two it could borrow are both spoken for — amber
+            means running and only running, and rose is scarce. And a seventh mark in a row that
+            already carries a status glyph, an agent chip, a collision marker and a fragment is a
+            mark nobody decodes. "operate" is the shortest true thing.
+
+            BESIDE THE AGENT CHIP, because that is what it qualifies: this is a conversation ABOUT
+            that agent's work rather than about its code, and the two rows are otherwise identical. */}
+        {thread.mode === "operate" && (
+          <Chip
+            size="sm"
+            tone="faint"
+            variant="bare"
+            className="shrink-0"
+            title="An operate conversation: questions answered from the record, and jobs sent to the live agent"
+          >
+            operate
+          </Chip>
+        )}
         {/* §4.3.4's collision marker, ON THE AGENT CHIP rather than on the row's status glyph: it is a
             fact about the AGENT, not about this particular thread, so it belongs on the element that
             already represents the agent.

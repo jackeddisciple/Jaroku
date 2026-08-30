@@ -1843,7 +1843,7 @@ export type ClientCommand =
   | { cmd: "killAgent"; deploymentId: string }
   | { cmd: "listThreads" }
   | { cmd: "loadThread"; threadId: string }
-  | { cmd: "createThread"; agentId?: string | null; title?: string }
+  | { cmd: "createThread"; agentId?: string | null; title?: string; mode?: "build" | "operate" }
   | { cmd: "renameThread"; threadId: string; title: string }
   | { cmd: "archiveThread"; threadId: string }
   | { cmd: "restoreThread"; threadId: string }
