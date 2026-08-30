@@ -1782,7 +1782,14 @@ export type ServerMessage =
   | { channel: "enforcement"; type: "error"; message: string }
   | (InThread & { channel: "reply"; type: "started"; agentId: string; question: string; regenerateOf?: string })
   | (InThread & { channel: "reply"; type: "delta"; agentId: string; text: string })
-  | (InThread & { channel: "reply"; type: "done"; agentId: string; usage?: GenUsage })
+  // `citations` ARRIVES WITH `done` AND NOT WITH THE TEXT — Part 3 §7.4. A `[work:…]` marker can be
+  // split across two deltas, so a chip drawn mid-stream is half a citation and a stray bracket. Only
+  // ids that were in the fact pack come back, which is what leaves an invented one on screen as the
+  // bare text it always was.
+  | (InThread & {
+      channel: "reply"; type: "done"; agentId: string; usage?: GenUsage;
+      citations?: { id: string; status: string; agent_name: string; created_at: string }[];
+    })
   | (InThread & { channel: "reply"; type: "error"; agentId: string; message: string })
   | GenMessage
   | BillingMessage

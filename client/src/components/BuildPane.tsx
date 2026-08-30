@@ -12,19 +12,25 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { orderedFiles, useBuildStore } from "../store/buildStore.ts";
 import {
   isPlanning, pendingPlanId, threadFor, useChatStore,
-  type ChatTurn, type GenTurn, type PlanTurn, type ProposalTurn, type ReplyTurn,
+  type ChatTurn, type GenTurn, type PlanTurn, type ProposalTurn, type ReplyTurn, type WorkTurn,
 } from "../store/chatStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { inputKey, useUiStore } from "../store/uiStore.ts";
 import { runProviders, useProviderStore } from "../store/providerStore.ts";
 import {
-  sendApplyEdit, sendBranchRun, sendDiscardEdit, sendDiscardPlan, sendEdit, sendExplain,
-  sendGenerate, sendPlanAgent, sendPromoteTestInput, sendRun,
+  sendApplyEdit, sendAskRecord, sendBranchRun, sendDiscardEdit, sendDiscardPlan, sendDispatchWork,
+  sendEdit, sendExplain, sendGenerate, sendLoadWorkItem, sendPlanAgent, sendPromoteTestInput, sendRun,
 } from "../lib/socket.ts";
 import { useEvalStore } from "../store/evalStore.ts";
 import { UpsellCard } from "./UpsellCard.tsx";
 import { composerMoment } from "../lib/composerMoment.ts";
 import { classifyIntent, fixPrompt, routeLabel } from "../lib/intent.ts";
+// PART 3'S SECOND CLASSIFIER — two outcomes, its own module. See its header for why it is not an
+// extension of the table above it.
+import { classifyOperate, operateLabel } from "../lib/operateIntent.ts";
+import { WorkGate } from "./WorkGate.tsx";
+import { useWorkStore } from "../store/workStore.ts";
+import { threadById } from "../store/threadStore.ts";
 import { fmtCost, fmtTokens } from "../lib/format.ts";
 import { Chip, chipClass } from "./Chip.tsx";
 import { ChoiceRow, type Choice } from "./ChoiceRow.tsx";
@@ -221,6 +227,85 @@ function GenTurnView({ turn, isLive }: { turn: GenTurn; isLive: boolean }) {
 // backticks reached the screen as literal characters — so a reply reading "the `gmail_search` tool
 // needs `GMAIL_CLIENT_ID`" sat directly below a diff-card summary where the same kind of name was a
 // proper chip. Two Jaroku answers in one thread, two different typographic languages.
+/**
+ * Part 3 §7.4's citation, as a chip that opens the job it names.
+ *
+ * IT OPENS THE PART 2 WORK DETAIL, which is the panel the Cockpit list already opens and which
+ * already links through to the trace by the ordinary `loadRun` path. §11: "Do not build a third way
+ * into a trace." So this is `sendLoadWorkItem` and nothing else — the same call the row makes.
+ *
+ * IT CARRIES A STATUS WORD RATHER THAN THE GLYPH, because a chip inside a paragraph is read at
+ * reading speed and a coloured mark in a sentence is a thing somebody has to stop and decode. The
+ * glyph belongs on the row, where a column of them is scannable.
+ */
+function CitationChip({ cite }: { cite: { id: string; status: string; agent_name: string } }) {
+  return (
+    <button
+      type="button"
+      onClick={() => sendLoadWorkItem(cite.id)}
+      title={`${cite.agent_name} — ${cite.status}. Open this job.`}
+      className="mx-0.5 inline-flex max-w-full items-center gap-1 rounded-control border border-hair bg-elevated px-1.5 py-0.5 align-baseline text-tiny text-muted transition-colors duration-fast hover:border-edge hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+    >
+      <Glyph icon={Icon.AttachRun} size={ICON.xs} className="shrink-0 text-faint" />
+      <span className="truncate">{cite.status}</span>
+    </button>
+  );
+}
+
+/**
+ * A job this conversation gave a deployed agent — Part 3 §5.
+ *
+ * ONE LINE AND A CHIP, deliberately, and it is the strongest example of §11's absence rule: the
+ * conversation is not where a job's status lives. The Cockpit's row is, kept live by the work
+ * channel, and a card here that rendered a status would be a second answer that goes stale between
+ * the answer arriving and somebody reading it.
+ */
+function WorkTurnView({ turn }: { turn: WorkTurn }) {
+  return (
+    <div className="flex flex-wrap items-baseline gap-1.5 text-label text-muted">
+      <span>Gave the agent a job.</span>
+      <button
+        type="button"
+        onClick={() => sendLoadWorkItem(turn.workItemId)}
+        className="inline-flex items-center gap-1 rounded-control border border-hair bg-elevated px-1.5 py-0.5 text-tiny text-muted transition-colors duration-fast hover:border-edge hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+      >
+        <Glyph icon={Icon.AttachRun} size={ICON.xs} className="shrink-0 text-faint" />
+        <span>Open the job</span>
+      </button>
+    </div>
+  );
+}
+
+/**
+ * The answer, with its citations turned into chips (§7.4).
+ *
+ * SPLIT ON THE MARKER RATHER THAN REWRITTEN, so an id the server did NOT resolve stays on screen as
+ * the literal `[work:…]` it always was. That is the mechanism working rather than a gap in it: §7.4
+ * asks for "a sentence with nothing behind it is visibly a sentence with nothing behind it", and a
+ * renderer that stripped an unresolvable marker would leave a fluent sentence with no visible
+ * defect.
+ *
+ * NOTHING HAPPENS WHILE IT STREAMS, because `citations` arrives with `done` — a marker can be split
+ * across two deltas, and a chip drawn mid-stream is half a citation and a stray bracket.
+ */
+function CitedProse({ text, cites }: {
+  text: string;
+  cites: { id: string; status: string; agent_name: string; created_at: string }[];
+}) {
+  const byId = new Map(cites.map((c) => [c.id.toLowerCase(), c]));
+  const parts = text.split(/(\[work:[0-9a-fA-F-]{36}\])/g);
+  return (
+    <>
+      {parts.map((part, i) => {
+        const m = /^\[work:([0-9a-fA-F-]{36})\]$/.exec(part);
+        const hit = m ? byId.get(m[1]!.toLowerCase()) : undefined;
+        if (!hit) return <Prose key={i} text={part} />;
+        return <CitationChip key={i} cite={hit} />;
+      })}
+    </>
+  );
+}
+
 function ReplyTurnView({ turn }: { turn: ReplyTurn }) {
   // The store has the whole answer as of this frame; this is how much of it is painted. See
   // lib/useStreamedText.ts — an explanation arrives from the model in clause-sized chunks, and
@@ -228,7 +313,9 @@ function ReplyTurnView({ turn }: { turn: ReplyTurn }) {
   const text = useStreamedText(turn.text, turn.status === "streaming");
   return (
     <div className={`text-label whitespace-pre-wrap break-words ${turn.status === "error" ? "text-err" : "text-ink"}`}>
-      <Prose text={text} />
+      {turn.citations && turn.citations.length > 0
+        ? <CitedProse text={text} cites={turn.citations} />
+        : <Prose text={text} />}
       {turn.status === "streaming" && (
         <span className="animate-stream-pulse text-faint motion-reduce:animate-none">▋</span>
       )}
@@ -453,6 +540,13 @@ function Turn({ turn, isLastGen }: { turn: ChatTurn; isLastGen: boolean }) {
     return (
       <AssistantTurn turn={turn} isLast={isLastGen}>
         <TurnRow marker={<JarokuMark />}><ReplyTurnView turn={turn} /></TurnRow>
+      </AssistantTurn>
+    );
+  }
+  if (turn.kind === "work") {
+    return (
+      <AssistantTurn turn={turn} isLast={isLastGen}>
+        <TurnRow marker={<JarokuMark />}><WorkTurnView turn={turn} /></TurnRow>
       </AssistantTurn>
     );
   }
@@ -896,7 +990,12 @@ export function BuildPane({
           ? t.text
           : t.kind === "proposal"
             ? (t.summary ?? "Proposed an edit")
-            : "Generated an agent";
+            // A JOB'S LABEL IS WHAT WAS ASKED, when this turn was made in this session. A
+            // rehydrated one has no prose — the conversation stores a reference, not a copy — so it
+            // falls back to the category, which is what the rail can honestly say about it.
+            : t.kind === "work"
+              ? (t.input ?? "Gave the agent a job")
+              : "Generated an agent";
       return [{ turnId: itemId, label: pinLabel(label), kind: t.kind }];
     });
   }, [pins, turns]);
@@ -990,6 +1089,38 @@ export function BuildPane({
     useTraceStore.getState().selectStep(null);
     useUiStore.getState().setSelectedNodeId(null);
   };
+
+  /**
+   * WHICH KIND OF CONVERSATION THIS IS (Part 3 §11).
+   *
+   * ONE BRANCH INSIDE THE VIEW RATHER THAN A SECOND VIEW, which is §11's instruction: "Reuse the
+   * thread rendering. Same items, same virtualisation, same titling... Do not fork the view; branch
+   * on mode inside it." Everything above this line — the turn list, the resume, the pins, the
+   * notes — is the same code for both.
+   *
+   * `build` FOR A THREAD THAT IS NOT LOADED YET, which is the safe default in the direction that
+   * matters: a composer that briefly thought it was operating would offer to run a live agent.
+   */
+  const activeThread = useThreadStore((s) => threadById(s.threads, s.activeThreadId));
+  const operating = activeThread?.mode === "operate";
+  /**
+   * The fleet card for this thread's agent, which is what the pre-flight gate renders.
+   *
+   * FROM THE FLEET RATHER THAN FROM THE THREAD, because the gate's whole content is what is true
+   * NOW — the deployment version, the provider, the model, whether the URL is public — and the
+   * thread knows none of it. No card means no live deployment, which is why the send control below
+   * refuses rather than opening a gate with blanks in it.
+   */
+  const operateCard = useWorkStore((s) =>
+    s.fleet.find((c) => c.agent_id === activeThread?.agent_id) ?? null);
+  /**
+   * §6's classification, recomputed live like the build composer's — and for a sharper reason. The
+   * label has to be on screen WHILE somebody types, which is what rules out anything with a round
+   * trip in it.
+   */
+  const operateRoute = classifyOperate(text);
+  /** Open when a command is waiting for §6's pre-flight confirmation. */
+  const [operateGated, setOperateGated] = useState(false);
 
   // Route the CURRENT text by (intent + context) — recomputed live so the composer can show where
   // ⌘↵ will send it. Pure heuristics; no per-keystroke network/LLM cost.
@@ -1279,6 +1410,25 @@ export function BuildPane({
 
   // One dispatch point: route the message by (selection context + intent) into the EXISTING
   // mechanisms. Only "explain" is a new path; edit/fix reuse sendEdit, rerun reuses branchRun.
+  /**
+   * §6's command, once the gate has been seen: the ORDINARY `dispatchWork`.
+   *
+   * "Same command, same store, same run token, same trace, same work item. There is no third way to
+   * execute an agent, and this part must not become one." The only thing this adds to the Cockpit
+   * composer's call is the thread id, and that is a note about where the job came from rather than
+   * a route — the server binds it as a `work` item AFTER the dispatch it would have made anyway.
+   */
+  const dispatchOperate = (): void => {
+    const trimmed = text.trim();
+    const agentId = activeThread?.agent_id ?? activeAgentId;
+    if (!trimmed || !agentId) return;
+    setOperateGated(false);
+    // CLEARED ON PRESS, like the Cockpit's own composer, and for the same reason: leaving the text
+    // until the server answers is what invites the same job to be sent twice.
+    setText("");
+    sendDispatchWork(agentId, trimmed, undefined, activeThread?.id);
+  };
+
   const submit = () => {
     const trimmed = text.trim();
     if (!connected || !trimmed) return;
@@ -1289,6 +1439,33 @@ export function BuildPane({
       if (!canRun) return;
       localStorage.setItem(inputKey(activeAgentId), testDraft);
       sendRun(trimmed, provider, model, activeAgentId ?? undefined);
+      return;
+    }
+
+    /**
+     * PART 3 §6: IN AN OPERATE THREAD THERE ARE TWO DESTINATIONS AND NEITHER IS AN EDIT.
+     *
+     * BEFORE THE ATTACHMENTS AND BEFORE THE INTENT SWITCH, which is the ordering that makes the
+     * rule true rather than intended: everything below this block routes into plan / generate /
+     * edit / fix / explain, and a real job must never reach any of them. Returning here is what
+     * guarantees that, rather than a branch inside the switch that somebody could later fall
+     * through.
+     */
+    if (operating) {
+      if (busy) return;
+      const agentId = activeThread?.agent_id ?? activeAgentId;
+      if (!agentId) return;
+      if (operateRoute.kind === "command") {
+        // THE GATE, NOT THE DISPATCH. §6: an ambiguous message classified as a command still meets
+        // the pre-flight confirmation, so the user always sees what is about to happen before money
+        // moves. The send happens in `dispatchOperate` below, when they confirm.
+        if (operateCard) setOperateGated(true);
+        return;
+      }
+      // A QUESTION NEVER TOUCHES THE CONTAINER — §3.1. It is a read against the record, and the
+      // composer clears because the question is now the thread's own message.
+      sendAskRecord(agentId, trimmed, activeThread?.id);
+      setText("");
       return;
     }
 
@@ -1826,7 +2003,26 @@ export function BuildPane({
                 the command palette three keystrokes away draws its own keys as bordered caps: the
                 app has a primitive for exactly this shape of thing and two call sites went around
                 it. */}
-            {composerMode === "chat" && text.trim() && (
+            {/* §6: THE LABEL IS VISIBLE BEFORE SENDING, NOT AFTER — and in an operate thread it is
+                ALWAYS visible, including on an empty composer, which is the one difference from the
+                build one beside it. "Here it matters more, so it is louder." A label that appeared
+                only once somebody had typed would be absent at the moment they decided what to
+                type, and `text.trim()` is exactly that condition. The `amber` is this palette's
+                word for in flight and belongs to a running job, so the warning tone here is the
+                accent — a command is not an error, it is a thing about to happen. */}
+            {composerMode === "chat" && operating && (
+              <span className="ml-auto flex items-center gap-1.5">
+                {text.trim() && (
+                  <kbd className={`${chipClass({ size: "sm", mono: true, tone: "faint" })} shadow-[inset_0_0_0_1px_theme(colors.hair)]`}>
+                    {keyHint("⌘↵")}
+                  </kbd>
+                )}
+                <span className={operateRoute.kind === "command" ? "text-accent" : "text-faint"}>
+                  {operateLabel(operateRoute, activeThread?.agent_name ?? "this agent")}
+                </span>
+              </span>
+            )}
+            {composerMode === "chat" && !operating && text.trim() && (
               <span className="ml-auto flex items-center gap-1.5 text-faint">
                 <kbd className={`${chipClass({ size: "sm", mono: true, tone: "faint" })} shadow-[inset_0_0_0_1px_theme(colors.hair)]`}>
                   {keyHint("⌘↵")}
@@ -2214,6 +2410,28 @@ export function BuildPane({
                     },
                   }
                 : {}),
+              /**
+               * PART 3 §11: WHAT IS ABSENT IN OPERATE MODE IS THE POINT.
+               *
+               * "No plan card, no diff card, no Apply, no Undo, no file streaming. ABSENT, NOT
+               * DISABLED — this codebase's disabled-state discipline is to state what is true rather
+               * than hide a control, and here the truth is that these controls do not belong to this
+               * mode at all, which is different from a control the user lacks permission for."
+               *
+               * The two here are the ones that would otherwise still render. `model` picks which
+               * model a TEST RUN goes to, and there are no test runs in an operate thread — the
+               * model is whatever the deployment was built with, which the gate names. `mode` is the
+               * Chat/Test toggle, and Test sends the text as the agent's own input to a LOCAL run,
+               * which is the build surface's way of trying something. Beside a composer that
+               * dispatches to a live container, a second control that also "runs the agent" is the
+               * confusion §8 spends a paragraph on.
+               *
+               * The plan and diff cards need no branch at all: an operate thread cannot HOLD a
+               * `plan`, `generation` or `proposal` item — the store refuses one — so there is
+               * nothing for them to render. That is the enforcement doing the work the UI would
+               * otherwise be trusted to do.
+               */
+              ...(operating ? {} : {
               model: {
                 bar: () => (
                   <ModelSelector provider={provider} model={model} setModel={setModel} />
@@ -2250,6 +2468,7 @@ export function BuildPane({
                   </div>
                 ),
               },
+              }),
               mic: {
                 bar: () => (
                   <ControlButton
@@ -2300,6 +2519,21 @@ export function BuildPane({
         </div>
         </ComposerShell>
       </div>
+
+      {/* §6'S PRE-FLIGHT GATE, AND IT IS THE SAME COMPONENT THE COCKPIT COMPOSER RENDERS — see
+          `WorkGate`. "An ambiguous message classified as a command still meets that gate, so the
+          user always sees what is about to happen before money moves. That is the answer to
+          classification uncertainty; do not add a second confirmation dialog beside it." A dialog of
+          this thread's own would be exactly that second one, however identical it looked. */}
+      {operating && operateCard && (
+        <WorkGate
+          card={operateCard}
+          input={text}
+          open={operateGated}
+          onCancel={() => setOperateGated(false)}
+          onConfirm={dispatchOperate}
+        />
+      )}
     </div>
   );
 }

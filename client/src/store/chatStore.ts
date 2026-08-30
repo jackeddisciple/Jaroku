@@ -165,9 +165,41 @@ export interface ReplyTurn extends TurnAnchor {
    * gone. Storing them would be a transcript table §7 deliberately does not have.
    */
   priorVariants?: string[];
+  /**
+   * Part 3 §7.4: the work items this answer cited, resolved by the server.
+   *
+   * ON `done` RATHER THAN ARRIVING WITH THE TEXT, because a `[work:…]` marker can be split across
+   * two deltas and a chip drawn mid-stream would be half a citation and a stray bracket. Until it
+   * arrives the markers render as the plain text they are, which is also what an INVENTED id keeps
+   * looking like for ever — the server only sends back ids that were in the pack, so a sentence
+   * with nothing behind it stays visibly a sentence with nothing behind it.
+   */
+  citations?: { id: string; status: string; agent_name: string; created_at: string }[];
 }
 
-export type ChatTurn = UserTurn | PlanTurn | GenTurn | ProposalTurn | InfoTurn | ReplyTurn;
+/**
+ * A job this conversation gave a deployed agent — Part 3 §5.
+ *
+ * A REFERENCE, NOT A CARD WITH A STATUS IN IT. The conversation stores `work_items.id` and nothing
+ * else, which is `thread_items`' own rule ("ownership from `thread_items`, liveness from the
+ * owner") carried into the client: what the job is DOING right now is the Cockpit's row, kept live
+ * by the work channel's deltas, and a copy here would be a second status that goes stale between
+ * the answer arriving and somebody reading it.
+ *
+ * So the turn holds the id and the one line somebody typed, and the chip on it opens the Part 2
+ * work detail — the same panel the Cockpit list opens, reached the same way.
+ */
+export interface WorkTurn extends TurnAnchor {
+  id: string;
+  role: "jaroku";
+  kind: "work";
+  /** `work_items.id`. What `sendLoadWorkItem` takes. */
+  workItemId: string;
+  /** What was asked, when this turn was made in this session. Absent on a rehydrated one. */
+  input: string | null;
+}
+
+export type ChatTurn = UserTurn | PlanTurn | GenTurn | ProposalTurn | InfoTurn | ReplyTurn | WorkTurn;
 
 /**
  * Which session a message belongs to, as the envelope carried it.
@@ -226,7 +258,11 @@ interface ChatState {
   /** §5.4: show a different one of this turn's answers. See the implementation. */
   switchVariant: (e: In & { turnId: string; ordinal: number }) => void;
   replyDelta: (e: In & { agentId: string; text: string }) => void;
-  replyDone: (e: In & { agentId: string; usage?: GenUsage }) => void;
+  replyDone: (e: In & {
+    agentId: string;
+    usage?: GenUsage;
+    citations?: { id: string; status: string; agent_name: string; created_at: string }[];
+  }) => void;
   replyError: (e: In & { agentId: string; message: string }) => void;
 }
 
@@ -283,11 +319,20 @@ export const useChatStore = create<ChatState>((set) => ({
         // why notes and pins had nothing to attach to: the local `id` beside it is a render key
         // that changes on every reload, and a note keyed on one would move to a different turn the
         // next time somebody opened the thread.
-        [threadId]: items.map((it): ChatTurn =>
-          it.kind === "message" && it.role === "user"
-            ? { id: turnId(), itemId: it.id, role: "user", text: it.body ?? "" }
-            : { id: turnId(), itemId: it.id, role: "jaroku", kind: "info", tone: "muted", text: stubText(it) },
-        ),
+        [threadId]: items.map((it): ChatTurn => {
+          if (it.kind === "message" && it.role === "user") {
+            return { id: turnId(), itemId: it.id, role: "user", text: it.body ?? "" };
+          }
+          // A WORK ITEM REHYDRATES AS A CHIP, NOT AS A SENTENCE, which is the one item kind where
+          // the stub would be a worse answer than the row: "Gave the agent a job" tells somebody
+          // nothing they can act on, and the id is right there. Everything else in this table
+          // points at something the conversation cannot open — a proposal that did not survive the
+          // restart, a plan that was superseded — and a sentence is all there is to say about it.
+          if (it.kind === "work" && it.ref_id) {
+            return { id: turnId(), itemId: it.id, role: "jaroku", kind: "work", workItemId: it.ref_id, input: null };
+          }
+          return { id: turnId(), itemId: it.id, role: "jaroku", kind: "info", tone: "muted", text: stubText(it) };
+        }),
       },
     })),
 
@@ -634,7 +679,7 @@ export const useChatStore = create<ChatState>((set) => ({
       return putTurns(s, threadId, replaceTurn(turns, open.id, { ...open, text: open.text + text }));
     }),
 
-  replyDone: ({ threadId, agentId, usage }) =>
+  replyDone: ({ threadId, agentId, usage, citations }) =>
     set((s) => {
       const turns = turnsIn(s, threadId);
       const open = findReply(turns, agentId);
@@ -645,8 +690,12 @@ export const useChatStore = create<ChatState>((set) => ({
         // KEPT WHEN THE EVENT CARRIES NONE, rather than nulled. A `done` with no usage is an answer
         // that had nothing to report about itself — the no-key path streams the raw context and
         // never calls a model — not one whose metadata was withdrawn.
+        // `citations` SPREAD RATHER THAN SET, on the same argument as `usage` above it: an answer
+        // that cited nothing sends none, and a reply that had them must not lose them to a second
+        // `done` — which a regeneration produces.
         ...putTurns(s, threadId, replaceTurn(turns, open.id, {
           ...open, status: "done" as const, ...(usage ? { usage } : {}),
+          ...(citations && citations.length > 0 ? { citations } : {}),
         })),
       };
     }),
@@ -679,6 +728,10 @@ function stubText(item: ThreadItemView): string {
     case "plan": return "Wrote a plan.";
     case "generation": return "Generated the agent.";
     case "proposal": return "Proposed an edit.";
+    // Only reachable for a `work` row whose `ref_id` is missing, which nothing writes — the chip
+    // above is the ordinary path. A category is the honest thing to say about a reference with
+    // nothing on the end of it.
+    case "work": return "Gave the agent a job.";
     // A message with no `user` role, which nothing writes today. Its body is still the truest
     // thing available about it, so it is shown rather than replaced with a category.
     default: return item.body ?? "";

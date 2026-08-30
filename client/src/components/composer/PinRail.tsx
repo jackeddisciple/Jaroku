@@ -24,7 +24,7 @@ export interface PinnedTurn {
   /** §5.3: "first ~60 chars of the turn, or its plan title if the turn produced a plan." */
   label: string;
   /** Which kind of turn it was, so the rail's glyphs stay scannable. */
-  kind: "plan" | "gen" | "proposal" | "reply";
+  kind: "plan" | "gen" | "proposal" | "reply" | "work";
 }
 
 const KIND_ICON = {
@@ -32,6 +32,10 @@ const KIND_ICON = {
   gen: Icon.Build,
   proposal: Icon.Regenerate,
   reply: Icon.Note,
+  // A JOB GIVEN TO A DEPLOYED AGENT (Part 3). `AttachRun`, which is this app's mark for an
+  // execution — the same glyph the composer offers when somebody attaches a run — rather than a
+  // seventh symbol for a thing that already has one.
+  work: Icon.AttachRun,
 } as const;
 
 /** §5.3: "Pin label = first ~60 chars of the turn, or its plan title." */

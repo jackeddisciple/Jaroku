@@ -2009,8 +2009,36 @@ export function sendLoadWorkItem(itemId: string): void {
  * without a placeholder gets the old behaviour, where the answer joins the list as an ordinary
  * arrival.
  */
-export function sendDispatchWork(agentId: string, input: string, clientRef?: string): boolean {
-  return send({ cmd: "dispatchWork", agentId, input, clientRef });
+export function sendDispatchWork(
+  agentId: string,
+  input: string,
+  clientRef?: string,
+  /**
+   * The operate thread this command was given in — Part 3 §6.
+   *
+   * IT IS A NOTE ABOUT WHERE THE JOB CAME FROM, NOT A ROUTE. §6: "A command in an operate thread is
+   * an ordinary `dispatchWork`. Same command, same store, same run token, same trace, same work
+   * item." So this is the same send the Cockpit composer makes, through the same pre-flight gate,
+   * with one more field — and absent is the ordinary case, because a job dispatched from the fleet
+   * strip did not happen in a conversation.
+   */
+  threadId?: string,
+): boolean {
+  return send({ cmd: "dispatchWork", agentId, input, clientRef, ...(threadId ? { threadId } : {}) });
+}
+
+/**
+ * A question about what an agent has done, answered from the record — Part 3 §7.
+ *
+ * NOT `sendExplain`, and the difference is §3 rather than tidiness: `explain` grounds its answer in
+ * the agent's CODE (the step you selected, the prompt on disk) and this grounds its answer in the
+ * RECORD. A question about what happened must not be answerable from what the agent is capable of.
+ *
+ * It answers on the REPLY channel, which the two do share — prose streaming into a conversation is
+ * something this product already does exactly one way.
+ */
+export function sendAskRecord(agentId: string, question: string, threadId?: string): boolean {
+  return send({ cmd: "askRecord", agentId, question, ...(threadId ? { threadId } : {}) });
 }
 
 export function sendCancelWork(itemId: string): boolean {

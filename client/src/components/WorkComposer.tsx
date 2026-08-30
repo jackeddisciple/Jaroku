@@ -29,7 +29,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { COMPOSER, GATE } from "../lib/cockpitCopy.ts";
+import { COMPOSER } from "../lib/cockpitCopy.ts";
 import { cockpitComposer } from "../lib/cockpitComposer.ts";
 import { SPINE_X } from "../lib/cockpitLayout.ts";
 import { needsReconnect } from "../lib/fleetSentence.ts";
@@ -39,8 +39,7 @@ import { ICON } from "../lib/tokens.ts";
 import { useCanRun } from "../lib/useCapability.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useWorkStore } from "../store/workStore.ts";
-import type { FleetCardView } from "../types.ts";
-import { CockpitDialog } from "./CockpitDialog.tsx";
+import { WorkGate } from "./WorkGate.tsx";
 import { DisabledReason, ENABLED, type DisabledState } from "./DisabledReason.tsx";
 import { Select } from "./Select.tsx";
 // `ArrowUpIcon` RATHER THAN A NEW SEND MARK. The composer bar's send control already uses it, and
@@ -65,56 +64,6 @@ const MAX_INPUT_BYTES = 65_536;
 /** In bytes, because that is what the boundary counts — a four-byte emoji is one character. */
 function byteLength(text: string): number {
   return new TextEncoder().encode(text).length;
-}
-
-/**
- * §8's pre-flight gate: what is about to happen, before the button that causes it.
- *
- * A SMALL MODAL WITH A SCRIM, which is §8's own instruction and the one place in this tab a modal
- * is right: "it is asking for a decision that spends money and touches the world". Everything else
- * about it is the app's existing dialog — `CockpitDialog` — rather than a bespoke one, and that is
- * also where §21's "the confirming control is not the default focus" is satisfied.
- *
- * IT NAMES WHAT WILL HAPPEN AND NOT WHAT IT WILL COST, deliberately. Nothing can honestly predict
- * the cost of a job whose graph has not run — the eval estimator works because it has a dataset and
- * a history, and this has one sentence somebody just typed. A confident figure here would be the
- * one number on this surface that was made up, on the tab whose whole argument is that its numbers
- * are real.
- *
- * IN §8's ORDER: the agent, the deployment version, the provider and model, the first line of the
- * input. A DEPLOYMENT WITH NO RECORDED VERSION SAYS SO rather than guessing one — a row written
- * before migration 041 has no record of which version it ran, and a confident "v1" would be a lie
- * about somebody's production on the one screen asking them to spend money.
- */
-function GateBody({ card, input }: { card: FleetCardView; input: string }) {
-  // THE FIRST LINE, which is what §8 asks for. A gate that rendered a 600-line pasted email would
-  // be a dialog somebody scrolls rather than reads, and the point of the line is recognition —
-  // "yes, that is the job I meant" — rather than review.
-  const firstLine = input.split("\n", 1)[0] ?? "";
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="flex flex-col gap-0.5 text-caption">
-        <span className="text-ink">{card.agent_name}</span>
-        <span className="text-muted">
-          {card.version === null ? GATE.unrecordedVersion : `v${card.version}`}
-          <span className="text-faint"> · </span>
-          {card.model}
-          <span className="text-faint"> on </span>
-          {card.provider}
-        </span>
-        {/* THE ONE THING A PUBLIC ENDPOINT ADDS TO THE GATE. It is not about this job, it is about
-            the agent this job is going to — and the moment somebody is being asked to spend money
-            on it is the moment that fact is worth repeating. */}
-        {card.connection === "public" && (
-          <span className="text-warn">its URL is public, so anyone holding it can spend the same key</span>
-        )}
-      </div>
-      <p className="truncate rounded-control border border-hair bg-canvas px-2 py-1 text-caption text-ink"
-        title={firstLine}>
-        {firstLine}
-      </p>
-    </div>
-  );
 }
 
 export function WorkComposer() {
@@ -307,11 +256,10 @@ export function WorkComposer() {
           workspace's real provider key — so the gate is between the button and the dispatch rather
           than a confirmation after it. */}
       {chosen && (
-        <CockpitDialog
+        <WorkGate
+          card={chosen}
+          input={input}
           open={gated}
-          title={GATE.title}
-          body={<GateBody card={chosen} input={input} />}
-          confirmLabel={GATE.confirm}
           onCancel={() => setGated(false)}
           onConfirm={dispatch}
         />
