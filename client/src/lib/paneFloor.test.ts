@@ -16,6 +16,7 @@
 //   npm run test:pane-floor
 
 import {
+  COMPOSER_DEFAULT_MIN_PCT, COMPOSER_MAX_MIN_PCT, COMPOSER_MIN_PX,
   SIDEBAR_DEFAULT_MIN_PCT, SIDEBAR_MAX_PCT, SIDEBAR_MIN_PX, pixelFloorPercent,
 } from "./paneFloor.ts";
 
@@ -99,6 +100,66 @@ console.log("\nthe floor is wider than the content that could not fit");
   // A floor at or below 232px would reproduce the failure exactly.
   check("the pixel floor exceeds the pane the failure happened in", SIDEBAR_MIN_PX > 200);
   check("...and exceeds the column's measured content requirement", SIDEBAR_MIN_PX >= 232);
+}
+
+/**
+ * What the composer's own group gets, in pixels, at a viewport width.
+ *
+ * The group is the shell minus the sidebar at its floor and minus the 5px divider between them —
+ * which is the worst case for the composer and therefore the one worth asserting: every pixel the
+ * sidebar is allowed to take is a pixel this column is not.
+ */
+const panesFor = (viewport: number): number => {
+  const shell = shellFor(viewport);
+  const sidebar = (pixelFloorPercent(SIDEBAR_MIN_PX, shell, SIDEBAR_MAX_PCT, SIDEBAR_DEFAULT_MIN_PCT) / 100) * shell;
+  return shell - sidebar - 5;
+};
+
+const composerPx = (viewport: number): number => {
+  const group = panesFor(viewport);
+  const pct = pixelFloorPercent(COMPOSER_MIN_PX, group, COMPOSER_MAX_MIN_PCT, COMPOSER_DEFAULT_MIN_PCT);
+  return (pct / 100) * group;
+};
+
+console.log("\nand the composer column, whose control bar is the same kind of fixed-width content");
+{
+  // THE ROW THE FLOOR EXISTS FOR: ⊕, expand, ⋯, the model chip, Chat/Test, the mic and send, at a
+  // 32px hit target and an 8px gap each. `lib/composerBar.ts` promises that row never wraps and
+  // that the mic and send never collapse; at 30% of this group both promises were broken at 1440,
+  // with the two of them outside the composer's own box.
+  for (const viewport of [1920, 1440, 1280]) {
+    check(`${viewport}px → the composer cannot go below ${COMPOSER_MIN_PX}px (${Math.round(composerPx(viewport))}px)`,
+      composerPx(viewport) >= COMPOSER_MIN_PX - 1, `${Math.round(composerPx(viewport))}px`);
+  }
+  // The old rule, at the window this was found on.
+  const group = panesFor(1440);
+  const old = (COMPOSER_DEFAULT_MIN_PCT / 100) * group;
+  check("the old percentage floor was under the bar's own width", old < 436, `${Math.round(old)}px`);
+  check("...and the pixel floor is not", COMPOSER_MIN_PX >= 436);
+}
+
+console.log("\nthe two floors are handed to one group and may never sum past it");
+{
+  // The right pane asks for 32% of the same group. A pair of minimums that sums past 100 has no
+  // valid layout, and `react-resizable-panels` resolves that by ignoring one of them — silently.
+  const RIGHT_MIN_PCT = 32;
+  for (const viewport of [1920, 1440, 1280, 1024, 900, 640, 320]) {
+    const pct = pixelFloorPercent(COMPOSER_MIN_PX, panesFor(viewport), COMPOSER_MAX_MIN_PCT, COMPOSER_DEFAULT_MIN_PCT);
+    check(`${viewport}px leaves the right pane its own ${RIGHT_MIN_PCT}%`, pct + RIGHT_MIN_PCT <= 100,
+      `${pct.toFixed(1)}%`);
+  }
+  check("a group narrower than the floor itself clamps rather than inverting",
+    pixelFloorPercent(COMPOSER_MIN_PX, 200, COMPOSER_MAX_MIN_PCT, COMPOSER_DEFAULT_MIN_PCT) === COMPOSER_MAX_MIN_PCT);
+}
+
+console.log("\na wide screen is untouched here too");
+{
+  // At 1920 and 1440 the conversion lands below `defaultSize={45}`, so nothing about the shipped
+  // layout moves for anybody whose window was already big enough.
+  for (const viewport of [1920, 1440]) {
+    const pct = pixelFloorPercent(COMPOSER_MIN_PX, panesFor(viewport), COMPOSER_MAX_MIN_PCT, COMPOSER_DEFAULT_MIN_PCT);
+    check(`${viewport} resolves below the default size`, pct < 45, `${pct.toFixed(1)}%`);
+  }
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

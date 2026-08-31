@@ -17,7 +17,10 @@ import { EnforcementStrip } from "./components/EnforcementStrip.tsx";
 import { WorkspacePanel } from "./components/WorkspacePanel.tsx";
 import { WorkspaceSwitchLock } from "./components/WorkspaceSwitchLock.tsx";
 import { backgrounded, setWindowTitle } from "./lib/windowTitle.ts";
-import { SIDEBAR_DEFAULT_MIN_PCT, SIDEBAR_MAX_PCT, SIDEBAR_MIN_PX, pixelFloorPercent } from "./lib/paneFloor.ts";
+import {
+  COMPOSER_DEFAULT_MIN_PCT, COMPOSER_MAX_MIN_PCT, COMPOSER_MIN_PX,
+  SIDEBAR_DEFAULT_MIN_PCT, SIDEBAR_MAX_PCT, SIDEBAR_MIN_PX, pixelFloorPercent,
+} from "./lib/paneFloor.ts";
 import { RoleRefusal } from "./components/RoleRefusal.tsx";
 import { InviteNotice } from "./components/InviteNotice.tsx";
 import { redeemPendingInvite } from "./lib/invite.ts";
@@ -61,17 +64,29 @@ import { useWorkStore, workBadgeCount } from "./store/workStore.ts";
  * and differs from it by the one-pixel border on each side, which is below the resolution of a
  * floor whose job is to stop a column reaching 149px.
  */
-function useSidebarFloor(shell: HTMLElement | null, fallback: number, max: number): number {
+/**
+ * ONE HOOK FOR BOTH COLUMNS, because there are two of them now and the second is the same bug.
+ *
+ * The sidebar measures the shell; the composer measures the pane group it is the first panel of,
+ * which is a different element with a different width — so what is shared is the arithmetic and the
+ * observer, and the element and the requirement are arguments.
+ */
+function usePaneFloor(
+  host: HTMLElement | null,
+  px: number,
+  fallback: number,
+  max: number,
+): number {
   const [width, setWidth] = useState(0);
   useEffect(() => {
-    if (!shell || typeof ResizeObserver === "undefined") return;
-    const measure = (): void => setWidth(shell.clientWidth);
+    if (!host || typeof ResizeObserver === "undefined") return;
+    const measure = (): void => setWidth(host.clientWidth);
     measure();
     const observer = new ResizeObserver(measure);
-    observer.observe(shell);
+    observer.observe(host);
     return () => observer.disconnect();
-  }, [shell]);
-  return pixelFloorPercent(SIDEBAR_MIN_PX, width, max, fallback);
+  }, [host]);
+  return pixelFloorPercent(px, width, max, fallback);
 }
 
 function PaneDivider() {
@@ -96,7 +111,12 @@ export function App() {
   // layout renders — sign-in, first-run, the name screen, account onboarding — and a hook called
   // after one of them would be a hook whose call order changes with the session.
   const [shell, setShell] = useState<HTMLElement | null>(null);
-  const sidebarMin = useSidebarFloor(shell, SIDEBAR_DEFAULT_MIN_PCT, SIDEBAR_MAX_PCT);
+  const sidebarMin = usePaneFloor(shell, SIDEBAR_MIN_PX, SIDEBAR_DEFAULT_MIN_PCT, SIDEBAR_MAX_PCT);
+  // AND THE COMPOSER COLUMN, measured on the group it is the first panel of rather than on the
+  // shell: the sidebar's own width is inside the shell and outside this group, so a floor derived
+  // from the shell would be a share of a container the composer does not live in.
+  const [panes, setPanes] = useState<HTMLElement | null>(null);
+  const composerMin = usePaneFloor(panes, COMPOSER_MIN_PX, COMPOSER_DEFAULT_MIN_PCT, COMPOSER_MAX_MIN_PCT);
 
   const activeAgentId = useBuildStore((s) => s.activeAgentId);
   const connected = useTraceStore((s) => s.connection === "open");
@@ -340,10 +360,14 @@ export function App() {
                 resize observer is never handed a zero-width container and its saved sizes survive
                 the round trip. It also drops out of the tab order, which is what stops the keyboard
                 reaching a composer nobody can see. */}
-            <div className="relative h-full">
+            <div ref={setPanes} className="relative h-full">
               <div className={`absolute inset-0 ${navView ? "invisible" : ""}`}>
                 <PanelGroup direction="horizontal" autoSaveId="jaroku-panes-v1" className="h-full">
-                  <Panel defaultSize={45} minSize={30} order={1}>
+                  {/* `minSize` IS A MEASURED PIXEL FLOOR HERE TOO, for the reason the sidebar's is:
+                      the composer's control bar is a row of 32px hit targets and 8px gaps that its
+                      own rules forbid to wrap, and 30% of this group is 354px at 1440 and 192px at
+                      900 — one rule expressing two different requirements again. */}
+                  <Panel defaultSize={45} minSize={composerMin} order={1}>
                     {/* The composer, alone during step 3 and still the centre of the screen through
                         step 4. Wrapped rather than swapped, so BuildPane is never torn down. */}
                     <ComposerColumn phase={phase} />

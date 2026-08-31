@@ -51,6 +51,38 @@ export const SIDEBAR_DEFAULT_MIN_PCT = 16;
 export const SIDEBAR_MAX_PCT = 34;
 
 /**
+ * The composer column's real requirement, in pixels — and it is the same failure one column over.
+ *
+ * THE CONTROL BAR IS FIXED-WIDTH CONTENT and its own rules say so: `lib/composerBar.ts` states that
+ * the bar never wraps and that "⊕, mic and send never collapse and never move into overflow". Both
+ * clauses are about a row of controls whose widths are pixels — a 32px hit target each, an 8px gap
+ * between them, a Chat/Test track — so what the column needs is a number of pixels, and `minSize={30}`
+ * is 354px at 1440 and 192px at 900.
+ *
+ * MEASURED FROM THE FAILURE. Dragged to its percentage floor at 1440, the composer column was 316px
+ * and the bar overflowed by about 100 of them: the mic and the send button — the two controls the
+ * bar promises never to collapse — were outside the composer's own rounded box and could not be
+ * clicked at all. The whole row is visible again at 436px, which is this with a little headroom, and
+ * the model chip's label is the part that gives way first because it is the only one that can.
+ */
+export const COMPOSER_MIN_PX = 440;
+
+/** The percentage the app shipped with, kept as the pre-measurement fallback — see the sidebar's. */
+export const COMPOSER_DEFAULT_MIN_PCT = 30;
+
+/**
+ * The ceiling this floor is clamped under, and it is the RIGHT pane's own minimum subtracted from
+ * the whole.
+ *
+ * `react-resizable-panels` is handed two minimums for one group; if they sum past 100 the group has
+ * no valid layout at all and the library resolves that by ignoring one of them. At a 900px window —
+ * the shell's own `min-w`, below which it scrolls instead — 440px is 68% of what is left after the
+ * sidebar, and the right pane asks for 32. The two meet exactly, which is why the clamp is this
+ * number rather than a round one.
+ */
+export const COMPOSER_MAX_MIN_PCT = 68;
+
+/**
  * A pixel floor as a percentage of the group it sits in.
  *
  * `fallback` is returned whenever there is nothing to measure — the first render, a hidden pane, a
