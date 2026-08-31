@@ -620,16 +620,30 @@ function ModelSelector({
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open]);
   return (
-    <div ref={ref} className="relative">
+    // A FLOOR RATHER THAN `min-w-0`, and the difference is visible. A flex item's floor is its own
+    // content unless it is told otherwise, so without something here the truncation below can never
+    // take effect — but told `0` the wrapper collapses under the chip's own icon and chevron, which
+    // are `shrink-0` and therefore paint straight over the control beside them. 3.5rem is the chip
+    // with no label at all: the padding, the provider mark, the gap and the chevron.
+    <div ref={ref} className="relative min-w-[3.5rem]">
       <Chip
         size="lg"
+        className="max-w-full"
         selected={open}
         onClick={() => setOpen((o) => !o)}
-        title="Run model"
+        // THE WHOLE LABEL IS IN THE TOOLTIP, which is what makes shortening it safe.
+        title={`Run model — ${label}`}
         icon={<ProviderMark provider={provider} size={12} />}
       >
         {/* "Dry run (free)" is prose; a model id is an identifier. Only the latter gets mono. */}
-        <span className={provider === "fake" ? undefined : ""}>{label}</span>
+        {/* `truncate` RATHER THAN THE CHIP'S OWN BREAK RULE. `chipClass` sets
+            `overflow-wrap:anywhere` on every chip, for the good reason that a tool id or a file
+            path should break rather than overflow the row it sits in — but this chip sits in a row
+            that may not wrap, and prose breaks in a way an identifier does not: at a narrow
+            composer "Dry run (free)" came out one character per line, fifteen lines tall, and
+            pushed the mic and the send button out of a bar whose own rule is that those two never
+            collapse. A control's label shortens; it never breaks. */}
+        <span className="min-w-0 truncate">{label}</span>
         {/* Points down at a closed menu and up at an open one — this popover opens upward, and a
             chevron that keeps pointing down while the list is above it is pointing at nothing. */}
         <span
