@@ -187,7 +187,6 @@ export function CommandPalette() {
       open={open}
       onOpenChange={setOpen}
       label="Command palette"
-      className="fixed inset-0 z-50 flex items-start justify-center pt-[12vh]"
       // THE CARD HAD NO PERCEPTIBLE EDGE. `bg-panel` behind a `black/50` scrim over a `#0d0d0f`
       // page lands within a couple of percent of the dimmed background it floats on, so the app's
       // primary navigation surface read as unbordered text hanging in space — a contrast problem
@@ -195,8 +194,16 @@ export function CommandPalette() {
       //
       // The scrim goes to the app's own `void` at a real opacity, and the card comes up a step. A
       // modal earns the strongest dim in the app: nothing behind it is meant to be read.
-      overlayClassName="fixed inset-0 bg-ink/40"
-      contentClassName="relative w-[min(560px,92vw)] bg-elevated rounded-modal overflow-hidden border border-edge shadow-overlay"
+      //
+      // AND `className` IS NOT ONE OF THE THREE. `Command.Dialog` spreads everything it does not
+      // name onto the `Command` ROOT, which is a child of the content — so the positioning this
+      // dialog needs was being applied one level too deep: the root took `fixed inset-0` and left
+      // the content box, which is the thing carrying the surface, the border, the radius and the
+      // width, with nothing to give it a size. The card was therefore never painted at all, and
+      // the list rendered straight over the app with the conversation legible between its rows.
+      // Every class is the same class; the only change is which of the two elements wears it.
+      overlayClassName="fixed inset-0 z-50 bg-ink/40"
+      contentClassName="fixed inset-x-0 top-[12vh] z-50 mx-auto w-[min(560px,92vw)] bg-elevated rounded-modal overflow-hidden border border-edge shadow-overlay"
     >
       <Command loop>
         <Command.Input
