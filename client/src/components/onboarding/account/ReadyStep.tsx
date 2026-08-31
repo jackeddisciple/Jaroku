@@ -18,6 +18,7 @@ import { PrimaryButton } from "../../auth/controls.tsx";
 import { AuthNotice } from "../../auth/AuthShell.tsx";
 import { ICON } from "../../../lib/tokens.ts";
 import { useAccountOnboardingStore } from "../../../store/accountOnboardingStore.ts";
+import { useBuildStore } from "../../../store/buildStore.ts";
 import { Reveal } from "../Reveal.tsx";
 
 /** §5.1's three, verbatim in intent. Each is one thing to do next, in the place it happens. */
@@ -27,8 +28,37 @@ const NEXT = [
   "Ask Jaroku to change it, in the composer",
 ];
 
+/**
+ * The same screen for somebody who has no agent, which step 4's Skip makes a real state.
+ *
+ * ALL THREE OF THE LINES ABOVE ARE ABOUT AN AGENT — run it, read its graph, change it — and they were
+ * rendered unconditionally, so pressing "Skip for now" one screen earlier led straight to a
+ * congratulation and three instructions about a thing that does not exist. That is the one failure a
+ * closing screen can have: it is the last word, and there is nothing after it to correct the record.
+ *
+ * SAME SHAPE, SAME PLACES. Each of these is still one thing to do in the next thirty seconds, named
+ * by where it happens rather than by what it is — the composer, the plan card, the Secrets tab —
+ * because that is what made the original three worth printing.
+ */
+const NEXT_WITHOUT_AGENT = [
+  "Describe the agent you want, in the composer",
+  "Approve the plan you get back — nothing is written until you do",
+  "Add a provider key in Secrets to run on a real model",
+];
+
 export function ReadyStep() {
   const finish = useAccountOnboardingStore((s) => s.finish);
+  /**
+   * Did step 4 start anything?
+   *
+   * TWO SOURCES BECAUSE THERE ARE TWO WAYS TO HAVE ONE. `agentStarted` covers the generation this
+   * flow just dispatched, which is still in flight when this screen paints and therefore not in the
+   * list yet; the list covers a resume that landed on step 5 in a workspace that already has agents.
+   * Either is enough, and neither alone is.
+   */
+  const started = useAccountOnboardingStore((s) => s.agentStarted);
+  const hasAgent = useBuildStore((s) => s.agents.length > 0);
+  const next = started || hasAgent ? NEXT : NEXT_WITHOUT_AGENT;
 
   return (
     <AuthNotice>
@@ -59,7 +89,7 @@ export function ReadyStep() {
 
       <Reveal delay={180}>
         <ul className="mx-auto mt-4 flex max-w-[34ch] flex-col gap-2.5 text-left">
-          {NEXT.map((item) => (
+          {next.map((item) => (
             <li key={item} className="flex items-baseline gap-3">
               <span aria-hidden className="h-1 w-1 shrink-0 rounded-full bg-muted" />
               <span className="text-label leading-[1.5] text-ink">{item}</span>

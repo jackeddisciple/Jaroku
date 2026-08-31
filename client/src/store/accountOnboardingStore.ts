@@ -36,6 +36,20 @@ interface AccountOnboardingState {
   skipped: boolean;
   /** Whether the workspace step has already produced a workspace, so a resume does not re-create. */
   workspaceNamed: boolean;
+  /**
+   * Whether step 4 actually started an agent, as opposed to being skipped past.
+   *
+   * THE LAST SCREEN IS WHAT THIS IS FOR. Its three suggestions — run it, read its graph, ask for a
+   * change — are all about an agent, and step 4 has a Skip beside it, so the screen was congratulating
+   * people and then telling them to run something that does not exist. `advance()` is called on both
+   * paths and cannot tell them apart afterwards; this is the difference, recorded where it happens.
+   *
+   * LOCAL TO THIS WINDOW, like `skipped` and for the same reason: it is a fact about this pass through
+   * the flow, not about the account. A resume that lands straight on step 5 reads false here, which is
+   * why `ReadyStep` also asks the agent list — this is the answer for the case the list cannot give,
+   * which is a generation still in flight.
+   */
+  agentStarted: boolean;
 
   /** Read the resume point off a freshly-landed session. Idempotent per session. */
   hydrate: (step: number) => void;
@@ -52,12 +66,15 @@ interface AccountOnboardingState {
   /** §5.4's restart-from-settings. Clears the flag server-side and reopens at step 1. */
   restart: () => Promise<void>;
   markWorkspaceNamed: () => void;
+  /** Step 4 dispatched a sample selection or a plan. See `agentStarted`. */
+  markAgentStarted: () => void;
 }
 
 export const useAccountOnboardingStore = create<AccountOnboardingState>((set, get) => ({
   step: null,
   skipped: false,
   workspaceNamed: false,
+  agentStarted: false,
 
   hydrate: (step) =>
     set((s) => {
@@ -105,10 +122,11 @@ export const useAccountOnboardingStore = create<AccountOnboardingState>((set, ge
     // AWAITED, unlike every other write here, because the caller is a settings screen with a button
     // on it and the person is watching that button. It also has to land before the local step moves,
     // or a failure would put somebody into a flow the server still thinks they finished.
-    set({ step: FIRST_STEP, skipped: false, workspaceNamed: false });
+    set({ step: FIRST_STEP, skipped: false, workspaceNamed: false, agentStarted: false });
   },
 
   markWorkspaceNamed: () => set({ workspaceNamed: true }),
+  markAgentStarted: () => set({ agentStarted: true }),
 }));
 
 /**
