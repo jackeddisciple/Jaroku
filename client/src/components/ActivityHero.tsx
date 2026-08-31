@@ -168,7 +168,14 @@ function TokensCard() {
       <div className="relative mt-2">
         {/* THE SPARKLINE IS BEHIND THE NUMBER, at low opacity and full card width — §3.2's "texture
             behind the number, not the headline". */}
-        {summary.pulse.length > 1 && (
+        {/* AND ONLY WHEN THERE IS A NUMBER TO BE BEHIND. §3.5: "never an empty chart axis implying a
+            flat line at zero." A range with no model call in it still has a full row of pulse
+            buckets — seven of them over a week — every one of them zero, and `Sparkline`'s own rule
+            that a flat series is drawn along the floor then painted a hairline directly under the
+            words "no model calls in this range". The card was making two statements about the same
+            window and only one of them was true. `pulse.length` answers "is there a series"; the
+            figure answers "is there anything in it", and it is the second question this is. */}
+        {value !== null && summary.pulse.length > 1 && (
           <Sparkline
             values={summary.pulse.map((c) => c.tokens)}
             className="pointer-events-none absolute inset-x-0 bottom-0 h-8 w-full opacity-70"
