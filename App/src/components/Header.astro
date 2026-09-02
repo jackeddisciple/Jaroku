@@ -1,0 +1,182 @@
+---
+import Logo from "./Logo.astro";
+import Icon from "./Icon.astro";
+import DownloadButton from "./DownloadButton.astro";
+import { PRIMARY_NAV, RESOURCES_NAV, SITE } from "@data/site";
+
+const path = Astro.url.pathname.replace(/\/$/, "") || "/";
+const isActive = (href: string) => (href === "/" ? path === "/" : path.startsWith(href));
+---
+
+<header class="site-header">
+  <div class="container-wide bar">
+    <a class="brand" href="/" aria-label={`${SITE.name} — home`}>
+      <Logo size={22} />
+      <span>Jaroku</span>
+      <span class="ver">v{SITE.version}</span>
+    </a>
+
+    <nav class="primary" aria-label="Primary">
+      <ul>
+        {PRIMARY_NAV.map((item) => (
+          <li>
+            <a href={item.href} class:list={[{ active: isActive(item.href) }]}>{item.label}</a>
+          </li>
+        ))}
+        <li class="resources">
+          <button type="button" aria-haspopup="true" aria-expanded="false" class="res-btn" data-menu="resources">
+            Resources
+            <Icon name="chevron-down" size={14} />
+          </button>
+          <div class="mega" role="menu" aria-label="Resources">
+            <ul>
+              {RESOURCES_NAV.map((item) => (
+                <li>
+                  <a href={item.href} role="menuitem">
+                    <span class="mega-label">{item.label}</span>
+                    <span class="mega-desc">{item.description}</span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </li>
+      </ul>
+    </nav>
+
+    <div class="cta">
+      <DownloadButton variant="primary" size="sm">
+        <Icon name="download" size={16} />
+      </DownloadButton>
+      <button type="button" class="menu-toggle" aria-label="Open menu" aria-expanded="false" data-mobile-menu>
+        <Icon name="menu" size={20} />
+      </button>
+    </div>
+  </div>
+
+  <div class="mobile" hidden data-mobile-panel>
+    <nav aria-label="Mobile">
+      <ul>
+        {PRIMARY_NAV.map((item) => (
+          <li><a href={item.href} class:list={[{ active: isActive(item.href) }]}>{item.label}</a></li>
+        ))}
+      </ul>
+      <div class="mobile-group-label">Resources</div>
+      <ul>
+        {RESOURCES_NAV.map((item) => (
+          <li><a href={item.href} class:list={[{ active: isActive(item.href) }]}>{item.label}</a></li>
+        ))}
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<style>
+  .site-header {
+    position: sticky; top: 0; z-index: 40;
+    background: rgba(255, 255, 255, 0.82);
+    backdrop-filter: saturate(180%) blur(12px);
+    -webkit-backdrop-filter: saturate(180%) blur(12px);
+    border-bottom: 1px solid var(--hair);
+  }
+  .bar {
+    display: flex; align-items: center; justify-content: space-between; gap: 24px;
+    padding: 12px 24px;
+  }
+  .brand {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-weight: 600; letter-spacing: -0.01em; color: var(--ink);
+  }
+  .brand:hover { color: var(--ink); }
+  .brand .ver {
+    font-size: 11px; font-weight: 500;
+    color: var(--muted);
+    padding: 2px 6px; margin-left: 4px;
+    background: var(--panel-2); border: 1px solid var(--hair);
+    border-radius: 999px; font-variant-numeric: tabular-nums;
+  }
+  nav.primary { display: none; }
+  @media (min-width: 900px) { nav.primary { display: block; } }
+  nav.primary ul {
+    display: inline-flex; align-items: center; gap: 4px;
+    margin: 0; padding: 0; list-style: none;
+  }
+  nav.primary a, nav.primary .res-btn {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 8px 12px; border-radius: 8px;
+    font-size: 14px; color: var(--muted); background: transparent; border: 0; cursor: pointer;
+    font-family: inherit;
+  }
+  nav.primary a:hover, nav.primary .res-btn:hover { color: var(--ink); background: var(--panel-2); }
+  nav.primary a.active { color: var(--ink); }
+
+  .resources { position: relative; }
+  .mega {
+    position: absolute; top: calc(100% + 8px); right: 0;
+    min-width: 480px;
+    background: var(--panel); border: 1px solid var(--hair); border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-2);
+    padding: 8px; opacity: 0; transform: translateY(-4px); pointer-events: none;
+    transition: opacity 140ms ease, transform 140ms ease;
+  }
+  .resources.open .mega { opacity: 1; transform: translateY(0); pointer-events: auto; }
+  .mega ul { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; list-style: none; margin: 0; padding: 0; }
+  .mega a {
+    display: block; padding: 12px; border-radius: 10px;
+    color: var(--ink);
+  }
+  .mega a:hover { background: var(--bg-tint); }
+  .mega-label { display: block; font-weight: 500; font-size: 14px; }
+  .mega-desc { display: block; margin-top: 2px; font-size: 12.5px; color: var(--muted); line-height: 1.4; }
+
+  .cta { display: inline-flex; align-items: center; gap: 8px; }
+  .menu-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 36px; height: 36px; border-radius: 8px;
+    background: transparent; border: 1px solid var(--hair); color: var(--ink-2);
+    cursor: pointer;
+  }
+  @media (min-width: 900px) { .menu-toggle { display: none; } }
+
+  .mobile { border-top: 1px solid var(--hair); padding: 12px 16px 20px; }
+  .mobile[hidden] { display: none; }
+  .mobile ul { list-style: none; margin: 0 0 12px; padding: 0; }
+  .mobile a { display: block; padding: 10px 12px; border-radius: 8px; color: var(--ink); font-size: 15px; }
+  .mobile a:hover { background: var(--panel-2); }
+  .mobile a.active { background: var(--panel-2); color: var(--ink); }
+  .mobile-group-label {
+    font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--faint); padding: 12px 12px 6px;
+  }
+</style>
+
+<script>
+  const resItem = document.querySelector<HTMLLIElement>("li.resources");
+  const resBtn = document.querySelector<HTMLButtonElement>('[data-menu="resources"]');
+  if (resItem && resBtn) {
+    let open = false;
+    const setOpen = (v: boolean) => {
+      open = v;
+      resItem.classList.toggle("open", v);
+      resBtn.setAttribute("aria-expanded", String(v));
+    };
+    resBtn.addEventListener("click", () => setOpen(!open));
+    resItem.addEventListener("mouseenter", () => setOpen(true));
+    resItem.addEventListener("mouseleave", () => setOpen(false));
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") setOpen(false); });
+    document.addEventListener("click", (e) => {
+      if (!resItem.contains(e.target as Node)) setOpen(false);
+    });
+  }
+
+  const toggle = document.querySelector<HTMLButtonElement>("[data-mobile-menu]");
+  const panel = document.querySelector<HTMLDivElement>("[data-mobile-panel]");
+  if (toggle && panel) {
+    toggle.addEventListener("click", () => {
+      const isOpen = !panel.hasAttribute("hidden");
+      if (isOpen) { panel.setAttribute("hidden", ""); }
+      else { panel.removeAttribute("hidden"); }
+      toggle.setAttribute("aria-expanded", String(!isOpen));
+    });
+  }
+</script>
