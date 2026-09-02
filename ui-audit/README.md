@@ -102,6 +102,7 @@ the folder would document a feature that does not exist.
 | **Visual structure** | [`visual-structure.md`](visual-structure.md) — composition, density, silhouettes |
 | **Accessibility** | [`accessibility.md`](accessibility.md) — observed behaviour; no conformance claimed |
 | **Implementation** | [`implementation-map.md`](implementation-map.md) — screen → component → store → channel → server |
+| **Icons** | [`icons.md`](icons.md) — which controls are icons today, and which are text and need one |
 
 ---
 
