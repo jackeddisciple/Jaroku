@@ -1,0 +1,183 @@
+---
+import Base from "@layouts/Base.astro";
+import Icon from "@components/Icon.astro";
+import DownloadButton from "@components/DownloadButton.astro";
+import { TIERS, MATRIX } from "@data/tiers";
+import { SITE } from "@data/site";
+
+const contactHref = `mailto:${SITE.contactEmail}?subject=Jaroku%20Team`;
+const enterpriseHref = `mailto:${SITE.contactEmail}?subject=Jaroku%20Enterprise`;
+---
+<Base
+  title="Pricing"
+  description={`Jaroku pricing: Free, Pro at $20/month, Team at $40/user/month. Every CTA downloads the app.`}
+>
+  <section class="section">
+    <div class="container-narrow head">
+      <span class="eyebrow">Pricing</span>
+      <h1>Start free, on your own key.</h1>
+      <p class="lead">
+        Every button here downloads the app. There is no checkout on the web &mdash; a visitor
+        who wants Pro downloads Jaroku, signs in, and upgrades from inside it, through the
+        same flow every other upgrade uses. Team is a mailto because a team is a conversation.
+      </p>
+    </div>
+  </section>
+
+  <section class="tiers-wrap">
+    <div class="container-wide">
+      <div class="tiers">
+        {TIERS.map((t) => (
+          <article class:list={["tier", { featured: !!t.featured }]}>
+            {t.featured && <span class="ribbon">Most common</span>}
+            <div class="tag">{t.tag}</div>
+            <div class="name">{t.name}</div>
+            <div class="price">
+              <span class="amt">{t.price}</span>
+              {t.cadence && <span class="cad">{t.cadence}</span>}
+            </div>
+            <p class="line muted">{t.line}</p>
+            <div class="cta-row">
+              {t.cta.kind === "download" ? (
+                <DownloadButton
+                  variant={t.featured ? "accent" : "quiet"}
+                  label={t.cta.label}
+                >
+                  <Icon name="download" size={16} />
+                </DownloadButton>
+              ) : (
+                <a class="btn btn-primary" href={contactHref}>
+                  <Icon name="external" size={14} /> {t.cta.label}
+                </a>
+              )}
+            </div>
+            <ul class="bullets">
+              {t.bullets.map((b) => (
+                <li><Icon name="check" size={14} /> {b}</li>
+              ))}
+            </ul>
+          </article>
+        ))}
+      </div>
+
+      <p class="scroll-hint muted">
+        <span>Full comparison below</span>
+        <Icon name="chevron-down" size={14} />
+      </p>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="container">
+      <h2>Every limit, side by side</h2>
+      <p class="muted table-note">
+        Agent generation, editing, branching, the Trace, Graph, Evals, MCP and Secrets tabs,
+        reasoning-effort control and the permission shield are on every plan, including Free.
+        They&rsquo;re the product, not an upsell.
+      </p>
+
+      <div class="table-scroll">
+        <table class="matrix">
+          <thead>
+            <tr>
+              <th scope="col">&nbsp;</th>
+              <th scope="col">Free</th>
+              <th scope="col">Pro</th>
+              <th scope="col">Team</th>
+            </tr>
+          </thead>
+          <tbody>
+            {MATRIX.map((group) => (
+              <>
+                <tr class="group"><th scope="row" colspan="4">{group.title}</th></tr>
+                {group.rows.map((row) => (
+                  <tr>
+                    <th scope="row">{row[0]}</th>
+                    <td class:list={[{ no: row[1] === "—" }]}>{row[1]}</td>
+                    <td class:list={[{ no: row[2] === "—" }]}>{row[2]}</td>
+                    <td class:list={[{ no: row[3] === "—" }]}>{row[3]}</td>
+                  </tr>
+                ))}
+              </>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="section-tight">
+    <div class="container-narrow closer">
+      <p class="muted">
+        Enterprise &mdash; SSO, an SLA, or on-premises:
+        <a href={enterpriseHref}>{SITE.contactEmail}</a>
+      </p>
+      <p class="faint">Prices in USD. Downgrading never deletes your agents, deployments or history.</p>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .head { text-align: center; }
+  .head h1 { max-width: 20ch; margin-inline: auto; }
+  .head .lead { max-width: 60ch; margin: 12px auto 0; }
+
+  .tiers-wrap { padding: 24px 0 56px; }
+  .tiers {
+    display: grid; gap: 16px;
+    grid-template-columns: 1fr;
+  }
+  @media (min-width: 720px) { .tiers { grid-template-columns: repeat(3, 1fr); align-items: stretch; } }
+
+  .tier {
+    position: relative;
+    display: flex; flex-direction: column;
+    padding: 24px;
+    background: var(--panel); border: 1px solid var(--hair); border-radius: var(--radius-lg);
+    transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+  }
+  .tier:hover { border-color: var(--edge); box-shadow: var(--shadow-2); transform: translateY(-2px); }
+  .tier.featured {
+    border-color: rgba(43,92,255,0.35);
+    box-shadow: 0 0 0 4px rgba(43,92,255,0.06);
+  }
+  .ribbon {
+    position: absolute; top: -10px; right: 20px;
+    background: var(--accent); color: #fff;
+    font-size: 11px; font-weight: 500; letter-spacing: 0.02em;
+    padding: 3px 8px; border-radius: 999px;
+  }
+  .tag { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--faint); }
+  .name { margin-top: 4px; font-size: 15px; font-weight: 500; color: var(--muted); }
+  .price { margin: 6px 0 6px; display: flex; align-items: baseline; gap: 2px; }
+  .price .amt { font-size: 42px; font-weight: 600; letter-spacing: -0.02em; }
+  .price .cad { font-size: 14px; color: var(--faint); }
+
+  .line { min-height: 44px; margin: 4px 0 16px; font-size: 13px; }
+
+  .cta-row { display: flex; }
+  .cta-row a { flex: 1; }
+
+  .bullets { list-style: none; margin: 20px 0 0; padding: 0; }
+  .bullets li {
+    display: flex; align-items: baseline; gap: 8px;
+    padding: 7px 0; font-size: 13.5px; color: var(--ink-2);
+    border-top: 1px solid var(--hair);
+  }
+  .bullets li:first-child { border-top: 0; }
+  .bullets li svg { color: var(--ok); flex-shrink: 0; margin-top: 3px; }
+
+  .scroll-hint {
+    display: inline-flex; align-items: center; gap: 6px;
+    justify-content: center;
+    width: 100%; margin-top: 32px;
+    font-size: 12.5px;
+  }
+
+  .table-note { max-width: 76ch; margin-bottom: 24px; font-size: 13.5px; }
+  .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.matrix { min-width: 640px; }
+
+  .closer { text-align: center; }
+  .closer p { margin: 4px 0; font-size: 13.5px; }
+</style>

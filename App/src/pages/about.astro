@@ -1,0 +1,229 @@
+---
+import Base from "@layouts/Base.astro";
+import Icon from "@components/Icon.astro";
+import DownloadButton from "@components/DownloadButton.astro";
+
+const principles: { icon: Parameters<typeof Icon>[0]["name"]; title: string; body: string }[] = [
+  {
+    icon: "trace",
+    title: "The trace never lies.",
+    body: "The tracer never crashes the agent it observes, and never guesses. A router classification that can't be proven is emitted as a state update, not a wrong label.",
+  },
+  {
+    icon: "cost",
+    title: "Unknown &ne; zero.",
+    body: "An unpriced model reports null cost, never $0.00. A judge failure is unscored, never a score of 0. Both survive CSV export.",
+  },
+  {
+    icon: "shield-check",
+    title: "Nothing lands unreviewed.",
+    body: "Generation shows you a plan first. Edits show you a diff first. Both stage to a temp directory and atomic-swap only after validation passes.",
+  },
+  {
+    icon: "terminal",
+    title: "stdout is sacred.",
+    body: "stdout carries trace events and nothing else. The runner dup2's fd 1 to stderr before importing any generated code, so a stray print() physically cannot corrupt the stream.",
+  },
+  {
+    icon: "key",
+    title: "Money asks first.",
+    body: "The free dry-run path is one click. Spending real money requires picking providers, seeing an estimate, and setting a hard budget ceiling the server enforces.",
+  },
+  {
+    icon: "bolt",
+    title: "A control that does nothing is worse than no control.",
+    body: "A stored setting has to change what the machine does, or it's a lie the UI keeps telling. A button with no handler fails a test; an action name with no case fails the typecheck.",
+  },
+];
+---
+<Base
+  title="About"
+  description="What Jaroku is, and the thinking behind it. Forward-only migrations, a frozen event schema, row-level security tested as the app role, thirty-eight recorded architecture decisions."
+>
+  <section class="section">
+    <div class="container-narrow head">
+      <span class="eyebrow">About</span>
+      <h1>Jaroku is a workbench for LangGraph agents.</h1>
+      <p class="lead">
+        It is built around one primitive &mdash; the trace &mdash; and everything else in the
+        product is a consumer of that stream: the timeline, the state diff view, the eval
+        dashboard, the cost figures, the branch feature. The point of the tool is to make an
+        agent something you can watch, argue with, and take away.
+      </p>
+    </div>
+  </section>
+
+  <section class="section-tight">
+    <div class="container">
+      <div class="stat-row">
+        <div>
+          <div class="stat-n">3</div>
+          <div class="stat-l">symbols in the agent contract</div>
+          <div class="stat-h">TOOLS &middot; build_graph(llm) &middot; build_initial_state</div>
+        </div>
+        <div>
+          <div class="stat-n">38</div>
+          <div class="stat-l">recorded architecture decisions</div>
+          <div class="stat-h">in <code class="mono">adr/</code>, one per decision, kept honest</div>
+        </div>
+        <div>
+          <div class="stat-n">1</div>
+          <div class="stat-l">pricing table for both sides</div>
+          <div class="stat-h">Python and Node both read <code class="mono">runtime/pricing.json</code></div>
+        </div>
+        <div>
+          <div class="stat-n">0</div>
+          <div class="stat-l">imports from Jaroku in a generated agent</div>
+          <div class="stat-h">enforced by the validator before the file is written</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section principles" aria-labelledby="s-principles">
+    <div class="container">
+      <div class="head-inline">
+        <span class="eyebrow">Principles held to</span>
+        <h2 id="s-principles">The difference between a tool you trust and one you don&rsquo;t.</h2>
+      </div>
+      <div class="grid grid-3">
+        {principles.map((p) => (
+          <article class="card">
+            <Icon name={p.icon} size={22} />
+            <h4 set:html={p.title} />
+            <p class="muted">{p.body}</p>
+          </article>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class="section rigor" aria-labelledby="s-rigor">
+    <div class="container">
+      <div class="two-col">
+        <div>
+          <span class="eyebrow">Engineering rigor</span>
+          <h2 id="s-rigor">Boring in exactly the ways it needs to be.</h2>
+          <p>
+            The list below is the reason a technical buyer stays. None of it is glamorous, and all
+            of it is what keeps a real production instance from teaching you a hard lesson.
+          </p>
+          <ul class="dots">
+            <li><Icon name="check" size={16} /> <span><strong>Forward-only checksummed migrations.</strong> A drifted migration is refused at boot, not silently applied.</span></li>
+            <li><Icon name="check" size={16} /> <span><strong>Frozen event schema, versioned.</strong> Shape changes get a new version; the old one still parses.</span></li>
+            <li><Icon name="check" size={16} /> <span><strong>Row-level security tested as the application role</strong> &mdash; not as the superuser, which would pass every test and prove nothing.</span></li>
+            <li><Icon name="check" size={16} /> <span><strong>Reviewed connectors copied verbatim.</strong> Third-party MCP servers, treated as untrusted by design.</span></li>
+            <li><Icon name="check" size={16} /> <span><strong>Secrets: names travel, values do not.</strong> A reveal path is gated by elevation.</span></li>
+            <li><Icon name="check" size={16} /> <span><strong>Staging directory with an atomic swap</strong>, gated by layered validation. Nothing partially written ever runs.</span></li>
+          </ul>
+        </div>
+        <aside class="card contract-card" aria-label="Agent contract">
+          <div class="mono muted small">runtime/jaroku_runner/contract.py</div>
+          <h4>The contract, once</h4>
+          <p class="muted">Server-side and runtime-side check the same three symbols. Anything else is out of contract and refused before it lands.</p>
+          <ul class="k-list">
+            <li>
+              <span class="k">TOOLS</span>
+              <span class="v mono">list[@tool]</span>
+              <span class="hint">every tool the graph can call</span>
+            </li>
+            <li>
+              <span class="k">build_graph</span>
+              <span class="v mono">(llm) &rarr; CompiledGraph</span>
+              <span class="hint">the model is injected, never constructed</span>
+            </li>
+            <li>
+              <span class="k">build_initial_state</span>
+              <span class="v mono">(str) &rarr; dict</span>
+              <span class="hint">a string becomes the initial state dict</span>
+            </li>
+          </ul>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <section class="section not-claimed" aria-labelledby="s-not">
+    <div class="container-narrow">
+      <span class="eyebrow">What is not claimed</span>
+      <h2 id="s-not">This is an honest posture.</h2>
+      <p class="lead">
+        Jaroku is pre-1.0. It is under active development by a small team. The following claims
+        are <em>not</em> made on this site because they aren&rsquo;t true today &mdash; and a
+        buyer who is going to trust the trace can also handle the truth about the rest of it.
+      </p>
+      <ul class="anti">
+        <li><Icon name="close" size={14} /> No SOC 2 report.</li>
+        <li><Icon name="close" size={14} /> No uptime SLA.</li>
+        <li><Icon name="close" size={14} /> No enterprise support contract.</li>
+        <li><Icon name="close" size={14} /> No customer logos, no user counts, no funding announcements.</li>
+      </ul>
+      <p class="muted">
+        A sandbox for model-written Python on the control plane is planned; until it lands, the
+        server is not safe to point at strangers, and <a href="/security">Security</a> says so
+        plainly.
+      </p>
+    </div>
+  </section>
+
+  <section class="section closer">
+    <div class="container-narrow closer-inner">
+      <h2>Try it. Read the ADRs. Ask a hard question.</h2>
+      <div class="cta-row">
+        <DownloadButton variant="accent">
+          <Icon name="download" size={16} />
+        </DownloadButton>
+        <a class="btn btn-quiet" href="/security">Security posture</a>
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .head { text-align: center; }
+  .head h1 { max-width: 22ch; margin-inline: auto; }
+  .head .lead { max-width: 62ch; margin: 12px auto 0; }
+
+  .stat-row {
+    display: grid; gap: 20px;
+    grid-template-columns: 1fr;
+    padding: 24px;
+    background: var(--panel-2); border: 1px solid var(--hair); border-radius: var(--radius-lg);
+  }
+  @media (min-width: 640px) { .stat-row { grid-template-columns: repeat(2, 1fr); } }
+  @media (min-width: 1024px) { .stat-row { grid-template-columns: repeat(4, 1fr); gap: 32px; } }
+  .stat-n { font-size: 44px; font-weight: 600; letter-spacing: -0.03em; line-height: 1; color: var(--ink); }
+  .stat-l { margin-top: 6px; font-size: 13px; color: var(--ink-2); }
+  .stat-h { margin-top: 2px; font-size: 12px; color: var(--faint); }
+
+  .head-inline { max-width: 48ch; margin-bottom: 28px; }
+  .card h4 { margin: 12px 0 6px; font-size: 16px; }
+
+  .two-col { display: grid; gap: 40px; grid-template-columns: 1fr; }
+  @media (min-width: 900px) { .two-col { grid-template-columns: 1.1fr 1fr; gap: 48px; } }
+
+  .contract-card { padding: 24px; }
+  .contract-card .small { font-size: 11.5px; }
+  .contract-card h4 { margin: 6px 0 6px; }
+
+  .dots { padding: 0; margin: 18px 0 0; list-style: none; }
+  .dots li { display: flex; gap: 10px; padding: 8px 0; color: var(--ink-2); font-size: 14.5px; align-items: baseline; }
+  .dots li svg { color: var(--ok); flex-shrink: 0; margin-top: 3px; }
+
+  .k-list { padding: 0; margin: 20px 0 0; list-style: none; }
+  .k-list li {
+    display: grid; grid-template-columns: 160px 1fr; gap: 10px 16px;
+    padding: 14px 0; border-top: 1px solid var(--hair); align-items: baseline;
+  }
+  .k-list li:first-child { border-top: 0; }
+  .k-list .k { font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
+  .k-list .v { font-size: 13.5px; }
+  .k-list .hint { grid-column: 2 / -1; color: var(--faint); font-size: 12.5px; }
+
+  .anti { list-style: none; padding: 0; margin: 18px 0; display: grid; gap: 6px; }
+  .anti li { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
+  .anti li svg { color: var(--err); }
+
+  .closer-inner { text-align: center; }
+  .cta-row { display: inline-flex; gap: 12px; margin-top: 16px; flex-wrap: wrap; justify-content: center; }
+</style>
