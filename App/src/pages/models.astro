@@ -1,0 +1,216 @@
+---
+import Base from "@layouts/Base.astro";
+import Icon from "@components/Icon.astro";
+import { MODELS, DRY_RUN, PROVIDER_META, REASONING_BUDGETS, type Provider } from "@data/models";
+
+const grouped = new Map<Provider, typeof MODELS>();
+for (const m of MODELS) {
+  const arr = grouped.get(m.provider) ?? [];
+  arr.push(m);
+  grouped.set(m.provider, arr);
+}
+const providerOrder: Provider[] = ["anthropic", "openai", "google"];
+const currency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtCtx = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : `${(n / 1000).toFixed(0)}k`);
+const fmtOut = (n: number) => `${(n / 1000).toFixed(0)}k`;
+---
+<Base
+  title="Models"
+  description="Which providers and models Jaroku supports today, with real prices. Bring your own key — every price on this page comes from the same file the runtime and the server read."
+>
+  <section class="section">
+    <div class="container-narrow head">
+      <span class="eyebrow">Models</span>
+      <h1>Bring your own key. Any of these providers, one flag apart.</h1>
+      <p class="lead">
+        Model choice is a host concern in Jaroku, not the agent&rsquo;s. You pick a provider and a model
+        in the app, and the same generated agent runs on any of them without regeneration &mdash;
+        because <a href="/about">the contract</a> injects the model rather than letting the agent
+        construct one.
+      </p>
+    </div>
+  </section>
+
+  <section class="section-tight">
+    <div class="container">
+      <div class="pricing-note card">
+        <Icon name="database" size={18} />
+        <div>
+          <strong>One pricing table for two readers.</strong>
+          <p class="muted">
+            Prices are USD per million tokens, read at build from the same
+            <code class="mono">runtime/pricing.json</code> the runner and the server both use. If a price on
+            this page is wrong, it is wrong in production too &mdash; and there is one place to fix it.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  {providerOrder.map((prov) => (
+    <section class="section-tight provider" aria-labelledby={`p-${prov}`}>
+      <div class="container">
+        <header class="provider-head">
+          <div>
+            <h2 id={`p-${prov}`}>{PROVIDER_META[prov].label}</h2>
+            <p class="muted">{PROVIDER_META[prov].note}</p>
+          </div>
+          <div class="envkey">
+            <span class="k">env</span>
+            <span class="mono v">{PROVIDER_META[prov].envKey}</span>
+          </div>
+        </header>
+
+        <div class="table-scroll">
+          <table class="matrix">
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th>Input <span class="faint">/M</span></th>
+                <th>Output <span class="faint">/M</span></th>
+                <th>Context</th>
+                <th>Max output</th>
+                <th>Reasoning</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(grouped.get(prov) ?? []).map((m) => (
+                <tr>
+                  <th scope="row"><span class="mono">{m.id}</span></th>
+                  <td>{currency.format(m.input)}</td>
+                  <td>{currency.format(m.output)}</td>
+                  <td>{fmtCtx(m.context_window)}</td>
+                  <td>{fmtOut(m.max_output_tokens)}</td>
+                  <td>
+                    {m.reasoning === "thinking" && <span class="badge">thinking budget</span>}
+                    {m.reasoning === "effort" && <span class="badge">reasoning_effort</span>}
+                    {m.reasoning === null && <span class="faint">—</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  ))}
+
+  <section class="section-tight" aria-labelledby="s-dry">
+    <div class="container">
+      <div class="dry card">
+        <div class="dry-icon"><Icon name="sparkles" size={22} /></div>
+        <div>
+          <h2 id="s-dry">The dry-run provider &mdash; free.</h2>
+          <p class="muted">
+            <code class="mono">{DRY_RUN.id}</code> walks your agent&rsquo;s <code class="mono">TOOLS</code>,
+            synthesises one call per tool, then answers plainly. It exercises every generated tool function
+            with no API key and no cost, and it&rsquo;s the reason you can build with Jaroku before you enter
+            a single credential.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="s-reasoning">
+    <div class="container">
+      <div class="two-col">
+        <div>
+          <span class="eyebrow">Reasoning effort</span>
+          <h2 id="s-reasoning">Three shapes, one control.</h2>
+          <p>
+            Providers expose reasoning three different ways: an extended-thinking token budget (Claude,
+            Gemini 2.5), a named level the API takes directly (OpenAI&rsquo;s <code class="mono">reasoning_effort</code>),
+            or none at all. Jaroku surfaces one control &mdash; Low, Medium, High, XHigh &mdash; and maps
+            it to the right shape for the model you picked. A model with no reasoning control shows no
+            chip, rather than a meaningless &ldquo;Low&rdquo;.
+          </p>
+          <p class="muted">
+            XHigh clamps to High on <em>effort</em> providers because their API has three levels and no
+            fourth. The clamp is reported, never silent.
+          </p>
+        </div>
+        <aside class="card">
+          <h4>Thinking-token budgets</h4>
+          <ul class="k-list">
+            <li><span class="k">Low</span><span class="v">{REASONING_BUDGETS.low.toLocaleString()} tokens</span></li>
+            <li><span class="k">Medium</span><span class="v">{REASONING_BUDGETS.medium.toLocaleString()} tokens</span></li>
+            <li><span class="k">High</span><span class="v">{REASONING_BUDGETS.high.toLocaleString()} tokens</span></li>
+            <li><span class="k">XHigh</span><span class="v">{REASONING_BUDGETS.xhigh.toLocaleString()} tokens</span></li>
+          </ul>
+          <p class="faint tiny">
+            Budgets are validated against the model&rsquo;s <code class="mono">max_output_tokens</code>
+            before dispatch. A budget larger than the response it has to fit inside is clamped &mdash;
+            visibly &mdash; rather than passed and failed.
+          </p>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <section class="section closer">
+    <div class="container-narrow closer-inner">
+      <h2>Nothing here is priced by us. Every dollar goes to the provider.</h2>
+      <p class="muted">
+        On Free, your own key is required and no inference runs through Jaroku. On Pro and Team you can
+        choose to route through Jaroku with an included credit each month, and overage settles at cost + 15%.
+      </p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="/pricing">Pricing</a>
+        <a class="btn btn-quiet" href="/learn">How the model plumbing works</a>
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .head { text-align: center; }
+  .head h1 { max-width: 22ch; margin-inline: auto; }
+  .head .lead { max-width: 62ch; margin: 12px auto 0; }
+
+  .pricing-note {
+    display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: start;
+    padding: 20px;
+  }
+  .pricing-note svg { color: var(--muted); margin-top: 4px; }
+  .pricing-note p { margin: 4px 0 0; font-size: 13.5px; }
+
+  .provider-head {
+    display: flex; align-items: end; justify-content: space-between;
+    gap: 16px; flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+  .provider-head h2 { font-size: 26px; margin: 0 0 4px; }
+  .provider-head .muted { font-size: 13.5px; max-width: 60ch; }
+  .envkey { display: inline-flex; align-items: baseline; gap: 8px; padding: 6px 10px; background: var(--panel-2); border: 1px solid var(--hair); border-radius: 8px; }
+  .envkey .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--faint); }
+  .envkey .v { font-size: 12.5px; color: var(--ink-2); }
+
+  .table-scroll { overflow-x: auto; }
+  table.matrix { min-width: 720px; }
+  table.matrix thead th { font-size: 11px; }
+
+  .dry {
+    display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: start;
+    padding: 24px;
+  }
+  .dry-icon { color: var(--accent); margin-top: 4px; }
+  .dry h2 { font-size: 22px; margin: 0 0 6px; }
+
+  .two-col { display: grid; gap: 32px; grid-template-columns: 1fr; }
+  @media (min-width: 900px) { .two-col { grid-template-columns: 1.1fr 1fr; gap: 48px; } }
+
+  .k-list { padding: 0; margin: 8px 0 12px; list-style: none; }
+  .k-list li {
+    display: grid; grid-template-columns: 90px 1fr; gap: 8px 16px;
+    padding: 10px 0; border-top: 1px solid var(--hair);
+  }
+  .k-list li:first-child { border-top: 0; }
+  .k-list .k { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .k-list .v { font-size: 13.5px; font-variant-numeric: tabular-nums; }
+  .tiny { font-size: 12px; margin-top: 8px; }
+
+  .closer-inner { text-align: center; }
+  .closer-inner .lead { max-width: 62ch; margin-inline: auto; }
+  .cta-row { display: inline-flex; gap: 12px; margin-top: 20px; flex-wrap: wrap; justify-content: center; }
+</style>
