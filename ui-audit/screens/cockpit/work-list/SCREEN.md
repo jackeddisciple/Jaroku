@@ -110,6 +110,15 @@ things:
 | filtered by a fleet card | `filtered-by-fleet-card.png` | `Only Tracey ×`; the agent column disappears |
 | new items arriving | — | `IMPLEMENTED / NOT CURRENTLY OBSERVABLE` — `LIVE.pill`, `lib/workLive.ts` |
 | virtualised at scale | — | `IMPLEMENTED / NOT CURRENTLY OBSERVABLE` — `WorkList.tsx:670` renders a spacer div |
+| **narrow (1024×700)** | `default-narrow.png` | The list keeps every column and is covered by the detail panel — see below |
+
+## Narrow width
+
+At 1024px the list **sheds only the failure sentence** (`hidden md:block`). Columns 3–6 are
+`shrink-0` with fixed widths and no breakpoint removes any of them, despite the source comments
+naming a shedding order. What actually happens is that the detail panel **covers** them.
+
+![The work list at 1024px](default-narrow.png)
 
 ## Keyboard
 

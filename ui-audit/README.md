@@ -98,6 +98,10 @@ the folder would document a feature that does not exist.
 | **Legacy** | [`legacy/`](legacy/) — current token values, and the arguments beside them |
 | **Findings** | [`findings/`](findings/) — inconsistencies, UX debt, missing states |
 | **Screenshots** | [`screenshots-index.md`](screenshots-index.md) — every image, with its screen and state |
+| **Interactions** | [`interactions.md`](interactions.md) — trigger → response → state → recovery |
+| **Visual structure** | [`visual-structure.md`](visual-structure.md) — composition, density, silhouettes |
+| **Accessibility** | [`accessibility.md`](accessibility.md) — observed behaviour; no conformance claimed |
+| **Implementation** | [`implementation-map.md`](implementation-map.md) — screen → component → store → channel → server |
 
 ---
 
