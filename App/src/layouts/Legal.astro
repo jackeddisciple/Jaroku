@@ -1,0 +1,43 @@
+---
+import Base from "@layouts/Base.astro";
+import { SITE } from "@data/site";
+
+interface Props {
+  title: string;
+  description?: string;
+  intro?: string;
+  asOf?: string;
+}
+const { title, description, intro, asOf = SITE.legalAsOf } = Astro.props;
+---
+<Base title={title} description={description}>
+  <section class="section-tight">
+    <div class="container-narrow legal">
+      <span class="eyebrow">Legal</span>
+      <h1>{title}</h1>
+      <p class="asof muted">Current as of {asOf}.</p>
+      {intro && <p class="lead">{intro}</p>}
+      <div class="body prose">
+        <slot />
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .legal { padding-top: 40px; }
+  .asof { font-size: 13px; margin: 4px 0 0; }
+  .body { margin-top: 32px; }
+
+  .prose :global(h2) { font-size: 22px; margin-top: 40px; margin-bottom: 12px; }
+  .prose :global(h3) { font-size: 16px; margin-top: 28px; margin-bottom: 8px; color: var(--ink-2); }
+  .prose :global(p) { font-size: 14.5px; line-height: 1.7; color: var(--ink-2); margin: 0 0 14px; }
+  .prose :global(ul), .prose :global(ol) { padding-left: 20px; margin: 0 0 16px; }
+  .prose :global(li) { font-size: 14.5px; line-height: 1.65; color: var(--ink-2); margin-bottom: 6px; }
+  .prose :global(a) { color: var(--accent); text-decoration: underline; text-decoration-thickness: 0.5px; text-underline-offset: 3px; }
+  .prose :global(code) { background: var(--panel-2); border: 1px solid var(--hair); padding: 0 5px; border-radius: 4px; font-size: 0.9em; }
+  .prose :global(table) { width: 100%; border-collapse: collapse; font-size: 14px; margin: 12px 0 20px; }
+  .prose :global(th), .prose :global(td) { padding: 10px 12px; text-align: left; border-top: 1px solid var(--hair); }
+  .prose :global(thead th) { border-top: 0; color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .prose :global(strong) { color: var(--ink); font-weight: 500; }
+</style>
