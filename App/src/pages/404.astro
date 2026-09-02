@@ -1,0 +1,68 @@
+---
+import Base from "@layouts/Base.astro";
+import Icon from "@components/Icon.astro";
+import DownloadButton from "@components/DownloadButton.astro";
+import { PRIMARY_NAV, RESOURCES_NAV } from "@data/site";
+---
+<Base title="Not found" description="This page doesn't exist. Here's where you probably wanted to go.">
+  <section class="section">
+    <div class="container-narrow four">
+      <div class="glyph" aria-hidden="true">
+        <span>4</span><span class="dot"></span><span>4</span>
+      </div>
+      <h1>Nothing here to render.</h1>
+      <p class="lead">
+        The URL was either mistyped, or points at a page that hasn&rsquo;t been built yet. The list
+        below is every route on the site &mdash; one of them is almost certainly the one you wanted.
+      </p>
+
+      <div class="routes">
+        <div>
+          <h4>Product</h4>
+          <ul>
+            {PRIMARY_NAV.map((i) => <li><a href={i.href}>{i.label}<Icon name="arrow-right" size={12} class="chev" /></a></li>)}
+          </ul>
+        </div>
+        <div>
+          <h4>Resources</h4>
+          <ul>
+            {RESOURCES_NAV.map((i) => <li><a href={i.href}>{i.label}<Icon name="arrow-right" size={12} class="chev" /></a></li>)}
+          </ul>
+        </div>
+      </div>
+
+      <div class="cta-row">
+        <a class="btn btn-quiet" href="/">Back to home</a>
+        <DownloadButton variant="accent">
+          <Icon name="download" size={16} />
+        </DownloadButton>
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .four { text-align: center; padding: 40px 0; }
+  .glyph {
+    display: inline-flex; align-items: center; gap: 16px;
+    font-family: var(--mono); font-size: 96px; font-weight: 500;
+    color: var(--ink); letter-spacing: -0.06em;
+    margin-bottom: 12px;
+  }
+  .glyph .dot { display: inline-block; width: 12px; height: 12px; border-radius: 999px; background: var(--accent); }
+  .routes {
+    margin: 32px auto 24px; padding: 24px;
+    max-width: 620px;
+    background: var(--panel-2); border: 1px solid var(--hair); border-radius: var(--radius-lg);
+    display: grid; gap: 20px; grid-template-columns: 1fr;
+    text-align: left;
+  }
+  @media (min-width: 560px) { .routes { grid-template-columns: 1fr 1fr; } }
+  .routes h4 { margin: 0 0 8px; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); }
+  .routes ul { list-style: none; padding: 0; margin: 0; }
+  .routes li { padding: 4px 0; }
+  .routes a { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--ink-2); }
+  .routes a:hover { color: var(--accent); }
+  .routes .chev { color: var(--faint); }
+  .cta-row { display: inline-flex; gap: 12px; margin-top: 20px; flex-wrap: wrap; justify-content: center; }
+</style>
