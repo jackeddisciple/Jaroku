@@ -1,0 +1,112 @@
+---
+// The hero's canvas host. Renders a static SVG fallback that is a real picture (not "loading"
+// text), and boots the WebGL scene on top only when it can afford to:
+//   - IntersectionObserver: the hero is at the top of the page but this still handles the
+//     case where a very tall viewport pushes the canvas off screen on first paint.
+//   - matchMedia("(prefers-reduced-motion: reduce)") sets the scene to render one frame and
+//     stop, exactly as the brief requires.
+//   - No WebGL context available → the dynamic import is skipped entirely; nobody pays for
+//     the Three.js bundle for a fallback picture.
+---
+
+<div class="hero-canvas" aria-hidden="true">
+  <!-- Static fallback: a hand-drawn graph shape in the same visual language as the WebGL
+       scene. Rendered before any JS runs; if WebGL never boots, this is what you see. -->
+  <svg viewBox="0 0 800 480" xmlns="http://www.w3.org/2000/svg" class="fallback">
+    <defs>
+      <radialGradient id="glow" cx="50%" cy="50%" r="60%">
+        <stop offset="0%" stop-color="rgba(43,92,255,0.08)"/>
+        <stop offset="100%" stop-color="rgba(43,92,255,0)"/>
+      </radialGradient>
+    </defs>
+    <rect x="0" y="0" width="800" height="480" fill="url(#glow)"/>
+    <g stroke="#c8cdd6" stroke-width="0.7" fill="none">
+      <path d="M120 140 L280 200 L440 130 L600 220 L720 140" />
+      <path d="M140 340 L260 250 L400 360 L560 260 L700 340" />
+      <path d="M280 200 L260 250" />
+      <path d="M440 130 L400 360" />
+      <path d="M600 220 L560 260" />
+      <path d="M280 200 L440 130" />
+      <path d="M280 200 L400 360" />
+      <path d="M440 130 L600 220" />
+    </g>
+    <g fill="#2b5cff">
+      <circle cx="120" cy="140" r="5"/>
+      <circle cx="280" cy="200" r="7"/>
+      <circle cx="440" cy="130" r="6"/>
+      <circle cx="600" cy="220" r="7"/>
+      <circle cx="720" cy="140" r="5"/>
+    </g>
+    <g fill="#0b0d10">
+      <circle cx="140" cy="340" r="4"/>
+      <circle cx="260" cy="250" r="5"/>
+      <circle cx="400" cy="360" r="6"/>
+      <circle cx="560" cy="260" r="5"/>
+      <circle cx="700" cy="340" r="4"/>
+    </g>
+  </svg>
+
+  <canvas data-hero-canvas></canvas>
+</div>
+
+<style>
+  .hero-canvas {
+    position: relative;
+    aspect-ratio: 5 / 3;
+    width: 100%;
+    max-width: 720px;
+    margin-inline: auto;
+    background: radial-gradient(circle at 50% 40%, rgba(43,92,255,0.05), transparent 60%);
+    border-radius: 22px;
+  }
+  .fallback, canvas {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    display: block; border-radius: inherit;
+  }
+  canvas { opacity: 0; transition: opacity 380ms ease; }
+  .hero-canvas.ready canvas { opacity: 1; }
+  .hero-canvas.ready .fallback { opacity: 0; }
+  .fallback { transition: opacity 380ms ease; }
+</style>
+
+<script>
+  const host = document.querySelector<HTMLDivElement>(".hero-canvas");
+  const canvas = document.querySelector<HTMLCanvasElement>("[data-hero-canvas]");
+  if (host && canvas) {
+    const hasWebGL = (() => {
+      try {
+        const c = document.createElement("canvas");
+        return !!(window.WebGLRenderingContext && (c.getContext("webgl2") || c.getContext("webgl")));
+      } catch { return false; }
+    })();
+
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    if (!hasWebGL) {
+      // Static SVG stays visible; do nothing else.
+    } else {
+      let stopped = false;
+      let stop: (() => void) | null = null;
+      const io = new IntersectionObserver(async (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting || stopped) continue;
+          io.disconnect();
+          try {
+            const mod = await import("../lib/hero-scene.ts");
+            if (stopped) return;
+            stop = mod.startHero({ canvas, reducedMotion: reduced });
+            host.classList.add("ready");
+          } catch (err) {
+            console.warn("hero scene failed to boot", err);
+          }
+        }
+      }, { rootMargin: "200px" });
+      io.observe(host);
+
+      window.addEventListener("beforeunload", () => {
+        stopped = true;
+        stop?.();
+      });
+    }
+  }
+</script>

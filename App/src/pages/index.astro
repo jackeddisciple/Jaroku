@@ -1,0 +1,372 @@
+---
+import Base from "@layouts/Base.astro";
+import HeroCanvas from "@components/HeroCanvas.astro";
+import Icon from "@components/Icon.astro";
+import DownloadButton from "@components/DownloadButton.astro";
+import { SITE } from "@data/site";
+---
+<Base title="Home">
+
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="container hero-grid">
+      <div class="hero-copy">
+        <span class="eyebrow"><span class="dot"></span> v{SITE.version} — the Cockpit release</span>
+        <h1 id="hero-title">
+          A workbench for LangGraph agents<span class="hero-punct">.</span><br />
+          <span class="fade">You can copy out and run anywhere.</span>
+        </h1>
+        <p class="lead">
+          Jaroku generates plain LangGraph. It imports nothing from Jaroku, deploys into your own hosting
+          account, and produces a full trace and derived cost for every single run. If we go away tomorrow,
+          your agents don&rsquo;t.
+        </p>
+
+        <div class="hero-cta">
+          <DownloadButton variant="accent">
+            <Icon name="download" size={16} />
+          </DownloadButton>
+          <a class="btn btn-quiet" href="/about">
+            Read the thinking
+            <Icon name="arrow-right" size={14} />
+          </a>
+        </div>
+
+        <div class="hero-meta">
+          <div>
+            <span class="k">Contract</span>
+            <span class="v mono">agent.py: TOOLS · build_graph(llm) · build_initial_state</span>
+          </div>
+          <div>
+            <span class="k">Runs on</span>
+            <span class="v">macOS · Windows · Linux</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="hero-canvas-wrap">
+        <HeroCanvas />
+        <div class="hero-legend" aria-hidden="true">
+          <span><i class="dot" style="background:#2b5cff"></i>router</span>
+          <span><i class="dot" style="background:#148a4c"></i>model</span>
+          <span><i class="dot" style="background:#0b0d10"></i>tool</span>
+          <span><i class="dot" style="background:#8a92a1"></i>state</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section portability" id="portability" aria-labelledby="s-portability">
+    <div class="container">
+      <div class="two-col">
+        <div>
+          <span class="eyebrow">Portability, enforced</span>
+          <h2 id="s-portability">A generated agent imports nothing from Jaroku.</h2>
+          <p class="lead">
+            The contract is three symbols in <code class="mono">agent.py</code>: the tool list, a builder that
+            takes an injected model, and a way to turn user input into initial state. The validator rejects
+            code that imports anything named <code class="mono">jaroku</code> before the file is even allowed
+            to land. It&rsquo;s LangGraph. Take it out.
+          </p>
+          <ul class="dots">
+            <li><Icon name="check" size={16} /> Provider selection is host-side. Switch Claude &harr; GPT &harr; Gemini without regenerating.</li>
+            <li><Icon name="check" size={16} /> Dry-run model walks <code class="mono">TOOLS</code> and calls each one, so you can build with no API key.</li>
+            <li><Icon name="check" size={16} /> Every generated project ships its own <code class="mono">pyproject.toml</code> and runs standalone.</li>
+          </ul>
+        </div>
+        <aside class="snippet card" aria-label="Generated agent contract">
+          <div class="snippet-head">
+            <span class="mono">agent.py</span>
+            <span class="badge">generated</span>
+          </div>
+<pre class="code"><code><span class="c"># Three symbols. No host imports. Enforced by the validator.</span>
+<span class="k">from</span> langchain_core.tools <span class="k">import</span> tool
+<span class="k">from</span> langgraph.graph <span class="k">import</span> StateGraph, END
+
+<span class="c"># 1) TOOLS: every @tool the graph can call.</span>
+TOOLS = [search_web, read_file]
+
+<span class="c"># 2) build_graph: model is INJECTED — never constructed here.</span>
+<span class="k">def</span> build_graph(llm):
+    graph = StateGraph(State)
+    llm_with_tools = llm.bind_tools(TOOLS)
+    ...
+    <span class="k">return</span> graph.compile()
+
+<span class="c"># 3) build_initial_state: turn a string into a dict of state.</span>
+<span class="k">def</span> build_initial_state(user_input: <span class="k">str</span>) -&gt; <span class="k">dict</span>:
+    <span class="k">return</span> &#123;<span class="s">"messages"</span>: [(<span class="s">"user"</span>, user_input)]&#125;</code></pre>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <section class="section trace" id="trace" aria-labelledby="s-trace">
+    <div class="container">
+      <span class="eyebrow">The trace never lies</span>
+      <h2 id="s-trace">Every run emits a frozen event stream. Everything else in the product reads it.</h2>
+      <p class="lead">
+        The timeline renders it live. The state diff view reads <code class="mono">state_before</code> and
+        <code class="mono">state_after</code>. Cost is <em>summed from the steps</em>, so a crashed run still
+        reports the money it spent. Unknown is reported as unknown &mdash; a judge failure is unscored, and an
+        unpriced model reports <code class="mono">null</code>, never <code class="mono">$0.00</code>.
+      </p>
+
+      <div class="grid grid-3 stack-lg">
+        <div class="card card-lift">
+          <Icon name="trace" size={22} />
+          <h4>NDJSON, one object per step</h4>
+          <p>Schema versioned and frozen. If the shape has to change, a new version is added; the old one still parses.</p>
+        </div>
+        <div class="card card-lift">
+          <Icon name="cost" size={22} />
+          <h4>Cost derived, not summarised</h4>
+          <p>Read from the steps table by the same pricing file the runtime and server both read. One source, two consumers.</p>
+        </div>
+        <div class="card card-lift">
+          <Icon name="eye" size={22} />
+          <h4>Pause &middot; resume &middot; branch</h4>
+          <p>Fork a run from any checkpoint. The debug driver replays deterministic reads and refuses non-deterministic ones.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section deploy" id="deploy" aria-labelledby="s-deploy">
+    <div class="container">
+      <div class="two-col reverse">
+        <div>
+          <span class="eyebrow">Deploy into your own hosting account</span>
+          <h2 id="s-deploy">The container runs on your Railway. The bearer token is yours.</h2>
+          <p class="lead">
+            The deploy path uploads the generated project to Railway using the Railway CLI, sets the environment
+            variables it needs, and hands you a URL. The image binds <code class="mono">0.0.0.0</code> on purpose,
+            which is why the deployed agent&rsquo;s bearer token is not optional.
+          </p>
+          <ul class="dots">
+            <li><Icon name="check" size={16} /> Same runner as your desktop &mdash; a deployed run is an ordinary traced run.</li>
+            <li><Icon name="check" size={16} /> Trace, cost, pause, resume, branch and the permission shield all work in production.</li>
+            <li><Icon name="check" size={16} /> Bearer token displayed once, at deploy. Rotate from the app.</li>
+          </ul>
+        </div>
+        <aside class="card deploy-card" aria-label="Deploy details">
+          <ul class="k-list">
+            <li>
+              <span class="k">Target</span>
+              <span class="v">Railway (yours)</span>
+              <span class="hint">via <code class="mono">railway up</code></span>
+            </li>
+            <li>
+              <span class="k">Runner</span>
+              <span class="v">jaroku_runner subprocess</span>
+              <span class="hint">the same one the desktop runs</span>
+            </li>
+            <li>
+              <span class="k">Trace</span>
+              <span class="v">schema&#8209;v1 events, ingested to your workspace</span>
+            </li>
+            <li>
+              <span class="k">Confirmation</span>
+              <span class="v">high-impact tools stop and ask</span>
+              <span class="hint">from a deployed run, into your Inbox</span>
+            </li>
+          </ul>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <section class="section cockpit" id="cockpit" aria-labelledby="s-cockpit">
+    <div class="container">
+      <div class="cockpit-head">
+        <span class="eyebrow"><Icon name="cockpit" size={12} /> The Cockpit</span>
+        <h2 id="s-cockpit">Once an agent is live, you still need a way to talk to it.</h2>
+        <p class="lead">
+          The Cockpit is the operator surface. Five questions, in one screen: what is live, give this one a job,
+          what is happening to the jobs I gave it, what does it need from me, and what did it cost. None of it is
+          approximate &mdash; all of it reads what the production bridge already records.
+        </p>
+      </div>
+
+      <div class="cockpit-grid grid grid-3 stack-lg">
+        <div class="card card-lift">
+          <h5>What&rsquo;s live</h5>
+          <p class="muted">Deployed agents with a status colour that means what it looks like.</p>
+        </div>
+        <div class="card card-lift">
+          <h5>Give it a job</h5>
+          <p class="muted">Dispatch work through the same pre-flight gate every command already passes.</p>
+        </div>
+        <div class="card card-lift">
+          <h5>What needs you</h5>
+          <p class="muted">A single Inbox for confirmations from live containers. Nothing hidden in email.</p>
+        </div>
+        <div class="card card-lift">
+          <h5>Cost by agent, by day</h5>
+          <p class="muted">Summed from the same steps table. Asking costs are counted separately.</p>
+        </div>
+        <div class="card card-lift">
+          <h5>Talk to an agent</h5>
+          <p class="muted">Per-agent conversation, on the record. Citations resolve against the pack the model saw.</p>
+        </div>
+        <div class="card card-lift">
+          <h5>Errored and why</h5>
+          <p class="muted">Failure the ladder didn&rsquo;t recover from is <em>errored</em>, not silence.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section rigor" id="rigor" aria-labelledby="s-rigor">
+    <div class="container">
+      <span class="eyebrow">Rigor, on the record</span>
+      <h2 id="s-rigor">Thirty-eight architecture decisions. Zero of them handwaves.</h2>
+      <p class="lead">
+        Forward-only checksummed migrations. A frozen event schema. Row-level security tested as the application
+        role, not the superuser. Reviewed connector templates copied byte for byte. MCP servers treated as untrusted
+        by design.
+      </p>
+      <div class="rigor-list">
+        <a class="rigor-item" href="/about">
+          <Icon name="layers" size={16} />
+          <span>Three-process architecture</span>
+          <Icon name="chevron-right" size={14} class="chev" />
+        </a>
+        <a class="rigor-item" href="/about">
+          <Icon name="database" size={16} />
+          <span>Forward-only migrations</span>
+          <Icon name="chevron-right" size={14} class="chev" />
+        </a>
+        <a class="rigor-item" href="/security">
+          <Icon name="shield-check" size={16} />
+          <span>RLS tested as the app role</span>
+          <Icon name="chevron-right" size={14} class="chev" />
+        </a>
+        <a class="rigor-item" href="/about">
+          <Icon name="trace" size={16} />
+          <span>Frozen trace event schema</span>
+          <Icon name="chevron-right" size={14} class="chev" />
+        </a>
+        <a class="rigor-item" href="/about">
+          <Icon name="lock" size={16} />
+          <span>Secrets: names travel, values don&rsquo;t</span>
+          <Icon name="chevron-right" size={14} class="chev" />
+        </a>
+        <a class="rigor-item" href="/about">
+          <Icon name="git" size={16} />
+          <span>GitHub App as the connection</span>
+          <Icon name="chevron-right" size={14} class="chev" />
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section closer" id="download" aria-labelledby="s-closer">
+    <div class="container-narrow closer-inner">
+      <h2 id="s-closer">Try it in sixty seconds. On your own key or on the dry-run model.</h2>
+      <p class="lead">
+        The dry-run provider walks your tools and answers plainly &mdash; no key, no cost. Add an Anthropic key when
+        you want a real model.
+      </p>
+      <div class="closer-cta">
+        <DownloadButton variant="accent">
+          <Icon name="download" size={16} />
+        </DownloadButton>
+        <a class="btn btn-quiet" href="/pricing">See pricing</a>
+      </div>
+      <p class="faint tiny">
+        Downloads are inert this pass &mdash; the CDN goes up before the first stable release. macOS, Windows and Linux builds are all wired to the same placeholder.
+      </p>
+    </div>
+  </section>
+
+</Base>
+
+<style>
+  .hero {
+    padding: clamp(48px, 6vw, 96px) 0 clamp(56px, 8vw, 120px);
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::before {
+    content: ""; position: absolute; inset: -20% -10% auto -10%; height: 60%;
+    background: radial-gradient(ellipse at 20% 20%, rgba(43,92,255,0.05), transparent 60%),
+                radial-gradient(ellipse at 80% 10%, rgba(20,138,76,0.04), transparent 60%);
+    z-index: -1; pointer-events: none;
+  }
+  .hero-grid {
+    display: grid;
+    gap: 40px;
+    grid-template-columns: 1fr;
+    align-items: center;
+  }
+  @media (min-width: 960px) {
+    .hero-grid { grid-template-columns: 1.05fr 1fr; gap: 56px; }
+  }
+  h1 { font-size: var(--step-6); }
+  .hero-punct { color: var(--accent); }
+  .fade { color: var(--muted); font-weight: 500; }
+
+  .hero-cta { display: flex; gap: 12px; flex-wrap: wrap; margin: 24px 0 32px; }
+  .hero-meta {
+    display: grid; gap: 12px; padding: 16px; border: 1px solid var(--hair);
+    border-radius: var(--radius); background: var(--panel-2);
+  }
+  @media (min-width: 640px) { .hero-meta { grid-template-columns: 1fr 1fr; } }
+  .hero-meta .k { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--faint); }
+  .hero-meta .v { display: block; font-size: 13px; color: var(--ink-2); margin-top: 2px; }
+
+  .hero-canvas-wrap { position: relative; }
+  .hero-legend {
+    position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+    display: inline-flex; gap: 12px; flex-wrap: wrap; padding: 6px 10px;
+    background: rgba(255,255,255,0.85); backdrop-filter: blur(6px);
+    border: 1px solid var(--hair); border-radius: 999px;
+    font-size: 11px; color: var(--muted);
+  }
+  .hero-legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .hero-legend .dot { width: 6px; height: 6px; border-radius: 999px; display: inline-block; }
+
+  .two-col { display: grid; gap: 40px; grid-template-columns: 1fr; align-items: center; }
+  @media (min-width: 900px) { .two-col { grid-template-columns: 1fr 1fr; gap: 56px; } .two-col.reverse > :first-child { order: 2; } }
+
+  .dots { padding: 0; margin: 20px 0 0; list-style: none; }
+  .dots li { display: flex; gap: 10px; padding: 6px 0; color: var(--ink-2); font-size: 14.5px; }
+  .dots li svg { color: var(--ok); flex-shrink: 0; margin-top: 3px; }
+
+  .snippet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .snippet-head .mono { color: var(--muted); font-size: 12.5px; }
+
+  .cockpit-head { max-width: 62ch; margin: 0 auto 48px; text-align: center; }
+  .cockpit-head .eyebrow { margin-bottom: 12px; }
+  .cockpit-grid .card h5 { margin: 6px 0; font-size: 15px; }
+
+  .k-list { padding: 0; margin: 0; list-style: none; }
+  .k-list li {
+    display: grid; grid-template-columns: 100px 1fr; gap: 8px 12px; padding: 12px 0;
+    border-top: 1px solid var(--hair);
+    align-items: baseline;
+  }
+  .k-list li:first-child { border-top: 0; }
+  .k-list .k { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .k-list .v { color: var(--ink); font-size: 14px; }
+  .k-list .hint { grid-column: 2 / -1; color: var(--faint); font-size: 12.5px; }
+
+  .rigor-list { display: grid; gap: 8px; grid-template-columns: 1fr; margin-top: 24px; }
+  @media (min-width: 720px) { .rigor-list { grid-template-columns: repeat(2, 1fr); } }
+  @media (min-width: 1024px) { .rigor-list { grid-template-columns: repeat(3, 1fr); } }
+  .rigor-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 16px;
+    background: var(--panel); border: 1px solid var(--hair); border-radius: var(--radius);
+    color: var(--ink); font-size: 14px;
+  }
+  .rigor-item .chev { margin-left: auto; color: var(--faint); transition: transform 120ms ease, color 120ms ease; }
+  .rigor-item:hover { border-color: var(--edge); color: var(--ink); }
+  .rigor-item:hover .chev { transform: translateX(2px); color: var(--accent); }
+
+  .closer-inner { text-align: center; }
+  .closer-cta { display: inline-flex; gap: 12px; margin: 20px 0 12px; flex-wrap: wrap; justify-content: center; }
+  .closer-inner h2 { max-width: 22ch; margin-inline: auto; }
+  .closer-inner .lead { margin-inline: auto; }
+  .tiny { font-size: 12px; margin-top: 8px; }
+</style>
