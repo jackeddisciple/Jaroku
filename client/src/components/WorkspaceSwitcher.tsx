@@ -402,7 +402,6 @@ export function WorkspaceSwitcher() {
   // session lands.
   if (!user || !workspaceId) return <div className="h-9 shrink-0 border-b border-hair" />;
   const current = workspaces.find((w) => w.id === workspaceId);
-  const KindIcon = current?.kind === "team" ? UsersIcon : UserIcon;
 
   return (
     <div ref={ref} className="relative shrink-0 border-b border-hair">
@@ -420,12 +419,13 @@ export function WorkspaceSwitcher() {
         }`}
         title={`${current?.name ?? "workspace"} — ${current?.kind ?? ""}, you are ${current?.role ?? "a member"}`}
       >
-        {/* THE KIND, BESIDE THE NAME. `kind` is the field that cannot change after creation and it
-            decides whether the members list, the roles and the Threads author column exist at all
-            — so the one place it is always visible is beside the name it qualifies. */}
-        <span className="shrink-0 text-muted" aria-hidden>
-          <KindIcon size={ICON.sm} />
-        </span>
+        {/* NO KIND MARK. A person/people glyph sat here to say whether the workspace was personal
+            or a team — but it qualified a name that is already the most prominent text in the
+            sidebar, and it is the one fact in this row that never changes: `kind` is fixed at
+            creation. A permanent glyph for a permanent value is decoration on the row every other
+            row in the column is scoped by. It stays in the row's tooltip, which reads
+            "<name> — team, you are owner", so the fact is still reachable where somebody asking
+            for it would look. */}
         <Truncate className="min-w-0 flex-1 text-label text-ink" title={current?.name}>
           {current?.name ?? "workspace"}
         </Truncate>
@@ -444,8 +444,8 @@ export function WorkspaceSwitcher() {
           <Chip caps size="sm" tone="faint" className="shrink-0">{current.plan.label}</Chip>
         )}
         <span className="shrink-0 text-faint" aria-hidden>
-            {open ? <Icon.workspace.switcherOpen size={ICON.xs} /> : <Icon.workspace.switcherClosed size={ICON.xs} />}
-          </span>
+          {open ? <Icon.workspace.switcherOpen size={ICON.xs} /> : <Icon.workspace.switcherClosed size={ICON.xs} />}
+        </span>
       </button>
 
       {/* §5.2 — "show an error inline in the switcher and revert to the previous workspace".
