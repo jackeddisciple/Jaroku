@@ -54,7 +54,8 @@ import { FleetStrip } from "./FleetStrip.tsx";
 import { WorkComposer } from "./WorkComposer.tsx";
 import { WorkDetail } from "./WorkDetail.tsx";
 import { WorkList } from "./WorkList.tsx";
-import { RefreshIcon, RocketIcon } from "./panelIcons.tsx";
+import { RocketIcon } from "./panelIcons.tsx";
+import { Icon } from "../lib/icons/registry.ts";
 
 /**
  * §3A's header bar, which is the Inbox's header — copied literally rather than approximated.
@@ -103,7 +104,7 @@ function Header() {
         title={HEADER.refresh}
         aria-label={HEADER.refresh}
       >
-        <RefreshIcon size={ICON.xs} />
+        <Icon.cockpit.refresh size={ICON.xs} />
       </button>
     </div>
   );
@@ -118,6 +119,7 @@ function Header() {
  * same argument at greater length.
  */
 function NothingLive() {
+  const setRightTab = useUiStore((s) => s.setRightTab);
   return (
     <EmptyState
       icon={RocketIcon}
@@ -125,7 +127,22 @@ function NothingLive() {
       // THE HINT NAMES THE DEPLOY PANEL, which §10 asks for: this is the only state of the three
       // whose answer is somewhere else in the product, so the sentence has to say where. The other
       // two are answered by the composer below them and by the filter bar above them.
-      hint={EMPTY.noAgents.hint}
+      hint={
+        <>
+          {EMPTY.noAgents.hint}{" "}
+          {/* §6: TEXT + A TRAILING MARK. `EMPTY.noAgents.action` has been in the copy table since
+              the Cockpit shipped and nothing rendered it — so the one empty state whose answer is
+              in another panel named that panel in prose and gave no way to reach it. */}
+          <button
+            type="button"
+            onClick={() => setRightTab("deploy")}
+            className="inline-flex items-center gap-1 text-ink underline-offset-2 hover:underline focus-visible:outline-none focus-visible:shadow-focusring"
+          >
+            {EMPTY.noAgents.action}
+            <Icon.emptyState.openDeployPanel size={ICON.badge} />
+          </button>
+        </>
+      }
     />
   );
 }

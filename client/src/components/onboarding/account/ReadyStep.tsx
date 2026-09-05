@@ -20,6 +20,7 @@ import { ICON } from "../../../lib/tokens.ts";
 import { useAccountOnboardingStore } from "../../../store/accountOnboardingStore.ts";
 import { useBuildStore } from "../../../store/buildStore.ts";
 import { Reveal } from "../Reveal.tsx";
+import { Icon } from "../../../lib/icons/registry.ts";
 
 /** §5.1's three, verbatim in intent. Each is one thing to do next, in the place it happens. */
 const NEXT = [
@@ -101,7 +102,10 @@ export function ReadyStep() {
       <Reveal delay={260}>
         <div className="mx-auto mt-9 max-w-[300px]">
           <PrimaryButton onClick={finish} autoFocus>
+            {/* TEXT + A TRAILING MARK: it says where the press goes, which is out of onboarding
+                and into the product, so it sits after the words rather than before them. */}
             Open Jaroku
+            <Icon.auth.openJaroku size={ICON.sm} />
           </PrimaryButton>
         </div>
       </Reveal>

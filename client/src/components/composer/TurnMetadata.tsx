@@ -19,7 +19,8 @@
 // AND IT IS A NAVIGATION SURFACE, not only a readout (§6.3): the build chip opens that version's
 // diff. "The fastest path from 'this response' to 'the code it wrote'."
 
-import { Glyph, Icon, GLYPH, HIT_TARGET } from "../icons.ts";
+import { Glyph, GLYPH, HIT_TARGET } from "../icons.ts";
+import { Icon } from "../../lib/icons/registry.ts";
 import { ProviderMark } from "../../lib/icons.tsx";
 import { DiffStat } from "../DiffStat.tsx";
 import { Truncate } from "../Truncate.tsx";
@@ -84,7 +85,7 @@ export function TurnMetadata({
                 : `Reasoning effort: ${effortLabel(meta.effortApplied as Effort)}`
             }
           >
-            <Glyph icon={Icon.Effort} size={GLYPH.meta} />
+            <Glyph icon={Icon.composer.effort} size={GLYPH.meta} />
             {effortLabel(meta.effortApplied as Effort)}
             {/* The clamp marker. A glyph rather than a colour, so §10's "state must be conveyed by
                 more than colour" holds in a row that is deliberately monochrome. */}
@@ -112,7 +113,7 @@ export function TurnMetadata({
               ${meta.versionStaged ? "text-run animate-stream-pulse motion-reduce:animate-none" : "text-muted"}`}
             style={{ minHeight: HIT_TARGET / 2 }}
           >
-            <Glyph icon={Icon.Build} size={GLYPH.meta} />
+            <Glyph icon={Icon.meta.build} size={GLYPH.meta} />
             {meta.versionLabel}
             {/* §6.3's trailing figures, only while they are still a summary — see `diffSummary`. */}
             {diff && <DiffStat additions={diff.plus} deletions={diff.minus} />}
@@ -134,7 +135,7 @@ export function TurnMetadata({
             }`}
             title={streaming ? "Still generating" : "Wall clock, from dispatch to the end of the stream"}
           >
-            <Glyph icon={Icon.Duration} size={GLYPH.meta} />
+            <Glyph icon={Icon.meta.duration} size={GLYPH.meta} />
             {duration}
           </span>
         );

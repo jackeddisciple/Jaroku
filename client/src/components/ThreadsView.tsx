@@ -19,6 +19,7 @@ import { openThread, openThreadAgent } from "../lib/threadNav.ts";
 import {
   sendArchiveThread, sendCreateThread, sendListThreads, sendRenameThread, sendRestoreThread,
 } from "../lib/socket.ts";
+import { Icon } from "../lib/icons/registry.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
@@ -27,7 +28,7 @@ import { EmptyState } from "./EmptyState.tsx";
 import { ThreadFilterBar } from "./ThreadFilterBar.tsx";
 import { ThreadRow } from "./ThreadRow.tsx";
 import { useThreadKeys } from "./useThreadKeys.ts";
-import { PlusIcon, RefreshIcon, SearchIcon, XIcon } from "./panelIcons.tsx";
+import { SearchIcon } from "./panelIcons.tsx";
 
 /**
  * §4.6's first empty state, which is an ENTRY POINT rather than a notice.
@@ -116,9 +117,10 @@ function ArchiveNotice() {
       <button
         onClick={dismiss}
         title="Dismiss"
+        aria-label="Dismiss"
         className="shrink-0 text-faint transition-colors hover:text-ink"
       >
-        <XIcon size={ICON.xs} />
+        <Icon.global.dismissNotice size={ICON.xs} />
       </button>
     </div>
   );
@@ -212,7 +214,7 @@ export function ThreadsView() {
           className="ml-auto rounded-control p-1.5 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink disabled:pointer-events-none disabled:opacity-40"
           title="Ask for the list again"
         >
-          <RefreshIcon size={ICON.sm} />
+          <Icon.threads.refresh size={ICON.sm} />
         </button>
         <button
           onClick={() => sendCreateThread()}
@@ -221,7 +223,7 @@ export function ThreadsView() {
           title={connected ? "New thread" : "Reconnecting — a new thread needs a connection"}
           aria-label="New thread"
         >
-          <PlusIcon size={ICON.sm} />
+          <Icon.threads.new size={ICON.sm} />
         </button>
       </div>
 

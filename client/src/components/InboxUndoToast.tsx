@@ -20,6 +20,8 @@ import { sendUndoInboxAction } from "../lib/socket.ts";
 import { MOTION, SURFACE } from "../lib/tokens.ts";
 import { useInboxStore } from "../store/inboxStore.ts";
 import { keyHint } from "../lib/modKey.ts";
+import { Icon } from "../lib/icons/registry.ts";
+import { ICON } from "../lib/tokens.ts";
 
 /** §3's window. Five seconds, which is the number the specification gives. */
 export const TOAST_MS = 5000;
@@ -76,8 +78,9 @@ export function InboxUndoToast() {
       {undo.changed > 1 && <span className="text-faint">{undo.changed} items</span>}
       <button
         onClick={() => sendUndoInboxAction(undo.token)}
-        className="ml-auto rounded-control px-2 py-0.5 text-tiny text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
+        className="ml-auto inline-flex items-center gap-1 rounded-control px-2 py-0.5 text-tiny text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
       >
+        <Icon.inbox.undo size={ICON.badge} />
         Undo
       </button>
       <span className="shrink-0 text-tiny text-faint">{keyHint("⌘Z")}</span>

@@ -36,8 +36,10 @@ import { AgentSparkline } from "./AgentSparkline.tsx";
 import { Capable } from "./Capable.tsx";
 import { CockpitDialog } from "./CockpitDialog.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
-import { GlobeIcon, HashIcon, KebabIcon, KeyIcon, PlugIcon } from "./panelIcons.tsx";
+import { GlobeIcon, KeyIcon, PlugIcon } from "./panelIcons.tsx";
 import { Truncate } from "./Truncate.tsx";
+import { Icon } from "../lib/icons/registry.ts";
+import { IconButton } from "./IconButton.tsx";
 
 /**
  * The dot on a card, which carries the CONNECTION rather than the work.
@@ -146,7 +148,7 @@ function CardMenu({ card }: { card: FleetCardView }) {
         title={`More for ${card.agent_name}`}
         className="rounded-control p-0.5 text-faint transition-colors duration-fast hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
       >
-        <KebabIcon size={ICON.xs} />
+        <Icon.cockpit.agentMore size={ICON.xs} />
       </button>
 
       {open && (
@@ -173,29 +175,46 @@ function CardMenu({ card }: { card: FleetCardView }) {
 
           <div className="my-1 border-t border-hair" />
 
-          <MenuItem onClick={() => setLogs((v) => !v)} expanded={logs}>
-            {logs ? "Hide logs" : "Logs"}
-          </MenuItem>
+          {/* §6 MAKES THESE THREE ICON-ONLY, so they are a row rather than a stack. Three bare
+              glyphs listed vertically would be three lines of nothing; laid out as an action bar
+              they read as what they are — the operations available on this card — and each one
+              still carries its name in both places a name can be carried.
 
-          {/* §9: RECONNECT IS THE CARD'S PRIMARY ACTION WHEN IT IS UNCONNECTED, and it is offered
-              at every state rather than only then — a token can be rotated on Railway under a card
-              that still reads `connected`, and the repair has to be reachable before the first job
-              fails to prove it. */}
-          <Capable cmd="reconnectAgent">
-            <MenuItem onClick={() => { setOpen(false); setConfirming("reconnect"); }}>
-              {DESTRUCTIVE.reconnect.label}
-            </MenuItem>
-          </Capable>
+              §21 SURVIVES THE CHANGE, WHICH IS THE PART THAT MATTERED. Kill is still last and
+              still separated by a rule, because the separation is about a mis-aimed press landing
+              on the control that deletes somebody's agent, and shortening the controls makes that
+              MORE likely rather than less, not less. */}
+          <div role="group" aria-label={`Actions for ${card.agent_name}`} className="flex items-center gap-0.5">
+            <IconButton
+              icon={Icon.fleet.logs}
+              label={logs ? "Hide logs" : "Show logs"}
+              onClick={() => setLogs((v) => !v)}
+            />
 
-          {/* §21: LAST, AND SEPARATED. The hairline is the point — see this component's header. */}
-          <Capable cmd="killAgent">
-            <>
-              <div className="my-1 border-t border-hair" />
-              <MenuItem onClick={() => { setOpen(false); setConfirming("kill"); }} destructive>
-                {DESTRUCTIVE.kill.label}
-              </MenuItem>
-            </>
-          </Capable>
+            {/* §9: RECONNECT IS THE CARD'S PRIMARY ACTION WHEN IT IS UNCONNECTED, and it is offered
+                at every state rather than only then — a token can be rotated on Railway under a card
+                that still reads `connected`, and the repair has to be reachable before the first job
+                fails to prove it. */}
+            <Capable cmd="reconnectAgent">
+              <IconButton
+                icon={Icon.fleet.reconnect}
+                label={DESTRUCTIVE.reconnect.label}
+                onClick={() => { setOpen(false); setConfirming("reconnect"); }}
+              />
+            </Capable>
+
+            <Capable cmd="killAgent">
+              <>
+                <span className="mx-1 h-5 w-px shrink-0 bg-hair" aria-hidden />
+                <IconButton
+                  icon={Icon.fleet.kill}
+                  label={DESTRUCTIVE.kill.label}
+                  danger
+                  onClick={() => { setOpen(false); setConfirming("kill"); }}
+                />
+              </>
+            </Capable>
+          </div>
 
           {logs && (
             <div className="px-1 pb-1">
@@ -226,28 +245,6 @@ function CardMenu({ card }: { card: FleetCardView }) {
         onConfirm={() => { setConfirming(null); sendKillAgent(card.deployment_id); }}
       />
     </div>
-  );
-}
-
-/** One row of the overflow menu. A component so the four cannot drift in padding or in tone. */
-function MenuItem({ children, onClick, destructive = false, expanded }: {
-  children: React.ReactNode;
-  onClick: () => void;
-  destructive?: boolean;
-  expanded?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      onClick={onClick}
-      aria-expanded={expanded}
-      className={`w-full rounded-control px-2 py-1 text-left text-tiny transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
-        destructive ? "text-err hover:bg-active" : "text-ink hover:bg-active"
-      }`}
-    >
-      {children}
-    </button>
   );
 }
 
@@ -373,7 +370,7 @@ function FleetCard({ card, tabIndex, onArrow }: {
           aria-label={`Open the conversation with ${card.agent_name}`}
           className="pointer-events-auto relative z-10 flex shrink-0 items-center rounded-control p-0.5 text-faint transition-colors duration-fast hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
         >
-          <HashIcon size={ICON.xs} />
+          <Icon.cockpit.openConversation size={ICON.xs} />
         </button>
         {card.connection === "public" ? (
           <span className="shrink-0 text-tiny text-warn">{CONNECTION_LABEL.public}</span>

@@ -21,7 +21,8 @@
 import { useEffect, useRef, useState } from "react";
 
 import { ICON } from "../lib/tokens.ts";
-import { AlertTriangleIcon, ChevronDownIcon } from "./panelIcons.tsx";
+import { AlertTriangleIcon } from "./panelIcons.tsx";
+import { Icon } from "../lib/icons/registry.ts";
 
 export interface SplitAction {
   id: string;
@@ -104,7 +105,7 @@ export function SplitButton({
           onClick={() => setOpen((v) => !v)}
         >
           <span className={`inline-block transition-transform duration-fast ${open ? "rotate-180" : ""}`}>
-            <ChevronDownIcon size={ICON.xs} />
+            <Icon.github.syncMore size={ICON.xs} />
           </span>
         </button>
       </span>

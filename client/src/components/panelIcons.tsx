@@ -14,7 +14,13 @@
 
 import { ICON } from "../lib/tokens.ts";
 
-type P = {
+/**
+ * What every icon in this app accepts. Exported because `lib/icons/generated/` — the 117 marks
+ * `scripts/gen-icons.mjs` writes out of the HugeIcons free set — draw through the same factory
+ * below, and a generated component that declared its own prop shape would be the first crack in
+ * the rule that there is one icon path in this codebase.
+ */
+export type IconProps = {
   size?: number;
   /** Only for the rare case an icon sits against much larger type. Prefer leaving it alone. */
   strokeWidth?: number;
@@ -30,6 +36,8 @@ type P = {
    */
   label?: string;
 };
+
+type P = IconProps;
 
 /**
  * The one place SVG attributes are decided for the whole panel. Exported so composerIcons.tsx

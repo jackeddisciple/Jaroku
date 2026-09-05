@@ -41,6 +41,7 @@ import { useCanRun } from "../lib/useCapability.ts";
 import { sendSetAgentTools } from "../lib/socket.ts";
 import { useThreadStore } from "../store/threadStore.ts";
 import type { AgentDetailView } from "../types.ts";
+import { Icon } from "../lib/icons/registry.ts";
 
 type TabId = "capabilities" | "health" | "deploy" | "evals" | "threads" | "access";
 
@@ -120,10 +121,11 @@ function McpGrantEditor({ detail }: { detail: AgentDetailView }) {
     <div className="mb-2">
       <button
         type="button"
-        className={`${iconBtn} w-auto px-2 text-tiny text-muted`}
+        className={`${iconBtn} w-auto gap-1.5 px-2 text-tiny text-muted`}
         aria-expanded={open}
         onClick={() => { setDraft(granted); setOpen((v) => !v); }}
       >
+        <Icon.agentDetail.grantTool size={ICON.xs} />
         {open ? "Cancel" : granted.length > 0 ? "Change what it may call" : "Grant a tool"}
       </button>
 

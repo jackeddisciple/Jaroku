@@ -92,8 +92,12 @@ console.log("\neach one says what to do about it");
   // a sentence that described the way back without providing one would end in the reader hunting.
   check("the filtered state offers to clear the filter",
     filtered.includes(EMPTY.filtered.action), EMPTY.filtered.action);
+  // THE PROPERTY IS "IT IS A CONTROL", NOT "THE TEXT TOUCHES THE TAG". This used to require the
+  // words to be the first thing inside the `<button>`, which held right up until the chip grew a
+  // leading mark — icons_integration §6 gives this control `list`, and an icon + text control puts
+  // the glyph first. So: a button, and the words somewhere inside it, with no closing tag between.
   check("...and the offer is a button rather than prose",
-    new RegExp(`<button[^>]*>[^<]*${EMPTY.filtered.action}`).test(filtered),
+    new RegExp(`<button[^>]*>(?:(?!</button>).)*${EMPTY.filtered.action}`, "s").test(filtered),
     EMPTY.filtered.action);
 
   // THE SECOND HAS NO CONTROL OF ITS OWN, AND THAT IS CORRECT RATHER THAN AN OMISSION. Its action

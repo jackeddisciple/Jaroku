@@ -27,6 +27,8 @@ import { openAgentDetail } from "../lib/agentNav.ts";
 import { relTime } from "../lib/format.ts";
 import { paneOwnsBareKey } from "../lib/bareKeys.ts";
 import { keyHint } from "../lib/modKey.ts";
+import { Icon } from "../lib/icons/registry.ts";
+import { ICON } from "../lib/tokens.ts";
 
 /** Move the trace selection by ±1 in seq order (J/K). */
 function moveStep(delta: 1 | -1): void {
@@ -436,6 +438,18 @@ function Item({
           {kbd}
         </kbd>
       )}
+      {/* D7: ONE AFFORDANCE ON THE ROW COMPONENT, NOT TWENTY-ONE REGISTRY ENTRIES.
+          Every row in this palette does the same thing — it takes you somewhere — so what the
+          mark says is "this navigates", which is a property of the ROW rather than of any of the
+          twenty-one verbs in it. A leading mark saying WHAT each row opens is a different piece of
+          work with its own reasoning, and starting it here by accident is exactly what §4 asks
+          this comment to prevent.
+
+          `aria-hidden`, because the row's own text is already its accessible name and a screen
+          reader announcing "opens" after every one of twenty-one items is noise. */}
+      <span className="shrink-0 text-faint" aria-hidden>
+        <Icon.palette.jump size={ICON.badge} />
+      </span>
     </Command.Item>
   );
 }

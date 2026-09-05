@@ -23,7 +23,7 @@ import { ActionRow } from "./ActionRow.tsx";
 import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { EmptyState } from "./EmptyState.tsx";
-import { KeyIcon, EyeIcon, RefreshIcon, XIcon, PlugIcon, CheckIcon } from "./panelIcons.tsx";
+import { KeyIcon, RefreshIcon, XIcon, PlugIcon, CheckIcon } from "./panelIcons.tsx";
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { ICON, STATUS } from "../lib/tokens.ts";
 import {
@@ -40,6 +40,7 @@ import {
 import { groupSecrets, holdForElevation, useSecretsStore, visibleTo } from "../store/secretsStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { useCanReach } from "../lib/useCapability.ts";
+import { Icon } from "../lib/icons/registry.ts";
 
 /** Status as a chip, with a word in it — never colour alone. */
 function StatusChip({ secret }: { secret: SecretSummary }) {
@@ -100,7 +101,7 @@ function ValueOnce({ value, onDone }: { value: string; onDone: () => void }) {
             );
           }}
         >
-          {copied ? <CheckIcon size={ICON.xs} /> : null} {copied ? "Copied" : "Copy"}
+          {copied ? <CheckIcon size={ICON.xs} /> : <Icon.secrets.copy size={ICON.xs} />} {copied ? "Copied" : "Copy"}
         </button>
         <button className={quietBtn} onClick={onDone}>
           Done
@@ -392,7 +393,7 @@ function SecretRow({ secret, onChanged }: { secret: SecretSummary; onChanged: ()
             })
           }
         >
-          <EyeIcon size={ICON.xs} /> Reveal
+          <Icon.secrets.reveal size={ICON.xs} /> Reveal
         </button>
       ) : null}
       {canWrite && (

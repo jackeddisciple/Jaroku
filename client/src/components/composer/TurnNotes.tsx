@@ -12,7 +12,8 @@
 // as a secondary action. That converts a shrug into a regression test."
 
 import { useEffect, useRef, useState } from "react";
-import { Icon, GLYPH, Glyph } from "../icons.ts";
+import { GLYPH, Glyph } from "../icons.ts";
+import { Icon } from "../../lib/icons/registry.ts";
 import { ActionButton } from "./TurnActions.tsx";
 import { Popover, PopoverNote } from "./Popover.tsx";
 import { CheckboxField } from "../Checkbox.tsx";
@@ -52,7 +53,7 @@ export function NoteControl({ turnId, disabled = false }: { turnId: string; disa
     <div className="relative">
       <ActionButton
         buttonRef={triggerRef}
-        icon={Icon.Note}
+        icon={Icon.turn.note}
         name={notes.length > 0 ? `Notes (${notes.length})` : "Add a note"}
         title="Annotate this turn for the workspace"
         // §5.2: "Icon shows a count badge when > 0."
@@ -162,7 +163,7 @@ export function FeedbackControls({
   return (
     <>
       <ActionButton
-        icon={Icon.ThumbUp}
+        icon={Icon.turn.thumbUp}
         name={summary.mine === 1 ? "Remove your positive feedback" : "This was good"}
         title="This was good"
         pressed={summary.mine === 1}
@@ -176,7 +177,7 @@ export function FeedbackControls({
       <div className="relative">
         <ActionButton
           buttonRef={downRef}
-          icon={Icon.ThumbDown}
+          icon={Icon.turn.thumbDown}
           name={summary.mine === -1 ? "Remove your negative feedback" : "This was not good"}
           title="This was not good"
           pressed={summary.mine === -1}
@@ -237,7 +238,7 @@ export function FeedbackControls({
                 onClick={() => { onPromoteToDataset(); setOpen(false); }}
                 className="inline-flex items-center gap-1.5 text-accent hover:underline"
               >
-                <Glyph icon={Icon.AttachDataset} size={GLYPH.meta} />
+                <Glyph icon={Icon.attach.dataset} size={GLYPH.meta} />
                 Add this case to an eval dataset
               </button>
             </PopoverNote>

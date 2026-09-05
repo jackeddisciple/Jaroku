@@ -27,23 +27,8 @@ import { StepDetailPanel } from "./StepDetailPanel.tsx";
 import { AgentDetail } from "./AgentDetail.tsx";
 import { useAgentGridStore } from "../store/agentGridStore.ts";
 import { ICON } from "../lib/tokens.ts";
-import {
-  ActivityIcon,
-  AlertTriangleIcon,
-  ArrowDownIcon,
-  ArrowUpDownIcon,
-  ArrowUpIcon,
-  DollarSignIcon,
-  GitBranchIcon,
-  GithubIcon,
-  KeyIcon,
-  PlugIcon,
-  RefreshIcon,
-  RocketIcon,
-  SparklesIcon,
-  WrenchIcon,
-} from "./panelIcons.tsx";
-import { FlaskIcon } from "./inboxIcons.tsx";
+import { Icon, type IconComponent } from "../lib/icons/registry.ts";
+import { AlertTriangleIcon, ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, RefreshIcon } from "./panelIcons.tsx";
 
 // TEN DESTINATIONS IN 40px OF WIDTH, as glyphs in a vertical rail rather than as ten words in a
 // horizontal strip.
@@ -56,28 +41,28 @@ import { FlaskIcon } from "./inboxIcons.tsx";
 //
 // The order is unchanged, and so is the reasoning for it, which is recorded per entry below.
 // Nothing is added, removed, merged or re-parented — this is the same ten destinations, drawn.
-const TABS: { id: RightTab; label: string; Icon: (p: { size?: number }) => React.ReactElement }[] = [
+const TABS: { id: RightTab; label: string; Mark: IconComponent }[] = [
   // FIRST, AND ONLY WHEN AN AGENT IS OPEN — see `agentOpen` below. §6's detail is a tab rather
   // than a fourth column, and it leads the row because arriving from the Agents grid is what puts it
   // there: the panel should already be showing what was clicked.
-  { id: "agent", label: "Agent", Icon: SparklesIcon },
-  { id: "graph", label: "Graph", Icon: GitBranchIcon },
-  { id: "trace", label: "Trace", Icon: ActivityIcon },
-  { id: "evals", label: "Evals", Icon: FlaskIcon },
-  { id: "mcp", label: "MCP", Icon: WrenchIcon },
+  { id: "agent", label: "Agent", Mark: Icon.panel.agent },
+  { id: "graph", label: "Graph", Mark: Icon.panel.graph },
+  { id: "trace", label: "Trace", Mark: Icon.panel.trace },
+  { id: "evals", label: "Evals", Mark: Icon.panel.evals },
+  { id: "mcp", label: "MCP", Mark: Icon.panel.mcp },
   // Beside MCP rather than beside Usage: both tabs answer "what does this workspace reach
   // outside itself", and the two are the pair somebody audits together.
-  { id: "connections", label: "Connections", Icon: PlugIcon },
-  { id: "deploy", label: "Deploy", Icon: RocketIcon },
+  { id: "connections", label: "Connections", Mark: Icon.panel.connections },
+  { id: "deploy", label: "Deploy", Mark: Icon.panel.deploy },
   // Beside Connections, for the reason Connections sits beside MCP: the three answer "what does
   // this workspace reach outside itself, and with whose credentials", and they are audited
   // together.
-  { id: "secrets", label: "Secrets", Icon: KeyIcon },
+  { id: "secrets", label: "Secrets", Mark: Icon.panel.secrets },
   // Last in the row, and beside Deploy rather than beside Graph. The three tabs to its left answer
   // "what does this workspace reach outside itself"; this one answers "where does its code go",
   // which is the same kind of question about the same kind of boundary.
-  { id: "github", label: "GitHub", Icon: GithubIcon },
-  { id: "usage", label: "Usage", Icon: DollarSignIcon },
+  { id: "github", label: "GitHub", Mark: Icon.panel.github },
+  { id: "usage", label: "Usage", Mark: Icon.panel.usage },
 ];
 
 /**
@@ -262,7 +247,7 @@ export function RightPanel() {
                 active ? "bg-active text-accent" : "text-muted hover:bg-active/40 hover:text-ink"
               }`}
             >
-              <t.Icon size={ICON.md} />
+              <t.Mark size={ICON.md} />
               {/* THE ONE BADGE IN THIS RAIL, and it is computable while the tab is locked — the
                   health route answers in counts, without elevation, so somebody is not asked for a
                   passcode to be told whether they need to care. Carries a title as well as a colour,

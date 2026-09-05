@@ -27,9 +27,8 @@ import { sendLoadAgentVersion, sendRestoreAgentVersion } from "../lib/socket.ts"
 import { fmtBytes } from "../lib/agentFormat.ts";
 import { relTime } from "../lib/format.ts";
 import { ACCENT, ICON, STATUS, TEXT } from "../lib/tokens.ts";
-import { ArchiveRestoreIcon } from "./agentIcons.tsx";
-import { UndoIcon } from "./panelIcons.tsx";
 import type { AgentDetailView, AgentVersionView } from "../types.ts";
+import { Icon } from "../lib/icons/registry.ts";
 
 /** What made a version, as one word and one colour. Borrowed, never invented. */
 const SOURCE_COLOR: Record<AgentVersionView["source"], string> = {
@@ -166,7 +165,7 @@ function VersionRow({
               aria-label={`Restore v${version.version}`}
               className="rounded-control p-1 text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
             >
-              <ArchiveRestoreIcon size={ICON.xs} />
+              <Icon.agentDetail.restoreVersion size={ICON.xs} />
             </button>
           )}
         </div>
@@ -197,6 +196,10 @@ export function AgentVersions({ detail }: { detail: AgentDetailView }) {
   return (
     <div className="border-b border-hair px-4 py-3">
     <CollapsibleRegion
+      // THE REGION IS THE PUBLISHED VERSIONS, so the mark labels the region rather than a control.
+      // There is no separate "publish" button in this client — publishing happens through the
+      // build flow — and adding one here to give the key a home would be inventing a control.
+      mark={Icon.agentDetail.publishVersion}
       label="Version history"
       count={detail.versions.length}
       open={open}
@@ -222,7 +225,7 @@ export function AgentVersions({ detail }: { detail: AgentDetailView }) {
                   aria-label="Clear the comparison"
                   className="ml-auto rounded-control p-1 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink"
                 >
-                  <UndoIcon size={ICON.xs} />
+                  <Icon.evals.clearComparison size={ICON.xs} />
                 </button>
               </div>
               {changes.length === 0 ? (

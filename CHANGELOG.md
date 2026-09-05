@@ -8,6 +8,101 @@ release notes and the commits in that release's range.
 
 ---
 
+## v0.3.12 : One Mark Per Verb — The Icon System, Wired
+
+The client had three icon paths. `panelIcons.tsx` drew Lucide geometry at `ICON.strokeWidth`;
+`components/icons.ts` drew HugeIcons through `@hugeicons/react` at a second weight of 1.5; and a
+handful of controls drew their own inline `<svg>` or set a mark as a literal character in the text
+font. Nothing was broken, and that is the point — a screenshot of any one bar looked right. What
+they could not do was **move together**, so the composer's seven controls sat a different weight
+from the panel they live in, and one mark in the sidebar rail shipped at stroke 2 because that is
+what the package happened to send.
+
+This release replaces all three with one: **117 committed inline-SVG marks**, generated from
+`@hugeicons/core-free-icons@4.3.0` at authoring time, drawn through the one factory, at the one
+token. Client-only — no schema change, no migration, no server route.
+
+### Added
+
+- **`client/src/lib/icons/manifest.ts`** — 150 registry keys mapped to HugeIcons export names, as
+  strings. The one file anybody edits when a mark changes, and the reason changing what "fork" looks
+  like is a one-line edit rather than a hunt through nine call sites.
+- **`client/scripts/gen-icons.mjs`** — reads the package, strips `stroke` and `strokeWidth` from
+  every path so a mark *physically cannot* carry its own weight, and emits components that delegate
+  to `panelIcons.tsx`'s `svg()`. Deterministic: attributes sorted, element order preserved because
+  order is paint order. A manifest name the package does not export exits non-zero with the name
+  printed, rather than shipping a blank square.
+- **`client/src/lib/icons/registry.ts`** — the one import surface. `Icon.agents.fork`, never
+  `GitForkIcon`, typed so an unknown key is a compile error rather than an undefined render.
+- **`client/src/components/IconButton.tsx`** — `label` is required and becomes both `aria-label`
+  and the tooltip, from one string, so the two cannot disagree. 32×32 minimum hit target whatever
+  the mark's size; a disabled control carries the reason in the tooltip and keeps its name.
+- **Six suites, in their own CI step**: `test:icon-manifest`, `test:icon-stroke`, `test:icon-deps`,
+  `test:icon-registry`, `test:icon-a11y`, `test:icon-generated` — plus a `gen:icons` re-run whose
+  diff must be empty, which catches a manifest edit committed without regenerating.
+
+### Changed
+
+- **`@hugeicons/react` is uninstalled and `@hugeicons/core-free-icons` is a devDependency.** The
+  renderer walked path tuples on every render, which made the icon set a runtime dependency of the
+  composer's control bar — the one row that has to be on screen before anything else is.
+- **One stroke weight, `ICON.strokeWidth`.** `GLYPH.strokeWidth` is gone. The size ladder stayed:
+  sizes are not weights, and a toolbar control is 20 for reasons that survive the merge.
+- **Two controls that were text are now icon-only where §6 is binding**, and the labels moved to
+  `aria-label` plus tooltip rather than being deleted.
+
+### The seven decisions
+
+The specification is internally inconsistent in seven places. Each was resolved deliberately, and
+**three of them contradict the source document** — flagged here because a silent correction is
+indistinguishable from a mistake.
+
+- **D1 · Optical stroke at small sizes.** Match the existing factory, which puts a constant
+  `ICON.strokeWidth` on the `<svg>` and lets the 24-unit viewBox scale it down — so at 14px a mark
+  draws 1.02 device pixels and accepts the thinning. The alternative the spec offers,
+  `strokeWidth * 24 / size`, was **not** taken: it would be a third behaviour in a codebase that
+  already has one, and every Lucide mark would then sit lighter than the HugeIcons mark beside it.
+- **D2 · `x` versus `cancel-01`.** `XIcon` closes a surface; `Cancel01Icon` aborts an operation.
+  **Contradicts the document twice**: `inbox.dismiss` moves from `cancel-01` to `XIcon`, because
+  the document put `cancel-01` on a lane six inches from an `x` doing the identical job on a card;
+  and `evals.cancel` moves from `x` to `Cancel01Icon`, because cancelling an eval aborts something
+  in flight rather than closing a panel.
+- **D3 · Three refresh marks, kept, with the split written into the registry.** `Refresh03Icon`
+  re-fetches a list you are looking at; `ReloadIcon` retries an operation that failed;
+  `RefreshCwIcon` syncs with an external system, which is why GitHub gets its own.
+- **D4 · `plus` versus `plus-sign-square`.** The mark follows the **object**, not the surface: a
+  square-plus creates an agent, a bare plus creates everything else. **Contradicts the document** —
+  `agents.newThread` becomes `PlusIcon`, because the thing being created there is a thread.
+- **D5 · `loader-circle` in a filter chip.** Kept, drawn **static**, and nothing animates it. In a
+  row of five filters a spinning chip says the filter is loading; the amber dot on the rows below
+  is what actually reports liveness.
+- **D6 · The Workspace tab strip.** All six tabs get icon **and** label. The document marked four
+  icon-only and left two labelled, which reads as unfinished — and these are settings destinations
+  opened twice a month, which is exactly where a bare glyph fails.
+- **D7 · The command palette is one affordance, not 21.** All 21 rows carry the same trailing
+  "this navigates" mark, which is a property of the row component. One key, `palette.jump`.
+- **D8 · 117 marks, not 104** — an eighth decision this work had to make. Acceptance asks for 104,
+  but I2 requires `@hugeicons/react` uninstalled, and the composer's control bar, its ⊕ menu and the
+  turn rows drew through it. Thirteen of those marks are outside the appendix, so they joined the
+  manifest. The count moved and the invariant held, which is the right way round.
+
+### Notes
+
+- **The specification calls `lib/actionIcons.tsx` the factory; it is not.** That file is a semantic
+  table mapping action kinds to descriptors. The SVG factory is `components/panelIcons.tsx`'s
+  `svg()`, and the generated marks draw through it — §0's rule is that where the spec and the files
+  disagree, the files win.
+- **134 registry keys are named by §5 and §6, not the 135 the header claims.** The two tables say
+  86 and 48; `agents.new` is printed twice, shared between the sidebar and the Agents grid.
+- **The Inbox's `team` lane has no registry entry, deliberately.** §5 names five lanes and this is a
+  sixth — it does not exist in a Personal workspace, so the capture the specification was drawn from
+  could not have seen it. It keeps its existing mark, through the same factory at the same weight.
+- **`test:icon-a11y` found three icon-only controls with a tooltip and no accessible name** — the
+  sidebar's rename, the Threads notice dismiss, and the Workspace panel's close. All three now
+  carry both.
+
+---
+
 ## v0.3.11 : Talking To An Agent — The Per-Agent Conversation, On The Record
 
 The Cockpit gives you a list, and a list is not how a person asks *"did that email go out?"* This

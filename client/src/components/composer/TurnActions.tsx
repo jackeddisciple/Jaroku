@@ -15,7 +15,8 @@
 // twice and then report as broken.
 
 import { useRef, useState } from "react";
-import { Glyph, Icon, GLYPH, HIT_TARGET } from "../icons.ts";
+import { Glyph, GLYPH, HIT_TARGET } from "../icons.ts";
+import { Icon, type IconComponent } from "../../lib/icons/registry.ts";
 import { CopyTurn } from "./CopyTurn.tsx";
 import { Popover, PopoverRow } from "./Popover.tsx";
 import { FeedbackControls, NoteControl } from "./TurnNotes.tsx";
@@ -33,7 +34,7 @@ export function ActionButton({
   className = "",
   buttonRef,
 }: {
-  icon: (typeof Icon)[keyof typeof Icon];
+  icon: IconComponent;
   name: string;
   title?: string;
   onClick?: () => void;
@@ -129,7 +130,7 @@ export function TurnActions({
       {turnId && <NoteControl turnId={turnId} />}
       {turnId && conversationId && (
         <ActionButton
-          icon={Icon.Pin}
+          icon={Icon.turn.pin}
           name={isPinned ? "Unpin this turn" : "Pin this turn"}
           title={isPinned ? "Remove from your pinned rail" : "Pin to your rail — only you see it"}
           pressed={isPinned}
@@ -140,7 +141,7 @@ export function TurnActions({
 
       {onRegenerate && (
         <ActionButton
-          icon={Icon.Regenerate}
+          icon={Icon.turn.regenerate}
           name="Regenerate this response"
           title={
             streaming

@@ -36,8 +36,9 @@ import { StatusDot } from "./StatusBadge.tsx";
 import {
   AlertTriangleIcon, CheckIcon, LockIcon, PlugIcon, RefreshIcon, ShieldCheckIcon, XIcon,
 } from "./panelIcons.tsx";
-import { UnpluggedIcon } from "./inboxIcons.tsx";
 import type { ConnectionField as ConnectionFieldView, ConnectionView } from "../types.ts";
+import { Icon } from "../lib/icons/registry.ts";
+import { IconButton } from "./IconButton.tsx";
 
 /** What each status means, in the words somebody would use to decide what to do next. */
 const STATUS_COPY: Record<string, { state: "ok" | "error" | "pending" | "neutral"; icon: typeof CheckIcon }> = {
@@ -197,9 +198,12 @@ function ConnectorField({ field, onDone }: { field: ConnectionFieldView; onDone:
               }
             }}
           />
-          <button className={outlineBtn} disabled={busy || !value.trim()} onClick={() => void save()}>
-            {busy ? "Saving…" : "Save"}
-          </button>
+          <IconButton
+            icon={Icon.connections.save}
+            label={busy ? "Saving…" : "Save"}
+            disabledReason={busy ? "Saving…" : !value.trim() ? "Enter a value first" : null}
+            onClick={() => void save()}
+          />
         </div>
       )}
 
@@ -364,7 +368,7 @@ function ConnectionRow({ connection }: { connection: ConnectionView }) {
               title="Disconnect — hand the grant back and forget the credentials. Agents using it will report it at their next tool call."
               aria-label={`Disconnect ${connection.label}`}
             >
-              <UnpluggedIcon size={ICON.sm} />
+              <Icon.connections.disconnect size={ICON.sm} />
             </button>
           </>
         ) : (

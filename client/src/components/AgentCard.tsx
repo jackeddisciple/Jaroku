@@ -22,10 +22,11 @@ import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { AgentTagRow } from "./AgentTagRow.tsx";
 import { AgentSparkline } from "./AgentSparkline.tsx";
-import { ThumbnailMark, ArchiveIcon, ArchiveRestoreIcon, CopyIcon, DownloadIcon } from "./agentIcons.tsx";
-import { AlertTriangleIcon, GitForkIcon, KebabIcon, PencilIcon, PlusIcon } from "./panelIcons.tsx";
+import { ThumbnailMark, ArchiveIcon, ArchiveRestoreIcon } from "./agentIcons.tsx";
+import { AlertTriangleIcon, GitForkIcon, PencilIcon } from "./panelIcons.tsx";
 import { agentContextMarkdown } from "../lib/agentContext.ts";
 import { absTime, fmtCost, relTime } from "../lib/format.ts";
+import { Icon } from "../lib/icons/registry.ts";
 import { ICON, STATUS, TYPE } from "../lib/tokens.ts";
 import { spendFor, useAgentGridStore } from "../store/agentGridStore.ts";
 import type { AgentCardView } from "../types.ts";
@@ -91,7 +92,7 @@ function Overflow({
         aria-expanded={open}
         className="rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active active:bg-chrome hover:text-ink"
       >
-        <KebabIcon size={ICON.sm} />
+        <Icon.agents.more size={ICON.sm} />
       </button>
       {open && (
         <>
@@ -105,7 +106,7 @@ function Overflow({
               : [
                   item("Fork", GitForkIcon, onFork),
                   item("Rename", PencilIcon, onRename),
-                  item("Export current version", DownloadIcon, onExport),
+                  item("Export current version", Icon.agentDetail.export, onExport),
                   // ARCHIVE, AND THERE IS NO DELETE HERE. §5.2 lists both and this product has no
                   // delete path for an agent, deliberately: its versions, runs, traces and costs are
                   // the record every past comparison points at. The confirmation §7.5 asks for —
@@ -231,7 +232,7 @@ export function AgentCard({
               aria-label={`Start a new thread on ${agent.name}`}
               className="shrink-0 rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active active:bg-chrome hover:text-ink"
             >
-              <PlusIcon size={ICON.sm} />
+              <Icon.agents.newThread size={ICON.sm} />
             </button>
           )}
           <button
@@ -244,7 +245,7 @@ export function AgentCard({
             aria-label={`Copy ${agent.name}'s context`}
             className="shrink-0 rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active active:bg-chrome hover:text-ink"
           >
-            <CopyIcon size={ICON.sm} />
+            <Icon.agentDetail.copy size={ICON.sm} />
           </button>
           <Overflow
             agent={agent}

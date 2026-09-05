@@ -30,10 +30,9 @@ import { ICON } from "../lib/tokens.ts";
 import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { EmptyState } from "./EmptyState.tsx";
-import { ChevronDownIcon, ChevronRightIcon, DatabaseIcon, PencilIcon, PlusIcon, UndoIcon, XIcon } from "./panelIcons.tsx";
-import { DownloadIcon } from "./agentIcons.tsx";
-import { TrashIcon } from "./inboxIcons.tsx";
+import { ChevronDownIcon, ChevronRightIcon, DatabaseIcon, XIcon } from "./panelIcons.tsx";
 import type { DatasetExample, RubricCriterion } from "../types.ts";
+import { Icon } from "../lib/icons/registry.ts";
 
 /** An input/expected pair, editable in place. Commits on blur; Escape reverts. */
 function ExampleRow({
@@ -181,6 +180,9 @@ function RubricEditor({ datasetId }: { datasetId: string }) {
         className="flex w-full items-center gap-2 py-1.5 text-left"
         onClick={() => setOpen((v) => !v)}
       >
+        {/* THE DISCLOSURE IS THE EDIT — opening this is how a rubric gets changed, so the mark
+            goes here rather than on a second control that would do the same thing. */}
+        <Icon.evals.editRubric size={ICON.xs} className="shrink-0 text-faint" />
         <span className="text-tiny uppercase tracking-wider text-faint">Judge rubric</span>
         <span className="text-tiny text-muted">
           {isDefault ? "built-in" : (rubric?.name ?? "custom")} · {criteria.length} criteria
@@ -270,7 +272,7 @@ function RubricEditor({ datasetId }: { datasetId: string }) {
                 aria-label="Revert to the saved rubric"
                 className="rounded-control p-1 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink"
               >
-                <UndoIcon size={ICON.xs} />
+                <Icon.evals.revertRubric size={ICON.xs} />
               </button>
             )}
           </div>
@@ -384,7 +386,7 @@ export function DatasetBuilder() {
             aria-label="Rename this dataset"
             className="rounded-control p-1 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink"
           >
-            <PencilIcon size={ICON.xs} />
+            <Icon.evals.renameDataset size={ICON.xs} />
           </button>
           <button
             onClick={() => fileRef.current?.click()}
@@ -392,7 +394,7 @@ export function DatasetBuilder() {
             aria-label="Import examples from a CSV"
             className="rounded-control p-1 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink"
           >
-            <DownloadIcon size={ICON.xs} className="rotate-180" />
+            <Icon.evals.importCsv size={ICON.xs} />
           </button>
           <input
             ref={fileRef}
@@ -411,7 +413,7 @@ export function DatasetBuilder() {
             aria-label="Delete this dataset"
             className="ml-auto rounded-control p-1 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-err"
           >
-            <TrashIcon size={ICON.xs} />
+            <Icon.evals.deleteDataset size={ICON.xs} />
           </button>
         </div>
       )}
@@ -429,7 +431,7 @@ export function DatasetBuilder() {
             aria-label="Dismiss"
             className="shrink-0 text-faint transition-colors duration-fast hover:text-ink"
           >
-            <XIcon size={ICON.xs} />
+            <Icon.global.dismissNotice size={ICON.xs} />
           </button>
         </div>
       )}
@@ -473,7 +475,7 @@ export function DatasetBuilder() {
             aria-label="Add this example"
             className="rounded-control bg-active p-1.5 text-ink transition-opacity disabled:opacity-30"
           >
-            <PlusIcon size={ICON.sm} />
+            <Icon.evals.addExample size={ICON.sm} />
           </button>
         </div>
       )}

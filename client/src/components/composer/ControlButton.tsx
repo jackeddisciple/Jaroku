@@ -18,9 +18,8 @@
 // `aria-pressed="false"` on a button that is not one tells a screen reader it is a toggle that is
 // off.
 
-import { GLYPH, HIT_TARGET, Glyph, type Icon as IconRegistry } from "../icons.ts";
-
-type Registry = typeof IconRegistry;
+import { GLYPH, HIT_TARGET, Glyph } from "../icons.ts";
+import { type IconComponent } from "../../lib/icons/registry.ts";
 
 export function ControlButton({
   icon,
@@ -36,7 +35,7 @@ export function ControlButton({
   className = "",
   buttonRef,
 }: {
-  icon: Registry[keyof Registry];
+  icon: IconComponent;
   /** The text beside the glyph — "High", "Smart". Dropped below ~720px; see composerBar.ts. */
   label?: string;
   /** The accessible name. Required, because half of these controls have no visible text. */

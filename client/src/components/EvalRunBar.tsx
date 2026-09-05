@@ -23,6 +23,8 @@ import { fmtCost } from "../lib/format.ts";
 import { Chip } from "./Chip.tsx";
 import { primaryBtn } from "./buttons.ts";
 import type { EvalTarget } from "../types.ts";
+import { Icon } from "../lib/icons/registry.ts";
+import { IconButton } from "./IconButton.tsx";
 
 const key = (t: EvalTarget) => `${t.provider}/${t.model}`;
 const FREE: EvalTarget = { provider: "fake", model: "fake-dry-run" };
@@ -200,20 +202,27 @@ export function EvalRunBar() {
           )}
           <span className="ml-auto" />
           {running ? (
-            <button
+            <IconButton
+              icon={Icon.evals.cancel}
+              label="Cancel this eval"
+              danger
               onClick={() => progress && sendCancelEval(progress.evalId)}
-              className="rounded-control px-3 py-1.5 text-caption text-err hover:bg-active active:bg-chrome transition-colors whitespace-nowrap"
-            >
-              Cancel
-            </button>
+            />
           ) : (
-            <button
+            <IconButton
+              icon={Icon.evals.run}
+              // §8: A GATE'S LABEL NAMES WHAT THE PRESS DOES. Behind a spend ceiling this opens
+              // the estimate rather than dispatching, and saying "Run eval" there would promise
+              // money moving that the next screen has not asked about yet.
+              label={needsConfirm ? "Estimate the cost of this eval" : "Run eval"}
+              disabledReason={
+                !connected ? "Not connected"
+                  : !examples.length ? "Add an example first"
+                  : !targets.length ? "Choose a model to run against"
+                  : null
+              }
               onClick={beginRun}
-              disabled={!connected || !examples.length || !targets.length}
-              className={`${primaryBtn} shrink-0 whitespace-nowrap`}
-            >
-              {needsConfirm ? "Estimate cost…" : "Run eval"}
-            </button>
+            />
           )}
         </div>
       )}

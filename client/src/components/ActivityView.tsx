@@ -30,7 +30,7 @@ import { useActivityStore } from "../store/activityStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { Truncate } from "./Truncate.tsx";
-import { RangeIcon } from "./activityIcons.tsx";
+import { Icon } from "../lib/icons/registry.ts";
 
 /**
  * §1's greeting: the time of day, by the clock on the machine reading it.
@@ -123,7 +123,7 @@ function Header() {
         aria-label="Date range"
       >
         <span className="pl-1.5 pr-0.5 text-faint" aria-hidden>
-          <RangeIcon size={ICON.xs} />
+          <Icon.activity.dateRange size={ICON.xs} />
         </span>
         {ACTIVITY_RANGES.filter((r) => r !== "custom" || range === "custom").map((r) => (
           <button

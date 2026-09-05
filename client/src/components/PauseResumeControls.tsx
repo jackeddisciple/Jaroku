@@ -11,8 +11,8 @@
 import { useState } from "react";
 import { useTraceStore } from "../store/traceStore.ts";
 import { sendCancelRun, sendPauseRun, sendResumeRun } from "../lib/socket.ts";
+import { Icon } from "../lib/icons/registry.ts";
 import { ICON } from "../lib/tokens.ts";
-import { PauseIcon, PlayIcon, StopIcon } from "./panelIcons.tsx";
 
 export function PauseResumeControls() {
   const activeRunId = useTraceStore((s) => s.activeRunId);
@@ -38,7 +38,7 @@ export function PauseResumeControls() {
       className={`${base} border-err/40 bg-err/10 text-err hover:bg-err/20`}
       title="This cannot be resumed"
     >
-      <StopIcon size={ICON.xs} /> Stop this run?
+      <Icon.trace.stop size={ICON.xs} /> Stop this run?
     </button>
   ) : (
     <button
@@ -46,7 +46,7 @@ export function PauseResumeControls() {
       className={`${base} border-hair text-muted hover:bg-active active:bg-chrome hover:text-err`}
       title="Stop the run — nothing is left to resume from"
     >
-      <StopIcon size={ICON.xs} /> Stop
+      <Icon.trace.stop size={ICON.xs} /> Stop
     </button>
   );
 
@@ -60,7 +60,7 @@ export function PauseResumeControls() {
           className={`${base} border-hair text-run hover:bg-active active:bg-chrome`}
           title="Pause at the next step boundary"
         >
-          <PauseIcon size={ICON.xs} /> Pause
+          <Icon.trace.pause size={ICON.xs} /> Pause
         </button>
       ) : (
         <button
@@ -68,7 +68,7 @@ export function PauseResumeControls() {
           className={`${base} border-hair text-ok hover:bg-active active:bg-chrome`}
           title="Resume from the durable checkpoint"
         >
-          <PlayIcon size={ICON.xs} /> Resume
+          <Icon.trace.resume size={ICON.xs} /> Resume
         </button>
       )}
       {stop}

@@ -37,7 +37,7 @@ import { Capable } from "./Capable.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { WorkGlyph } from "./WorkGlyph.tsx";
-import { XIcon } from "./panelIcons.tsx";
+import { Icon } from "../lib/icons/registry.ts";
 
 /**
  * How many rows to assume before the container has been measured.
@@ -218,8 +218,9 @@ function Row({ item, columns }: { item: WorkItemView; columns: RowColumns }) {
                 // the item is on screen". The title says what it actually does rather than
                 // promising a stop the graph has not made yet.
                 title={DESTRUCTIVE.stop.title}
+                aria-label={DESTRUCTIVE.stop.label}
               >
-                {DESTRUCTIVE.stop.label}
+                <Icon.cockpitWork.stop size={ICON.xs} />
               </button>
             </Capable>
           ) : (
@@ -229,8 +230,9 @@ function Row({ item, columns }: { item: WorkItemView; columns: RowColumns }) {
                 onClick={() => sendRetryWork(item.id)}
                 className="rounded-control px-2 py-0.5 text-tiny text-muted transition-colors duration-fast hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
                 title="Ask the same thing again, as a new job, on whatever is live now"
+                aria-label="Retry this work item"
               >
-                Retry
+                <Icon.cockpitWork.retry size={ICON.xs} />
               </button>
             </Capable>
           )}
@@ -347,10 +349,14 @@ function Filters() {
             type="button"
             onClick={() => choose({ scope })}
             aria-pressed={filters.scope === scope}
-            className={`rounded-control px-2 py-0.5 text-tiny transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+            className={`inline-flex items-center gap-1 rounded-control px-2 py-0.5 text-tiny transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
               filters.scope === scope ? "bg-active text-ink" : "text-muted hover:text-ink"
             }`}
           >
+            {/* One person and several people, which is the whole distinction the toggle draws. */}
+            {scope === "mine"
+              ? <Icon.cockpitFilter.mine size={ICON.badge} />
+              : <Icon.cockpitFilter.everyones size={ICON.badge} />}
             {FILTERS.scope[scope]}
           </button>
         ))}
@@ -361,10 +367,13 @@ function Filters() {
           type="button"
           onClick={() => choose({ status: null })}
           aria-pressed={filters.status === null}
-          className={`rounded-control px-2 py-0.5 text-tiny transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+          className={`inline-flex items-center gap-1 rounded-control px-2 py-0.5 text-tiny transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
             filters.status === null ? "bg-active text-ink" : "text-muted hover:text-ink"
           }`}
         >
+          {/* THE SAME MARK THE THREADS FILTER PUTS ON ITS OWN "All", and that is deliberate rather
+              than a copy-paste — one word, one glyph, in two rows a reader sees side by side. */}
+          <Icon.cockpitFilter.all size={ICON.badge} />
           {FILTERS.allStatuses}
         </button>
         {WORK_STATUS_ORDER.map((status) => (
@@ -412,9 +421,10 @@ function Filters() {
           className="ml-auto flex items-center gap-1 rounded-chip border border-hair bg-panel px-2 py-0.5 text-tiny text-ink transition-colors duration-fast hover:bg-active focus-visible:outline-none focus-visible:shadow-focusring"
           title={FILTERS.clearAgent}
         >
+          <Icon.cockpitFilter.showEveryAgent size={ICON.badge} />
           <span className="max-w-[22ch] truncate">{FILTERS.agentChip(agentName)}</span>
           <span className="shrink-0 text-faint" aria-hidden>
-            <XIcon size={ICON.badge} />
+            <Icon.global.clearFilter size={ICON.badge} />
           </span>
         </button>
       )}
@@ -724,8 +734,9 @@ function ZeroState() {
             setFilters({ scope: "all", status: null, agentId: null });
             sendListWork();
           }}
-          className="underline-offset-2 hover:text-ink hover:underline focus-visible:outline-none focus-visible:shadow-focusring"
+          className="inline-flex items-center gap-1 underline-offset-2 hover:text-ink hover:underline focus-visible:outline-none focus-visible:shadow-focusring"
         >
+          <Icon.cockpitFilter.showEverything size={ICON.badge} />
           {EMPTY.filtered.action}
         </button>
       }

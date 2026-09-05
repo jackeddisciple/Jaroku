@@ -47,7 +47,7 @@ import { alpha } from "../lib/palette.ts";
 import { ACCENT, ICON, INTERACTION, RADIUS, STATUS, SURFACE, TEXT } from "../lib/tokens.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { Truncate } from "./Truncate.tsx";
-import { GitBranchIcon, PlusIcon, XIcon } from "./panelIcons.tsx";
+import { GitBranchIcon, PlusIcon } from "./panelIcons.tsx";
 import { activeEdge, activeNodeId, latestStepForNode, stepEdge, stepNodeId, traversedEdges } from "../lib/traceGraphMap.ts";
 import type { AgentGraph, GraphNode as GNode, Step } from "../types.ts";
 import {
@@ -59,6 +59,7 @@ import {
   modelResource,
   toolResource,
 } from "./graphIcons.tsx";
+import { Icon } from "../lib/icons/registry.ts";
 
 // ── dimensions ────────────────────────────────────────────────────────────────
 const AGENT_W = 300; // wide "AI Agent" card
@@ -634,7 +635,7 @@ function NodeInspector({ nodeId, ntype, onClose }: { nodeId: string; ntype: stri
       <div className="flex items-center justify-between mb-3">
         <Truncate className="text-ink" title={nodeId}>{nodeId}</Truncate>
         <button className="text-muted transition-colors duration-fast hover:text-ink" title="Close (Esc)" aria-label="Close" onClick={onClose}>
-          <XIcon size={ICON.sm} />
+          <Icon.workspace.close size={ICON.sm} />
         </button>
       </div>
       <Row label="Type" value={ntype} />
@@ -1045,8 +1046,9 @@ function GraphFailure({
               <button
                 type="button"
                 onClick={onRetry}
-                className="mx-auto mt-3 block rounded-control border border-edge px-2.5 py-1 text-tiny text-muted transition-colors hover:bg-active hover:text-ink"
+                className="mx-auto mt-3 inline-flex items-center gap-1.5 rounded-control border border-edge px-2.5 py-1 text-tiny text-muted transition-colors hover:bg-active hover:text-ink"
               >
+                <Icon.graph.retry size={ICON.xs} />
                 Try again
               </button>
             )}

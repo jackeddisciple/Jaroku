@@ -42,7 +42,7 @@ import { DisabledReason, ENABLED, type DisabledState } from "./DisabledReason.ts
 import { LoadingLine } from "./EmptyState.tsx";
 import { WorkGlyph } from "./WorkGlyph.tsx";
 import { Truncate } from "./Truncate.tsx";
-import { XIcon } from "./panelIcons.tsx";
+import { Icon } from "../lib/icons/registry.ts";
 
 /**
  * How many lines of somebody's own text are shown before it folds.
@@ -339,7 +339,7 @@ export function WorkDetail() {
           title={`${DETAIL.close} (Esc)`}
           aria-label={DETAIL.close}
         >
-          <XIcon size={ICON.sm} />
+          <Icon.cockpit.closeDetail size={ICON.sm} />
         </button>
       </div>
 
@@ -411,9 +411,12 @@ export function WorkDetail() {
               <button
                 type="button"
                 onClick={openTrace}
-                className="rounded-control border border-hair px-2.5 py-1 text-tiny text-ink transition-colors duration-fast hover:bg-active focus-visible:outline-none focus-visible:shadow-focusring"
+                className="inline-flex items-center gap-1.5 rounded-control border border-hair px-2.5 py-1 text-tiny text-ink transition-colors duration-fast hover:bg-active focus-visible:outline-none focus-visible:shadow-focusring"
               >
                 {DETAIL.trace}
+                {/* TRAILING, because it says where the press GOES rather than what it does — the
+                    same affordance every jump row in the palette carries. */}
+                <Icon.cockpitWork.openTrace size={ICON.badge} />
               </button>
             )}
 
@@ -428,8 +431,9 @@ export function WorkDetail() {
                   disabled={Boolean(cancelState.reason)}
                   className="rounded-control border border-hair px-2.5 py-1 text-tiny text-muted transition-colors duration-fast hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring disabled:pointer-events-none disabled:text-disabled"
                   title={`${STATUS_WORD[item.status]} — ${DESTRUCTIVE_STOP_TITLE}`}
+                  aria-label="Stop this job"
                 >
-                  Stop
+                  <Icon.cockpitWork.stop size={ICON.sm} />
                 </button>
               </DisabledReason>
             ) : (
@@ -440,8 +444,9 @@ export function WorkDetail() {
                   disabled={Boolean(retryState.reason)}
                   className="rounded-control border border-hair px-2.5 py-1 text-tiny text-muted transition-colors duration-fast hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring disabled:pointer-events-none disabled:text-disabled"
                   title="Ask the same thing again, as a new job, on whatever is live now"
+                  aria-label="Retry this work item"
                 >
-                  Retry
+                  <Icon.cockpitWork.retry size={ICON.sm} />
                 </button>
               </DisabledReason>
             )}
@@ -459,10 +464,11 @@ export function WorkDetail() {
             <button
               type="button"
               onClick={() => void navigator.clipboard?.writeText(workLink(workspaceId ?? "", item.id))}
-              className="ml-auto transition-opacity duration-fast hover:opacity-80 focus-visible:outline-none focus-visible:shadow-focusring"
               title={DETAIL.copyId}
               aria-label={DETAIL.copyId}
+              className="ml-auto inline-flex items-center gap-1 transition-opacity duration-fast hover:opacity-80 focus-visible:outline-none focus-visible:shadow-focusring"
             >
+              <Icon.cockpit.copyJobId size={ICON.badge} />
               {/* THROUGH `Chip`'s `mono` PROP RATHER THAN A LOCAL CLASS, which is where the one
                   decision about that face lives. An id IS an identifier, so mono is right here and
                   wrong four lines up. */}

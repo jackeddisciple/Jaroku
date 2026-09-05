@@ -44,6 +44,7 @@ import {
   AlertTriangleIcon, CheckIcon, GlobeIcon, KeyIcon, RocketIcon, XIcon,
 } from "./panelIcons.tsx";
 import { CheckboxField } from "./Checkbox.tsx";
+import { Icon } from "../lib/icons/registry.ts";
 
 /**
  * The stages of a deploy, in order, with the words used for each tense.
@@ -583,7 +584,8 @@ function DeployDetail({ deployment }: { deployment: Deployment }) {
 
       {buildLines.length > 0 && (
         <div className="mt-3">
-          <div className={TYPE.sectionLabel}>
+          <div className={`${TYPE.sectionLabel} flex items-center gap-1.5`}>
+            <Icon.deploy.buildLog size={ICON.xs} />
             Build output
             <span className="ml-2 font-normal normal-case tracking-normal text-faint">
               {buildLines.length} lines · already stripped of every credential this deploy sent
@@ -612,7 +614,8 @@ function DeployDetail({ deployment }: { deployment: Deployment }) {
             Cancel deploy
           </button>
         ) : running ? null : canDeploy ? (
-          <button className={quietBtn} onClick={() => select(null)}>
+          <button className={`${quietBtn} inline-flex items-center gap-1.5`} onClick={() => select(null)}>
+            <Icon.deploy.deployAnother size={ICON.xs} />
             Deploy another
           </button>
         ) : (
@@ -698,7 +701,8 @@ function RailwayTokenRow({ configured }: { configured: boolean }) {
         <span className="text-tiny text-muted">
           {configured ? "Railway connected" : "No Railway token"}
         </span>
-        <button className={`${quietBtn} ml-auto`} onClick={() => setOpen((v) => !v)}>
+        <button className={`${quietBtn} ml-auto inline-flex items-center gap-1.5`} onClick={() => setOpen((v) => !v)}>
+          <Icon.deploy.connectRailway size={ICON.xs} />
           {configured ? "Replace" : "Connect Railway"}
         </button>
         {configured && (

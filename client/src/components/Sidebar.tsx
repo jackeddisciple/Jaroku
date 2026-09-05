@@ -28,12 +28,9 @@ import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
 import { EmptyState } from "./EmptyState.tsx";
-import { ArchiveRestoreIcon, FilterIcon } from "./agentIcons.tsx";
 import { keyHint } from "../lib/modKey.ts";
-import {
-  ActivityIcon, CheckIcon, GaugeIcon, GitForkIcon, GlobeIcon, HashIcon, InboxIcon, LogOutIcon, RocketIcon,
-  LoaderIcon, PauseIcon, PencilIcon, PlusIcon, SearchIcon, SettingsIcon, SparklesIcon, XIcon,
-} from "./panelIcons.tsx";
+import { Icon, type IconComponent } from "../lib/icons/registry.ts";
+import { ActivityIcon, CheckIcon, GlobeIcon, RocketIcon, LoaderIcon, PauseIcon, SearchIcon, SparklesIcon, XIcon } from "./panelIcons.tsx";
 
 /**
  * §2's nav buttons, in the order the spec lists them.
@@ -41,12 +38,12 @@ import {
  * DATA RATHER THAN FOUR COPIES OF THE SAME MARKUP, so the badge that lands on one of them later is a
  * field here rather than a special case in one of four branches.
  */
-const NAV_DESTINATIONS: { id: NavDestination; label: string; icon: (p: { size?: number }) => React.ReactElement }[] = [
-  { id: "threads", label: "Threads", icon: HashIcon },
-  { id: "agents", label: "Agents", icon: SparklesIcon },
-  { id: "work", label: "Cockpit", icon: GaugeIcon },
-  { id: "inbox", label: "Inbox", icon: InboxIcon },
-  { id: "activity", label: "Activity", icon: ActivityIcon },
+const NAV_DESTINATIONS: { id: NavDestination; label: string; icon: IconComponent }[] = [
+  { id: "threads", label: "Threads", icon: Icon.nav.threads },
+  { id: "agents", label: "Agents", icon: Icon.nav.agents },
+  { id: "work", label: "Cockpit", icon: Icon.nav.cockpit },
+  { id: "inbox", label: "Inbox", icon: Icon.nav.inbox },
+  { id: "activity", label: "Activity", icon: Icon.nav.activity },
 ];
 
 // `archived` is the sixth, and it is a filter rather than a section for the reason §3.4 gives about
@@ -124,7 +121,7 @@ function RunRow({ run }: { run: RunSummary }) {
           <>
             <span className="absolute left-[7px] top-0 bottom-0 w-px bg-sidebar-border" aria-hidden />
             <span className="relative shrink-0 bg-inherit text-faint" title="branch">
-              <GitForkIcon size={ICON.xs} />
+              <Icon.agents.fork size={ICON.xs} />
             </span>
           </>
         )}
@@ -180,7 +177,7 @@ function AgentActions({ agent, onRename }: { agent: AgentSummary; onRename: () =
         aria-label="Restore this agent"
         className="shrink-0 rounded-control p-1 text-muted transition-colors hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink"
       >
-        <ArchiveRestoreIcon size={ICON.xs} />
+        <Icon.agents.restore size={ICON.xs} />
       </button>
     );
   }
@@ -190,9 +187,10 @@ function AgentActions({ agent, onRename }: { agent: AgentSummary; onRename: () =
       <button
         onClick={onRename}
         title="Rename (double-click the row)"
+        aria-label="Rename this agent"
         className="rounded-control p-1 text-faint transition-colors hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink"
       >
-        <PencilIcon size={ICON.xs} />
+        <Icon.agentDetail.rename size={ICON.xs} />
       </button>
       {confirming ? (
         <button
@@ -215,7 +213,7 @@ function AgentActions({ agent, onRename }: { agent: AgentSummary; onRename: () =
           title="Archive — nothing is deleted; its versions, runs and threads stay"
           className="rounded-control p-1 text-faint transition-colors hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink"
         >
-          <XIcon size={ICON.xs} />
+          <Icon.threads.archive size={ICON.xs} />
         </button>
       )}
     </span>
@@ -408,7 +406,7 @@ function NavRail() {
 
   return (
     <div className="flex w-10 shrink-0 flex-col items-center gap-0.5 py-2">
-      {NAV_DESTINATIONS.map(({ id, label, icon: Icon }) => {
+      {NAV_DESTINATIONS.map(({ id, label, icon: Mark }) => {
         const active = navSection === id;
         const badge = id === "inbox" ? waiting : id === "threads" ? needsYou : id === "work" ? waitingOnYou : 0;
         const badgeTitle =
@@ -431,7 +429,7 @@ function NavRail() {
               active ? "bg-sidebar-active text-accent" : "text-muted hover:bg-sidebar-hover hover:text-ink"
             }`}
           >
-            <Icon size={ICON.md} />
+            <Mark size={ICON.md} />
             {/* Present only when there is something to say, and `tabular-nums` so a count going
                 from 9 to 10 does not shift the glyph beside it. Neutral rather than amber on the
                 Inbox: amber means RUNNING in this palette, which is the one thing v0.2.2's
@@ -459,7 +457,7 @@ function NavRail() {
         aria-label="Provider keys"
         className="mt-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-sidebar-hover hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
       >
-        <SettingsIcon size={ICON.md} />
+        <Icon.nav.providerKeys size={ICON.md} />
       </button>
     </div>
   );
@@ -530,7 +528,7 @@ function AccountRow() {
         aria-label="Sign out"
         className="shrink-0 rounded-control p-1.5 text-faint transition-colors hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
       >
-        <LogOutIcon size={ICON.sm} />
+        <Icon.auth.signOut size={ICON.sm} />
       </button>
       </div>
       {/* RENDERED ONLY FOR AN ADMIN, and `AdminModeToggle` itself returns null otherwise — so for
@@ -706,7 +704,7 @@ function FilterMenu({
           filtering || open ? "bg-sidebar-active text-accent" : "text-muted hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink"
         }`}
       >
-        <FilterIcon size={ICON.sm} />
+        <Icon.agents.filter size={ICON.sm} />
         {filtering && current?.count != null && (
           <span className="text-tiny tabular-nums">{current.count}</span>
         )}
@@ -842,7 +840,7 @@ export function Sidebar() {
             doing yet. Open it and it takes the row; leave it empty and it gives the row back. */}
         {searching ? (
           <div className="flex min-w-0 flex-1 items-center gap-2 rounded-control bg-sidebar-active px-2 py-0.5">
-            <span className="shrink-0 text-faint"><SearchIcon size={ICON.xs} /></span>
+            <span className="shrink-0 text-faint"><Icon.agents.search size={ICON.xs} /></span>
             <input
               autoFocus
               value={query}
@@ -861,7 +859,7 @@ export function Sidebar() {
                 aria-label="Clear search"
                 className="shrink-0 text-faint transition-colors hover:text-ink"
               >
-                <XIcon size={ICON.xs} />
+                <Icon.global.clearSearch size={ICON.xs} />
               </button>
             )}
           </div>
@@ -875,7 +873,7 @@ export function Sidebar() {
             aria-label="Search agents"
             className="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
           >
-            <SearchIcon size={ICON.sm} />
+            <Icon.agents.search size={ICON.sm} />
           </button>
         )}
         <FilterMenu filter={filter} setFilter={setFilter} counts={counts} />
@@ -887,7 +885,7 @@ export function Sidebar() {
             activeAgentId === null ? "bg-sidebar-active text-accent" : "text-muted hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink"
           }`}
         >
-          <PlusIcon size={ICON.sm} />
+          <Icon.agents.new size={ICON.sm} />
         </button>
       </div>
 

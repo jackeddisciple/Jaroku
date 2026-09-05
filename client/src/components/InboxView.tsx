@@ -58,9 +58,9 @@ import { useInboxDrag } from "./useInboxDrag.ts";
 import { selectOnClick, useInboxKeys } from "./useInboxKeys.ts";
 import { InboxUndoToast } from "./InboxUndoToast.tsx";
 import { sendSnoozeInboxItem } from "../lib/socket.ts";
-import { ClockIcon, InboxIcon, RefreshIcon } from "./panelIcons.tsx";
-import { AlertIcon, PersonIcon, ShieldIcon, SparkIcon } from "./inboxIcons.tsx";
+import { PersonIcon } from "./inboxIcons.tsx";
 import type { InboxItemView, InboxSeverity } from "../types.ts";
+import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 
 /**
  * §5.3's zero state. "Celebrate it. Do not apologise for it, do not offer suggestions, do not fill
@@ -130,7 +130,7 @@ function LeftRail({
         // because a disabled control invites somebody to work out how to enable it.
         if (f === "team" && !team) return null;
         const active = filter === f;
-        const Icon = FILTER_ICON[f];
+        const Mark = FILTER_ICON[f];
         return (
           <button
             key={f}
@@ -142,7 +142,7 @@ function LeftRail({
               active ? "bg-active text-accent" : "text-muted hover:bg-active/40 hover:text-ink"
             }`}
           >
-            <Icon size={ICON.md} />
+            <Mark size={ICON.md} />
             {/* A ZERO RENDERS NOTHING, matching the empty-sections discipline the whole app follows:
                 a count of 0 beside a chip is noise, and the chip staying in place is what keeps the
                 keyboard's 1–6 a stable address. */}
@@ -193,13 +193,20 @@ function LeftRail({
  * `snoozed` is a clock. Each one is the glyph a card of that kind already wears, which is what
  * makes the rail readable without its labels.
  */
-const FILTER_ICON: Record<InboxFilter, (p: { size?: number }) => React.ReactElement> = {
-  all: InboxIcon,
-  blocking: AlertIcon,
-  attention: ShieldIcon,
-  proposals: SparkIcon,
+const FILTER_ICON: Record<InboxFilter, IconComponent> = {
+  all: Icon.inbox.laneInbox,
+  blocking: Icon.inbox.laneAlerts,
+  // The permissions lane. `circle-lock-add-02` rather than the shield this wore before: what
+  // collects here is a request to GRANT something, and a lock with a plus says that where a shield
+  // says only that a policy exists.
+  attention: Icon.inbox.lanePermissions,
+  proposals: Icon.inbox.laneProposals,
+  // NO REGISTRY ENTRY, ON PURPOSE. §5 names five lanes and this is the sixth — it does not exist
+  // in a Personal workspace, so the capture the specification was drawn from could not have seen
+  // it. Inventing a key for it here would be adding to the specification rather than implementing
+  // it, so it keeps the mark it already had, drawn through the same factory at the same weight.
   team: PersonIcon,
-  snoozed: ClockIcon,
+  snoozed: Icon.inbox.laneSnoozed,
 };
 
 /** One column: a header that carries its own count, and its cards. */
@@ -473,7 +480,7 @@ export function InboxView() {
           className="ml-auto rounded-control p-1.5 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink disabled:pointer-events-none disabled:opacity-40"
           title="Ask for the board again"
         >
-          <RefreshIcon size={ICON.xs} />
+          <Icon.inbox.refresh size={ICON.xs} />
         </button>
       </div>
 

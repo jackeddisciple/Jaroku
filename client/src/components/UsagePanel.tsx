@@ -28,9 +28,9 @@ import { distinctSub } from "../lib/rowFacts.ts";
 import { useCanReach, useCanRun } from "../lib/useCapability.ts";
 import { startCheckout } from "../lib/workspaceApi.ts";
 import { fmtCost, fmtTokens } from "../lib/format.ts";
+import { Icon } from "../lib/icons/registry.ts";
 import { ICON, STATUS, TEXT } from "../lib/tokens.ts";
 import { EmptyState, LoadingLine } from "./EmptyState.tsx";
-import { ExportIcon } from "./activityIcons.tsx";
 import { iconBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { download, usageStem, usageToCsv } from "../lib/evalExport.ts";
 import {
@@ -454,7 +454,7 @@ export function UsagePanel() {
             aria-label="Export CSV"
             onClick={() => download(`${usageStem(usage)}.csv`, usageToCsv(usage), "text/csv")}
           >
-            <ExportIcon size={ICON.sm} />
+            <Icon.usage.exportCsv size={ICON.sm} />
           </button>
         </div>
       </div>

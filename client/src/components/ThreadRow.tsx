@@ -38,7 +38,8 @@ import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { ICON } from "../lib/tokens.ts";
 import { AlertTriangleIcon } from "./panelIcons.tsx";
-import { ArchiveIcon, ArchiveRestoreIcon } from "./agentIcons.tsx";
+import { ArchiveIcon } from "./agentIcons.tsx";
+import { Icon } from "../lib/icons/registry.ts";
 
 /**
  * Who opened the thread, in a Team workspace only (§4.3).
@@ -388,7 +389,7 @@ export function ThreadRow({
               aria-label="Restore this thread"
               className="inline-flex items-center gap-1 rounded-control p-1 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink disabled:pointer-events-none disabled:opacity-40"
             >
-              <ArchiveRestoreIcon size={ICON.xs} />
+              <Icon.threads.restore size={ICON.xs} />
               <kbd className="text-tiny leading-none text-faint">E</kbd>
             </button>
           )}

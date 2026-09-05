@@ -18,8 +18,9 @@ import { ICON } from "../lib/tokens.ts";
 import { Truncate } from "./Truncate.tsx";
 import { TYPE } from "../lib/tokens.ts";
 import { Chip } from "./Chip.tsx";
-import { ChevronRightIcon } from "./panelIcons.tsx";
 import type { EvalResults, ExampleCell } from "../types.ts";
+import { Icon } from "../lib/icons/registry.ts";
+import { IconButton } from "./IconButton.tsx";
 
 /** Compact score chip. Distinguishes scored / unscored / failed — three different things. */
 function ScoreChip({ cell, active, onClick }: { cell: ExampleCell; active: boolean; onClick: () => void }) {
@@ -57,7 +58,23 @@ function ScoreChip({ cell, active, onClick }: { cell: ExampleCell; active: boole
 }
 
 /** Everything known about one (example, provider) pair. */
-function CellDetail({ cell, criteria }: { cell: ExampleCell; criteria: string[] }) {
+function CellDetail({
+  cell,
+  criteria,
+  onStep,
+}: {
+  cell: ExampleCell;
+  criteria: string[];
+  /**
+   * Move to the neighbouring response for this example, or null at either end.
+   *
+   * §5 NAMES THESE TWO AND THERE WAS NOWHERE TO PUT THEM, which is the finding rather than the
+   * omission: comparing four models' answers to one input meant scrolling back up to the chip row
+   * and picking the next one, so the reading you actually want — this answer, then that one, same
+   * question — cost a round trip through the control that opened it.
+   */
+  onStep: (delta: -1 | 1) => void;
+}) {
   const setRightTab = useUiStore((s) => s.setRightTab);
   const selectRun = useTraceStore((s) => s.selectRun);
 
@@ -73,6 +90,20 @@ function CellDetail({ cell, criteria }: { cell: ExampleCell; criteria: string[] 
   return (
     <div className="mt-2 ml-6 space-y-2 border-l border-hair pl-3">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-tiny">
+        <span className="flex items-center" role="group" aria-label="Step through this example's responses">
+          <IconButton
+            icon={Icon.evals.prevResponse}
+            label="Previous response"
+            size={ICON.xs}
+            onClick={() => onStep(-1)}
+          />
+          <IconButton
+            icon={Icon.evals.nextResponse}
+            label="Next response"
+            size={ICON.xs}
+            onClick={() => onStep(1)}
+          />
+        </span>
         <span className="text-ink">{cell.model}</span>
         <span className={cell.status === "succeeded" ? "text-muted" : "text-err"}>{cell.status}</span>
         {/* The floor marker, where the number is. `cost_complete` has ridden the per-leg rollup
@@ -97,7 +128,7 @@ function CellDetail({ cell, criteria }: { cell: ExampleCell; criteria: string[] 
             className="ml-auto inline-flex items-center gap-1 text-faint transition-colors duration-fast hover:text-ink"
           >
             Open trace
-            <ChevronRightIcon size={ICON.xs} />
+            <Icon.cockpitWork.openTrace size={ICON.xs} />
           </button>
         )}
       </div>
@@ -170,7 +201,19 @@ export function ExampleDrillDown({ results }: { results: EvalResults }) {
                       />
                     ))}
                   </div>
-                  {open && <CellDetail cell={open} criteria={criteria} />}
+                  {open && (
+                    <CellDetail
+                      cell={open}
+                      criteria={criteria}
+                      onStep={(delta) => {
+                        // WRAPS, because a row is a ring of two to four answers to one question
+                        // and stopping at the end would make the last one a dead end.
+                        const at = row.cells.findIndex((c) => c.jobId === open.jobId);
+                        const next = row.cells[(at + delta + row.cells.length) % row.cells.length];
+                        if (next) setOpenCell(next.jobId);
+                      }}
+                    />
+                  )}
                 </div>
               </div>
             </div>

@@ -16,9 +16,25 @@
 // resolving your work.
 
 import { FILTER_LABEL, THREAD_FILTERS, type ThreadFilter } from "../lib/threadFilter.ts";
+import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { ICON } from "../lib/tokens.ts";
 import type { ThreadCounts } from "../types.ts";
-import { SearchIcon, XIcon } from "./panelIcons.tsx";
+
+/**
+ * §6's mark per chip.
+ *
+ * `running` IS DRAWN STATIC AND MUST STAY THAT WAY — decision D5. `LoaderCircleIcon` reads as a
+ * spinner, and in a row of five filters a chip that appears to be spinning says the filter is
+ * loading rather than that it selects running threads. Nothing animates it, and the amber dot on
+ * the rows below is what actually reports liveness.
+ */
+const CHIP_MARK: Record<ThreadFilter, IconComponent> = {
+  all: Icon.threadsFilter.all,
+  needs_you: Icon.threadsFilter.needsYou,
+  running: Icon.threadsFilter.running,
+  recent: Icon.threadsFilter.recent,
+  archived: Icon.threadsFilter.archived,
+};
 
 export function ThreadFilterBar({
   filter,
@@ -39,7 +55,7 @@ export function ThreadFilterBar({
   return (
     <div className="shrink-0 border-b border-hair px-5 py-2">
       <div className="flex items-center gap-2 rounded-control bg-active px-2.5 py-1.5">
-        <span className="shrink-0 text-faint"><SearchIcon size={ICON.xs} /></span>
+        <span className="shrink-0 text-faint"><Icon.agents.search size={ICON.xs} /></span>
         {/* A PLACEHOLDER IS NOT AN ACCESSIBLE NAME, and it is the one thing that disappears the
             moment somebody starts typing — so a screen-reader user arrived at an unnamed text
             field, and arrived at it again with a value in it and still nothing saying what the
@@ -59,7 +75,7 @@ export function ThreadFilterBar({
             title="Clear the filter"
             className="shrink-0 text-faint transition-colors hover:text-ink"
           >
-            <XIcon size={ICON.xs} />
+            <Icon.global.clearFilter size={ICON.xs} />
           </button>
         )}
       </div>
@@ -68,6 +84,7 @@ export function ThreadFilterBar({
         {THREAD_FILTERS.map((id) => {
           const count = counts[id];
           const active = filter === id;
+          const Mark = CHIP_MARK[id];
           return (
             <button
               key={id}
@@ -82,10 +99,13 @@ export function ThreadFilterBar({
               // Dimmed at zero rather than disabled: clicking "Archived 0" is a legitimate thing to do
               // — it answers "have I archived anything" — and the empty state that follows says so.
               // A disabled chip would refuse a question it could perfectly well answer.
-              className={`rounded-control px-2 py-1 text-tiny transition-colors ${
+              className={`inline-flex items-center gap-1 rounded-control px-2 py-1 text-tiny transition-colors ${
                 active ? "bg-active text-ink" : count === 0 ? "text-faint hover:text-muted" : "text-muted hover:text-ink"
               }`}
             >
+              {/* Icon + text, not icon only. These five are a set the reader compares, and a row
+                  of five bare marks is five tooltips to open before the first choice. */}
+              <Mark size={ICON.badge} />
               {FILTER_LABEL[id]}
               {/* The count is always in the DOM, even at zero, so a chip never changes width when its
                   number arrives — which is what stops the row reflowing under the cursor. */}

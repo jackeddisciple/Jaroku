@@ -1,117 +1,43 @@
-// The icon registry — the single import surface for every glyph the composer and the turn
-// interaction rows draw.
+// The composer's size ladder, its hit target, and the one renderer for a mark chosen at runtime.
 //
-// WHY A REGISTRY AND NOT TWENTY IMPORTS. Hugeicons numbers its glyph families (`Copy01Icon`,
-// `Send02Icon`, `Mic02Icon`) and the numbering moves between releases: a name that resolves today
-// resolves to `undefined` after an upgrade, and an `undefined` icon does not throw — it renders
-// nothing. Twenty ad-hoc imports means twenty places to discover that, one blank 20px square at a
-// time. One registry means the upgrade breaks in a single file, and every rename is fixed where it
-// is declared rather than where it is used. Nothing outside this file imports from
-// `@hugeicons/core-free-icons`, and that rule is the whole value of the file.
+// WHAT THIS FILE USED TO BE, AND WHY IT IS NOT THAT ANY MORE. It was a second icon registry: a
+// table of twenty tokens mapping to `@hugeicons/core-free-icons` payloads, drawn by
+// `@hugeicons/react` at its own stroke weight of 1.5. It existed for a good reason — one place to
+// fix a renamed export — and it was correct about that. It was just the second such place.
 //
-// THE NAMES WERE VERIFIED AGAINST THE INSTALLED PACKAGE (4.3.0), not against the icon site. The
-// site's slug (`ai-brain-02`) and the package's export (`AiBrain02Icon`) agree today and are not
-// guaranteed to; the package is the thing that ships.
+// `lib/icons/registry.ts` is now the first and only one, and this file's table moved into it
+// wholesale: `Icon.Add` is `Icon.composer.attach`, `Icon.ThumbDown` is `Icon.turn.thumbDown`, and
+// so on for all twenty. Two registries with two spellings of the same twenty jobs is exactly the
+// arrangement icons_integration §0 says this product has already refused twice.
 //
-// AND THE URLS ARE NOT HERE ON PURPOSE. The spec lists a hugeicons.com link per token as a design
-// reference for confirming a shape. They are a reference, never a runtime: this file imports from
-// the npm package so tree-shaking works and an offline desktop build still draws its icons. A
-// hotlinked SVG would be a network dependency in the composer's control bar, which is the one row
-// in the product that has to be there before anything else is.
+// TWO THINGS WENT WITH IT, AND BOTH WERE DELIBERATE DECISIONS REVERSED ON PURPOSE:
 //
-// `.ts` RATHER THAN `.tsx`, which is not an accident either. What a registry maps is data — an
-// `IconSvgElement` is an array of path tuples — and keeping the file free of JSX is what stops it
-// from slowly acquiring the components that consume it. The one renderer here is built with
-// `createElement` for that reason, and it is deliberately the only thing in the file that is not a
-// table.
+//   THE RUNTIME DEPENDENCY. `@hugeicons/react` walked an array of path tuples on every render,
+//   which made the icon set a runtime dependency of the composer's control bar — the one row that
+//   has to be on screen before anything else is. The marks are committed inline SVG now, written
+//   by `scripts/gen-icons.mjs` at authoring time, and the package is a devDependency. I2.
+//
+//   THE SECOND STROKE WEIGHT. `GLYPH.strokeWidth` was 1.5 and this file argued, at length and not
+//   unreasonably, that a Hugeicons mark at 1.75 sits heavier than the Lucide chrome around it. The
+//   argument was sound and the consequence was not: the composer drew at 1.5 while everything
+//   touching it drew at 1.75, so the seven controls in that bar were a different weight from the
+//   panel they sit in. One weight, from `ICON.strokeWidth`, applied by the one factory in
+//   `panelIcons.tsx`. I1. If that weight is ever wrong it is now wrong everywhere at once, which
+//   is the property worth having.
+//
+// THE SIZE LADDER STAYED. Sizes are not weights: `toolbar` is 20 and `action` is 16 because of what
+// those rows are for, and that reasoning survives the families merging. It is here rather than in
+// `lib/tokens.ts`'s `ICON` because these five steps describe the composer and the turn rows
+// specifically, and `ICON`'s four describe text-adjacent chrome.
 
 import { createElement } from "react";
-import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  AddCircleIcon,
-  AiBrain02Icon,
-  BracesIcon,
-  ConnectIcon,
-  CopyIcon,
-  DatabaseImportIcon,
-  FileAddIcon,
-  FlowConnectionIcon,
-  FullScreenIcon,
-  GithubIcon,
-  HourglassIcon,
-  Mic02Icon,
-  Note02Icon,
-  PinIcon,
-  ReloadIcon,
-  RepairIcon,
-  SendIcon,
-  ShieldEnergyIcon,
-  ThumbsDownIcon,
-  ThumbsUpIcon,
-} from "@hugeicons/core-free-icons";
 
-/**
- * Every glyph, by the job it does rather than by the shape it is.
- *
- * The key side of this table is the part that must not change: a component asks for
- * `Icon.Regenerate` because it is regenerating something, and if a later release decides the
- * better shape for that is `Refresh02Icon`, the swap happens on the right-hand side and no caller
- * is touched. Naming these `Icon.Reload` — after the glyph — would have thrown that away and made
- * the registry a second spelling of the import list.
- */
-export const Icon = {
-  // --- composer control bar -------------------------------------------------------------------
-  /** ⊕ — attach context to this turn. */
-  Add: AddCircleIcon,
-  /** ⛶ — expand the composer into the modal editor. */
-  Fullscreen: FullScreenIcon,
-  /** Reasoning effort, in the control bar and again in the metadata row that reports it. */
-  Effort: AiBrain02Icon,
-  /** The permission shield — a policy control, never a tool-execution one. */
-  Shield: ShieldEnergyIcon,
-  /** The connector deck's affordance, beside the stacked logos. */
-  Connect: ConnectIcon,
-  /** Voice input. Already in the composer; re-pointed here so one file owns the shape. */
-  Mic: Mic02Icon,
-  /** Submit. Same note as the mic. */
-  Send: SendIcon,
-
-  // --- the ⊕ menu's five sources --------------------------------------------------------------
-  AttachFile: FileAddIcon,
-  AttachRun: RepairIcon,
-  AttachDataset: DatabaseImportIcon,
-  AttachTool: FlowConnectionIcon,
-  Github: GithubIcon,
-
-  // --- the message action row -----------------------------------------------------------------
-  Copy: CopyIcon,
-  Note: Note02Icon,
-  Pin: PinIcon,
-  Regenerate: ReloadIcon,
-  ThumbUp: ThumbsUpIcon,
-  ThumbDown: ThumbsDownIcon,
-
-  // --- the response metadata row --------------------------------------------------------------
-  /** { } — this turn produced a version. */
-  Build: BracesIcon,
-  /** Wall-clock from dispatch to stream completion. */
-  Duration: HourglassIcon,
-} as const;
-
-export type IconToken = keyof typeof Icon;
+import type { IconComponent } from "../lib/icons/registry.ts";
 
 /**
  * The size ladder, by context.
  *
- * DELIBERATELY NOT `lib/tokens.ts`'s `ICON`. That ladder is 10/12/14/16 at stroke 1.75 and it
- * describes Lucide geometry drawn on a 24px grid — the family the rest of the client uses. These
- * are Hugeicons at stroke 1.5 on their own grid, and the two do not read the same at the same
- * nominal number: a Hugeicons glyph at 16 sits lighter than a Lucide one at 16, which is why the
- * composer's controls are 20 and the action row's are 16 rather than both being `ICON.md`.
- *
- * Merging the two ladders would mean one of the two families rendering at a size chosen for the
- * other, everywhere. Keeping them apart is what lets a Hugeicons control sit in a row of Lucide
- * chrome without either looking wrong.
+ * Sizes only. The stroke weight is `ICON.strokeWidth`, for every mark in the app — see the header.
  */
 export const GLYPH = {
   /** The composer's bottom control bar. */
@@ -124,12 +50,6 @@ export const GLYPH = {
   menu: 18,
   /** The glyph of an empty state. */
   empty: 32,
-  /**
-   * Stroke 1.5, and it is the package's own default weight for Stroke Rounded — the only style
-   * the free package ships, which is also the style the design asked for. Passing it explicitly
-   * rather than relying on the default is what makes it a decision somebody can find.
-   */
-  strokeWidth: 1.5,
 } as const;
 
 /**
@@ -138,15 +58,23 @@ export const GLYPH = {
  * Thirty-two. A 20px glyph in a 20px button is a control you miss on a trackpad and cannot hit at
  * all on a touch screen, and the composer's bar is seven of them in a row — the place where a
  * near-miss costs the most, because the neighbour you hit instead is a different setting.
+ *
+ * `IconButton` enforces it for every icon-only control in the product; the composer's own buttons
+ * apply it directly because several of them carry a caret or a value beside the mark.
  */
 export const HIT_TARGET = 32;
 
 /**
- * Draw one registry glyph.
+ * Draw a mark the caller picked at runtime.
  *
- * `color="currentColor"` is not a default anybody may override at a call site, and that is the
- * point: the button's text colour drives the icon, so hover, active and disabled states come free
- * from the classes already on the button. Every icon in this app that hardcoded its own colour
+ * FOR DYNAMIC MARKS ONLY — `ICON_FOR[attachment.kind]`, a pin's kind, a source row's icon. A mark
+ * known at authoring time is written as itself: `<Icon.turn.copy size={GLYPH.action} />`, which is
+ * a component, because everything in the registry is one. This helper exists because JSX needs a
+ * capitalised binding and `<ICON_FOR[a.kind] />` is not valid syntax.
+ *
+ * It is NOT a second icon path: it renders whatever registry component it is handed and decides
+ * nothing. Colour comes from the button's text colour through `currentColor`, which is what makes
+ * hover, active and disabled states free — every icon in this app that hardcoded its own colour
  * ended up with a disabled state that stayed bright.
  */
 export function Glyph({
@@ -154,19 +82,9 @@ export function Glyph({
   size = GLYPH.action,
   className,
 }: {
-  icon: (typeof Icon)[IconToken];
+  icon: IconComponent;
   size?: number;
   className?: string;
 }) {
-  return createElement(HugeiconsIcon, {
-    icon,
-    size,
-    strokeWidth: GLYPH.strokeWidth,
-    color: "currentColor",
-    className,
-    // Decorative by default. An icon-only control carries its name on the BUTTON as an
-    // `aria-label` — §10's rule — and a glyph that also announced itself would say the same word
-    // twice to a screen reader.
-    "aria-hidden": true,
-  });
+  return createElement(icon, { size, className });
 }

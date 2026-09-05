@@ -35,15 +35,13 @@ import { acceptInvite, createWorkspace, storedToken } from "../lib/auth.ts";
 import { switchWorkspace } from "../lib/socket.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
+import { Icon } from "../lib/icons/registry.ts";
 import { ICON } from "../lib/tokens.ts";
 import { inviteTokenFromInput } from "../lib/invite.ts";
 import { orderWorkspaces, roleLabel, shouldScroll } from "../lib/workspaceList.ts";
 import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
-import {
-  AlertTriangleIcon, CheckIcon, ChevronDownIcon, PlusIcon, SettingsIcon, TicketIcon, UserIcon,
-  UsersIcon, XIcon,
-} from "./panelIcons.tsx";
+import { AlertTriangleIcon, CheckIcon, TicketIcon, UserIcon, UsersIcon } from "./panelIcons.tsx";
 
 /**
  * §3.2's two options, in §3.2's own words.
@@ -445,7 +443,9 @@ export function WorkspaceSwitcher() {
         {current?.plan?.label && (
           <Chip caps size="sm" tone="faint" className="shrink-0">{current.plan.label}</Chip>
         )}
-        <span className="shrink-0 text-faint" aria-hidden><ChevronDownIcon size={ICON.xs} /></span>
+        <span className="shrink-0 text-faint" aria-hidden>
+            {open ? <Icon.workspace.switcherOpen size={ICON.xs} /> : <Icon.workspace.switcherClosed size={ICON.xs} />}
+          </span>
       </button>
 
       {/* §5.2 — "show an error inline in the switcher and revert to the previous workspace".
@@ -464,7 +464,7 @@ export function WorkspaceSwitcher() {
             aria-label="Dismiss"
             className="shrink-0 text-faint transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
           >
-            <XIcon size={ICON.xs} />
+            <Icon.global.dismissNotice size={ICON.xs} />
           </button>
         </div>
       )}
@@ -538,7 +538,7 @@ export function WorkspaceSwitcher() {
             // all destinations, and filled buttons there would read as the menu's primary actions
             // rather than as the things you do when none of the rows above is what you wanted.
             <div className="border-t border-hair">
-              <MenuRow icon={PlusIcon} label="Create workspace" onClick={() => setCreating(true)} />
+              <MenuRow icon={Icon.workspace.newWorkspace} label="Create workspace" onClick={() => setCreating(true)} />
               <MenuRow icon={TicketIcon} label="Join workspace" onClick={() => setJoining(true)} />
               {/* SETTINGS FOR THE ACTIVE WORKSPACE — §6.1 and §10.1's entry point, on the row
                   group rather than on the active workspace's own row. A gear inside a row whose
@@ -547,7 +547,7 @@ export function WorkspaceSwitcher() {
                   in: the panel reads members, invitations, billing and the audit log over THIS
                   socket, and there is no socket in the others. */}
               <MenuRow
-                icon={SettingsIcon}
+                icon={Icon.workspace.settings}
                 label={`${current?.name ?? "Workspace"} settings`}
                 onClick={() => {
                   setOpen(false);

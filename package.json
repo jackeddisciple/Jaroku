@@ -1,7 +1,7 @@
 {
   "name": "jaroku-desktop",
   "private": true,
-  "version": "0.3.11",
+  "version": "0.3.12",
   "type": "module",
   "description": "The desktop wrapper's scripts. Jaroku itself is server/ and client/, and both still run on their own — see docs/tauri.md.",
   "scripts": {

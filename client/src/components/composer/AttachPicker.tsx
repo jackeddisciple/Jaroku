@@ -24,7 +24,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Command } from "cmdk";
 import { apiRequest } from "../../lib/http.ts";
-import { Glyph, Icon, GLYPH } from "../icons.ts";
+import { Glyph, GLYPH } from "../icons.ts";
+import { Icon, type IconComponent } from "../../lib/icons/registry.ts";
 import { Truncate } from "../Truncate.tsx";
 import { fmtTokens } from "../../lib/format.ts";
 
@@ -45,15 +46,15 @@ export const SOURCES: {
   kind: AttachKind;
   label: string;
   hint: string;
-  icon: (typeof Icon)[keyof typeof Icon];
+  icon: IconComponent;
   multi: boolean;
   placeholder: string;
 }[] = [
-  { kind: "file", label: "File", hint: "any project file", icon: Icon.AttachFile, multi: true, placeholder: "Find a file…" },
-  { kind: "run", label: "Run", hint: "a past trace", icon: Icon.AttachRun, multi: false, placeholder: "Find a run…" },
-  { kind: "dataset_case", label: "Dataset", hint: "an eval case", icon: Icon.AttachDataset, multi: true, placeholder: "Find a case…" },
-  { kind: "tool_schema", label: "Tool schema", hint: "connector/MCP tool", icon: Icon.AttachTool, multi: true, placeholder: "Find a tool…" },
-  { kind: "github", label: "GitHub", hint: "commit, PR, file", icon: Icon.Github, multi: false, placeholder: "Find a commit or PR…" },
+  { kind: "file", label: "File", hint: "any project file", icon: Icon.attach.file, multi: true, placeholder: "Find a file…" },
+  { kind: "run", label: "Run", hint: "a past trace", icon: Icon.attach.run, multi: false, placeholder: "Find a run…" },
+  { kind: "dataset_case", label: "Dataset", hint: "an eval case", icon: Icon.attach.dataset, multi: true, placeholder: "Find a case…" },
+  { kind: "tool_schema", label: "Tool schema", hint: "connector/MCP tool", icon: Icon.attach.tool, multi: true, placeholder: "Find a tool…" },
+  { kind: "github", label: "GitHub", hint: "commit, PR, file", icon: Icon.attach.github, multi: false, placeholder: "Find a commit or PR…" },
 ];
 
 /** A stable identity for a row, so a selection survives a re-fetch. Key order must not matter. */

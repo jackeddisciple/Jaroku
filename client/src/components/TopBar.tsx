@@ -26,7 +26,8 @@ import { BRAND, ICON, TYPE } from "../lib/tokens.ts";
 
 import { Truncate } from "./Truncate.tsx";
 import { Chip } from "./Chip.tsx";
-import { GitBranchIcon, GithubIcon, KeyIcon, StopIcon } from "./panelIcons.tsx";
+import { GitBranchIcon, KeyIcon } from "./panelIcons.tsx";
+import { Icon } from "../lib/icons/registry.ts";
 import { useGithubStore } from "../store/githubStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useEvalStore } from "../store/evalStore.ts";
@@ -100,7 +101,15 @@ function ProviderMenu({ provider, model }: { provider: string; model: string }) 
     <div ref={ref} className="relative">
       <button type="button" onClick={() => setOpen(!open)} title="Provider keys">
         {/* provider chip — brand color only because it's the chosen provider */}
-        <Chip size="lg" tone="ink" selected={open} icon={<ProviderMark provider={provider} />}>
+        <Chip
+          size="lg"
+          tone="ink"
+          selected={open}
+          // §6: the dry run is a destination in its own right, not a provider without a logo. It
+          // drew through `BRAND_COLOR.fake`, which is the muted grey — so the one option that is
+          // free read as the one option that was broken.
+          icon={provider === "fake" ? <Icon.topbar.dryRun size={ICON.badge} /> : <ProviderMark provider={provider} />}
+        >
           {providerLabelOf(models, provider)}
           {/* A model id is an identifier; the provider's name is prose. */}
           {provider !== "fake" && <span className="text-faint">{model}</span>}
@@ -214,7 +223,7 @@ function GithubChip({ agentId }: { agentId: string }) {
       size="sm"
       tone="faint"
       variant="bare"
-      icon={<GithubIcon size={ICON.badge} />}
+      icon={<Icon.panel.github size={ICON.badge} />}
       onClick={openGithubBranches}
       title={`${view.link.repo_full_name} · ${view.link.branch} — open the branch switcher`}
       className="max-w-[320px]"
@@ -403,7 +412,7 @@ export function TopBar() {
             className={`${iconBtn} text-err hover:text-err`}
             onClick={() => sendCancelDeploy(inFlight.id)}
           >
-            <StopIcon size={ICON.sm} />
+            <Icon.deploy.cancel size={ICON.sm} />
           </button>
         ) : (
           /* OUTLINE, NOT FILLED. This was pure #e4e4e7 on a near-black page, top right, present
@@ -422,6 +431,7 @@ export function TopBar() {
             disabled={!agent}
             onClick={() => setRightTab("deploy")}
           >
+            <Icon.topbar.deploy size={ICON.sm} />
             Deploy
           </button>
         )}

@@ -17,7 +17,9 @@
 // So the state only advances once the write resolves.
 
 import { useEffect, useRef, useState } from "react";
-import { GLYPH, HIT_TARGET, Glyph, Icon } from "../icons.ts";
+import { GLYPH, HIT_TARGET, Glyph } from "../icons.ts";
+import { CheckIcon } from "../panelIcons.tsx";
+import { Icon } from "../../lib/icons/registry.ts";
 
 /** §5.1: "Icon swaps to a check for 1.2s". */
 const CHECK_MS = 1200;
@@ -66,18 +68,15 @@ export function CopyTurn({
         style={{ minWidth: HIT_TARGET, minHeight: HIT_TARGET }}
       >
         {copied ? (
-          // Drawn here rather than pulled from the registry: the registry is §2.1's table and a
-          // check is not on it. One inline path is cheaper than a twenty-first token that exists
-          // to serve one transient state.
-          <svg
-            width={GLYPH.action} height={GLYPH.action} viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" strokeWidth={GLYPH.strokeWidth} strokeLinecap="round"
-            strokeLinejoin="round" className="align-middle" aria-hidden
-          >
-            <path d="M20 6 9 17l-5-5" />
-          </svg>
+          // THE ONE HAND-WRITTEN <svg> LEFT IN THIS FILE, AND IT IS GONE. It drew its own path at
+          // its own `strokeWidth`, which made a transient success state the only mark in the app
+          // that did not come from the factory — so it was also the only one that would not have
+          // moved when the token did. `CheckIcon` is the same shape through the same factory, and
+          // it stays out of the registry for the reason the old comment gave: a check is not one
+          // of the jobs §5 and §6 name, it is the copy control wearing a moment of feedback.
+          <CheckIcon size={GLYPH.action} />
         ) : (
-          <Glyph icon={Icon.Copy} size={GLYPH.action} />
+          <Glyph icon={Icon.turn.copy} size={GLYPH.action} />
         )}
       </button>
       {/* §10: "Live region announces stream start/finish and 'copied'." The visible check is a

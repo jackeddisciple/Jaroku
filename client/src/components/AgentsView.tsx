@@ -18,8 +18,8 @@ import { AgentCard } from "./AgentCard.tsx";
 import { Chip } from "./Chip.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import { useAgentKeys } from "./useAgentKeys.ts";
-import { FilterIcon, GridIcon, RowsIcon, ICON as AGENT_ICON } from "./agentIcons.tsx";
-import { PlusIcon, RefreshIcon, SearchIcon, SparklesIcon, XIcon } from "./panelIcons.tsx";
+import { ICON as AGENT_ICON } from "./agentIcons.tsx";
+import { SearchIcon, SparklesIcon } from "./panelIcons.tsx";
 import { Select } from "./Select.tsx";
 import { Truncate } from "./Truncate.tsx";
 import {
@@ -32,6 +32,7 @@ import {
   sendArchiveAgent, sendForkAgent, sendListAgentGrid, sendLoadAgentVersion, sendRenameAgent,
   sendRestoreAgent,
 } from "../lib/socket.ts";
+import { Icon } from "../lib/icons/registry.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { useAgentGridStore } from "../store/agentGridStore.ts";
 import { useMemberStore } from "../store/memberStore.ts";
@@ -135,7 +136,7 @@ function FilterMenu({
           active > 0 ? "bg-active text-ink" : "text-muted hover:bg-active active:bg-chrome hover:text-ink"
         }`}
       >
-        <FilterIcon size={ICON.sm} />
+        <Icon.agents.filterGrid size={ICON.sm} />
         {active > 0 && <span className="tabular-nums text-tiny">{active}</span>}
       </button>
       {open && (
@@ -353,7 +354,7 @@ export function AgentsView() {
 
         {/* Live filter over display_name and slug. `/` focuses it — see useAgentKeys. */}
         <div className="ml-2 flex min-w-[180px] flex-1 items-center gap-2 rounded-control border border-hair bg-panel px-2 py-1 focus-within:border-edge">
-          <SearchIcon size={ICON.xs} className="shrink-0 text-faint" />
+          <Icon.agents.searchGrid size={ICON.xs} className="shrink-0 text-faint" />
           <input
             ref={searchInput}
             value={filters.query}
@@ -373,7 +374,7 @@ export function AgentsView() {
               aria-label="Clear the search"
               className="shrink-0 text-faint transition-colors hover:text-ink"
             >
-              <XIcon size={ICON.xs} />
+              <Icon.global.clearSearch size={ICON.xs} />
             </button>
           )}
         </div>
@@ -403,10 +404,10 @@ export function AgentsView() {
         <div className="flex shrink-0 items-center rounded-control border border-hair">
           {(
             [
-              ["comfortable", GridIcon, "Comfortable — three per row, with the current work"],
-              ["compact", RowsIcon, "Compact — more per row, shorter cards"],
+              ["comfortable", Icon.agents.viewGrid, "Comfortable — three per row, with the current work"],
+              ["compact", Icon.agents.viewTable, "Compact — more per row, shorter cards"],
             ] as const
-          ).map(([id, Icon, title]) => (
+          ).map(([id, Mark, title]) => (
             <button
               key={id}
               type="button"
@@ -418,7 +419,7 @@ export function AgentsView() {
                 density === id ? "bg-active text-ink" : "text-faint hover:text-ink"
               }`}
             >
-              <Icon size={AGENT_ICON.sm} />
+              <Mark size={AGENT_ICON.sm} />
             </button>
           ))}
         </div>
@@ -430,7 +431,7 @@ export function AgentsView() {
           title="Ask for the grid again"
           aria-label="Ask for the grid again"
         >
-          <RefreshIcon size={12} />
+          <Icon.agents.refresh size={12} />
         </button>
 
         {/* §9 keeps a label on the two `+ New` actions, which is where a label genuinely carries
@@ -446,7 +447,7 @@ export function AgentsView() {
           title={connected ? "Describe a new agent in the composer" : "Reconnecting — a new agent needs a connection"}
           aria-label="New agent"
         >
-          <PlusIcon size={ICON.sm} />
+          <Icon.agents.new size={ICON.sm} />
         </button>
       </div>
 
@@ -461,7 +462,7 @@ export function AgentsView() {
             aria-label="Dismiss"
             className="ml-auto shrink-0 text-faint transition-colors hover:text-ink"
           >
-            <XIcon size={ICON.xs} />
+            <Icon.global.dismissNotice size={ICON.xs} />
           </button>
         </div>
       )}

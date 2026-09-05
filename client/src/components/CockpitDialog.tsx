@@ -30,12 +30,16 @@ import { useEffect, useId } from "react";
 import { DESTRUCTIVE } from "../lib/cockpitCopy.ts";
 import { useDialog } from "../lib/dialog.ts";
 import { LAYER } from "../lib/tokens.ts";
+import { type IconComponent } from "../lib/icons/registry.ts";
+import { ICON } from "../lib/tokens.ts";
 
 export function CockpitDialog({
   open,
   title,
   body,
   confirmLabel,
+  confirmIcon: ConfirmMark,
+  cancelIcon: CancelMark,
   onConfirm,
   onCancel,
   /**
@@ -52,6 +56,16 @@ export function CockpitDialog({
   title: string;
   body: React.ReactNode;
   confirmLabel: string;
+  /**
+   * A mark on the confirming control, for the one caller that has one.
+   *
+   * OPTIONAL BECAUSE THIS DIALOG IS SHARED. §6 gives the preflight gate's "Dispatch it" an arrow
+   * and its cancel a mark; the three graded destructive confirmations behind the same component —
+   * reconnect, kill, stop — are named in §7 as taking none. Passing the marks in from the gate is
+   * what keeps a dispatch arrow off the button that kills somebody's agent.
+   */
+  confirmIcon?: IconComponent;
+  cancelIcon?: IconComponent;
   onConfirm: () => void;
   onCancel: () => void;
   destructive?: boolean;
@@ -107,19 +121,24 @@ export function CockpitDialog({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-control px-2.5 py-1 text-tiny text-muted transition-colors duration-fast hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+            title={DESTRUCTIVE.cancel}
+            aria-label={DESTRUCTIVE.cancel}
+            className="inline-flex items-center gap-1.5 rounded-control px-2.5 py-1 text-tiny text-muted transition-colors duration-fast hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
           >
-            {DESTRUCTIVE.cancel}
+            {/* Icon-only where §6 asks for it, and the word everywhere else. Aborting an
+                in-flight operation, which is why it is `cancel-01` and not an `x` — see D2. */}
+            {CancelMark ? <CancelMark size={ICON.sm} /> : DESTRUCTIVE.cancel}
           </button>
           <button
             type="button"
             onClick={onConfirm}
-            className={`rounded-control border px-2.5 py-1 text-tiny transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+            className={`inline-flex items-center gap-1.5 rounded-control border px-2.5 py-1 text-tiny transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
               destructive
                 ? "border-err/40 text-err hover:bg-active"
                 : "border-hair text-ink hover:bg-active"
             }`}
           >
+            {ConfirmMark && <ConfirmMark size={ICON.sm} />}
             {confirmLabel}
           </button>
         </div>

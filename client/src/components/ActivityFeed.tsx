@@ -34,6 +34,7 @@ import { ActionRow } from "./ActionRow.tsx";
 import { Card } from "./ActivityView.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { FunnelIcon } from "./activityIcons.tsx";
+import { Icon } from "../lib/icons/registry.ts";
 
 /** The feed's own viewport. Taller than the cards beside it, because it is the one thing scrolled. */
 const FEED_HEIGHT = 236;
@@ -127,7 +128,7 @@ export function EventFeedCard() {
           aria-label="Filter the feed by kind"
           aria-expanded={showFilters}
         >
-          <FunnelIcon size={ICON.xs} />
+          <Icon.activity.filterKind size={ICON.xs} />
         </button>
       }
     >

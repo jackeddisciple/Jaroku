@@ -8,6 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "gen:icons": "node scripts/gen-icons.mjs",
     "test:plan-flow": "tsx src/store/planFlow.test.ts",
     "test:type-scale": "tsx src/lib/typeScale.test.ts",
     "test:colour-system": "tsx src/lib/colourSystem.test.ts",
@@ -86,14 +87,18 @@
     "test:inbox-board": "tsx src/lib/inboxBoard.test.ts",
     "test:activity-metrics": "tsx src/lib/activityMetrics.test.ts",
     "test:action-icons": "tsx src/lib/actionIcons.test.ts",
-    "test:feed-window": "tsx src/lib/feedWindow.test.ts"
+    "test:feed-window": "tsx src/lib/feedWindow.test.ts",
+    "test:icon-manifest": "tsx src/lib/icons/manifest.test.ts",
+    "test:icon-generated": "tsx src/lib/icons/generated.test.ts",
+    "test:icon-stroke": "tsx src/lib/icons/stroke.test.ts",
+    "test:icon-deps": "tsx src/lib/icons/deps.test.ts",
+    "test:icon-registry": "tsx src/lib/icons/registry.test.ts",
+    "test:icon-a11y": "tsx src/lib/icons/a11y.test.ts"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",
     "@fontsource/geist-mono": "^5.3.0",
     "@fontsource/geist-sans": "^5.3.0",
-    "@hugeicons/core-free-icons": "^4.3.0",
-    "@hugeicons/react": "^1.1.10",
     "@xyflow/react": "^12.11.2",
     "cmdk": "^1.1.1",
     "react": "^19.0.0",
@@ -103,6 +108,7 @@
     "zustand": "^5.0.2"
   },
   "devDependencies": {
+    "@hugeicons/core-free-icons": "^4.3.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",

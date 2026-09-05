@@ -34,6 +34,7 @@ import { iconBtn, primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import {
   CheckIcon, ChevronDownIcon, ExternalLinkIcon, GitPullRequestIcon, SearchIcon, XIcon,
 } from "./panelIcons.tsx";
+import { Icon } from "../lib/icons/registry.ts";
 
 // --- §3.2 the branch switcher -----------------------------------------------
 
@@ -432,7 +433,7 @@ export function PullRequestCard({ view }: { view: GithubView }) {
             aria-label="Open a pull request to resolve this"
             onClick={() => sendOpenGithubPr(view.agentId)}
           >
-            <GitPullRequestIcon size={ICON.sm} />
+            <Icon.github.openPullRequest size={ICON.sm} />
           </button>
           <span className="text-tiny text-faint">
             Resolving on GitHub keeps both histories.

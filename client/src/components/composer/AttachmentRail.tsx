@@ -19,7 +19,8 @@
 import { useState } from "react";
 import { Chip } from "../Chip.tsx";
 import { Truncate } from "../Truncate.tsx";
-import { Glyph, Icon, GLYPH } from "../icons.ts";
+import { Glyph, GLYPH } from "../icons.ts";
+import { Icon, type IconComponent } from "../../lib/icons/registry.ts";
 import { truncatePath } from "../../lib/truncatePath.ts";
 import { XIcon } from "../panelIcons.tsx";
 import { ICON } from "../../lib/tokens.ts";
@@ -46,12 +47,12 @@ export interface DraftAttachment {
   // that is no longer being written.
 }
 
-const ICON_FOR: Record<AttachKind, (typeof Icon)[keyof typeof Icon]> = {
-  file: Icon.AttachFile,
-  run: Icon.AttachRun,
-  dataset_case: Icon.AttachDataset,
-  tool_schema: Icon.AttachTool,
-  github: Icon.Github,
+const ICON_FOR: Record<AttachKind, IconComponent> = {
+  file: Icon.attach.file,
+  run: Icon.attach.run,
+  dataset_case: Icon.attach.dataset,
+  tool_schema: Icon.attach.tool,
+  github: Icon.attach.github,
 };
 
 /** How many chips render before the rest collapse. Two rows' worth at a typical composer width. */

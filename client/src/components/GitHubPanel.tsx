@@ -51,9 +51,10 @@ import { primaryBtn, quietBtn } from "./buttons.ts";
 import { Chip } from "./Chip.tsx";
 import { EmptyState, LoadingLine } from "./EmptyState.tsx";
 import { Truncate } from "./Truncate.tsx";
-import { CheckIcon, GithubIcon, KebabIcon, SearchIcon, XIcon } from "./panelIcons.tsx";
+import { CheckIcon, GithubIcon, KebabIcon, SearchIcon } from "./panelIcons.tsx";
 import { Select } from "./Select.tsx";
 import { CheckboxField } from "./Checkbox.tsx";
+import { Icon } from "../lib/icons/registry.ts";
 
 export function GitHubPanel() {
   // Field by field rather than the whole store, for the reason DeployPanel gives at length: a
@@ -130,7 +131,7 @@ export function GitHubPanel() {
               aria-label="dismiss"
               onClick={() => (error ? setError(null) : setNotice(null))}
             >
-              <XIcon size={ICON.xs} />
+              <Icon.global.dismissNotice size={ICON.xs} />
             </button>
           </div>
         </div>
@@ -240,7 +241,7 @@ function NotConnected() {
       <div className="mx-auto mt-1 max-w-[42ch]">
         <div className="flex justify-center">
           <button className={primaryBtn} disabled={busy} onClick={() => void connect()}>
-            <GithubIcon size={ICON.xs} /> {busy ? "Opening GitHub…" : "Connect GitHub"}
+            <Icon.github.connect size={ICON.xs} /> {busy ? "Opening GitHub…" : "Connect GitHub"}
           </button>
         </div>
         {problem && <p className="mt-2 text-center text-tiny leading-[1.5] text-err">{problem}</p>}

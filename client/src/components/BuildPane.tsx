@@ -65,7 +65,8 @@ import { paneOwnsBareKey } from "../lib/bareKeys.ts";
 import {
   FALLBACK_SETTINGS, useComposerSettingsStore, type Effort, type PermissionMode,
 } from "../store/composerSettingsStore.ts";
-import { GLYPH, Glyph, HIT_TARGET, Icon } from "./icons.ts";
+import { GLYPH, Glyph, HIT_TARGET } from "./icons.ts";
+import { Icon } from "../lib/icons/registry.ts";
 import type { Density } from "../lib/composerBar.ts";
 import { activeTrigger, removeTrigger, type ActiveTrigger } from "../lib/composerTriggers.ts";
 import { Truncate } from "./Truncate.tsx";
@@ -261,7 +262,7 @@ function CitationChip({ cite }: { cite: { id: string; status: string; agent_name
       title={`${cite.agent_name} — ${cite.status}. Open this job.`}
       className="mx-0.5 inline-flex max-w-full items-center gap-1 rounded-control border border-hair bg-elevated px-1.5 py-0.5 align-baseline text-tiny text-muted transition-colors duration-fast hover:border-edge hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
     >
-      <Glyph icon={Icon.AttachRun} size={ICON.xs} className="shrink-0 text-faint" />
+      <Glyph icon={Icon.attach.run} size={ICON.xs} className="shrink-0 text-faint" />
       <span className="truncate">{cite.status}</span>
     </button>
   );
@@ -284,7 +285,7 @@ function WorkTurnView({ turn }: { turn: WorkTurn }) {
         onClick={() => sendLoadWorkItem(turn.workItemId)}
         className="inline-flex items-center gap-1 rounded-control border border-hair bg-elevated px-1.5 py-0.5 text-tiny text-muted transition-colors duration-fast hover:border-edge hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
       >
-        <Glyph icon={Icon.AttachRun} size={ICON.xs} className="shrink-0 text-faint" />
+        <Glyph icon={Icon.attach.run} size={ICON.xs} className="shrink-0 text-faint" />
         <span>Open the job</span>
       </button>
     </div>
@@ -670,12 +671,13 @@ function ModelSelector({
                 {!usableProviders.has(p.id) ? (
                   <button
                     type="button"
-                    className="ml-auto text-tiny text-muted underline-offset-2 hover:text-ink hover:underline"
+                    className="ml-auto inline-flex items-center gap-1 text-tiny text-muted underline-offset-2 hover:text-ink hover:underline"
                     onClick={() => {
                       openSecretsForProvider(p.id);
                       setOpen(false);
                     }}
                   >
+                    <Icon.composer.addKey size={GLYPH.meta} />
                     Add key
                   </button>
                 ) : null}
@@ -772,9 +774,10 @@ function NoProviderKeyBanner() {
       </span>
       <button
         type="button"
-        className="shrink-0 font-medium text-ink underline-offset-2 hover:underline"
+        className="inline-flex shrink-0 items-center gap-1 font-medium text-ink underline-offset-2 hover:underline"
         onClick={() => setRightTab("secrets")}
       >
+        <Icon.composer.addKey size={GLYPH.meta} />
         Add a key
       </button>
     </div>
@@ -2323,7 +2326,7 @@ export function BuildPane({
               fullscreen: {
                 bar: () => (
                   <ControlButton
-                    icon={Icon.Fullscreen}
+                    icon={Icon.composer.expand}
                     name={fullscreen ? "Collapse the composer" : "Expand the composer"}
                     title={
                       fullscreen
@@ -2440,7 +2443,7 @@ export function BuildPane({
                     promote: {
                       bar: (density: Density) => (
                         <ControlButton
-                          icon={Icon.AttachDataset}
+                          icon={Icon.attach.dataset}
                           name="Save this test input to the eval dataset"
                           label={
                             showsLabel(density) && promoted
@@ -2534,7 +2537,7 @@ export function BuildPane({
               mic: {
                 bar: () => (
                   <ControlButton
-                    icon={Icon.Mic}
+                    icon={Icon.composer.mic}
                     name={voice.listening ? "Stop voice input" : "Voice input"}
                     title={
                       voice.supported
@@ -2572,7 +2575,7 @@ export function BuildPane({
                       disabled:cursor-not-allowed disabled:opacity-30"
                     style={{ width: HIT_TARGET, height: HIT_TARGET, background: TEXT.ink, color: SURFACE.bg }}
                   >
-                    <Glyph icon={Icon.Send} size={GLYPH.toolbar} />
+                    <Glyph icon={Icon.composer.send} size={GLYPH.toolbar} />
                   </button>
                 ),
               },

@@ -20,7 +20,7 @@
 // reader.
 
 import { useRef, useState } from "react";
-import { Icon } from "../icons.ts";
+import { Icon } from "../../lib/icons/registry.ts";
 import { ControlButton } from "./ControlButton.tsx";
 import { Popover, PopoverNote, PopoverRow } from "./Popover.tsx";
 import { STATUS } from "../../lib/tokens.ts";
@@ -61,7 +61,7 @@ export function ShieldControl({
     <div className="relative shrink-0">
       <ControlButton
         buttonRef={triggerRef}
-        icon={Icon.Shield}
+        icon={Icon.composer.permissions}
         // Fast keeps a caution mark even when the label is dropped below ~720px, because §10
         // requires the state to be carried by more than colour and the word is what goes first.
         label={dense ? undefined : value === "fast" ? "Fast ⚠" : modeLabel(value)}

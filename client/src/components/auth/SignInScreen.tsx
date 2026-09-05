@@ -31,6 +31,7 @@ import { BackendFailure } from "../BackendFailure.tsx";
 import { AuthShell, LegalLine } from "./AuthShell.tsx";
 import { FormError, OrDivider, PrimaryButton, SecondaryButton, TextField } from "./controls.tsx";
 import { Reveal } from "../onboarding/Reveal.tsx";
+import { Icon } from "../../lib/icons/registry.ts";
 
 /**
  * Google's mark, inline.
@@ -243,6 +244,7 @@ export function SignInScreen({
                   }
                 />
                 <PrimaryButton type="submit" disabled={busy !== null || email.trim().length === 0}>
+                  <Icon.auth.signIn size={ICON.sm} />
                   {busy === "email" ? "Sending a link…" : "Continue with email"}
                 </PrimaryButton>
               </form>
@@ -280,6 +282,7 @@ export function SignInScreen({
           />
           {error && <FormError>{error}</FormError>}
           <PrimaryButton type="submit" disabled={busy !== null || email.trim().length === 0}>
+            <Icon.auth.signIn size={ICON.sm} />
             {busy === "dev" ? "Signing in…" : "Sign in"}
           </PrimaryButton>
         </form>

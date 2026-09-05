@@ -31,8 +31,9 @@ import { useSecretsStore } from "../store/secretsStore.ts";
 import { fetchElevation } from "../lib/secrets.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { ICON } from "../lib/tokens.ts";
-import { KebabIcon, XIcon } from "./panelIcons.tsx";
 import type { InboxActionName, InboxItemView, SnoozeDuration } from "../types.ts";
+import { Icon } from "../lib/icons/registry.ts";
+import { IconButton } from "./IconButton.tsx";
 
 /** §3's three durations, in the order the menu lists them. LABELS, because a duration is a word. */
 const SNOOZE_CHOICES: { id: SnoozeDuration; label: string }[] = [
@@ -41,44 +42,6 @@ const SNOOZE_CHOICES: { id: SnoozeDuration; label: string }[] = [
   { id: "week", label: "Next week" },
 ];
 
-/**
- * One icon-only control.
- *
- * THE LABEL IS NOT OPTIONAL, which is why it is a required prop rather than something a caller may
- * pass. §7's rule is that an icon nobody can name is worse than a text button, and the cheapest way
- * to keep that true across a dozen call sites is for the component to be impossible to use without
- * one.
- */
-function IconButton({
-  label,
-  onClick,
-  children,
-  danger = false,
-}: {
-  label: string;
-  onClick: () => void;
-  children: React.ReactNode;
-  danger?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      onClick={(e) => {
-        // The card itself is clickable — it expands — so every control on it has to stop the click
-        // from reaching the card. Without this, dismissing something also opened it.
-        e.stopPropagation();
-        onClick();
-      }}
-      className={`rounded-control p-1 transition-colors hover:bg-active active:bg-chrome ${
-        danger ? "text-faint hover:text-err" : "text-faint hover:text-ink"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
 
 /**
  * §4.5's inline form, for the three actions that need somewhere to type.
@@ -227,9 +190,37 @@ function InlineForm({ item, action }: { item: InboxItemView; action: InboxAction
   );
 }
 
-/** The overflow (§4.4): every action that is not the primary one, and the snooze durations. */
+/**
+ * The snooze durations.
+ *
+ * §7 IS EXPLICIT THAT THESE KEEP THEIR WORDS — "labels stay where a label genuinely carries
+ * meaning", and "1 hour" is not a glyph. Only the control that OPENS this became a mark; what it
+ * opens is five spans of time, and there is no icon for tomorrow.
+ */
+function SnoozeMenu({ item, onClose }: { item: InboxItemView; onClose: () => void }) {
+  return (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      className="absolute right-0 top-6 z-30 mt-1 w-[184px] animate-slide-in overflow-hidden rounded-card border border-edge bg-elevated p-1 shadow-floating motion-reduce:animate-none"
+    >
+      {SNOOZE_CHOICES.map((choice) => (
+        <button
+          key={choice.id}
+          onClick={() => {
+            sendSnoozeInboxItem(item.id, choice.id);
+            onClose();
+          }}
+          className="block w-full px-3 py-1.5 text-left text-caption text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
+        >
+          {choice.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The overflow (§4.4): every action that is not the primary one. */
 function Overflow({ item, onClose }: { item: InboxItemView; onClose: () => void }) {
-  const [snoozing, setSnoozing] = useState(false);
   // The same filter the row above applies, for the same reason: an overflow offering a fix that
   // 403s is worse than one that is a line shorter.
   const secondary = useAllowedActions(item.actions).slice(1).filter((a) => a !== "dismiss");
@@ -243,22 +234,7 @@ function Overflow({ item, onClose }: { item: InboxItemView; onClose: () => void 
       // where "does this look like the other menus" is the whole question.
       className="absolute right-0 top-6 z-30 mt-1 w-[184px] animate-slide-in overflow-hidden rounded-card border border-edge bg-elevated p-1 shadow-floating motion-reduce:animate-none"
     >
-      {snoozing ? (
-        // §7: labels stay where a label genuinely carries meaning, and the snooze duration menu is
-        // named as one of the places they do. "1 hour" is not a glyph.
-        SNOOZE_CHOICES.map((choice) => (
-          <button
-            key={choice.id}
-            onClick={() => {
-              sendSnoozeInboxItem(item.id, choice.id);
-              onClose();
-            }}
-            className="block w-full px-3 py-1.5 text-left text-caption text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
-          >
-            {choice.label}
-          </button>
-        ))
-      ) : (
+      {(
         <>
           {secondary.map((action) => (
             <button
@@ -279,25 +255,6 @@ function Overflow({ item, onClose }: { item: InboxItemView; onClose: () => void 
               {ACTION_LABEL[action]}
             </button>
           ))}
-          <button
-            onClick={() => setSnoozing(true)}
-            className="block w-full px-3 py-1.5 text-left text-caption text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
-          >
-            Snooze…
-          </button>
-          {/* RESOLVE IS ALWAYS AVAILABLE, on every type, and it is not in the registry's action list
-              because it is not a fix — it is somebody saying "this is dealt with". If they are wrong
-              the next sweep does nothing, because the row is already resolved, and undo puts it back
-              for the predicate to judge afresh. */}
-          <button
-            onClick={() => {
-              sendResolveInboxItem(item.id);
-              onClose();
-            }}
-            className="block w-full px-3 py-1.5 text-left text-caption text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink"
-          >
-            Mark as done
-          </button>
         </>
       )}
     </div>
@@ -306,6 +263,7 @@ function Overflow({ item, onClose }: { item: InboxItemView; onClose: () => void 
 
 export function InboxCardActions({ item, expanded }: { item: InboxItemView; expanded: boolean }) {
   const [menu, setMenu] = useState(false);
+  const [snoozing, setSnoozing] = useState(false);
   /**
    * §8 ON THE INBOX. Every card offers a fix and the fixes come from five subsystems, so an
    * action's capability is a property of the action rather than of the card — see `ACTION_COMMAND`.
@@ -330,7 +288,10 @@ export function InboxCardActions({ item, expanded }: { item: InboxItemView; expa
       <div className="relative mt-1.5 flex items-center justify-end gap-0.5">
         {primary && !FORM_ACTIONS.has(primary) && (
           <IconButton
+            icon={actionIconFor(primary)}
             label={ACTION_LABEL[primary]}
+            size={ICON.xs}
+            stopPropagation
             onClick={() => {
               // Same rule as the overflow's: a card's most prominent control saying nothing is the
               // failure this whole pass is about, and a refusal here means the payload lacked what
@@ -339,20 +300,50 @@ export function InboxCardActions({ item, expanded }: { item: InboxItemView; expa
                 useInboxStore.getState().setError(`${ACTION_LABEL[primary]} — this card is missing what that needs`);
               }
             }}
-          >
-            {actionIconFor(primary)({ size: ICON.xs })}
-          </IconButton>
+          />
         )}
         {offered.length > 1 && (
-          <IconButton label="More actions" onClick={() => setMenu((m) => !m)}>
-            <KebabIcon size={ICON.xs} />
-          </IconButton>
+          <IconButton
+            icon={Icon.agents.more}
+            label="More actions"
+            size={ICON.xs}
+            stopPropagation
+            onClick={() => setMenu((m) => !m)}
+          />
         )}
+
+        {/* §6'S THREE CARD ACTIONS, TOGETHER AND ICON-ONLY. Archive and snooze were rows in the
+            overflow; they are here because the specification groups them with dismiss as one trio,
+            and because a card's three universal verbs should not need a menu opened to reach two of
+            them. They are NOT duplicated — the overflow lost both rows in the same change, so each
+            still happens in exactly one place. */}
+        <IconButton
+          icon={Icon.inboxCard.archive}
+          label="Mark as done"
+          size={ICON.xs}
+          stopPropagation
+          onClick={() => { sendResolveInboxItem(item.id); }}
+        />
+        <IconButton
+          icon={Icon.inboxCard.snooze}
+          label="Snooze"
+          size={ICON.xs}
+          stopPropagation
+          onClick={() => setSnoozing((v) => !v)}
+        />
+        {/* D2: AN X CLOSES A SURFACE. The specification printed `cancel-01` on the Inbox LANE
+            and `x` here, six inches apart, for one verb. Both are the x now. */}
         {canDismiss && (
-          <IconButton label="Dismiss — for you only" danger onClick={() => sendDismissInboxItem(item.id)}>
-            <XIcon size={ICON.xs} />
-          </IconButton>
+          <IconButton
+            icon={Icon.inboxCard.dismiss}
+            label="Dismiss — for you only"
+            danger
+            size={ICON.xs}
+            stopPropagation
+            onClick={() => sendDismissInboxItem(item.id)}
+          />
         )}
+        {snoozing && <SnoozeMenu item={item} onClose={() => setSnoozing(false)} />}
         {menu && <Overflow item={item} onClose={() => setMenu(false)} />}
       </div>
     </>

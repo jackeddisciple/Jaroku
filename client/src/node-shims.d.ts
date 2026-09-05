@@ -17,6 +17,20 @@ declare module "node:fs" {
   export function readFileSync(path: string, encoding: "utf8"): string;
 }
 
+/**
+ * ONE FUNCTION, FOR ONE SUITE. `test:icon-generated` proves the committed marks are byte-identical
+ * to what `scripts/gen-icons.mjs` writes, and the only honest way to know that is to RUN the
+ * generator — an in-memory reimplementation of its emitter would be a second copy of the thing
+ * under test, agreeing with itself and saying nothing about the file that actually runs.
+ */
+declare module "node:child_process" {
+  export function spawnSync(
+    command: string,
+    args: string[],
+    options: { encoding: "utf8" },
+  ): { status: number | null; stdout: string; stderr: string };
+}
+
 declare module "node:url" {
   export function fileURLToPath(url: string | URL): string;
 }

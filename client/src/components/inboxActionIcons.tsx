@@ -34,6 +34,7 @@ import {
   XIcon,
 } from "./panelIcons.tsx";
 import type { InboxActionName } from "../types.ts";
+import { Icon } from "../lib/icons/registry.ts";
 
 type IconComponent = (p: { size?: number; className?: string }) => React.ReactElement;
 
@@ -58,7 +59,7 @@ const BY_ACTION: Partial<Record<InboxActionName, IconComponent>> = {
   new_agent: SparklesIcon,
   open_providers: KeyIcon,
   cancel_deploy: XIcon,
-  dismiss_all: XIcon,
+  dismiss_all: Icon.inbox.dismiss,
   raise_ceiling: ChevronRightIcon,
 };
 

@@ -23,7 +23,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { EmptyState } from "../EmptyState.tsx";
-import { Glyph, Icon, GLYPH } from "../icons.ts";
+import { Glyph, GLYPH } from "../icons.ts";
+import { Icon } from "../../lib/icons/registry.ts";
 import { ControlButton } from "./ControlButton.tsx";
 import { Popover, PopoverRow } from "./Popover.tsx";
 import { AttachPicker, SOURCES, type AttachKind, type AttachableRow } from "./AttachPicker.tsx";
@@ -68,7 +69,7 @@ export function AddMenu({
     <div className="relative shrink-0">
       <ControlButton
         buttonRef={triggerRef}
-        icon={Icon.Add}
+        icon={Icon.composer.attach}
         name="Attach context"
         title="Attach a file, run, dataset case, tool schema or GitHub reference"
         expanded={open}
@@ -96,7 +97,7 @@ export function AddMenu({
         ) : (
           <EmptyState
             size="inline"
-            icon={({ size }) => <Glyph icon={Icon.Add} size={size ?? GLYPH.empty} />}
+            icon={({ size }) => <Glyph icon={Icon.composer.attach} size={size ?? GLYPH.empty} />}
             title={unavailable ? "Nothing to attach right now" : "Nothing to attach yet"}
             hint={
               unavailable

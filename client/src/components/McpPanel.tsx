@@ -28,13 +28,10 @@ import { Truncate } from "./Truncate.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { StatusBadge, StatusDot } from "./StatusBadge.tsx";
-import {
-  AlertTriangleIcon, EyeIcon, KeyIcon, PlugIcon, PlusIcon, RefreshIcon, ShieldAlertIcon,
-  ChevronDownIcon,
-  UserCircleIcon, XIcon,
-} from "./panelIcons.tsx";
+import { AlertTriangleIcon, EyeIcon, KeyIcon, PlugIcon, RefreshIcon, ShieldAlertIcon, ChevronDownIcon, UserCircleIcon, XIcon } from "./panelIcons.tsx";
 import { useCanRun } from "../lib/useCapability.ts";
 import type { McpServer, McpTool } from "../types.ts";
+import { Icon } from "../lib/icons/registry.ts";
 
 /** What each status means, in the words a user would use to decide what to do next. */
 const STATUS_COPY: Record<McpServer["status"], { state: "ok" | "error" | "pending"; label: string }> = {
@@ -393,7 +390,7 @@ export function McpPanel() {
         {canManage && (
           <button className={quietBtn + " shrink-0 inline-flex items-center gap-1"}
             onClick={() => setAdding((v) => !v)}>
-            <PlusIcon size={ICON.xs} />
+            <Icon.mcp.connectServer size={ICON.xs} />
             Connect a server
           </button>
         )}

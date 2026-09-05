@@ -16,7 +16,8 @@
 // THIS thread's pins are not what they are looking at right now.
 
 import { useState } from "react";
-import { Glyph, Icon, GLYPH } from "../icons.ts";
+import { Glyph, GLYPH } from "../icons.ts";
+import { Icon } from "../../lib/icons/registry.ts";
 import { Truncate } from "../Truncate.tsx";
 
 export interface PinnedTurn {
@@ -28,14 +29,14 @@ export interface PinnedTurn {
 }
 
 const KIND_ICON = {
-  plan: Icon.Effort,
-  gen: Icon.Build,
-  proposal: Icon.Regenerate,
-  reply: Icon.Note,
+  plan: Icon.composer.effort,
+  gen: Icon.meta.build,
+  proposal: Icon.turn.regenerate,
+  reply: Icon.turn.note,
   // A JOB GIVEN TO A DEPLOYED AGENT (Part 3). `AttachRun`, which is this app's mark for an
   // execution — the same glyph the composer offers when somebody attaches a run — rather than a
   // seventh symbol for a thing that already has one.
-  work: Icon.AttachRun,
+  work: Icon.attach.run,
 } as const;
 
 /** §5.3: "Pin label = first ~60 chars of the turn, or its plan title." */
@@ -73,7 +74,7 @@ export function PinRail({
         aria-expanded={!collapsed}
         className="flex w-full items-center gap-2 px-2.5 py-1.5 text-tiny text-muted transition-colors duration-fast hover:text-ink"
       >
-        <Glyph icon={Icon.Pin} size={GLYPH.meta} />
+        <Glyph icon={Icon.turn.pin} size={GLYPH.meta} />
         <span className="uppercase tracking-wider">Pinned</span>
         <span className="ml-auto tabular-nums text-faint">{pins.length}</span>
         <span className={`text-faint transition-transform duration-fast ${collapsed ? "-rotate-90" : ""}`} aria-hidden>

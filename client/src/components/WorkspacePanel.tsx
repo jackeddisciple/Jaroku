@@ -39,33 +39,42 @@ import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { Chip } from "./Chip.tsx";
 import { EmptyState, LoadingLine } from "./EmptyState.tsx";
 import { Truncate } from "./Truncate.tsx";
-import {
-  ActivityIcon, AlertTriangleIcon, CheckIcon, DollarSignIcon, GithubIcon, KeyIcon, PlugIcon,
-  TicketIcon, UserCircleIcon, UserPlusIcon, XIcon,
-} from "./panelIcons.tsx";
+import { ActivityIcon, AlertTriangleIcon, CheckIcon, DollarSignIcon, GithubIcon, KeyIcon, PlugIcon, TicketIcon, UserCircleIcon } from "./panelIcons.tsx";
 import { Select } from "./Select.tsx";
 import { BillingSection } from "./BillingSection.tsx";
 import { UpsellCard } from "./UpsellCard.tsx";
+import { Icon, type IconComponent } from "../lib/icons/registry.ts";
+import { IconButton } from "./IconButton.tsx";
 
-const SECTIONS: { id: WorkspaceSection; label: string }[] = [
+/**
+ * §6'S SIX-TAB STRIP, AND D6 IS SETTLED HERE: ALL SIX CARRY A MARK AND A WORD.
+ *
+ * The source document marked four of them icon-only and left `members` and `billing` labelled,
+ * which is a strip that reads as half-finished — and the half it finishes is the wrong half. These
+ * are settings destinations somebody opens twice a month, which is exactly where a bare glyph
+ * fails: nobody builds muscle memory for a screen they rarely visit, so an icon-only `audit` is a
+ * tooltip they have to open every time. Icons here are for SCANNING a row of six, not for
+ * replacing the words.
+ */
+const SECTIONS: { id: WorkspaceSection; label: string; Icon: IconComponent }[] = [
   // §10.2's first section, and the first one the panel opens on. What the workspace IS — its name,
   // its kind, when it was made — before anything about who is in it or what it costs.
-  { id: "general", label: "General" },
-  { id: "members", label: "Members" },
+  { id: "general", label: "General", Icon: Icon.workspaceTab.general },
+  { id: "members", label: "Members", Icon: Icon.workspaceTab.members },
   // Beside Members because most of what it records is membership, and because the two answer
   // the same question at different tenses: who is here, and what has been done here.
-  { id: "audit", label: "Audit" },
+  { id: "audit", label: "Audit", Icon: Icon.workspaceTab.audit },
   // What the workspace is PAYING, which this file's own header named as one of the four scopes
   // this panel exists for. Beside Members because seats are a membership question at the moment
   // somebody buys them, and before Data because it is read far more often than it is acted on.
-  { id: "billing", label: "Billing" },
+  { id: "billing", label: "Billing", Icon: Icon.workspaceTab.billing },
   // Last, and deliberately: it is the section with the irreversible button in it.
-  { id: "data", label: "Data" },
+  { id: "data", label: "Data", Icon: Icon.workspaceTab.data },
   // AND THE ONE THAT IS NOT ABOUT THE WORKSPACE AT ALL. Every section above is scoped by
   // `workspace_id`; this one is scoped by `user_id` and follows somebody to every workspace they
   // are in. It is last because it is the least often wanted, and separate because filing a personal
   // preference under a tenants settings is the conflation §1 of the onboarding spec warns about.
-  { id: "account", label: "Account" },
+  { id: "account", label: "Account", Icon: Icon.workspaceTab.account },
 ];
 
 /**
@@ -630,7 +639,7 @@ function MemberRow({ member, canManage, isSelf }: { member: Member; canManage: b
           aria-label={`Remove ${member.display_name || member.email}`}
           className="shrink-0 rounded-control px-1.5 py-1 text-tiny text-faint transition-colors hover:bg-active active:bg-chrome hover:text-err"
         >
-          <XIcon size={ICON.xs} />
+          <Icon.workspace.removeMember size={ICON.xs} />
         </button>
       )}
       {confirmRemove && (
@@ -677,7 +686,7 @@ function InviteRow({ invite, canManage }: { invite: Invite; canManage: boolean }
           aria-label={`Revoke the invitation for ${invite.email ?? "anyone with the link"}`}
           className="shrink-0 rounded-control px-1.5 py-1 text-tiny text-faint transition-colors hover:bg-active active:bg-chrome hover:text-err"
         >
-          <XIcon size={ICON.xs} />
+          <Icon.workspace.revokeInvite size={ICON.xs} />
         </button>
       )}
     </div>
@@ -792,7 +801,7 @@ function MembersSection() {
           sidebar's search field settled the same way. */}
       {canManage && !inviting && (
         <button onClick={() => setInviting(true)} className={secondaryBtn}>
-          <UserPlusIcon size={ICON.xs} /> Invite
+          <Icon.workspace.invite size={ICON.xs} /> Invite
         </button>
       )}
       {canManage && inviting && (
@@ -1089,9 +1098,16 @@ function DataSection() {
               it worse rather than better: a control that explains why it will not work is a
               control that has decided somebody should keep looking at it. */}
           {canManage && (
-            <button className={primaryBtn} onClick={() => void start()} disabled={exportState?.status === "pending" || exportState?.status === "starting"}>
-              {exportState?.status === "pending" || exportState?.status === "starting" ? "Preparing…" : "Export everything"}
-            </button>
+            <IconButton
+              icon={Icon.workspace.export}
+              label="Export everything"
+              disabledReason={
+                exportState?.status === "pending" || exportState?.status === "starting"
+                  ? "Preparing the archive…"
+                  : null
+              }
+              onClick={() => void start()}
+            />
           )}
           {exportState?.status === "pending" && (
             <span className="text-tiny text-faint">
@@ -1156,13 +1172,22 @@ function DataSection() {
                     placeholder="type the id above to confirm"
                     className="min-w-0 flex-1 rounded-control border border-hair bg-void px-2.5 py-1.5 text-tiny text-ink placeholder:font-sans placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
                   />
-                  <button
+                  {/* ICON-ONLY AND DESTRUCTIVE, WITH THE TYPED CONFIRMATION STILL IN FRONT OF
+                      IT. Shortening the control does not shorten the gate: the box beside it still
+                      has to contain this workspace's own id before the button will do anything,
+                      which is the server's requirement and the real friction here. */}
+                  <IconButton
+                    icon={Icon.workspace.delete}
+                    label="Delete this workspace permanently"
+                    danger
+                    size={ICON.sm}
+                    disabledReason={
+                      deleting ? "Deleting…"
+                        : confirm.trim() !== workspaceId ? "Type the workspace id above to confirm"
+                        : null
+                    }
                     onClick={() => void destroy()}
-                    disabled={deleting || confirm.trim() !== workspaceId}
-                    className="rounded-control border border-err/40 bg-err/10 px-3 py-1.5 text-caption text-err transition-colors hover:bg-err/20 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    {deleting ? "Deleting…" : "Delete permanently"}
-                  </button>
+                  />
                 </div>
               </>
             )}
@@ -1264,10 +1289,11 @@ export function WorkspacePanel() {
               <button
                 key={s.id}
                 onClick={() => open(s.id)}
-                className={`rounded-control px-2.5 py-1 text-caption transition-colors ${
+                className={`inline-flex items-center gap-1.5 rounded-control px-2.5 py-1 text-caption transition-colors ${
                   shown === s.id ? "bg-active text-ink" : "text-muted hover:text-ink"
                 }`}
               >
+                <s.Icon size={ICON.xs} />
                 {s.label}
               </button>
             ))}
@@ -1275,9 +1301,10 @@ export function WorkspacePanel() {
           <button
             onClick={close}
             title="Close (Esc)"
+            aria-label="Close (Esc)"
             className="ml-auto rounded-control px-1.5 py-1 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink"
           >
-            <XIcon size={ICON.sm} />
+            <Icon.workspace.close size={ICON.sm} />
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3.5">

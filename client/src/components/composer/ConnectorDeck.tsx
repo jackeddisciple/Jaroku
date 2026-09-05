@@ -19,7 +19,8 @@
 // three days is otherwise learned about when an agent fails at 2am.
 
 import { useRef, useState } from "react";
-import { Glyph, Icon, GLYPH, HIT_TARGET } from "../icons.ts";
+import { Glyph, GLYPH, HIT_TARGET } from "../icons.ts";
+import { Icon } from "../../lib/icons/registry.ts";
 import { Popover, PopoverNote } from "./Popover.tsx";
 import { Checkbox } from "../Checkbox.tsx";
 import { Truncate } from "../Truncate.tsx";
@@ -143,14 +144,14 @@ export function ConnectorDeck({
             )}
           </span>
         )}
-        <Glyph icon={Icon.Connect} size={GLYPH.toolbar} />
+        <Glyph icon={Icon.composer.connectors} size={GLYPH.toolbar} />
       </button>
 
       <Popover open={open} onClose={() => setOpen(false)} triggerRef={triggerRef} label="Connectors" width={320}>
         {connectors.length === 0 ? (
           <EmptyState
             size="inline"
-            icon={({ size }) => <Glyph icon={Icon.Connect} size={size ?? GLYPH.empty} />}
+            icon={({ size }) => <Glyph icon={Icon.composer.connectors} size={size ?? GLYPH.empty} />}
             title="No connectors yet"
             hint={
               <button type="button" onClick={onAddConnector} className="text-accent hover:underline">

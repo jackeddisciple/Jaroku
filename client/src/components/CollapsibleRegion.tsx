@@ -27,6 +27,7 @@
 
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { ChevronDownIcon } from "./panelIcons.tsx";
+import type { IconComponent } from "../lib/icons/registry.ts";
 
 export function CollapsibleRegion({
   label,
@@ -41,6 +42,14 @@ export function CollapsibleRegion({
   onToggle,
   /** A control that belongs beside the count — History's Versions/Both switch. */
   trailing,
+  /**
+   * A leading mark for the region, where the section has one.
+   *
+   * DECORATIVE, AND OPTIONAL BECAUSE MOST REGIONS HAVE NO MARK. The label is already the
+   * accessible name of the disclosure, so a glyph that also announced itself would say the same
+   * word twice — it is `aria-hidden` for the same reason every icon beside a word in this app is.
+   */
+  mark: Mark,
   children,
 }: {
   label: string;
@@ -48,6 +57,7 @@ export function CollapsibleRegion({
   open: boolean;
   onToggle: () => void;
   trailing?: React.ReactNode;
+  mark?: IconComponent;
   children: React.ReactNode;
 }) {
   return (
@@ -64,6 +74,9 @@ export function CollapsibleRegion({
               `TYPE.sectionLabel` — in the one component whose entire job is to be the reusable
               panel header, which is the last file in the client that should be hardcoding the
               header treatment. */}
+          {Mark && (
+            <span className="shrink-0 text-faint" aria-hidden><Mark size={ICON.xs} /></span>
+          )}
           <h3 className={`min-w-0 ${TYPE.sectionLabel}`}>
             {label}
           </h3>

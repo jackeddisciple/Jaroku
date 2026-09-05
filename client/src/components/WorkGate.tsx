@@ -14,6 +14,7 @@
 import { GATE } from "../lib/cockpitCopy.ts";
 import type { FleetCardView } from "../types.ts";
 import { CockpitDialog } from "./CockpitDialog.tsx";
+import { Icon } from "../lib/icons/registry.ts";
 
 /**
  * §8's pre-flight gate: what is about to happen, before the button that causes it.
@@ -85,6 +86,8 @@ export function WorkGate({ card, input, open, onCancel, onConfirm }: {
       title={GATE.title}
       body={<GateBody card={card} input={input} />}
       confirmLabel={GATE.confirm}
+      confirmIcon={Icon.cockpitGate.dispatch}
+      cancelIcon={Icon.cockpitGate.cancel}
       onCancel={onCancel}
       onConfirm={onConfirm}
     />

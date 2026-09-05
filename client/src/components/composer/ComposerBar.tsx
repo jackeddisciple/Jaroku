@@ -23,6 +23,7 @@ import {
 } from "../../lib/composerBar.ts";
 import { GLYPH, HIT_TARGET } from "../icons.ts";
 import { Popover } from "./Popover.tsx";
+import { Icon } from "../../lib/icons/registry.ts";
 
 /** What the bar needs from a control: how to draw it, in the bar and in the overflow menu. */
 export interface ControlSpec {
@@ -98,7 +99,10 @@ export function ComposerBar({
             duration-fast hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
           style={{ minWidth: HIT_TARGET, minHeight: HIT_TARGET, fontSize: GLYPH.toolbar }}
         >
-          <span aria-hidden className="leading-none">⋯</span>
+          {/* A REAL MARK, NOT A CHARACTER. This was a literal `⋯` set in the text font, so the
+              one control in this bar that is not an icon rendered at the FONT's weight beside six
+              that render at `ICON.strokeWidth`. */}
+          <Icon.composer.more size={GLYPH.toolbar} />
         </button>
         <Popover
           open={menuOpen}
