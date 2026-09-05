@@ -426,26 +426,41 @@ export function WorkspaceSwitcher() {
             row in the column is scoped by. It stays in the row's tooltip, which reads
             "<name> — team, you are owner", so the fact is still reachable where somebody asking
             for it would look. */}
-        <Truncate className="min-w-0 flex-1 text-label text-ink" title={current?.name}>
+        <Truncate className="min-w-0 text-label text-ink" title={current?.name}>
           {current?.name ?? "workspace"}
         </Truncate>
+        {/* THE AFFORDANCE SITS AGAINST THE NAME, NOT AT THE ROW'S EDGE — and the difference is
+            whether it reads as belonging to the name or to the row. It used to be last, after the
+            plan chip, with the whole of the row's slack between it and the word it opens: the
+            arrow was there, but "Adarsh's workspace" did not look like a control, because the one
+            mark saying so had another element sitting in the gap. Beside the name, the two read as
+            one dropdown and the plan chip goes back to being what it is — metadata at the end of
+            the row.
+
+            §5's pair, and the reason there are two: `arrow-down-01` closed, `arrow-up-01` open.
+            The direction is the state, so the mark says which way pressing it will go. */}
+        <span className="shrink-0 text-faint" aria-hidden>
+          {open ? <Icon.workspace.switcherOpen size={ICON.xs} /> : <Icon.workspace.switcherClosed size={ICON.xs} />}
+        </span>
         {expiring && (
           // The token behind this socket is nearly out. Said quietly rather than as a modal:
           // nothing has failed yet, and the reconnect will renew it.
-          <span className="shrink-0 text-tiny text-run" title="your session is about to end">
+          <span className="ml-auto shrink-0 text-tiny text-run" title="your session is about to end">
             ●
           </span>
         )}
         {/* THE PLAN, FROM THE SESSION, NEVER MAPPED HERE. `planFor` on the server is the same
             function the budget gate resolves limits through, so the chip in this row and the figure
             in the Usage panel are one computation — see the footer's own note for the paid
-            workspace that read "Free" in one place and "Pro" in the other. */}
+            workspace that read "Free" in one place and "Pro" in the other.
+
+            `ml-auto` HERE RATHER THAN ON THE NAME, which is what holds the row's shape now that the
+            name no longer takes the slack: the plan is pinned to the right edge and the dropdown
+            travels with the name, however long or short the name is. The expiring dot carries it
+            too, for the case where there is no plan chip to pin. */}
         {current?.plan?.label && (
-          <Chip caps size="sm" tone="faint" className="shrink-0">{current.plan.label}</Chip>
+          <Chip caps size="sm" tone="faint" className="ml-auto shrink-0">{current.plan.label}</Chip>
         )}
-        <span className="shrink-0 text-faint" aria-hidden>
-          {open ? <Icon.workspace.switcherOpen size={ICON.xs} /> : <Icon.workspace.switcherClosed size={ICON.xs} />}
-        </span>
       </button>
 
       {/* §5.2 — "show an error inline in the switcher and revert to the previous workspace".
