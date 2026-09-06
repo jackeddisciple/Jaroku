@@ -6290,6 +6290,13 @@ async function forkAgent(ctx: TenantContext, slug: string): Promise<void> {
     // the same thing for a person to read, and it is not what anything reads: a tag driven by parsing
     // that string would break silently the first time somebody reworded it.
     forkedFrom: source.id,
+    // §5.1: "A fork gets a fresh avatar and INHERITS the category." The two halves are opposite on
+    // purpose. A category is a fact about the WORK — a copy of the billing agent is still a billing
+    // agent, and making somebody re-pick it would be a form asking a question it already knows the
+    // answer to. An avatar is the thing that tells them apart, and fork and parent sit adjacent in
+    // the grid: they are exactly the pair that must not look identical.
+    category: source.category,
+    avoidAvatar: source.avatar_id,
   });
   // `publish`, NOT `addVersion`, AND THE DIFFERENCE IS THE WHOLE BUG. `addVersion` writes the row
   // and nothing else, which is correct for `restoreAgentVersion` — that names objects living under

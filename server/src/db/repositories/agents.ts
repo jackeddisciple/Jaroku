@@ -13,6 +13,7 @@
 
 import { randomUUID } from "node:crypto";
 import { assignEmoji } from "../../agents/emojiPalette.ts";
+import { UNCATEGORIZED, avatarIdFor } from "../../agents/avatarRoster.ts";
 import { asInt, asBool, jsonFromColumn, type Db, type Queryable } from "../db.ts";
 import type { TenantContext } from "../tenant.ts";
 
@@ -135,6 +136,31 @@ export interface Agent {
    * file and fails on one that does not.
    */
   emoji: string | null;
+  /**
+   * What kind of work this agent is for. Free text, never an enum (migration 068, I6).
+   *
+   * A VOCABULARY IN THE INTERFACE AND A STRING IN THE DATABASE. The picker offers twenty-five
+   * presets plus "name your own", and both are stored identically — because the list WILL change,
+   * and a migration to add "Compliance" to an enum would be a schema change to add a word.
+   *
+   * `Uncategorized` is a real value rather than a null: §5.1 refuses "leave it nullable to avoid the
+   * decision", and the sidebar reads it specially — a row in that category shows the agent's name
+   * alone rather than "· Uncategorized" after every one of them.
+   */
+  category: string;
+  /**
+   * Which roster entry this agent's avatar is (migration 068), or null.
+   *
+   * A ROSTER ID, NOT A RECIPE. The frozen recipe lives on the client beside the renderer; what the
+   * row carries is which of the twenty-eight, so the character an agent wears is a fact about the
+   * agent rather than an accident of whichever version of the code drew it last.
+   *
+   * NULLABLE IN THE SCHEMA AND EFFECTIVELY NEVER NULL. Migration 068 explains at length; the short
+   * version is that a DEFAULT here would be a NAMED CHARACTER, so a row written during a rolling
+   * deploy by a version that does not know the column would silently be Alder — a wrong identity
+   * rather than a missing one. Null falls back to the emoji, which is the card's honest answer.
+   */
+  avatar_id: string | null;
   created_at: string;
 }
 
@@ -190,7 +216,8 @@ export interface AgentOnDisk {
 
 const COLUMNS = `id, slug, display_name, display_name_is_custom, description, connectors,
                  mcp_tools, required_env, default_provider, hand_written, current_version,
-                 creation_cost, created_by, forked_from, emoji, archived_at, created_at`;
+                 creation_cost, created_by, forked_from, emoji, category, avatar_id,
+                 archived_at, created_at`;
 
 export class AgentRepository {
   constructor(private db: Db) {}
@@ -234,6 +261,11 @@ export class AgentRepository {
       created_by: (row["created_by"] as string | null) ?? null,
       forked_from: (row["forked_from"] as string | null) ?? null,
       emoji: (row["emoji"] as string | null) ?? null,
+      // A ROW FROM BEFORE 068'S DEFAULT LANDED reads as null and answers `Uncategorized`, which is
+      // the same value the column's default writes. One meaning, whichever side of the migration a
+      // row was written on.
+      category: (row["category"] as string | null) ?? UNCATEGORIZED,
+      avatar_id: (row["avatar_id"] as string | null) ?? null,
       archived_at: (row["archived_at"] as string | null) ?? null,
     };
   }
@@ -413,6 +445,18 @@ export class AgentRepository {
       id: string;
       /** The agent this one was copied from — `forkAgent`'s, and nothing else's. See migration 049. */
       forkedFrom?: string | null;
+      /** §6's second input. Absent means the neutral value, never a guess from the name. */
+      category?: string | null;
+      /** §6's third. Absent means the hash, which is what makes the avatar step skippable. */
+      avatarId?: string | null;
+      /**
+       * The avatar this one must NOT wear — the parent's, on a fork, and nothing else's.
+       *
+       * §5.1: "A fork gets a fresh avatar and inherits the category — fork and parent sit adjacent
+       * in the grid and are exactly the pair that must not look identical." A duplicate anywhere
+       * else is allowed and warned, so this is a parameter rather than a rule.
+       */
+      avoidAvatar?: string | null;
     },
   ): Promise<Agent> {
     if (!SAFE_SLUG.test(a.slug)) throw new Error(`not a usable agent id: ${a.slug}`);
@@ -420,8 +464,8 @@ export class AgentRepository {
     await this.q(ctx).run(
       `INSERT INTO agents (id, workspace_id, slug, display_name, description, connectors,
          mcp_tools, required_env, default_provider, hand_written, creation_cost, created_by,
-         forked_from, emoji, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         forked_from, emoji, category, avatar_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         a.id,
         ctx.workspaceId,
@@ -444,6 +488,13 @@ export class AgentRepository {
         // it. Fork and parent are the two agents you most need to tell apart and they sit adjacent
         // in the sidebar, which is exactly where a shared mark would cost the most.
         assignEmoji(a.id, taken),
+        // NEVER GUESSED FROM THE NAME. §5.1 rules that out explicitly, and the reason is the one
+        // every inferred field has: right often enough to be trusted, wrong often enough to
+        // mislead, with nothing on screen to say which.
+        a.category?.trim() || UNCATEGORIZED,
+        // A CHOSEN AVATAR WINS; otherwise the hash, so the form is never empty and somebody who
+        // does not care can skip the step. `avoidAvatar` is the fork case and only that.
+        a.avatarId ?? avatarIdFor(a.id, a.avoidAvatar ? [a.avoidAvatar] : []),
         a.created_at ?? new Date().toISOString(),
       ],
     );
@@ -466,6 +517,37 @@ export class AgentRepository {
   }
 
   /**
+   * Set the agent's category.
+   *
+   * IT TAKES ANY STRING, because the column takes any string (I6). A preset and a typed one are the
+   * same value by the time they reach here, and a store that validated against the preset list would
+   * be a store that rejects "name your own" — which is half the feature.
+   *
+   * An empty string becomes the neutral value rather than an empty cell: a category is NOT NULL, and
+   * "" would render as a name followed by an em dash and nothing.
+   */
+  async setCategory(ctx: TenantContext, id: string, category: string): Promise<void> {
+    await this.q(ctx).run(
+      `UPDATE agents SET category = ? WHERE id = ? AND workspace_id = ?`,
+      [category.trim() || UNCATEGORIZED, id, ctx.workspaceId],
+    );
+  }
+
+  /**
+   * Set the agent's avatar.
+   *
+   * NO COLLISION CHECK, exactly as `setEmoji` has none and for a stronger reason: §6 says taking an
+   * avatar another agent already uses is ALLOWED and warned, and the warning is the picker's. A
+   * store that refused would make a cosmetic choice a failure.
+   */
+  async setAvatar(ctx: TenantContext, id: string, avatarId: string): Promise<void> {
+    await this.q(ctx).run(
+      `UPDATE agents SET avatar_id = ? WHERE id = ? AND workspace_id = ?`,
+      [avatarId, id, ctx.workspaceId],
+    );
+  }
+
+  /**
    * Record what is on disk, keeping the row's identity.
    *
    * Upsert on (workspace_id, slug) rather than on id, because the disk has no uuid to offer —
@@ -482,8 +564,9 @@ export class AgentRepository {
     const taken = await this.takenEmoji(ctx);
     await this.q(ctx).run(
       `INSERT INTO agents (id, workspace_id, slug, display_name, description, connectors,
-         mcp_tools, required_env, default_provider, hand_written, creation_cost, emoji, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         mcp_tools, required_env, default_provider, hand_written, creation_cost, emoji,
+         category, avatar_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (workspace_id, slug) DO UPDATE SET
          -- A NAME A PERSON CHOSE SURVIVES THE SYNC. Without the CASE this column is overwritten
          -- from jaroku.json on every reconciliation, so a rename lasts until the next boot that
@@ -498,10 +581,12 @@ export class AgentRepository {
          default_provider = excluded.default_provider,
          hand_written = excluded.hand_written,
          creation_cost = excluded.creation_cost,
-         -- emoji IS NOT IN THE UPDATE LIST, deliberately. A reconciliation runs on every boot and
-         -- an identity mark that was rewritten by one would be a mark that changed for a reason
-         -- nobody could see -- the same trap display_name was in before display_name_is_custom
-         -- closed it, one column over.
+         -- emoji, category AND avatar_id ARE NOT IN THE UPDATE LIST, deliberately. A reconciliation
+         -- runs on every boot, and all three are things a PERSON sets: an identity that a boot
+         -- rewrote would be an identity that changed for a reason nobody could see -- the same trap
+         -- display_name was in before display_name_is_custom closed it, one column over. A
+         -- directory does not know what category its agent is in, and inventing one on every sync
+         -- would overwrite the answer somebody typed.
          deleted_at = NULL`,
       [
         id,
@@ -516,6 +601,11 @@ export class AgentRepository {
         a.hand_written ? 1 : 0,
         a.creation_cost ?? null,
         assignEmoji(id, taken),
+        // A DIRECTORY KNOWS NEITHER OF THESE. It has no category to declare and no avatar to name,
+        // so a synced agent takes the neutral category and its hashed avatar, and a person changes
+        // either from the identity section afterwards.
+        UNCATEGORIZED,
+        avatarIdFor(id),
         a.created_at ?? new Date().toISOString(),
       ],
     );

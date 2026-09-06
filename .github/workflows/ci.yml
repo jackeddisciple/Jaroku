@@ -403,6 +403,13 @@ jobs:
           # Linux box with no colour-emoji font, and the drift check between the two copies of the
           # list — the client cannot import from the server, so it is written twice on purpose.
           npm run test:agent-emoji
+          # AND THE SECOND HALF OF THE SAME IDEA, one fidelity up. The roster's ids are written twice
+          # for the same reason the emoji palette is — the client cannot import from the server —
+          # and a drift here is an agent whose row names an avatar the renderer has never heard of,
+          # which draws NOTHING, on the one feature whose whole point is that something is drawn.
+          # Beside it the pair §5.1 names: a fork must not look like its parent, because the two sit
+          # adjacent in the grid and are exactly the ones you need to tell apart.
+          npm run test:agent-avatar
           # `test:edit-versions` IS DELIBERATELY NOT HERE, and it is the one suite in this file's
           # history whose absence is a reason rather than an oversight. It replays recorded model
           # output, which needs no network — but an apply VALIDATES the generated project, and
