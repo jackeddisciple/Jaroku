@@ -181,6 +181,31 @@ console.log("\nI2: the roster is data, never a render");
 
 // --- 5. the default assignment ------------------------------------------------------------------
 
+console.log("\nthe carousel is the only place an avatar is chosen");
+{
+  // ONE SURFACE, ASSERTED. Choosing a face is a thing somebody does once, while they are being
+  // introduced to the product; a picker on the New agent dialog and another in the agent detail were
+  // two more controls competing with the work those screens are actually for. A rule like this is
+  // worth what it can be broken by, which is somebody adding a third picker in six months.
+  const carousel = readFileSync("src/components/AvatarCarousel.tsx", "utf8");
+  check("the carousel offers the whole roster", carousel.includes("GLOSS_ROSTER.map"));
+  check("...and the size is the selection", /scale\(/.test(carousel));
+  check("...with both ends faded", /maskImage/.test(carousel));
+
+  const mounts = readdirRecursive("src")
+    .filter((f) => /\.tsx$/.test(f) && !f.endsWith("AvatarCarousel.tsx"))
+    .filter((f) => readFileSync(f, "utf8").includes("<AvatarCarousel"));
+  check("exactly one screen mounts it", mounts.length === 1, mounts.join(", "));
+  check("...and it is the onboarding step",
+    mounts[0]?.endsWith("onboarding/account/AgentStep.tsx") === true, mounts[0] ?? "none");
+
+  // AND NOTHING SENDS A LATE AVATAR CHANGE, because there is no command to send. A relay command
+  // nothing can reach is a control nothing can reach, which this repository tests against everywhere
+  // else and should not make an exception for here.
+  check("there is no setAgentAvatar sender",
+    !readFileSync("src/lib/socket.ts", "utf8").includes("setAgentAvatar"));
+}
+
 console.log("\nthe hash lands somewhere, and lands there every time");
 {
   const uuid = "9f2b1c44-6d21-4f8a-b3e7-0a51d9c78e10";

@@ -49,7 +49,6 @@ interface AccountOnboardingState {
    * why `ReadyStep` also asks the agent list — this is the answer for the case the list cannot give,
    * which is a generation still in flight.
    */
-  agentStarted: boolean;
 
   /** Read the resume point off a freshly-landed session. Idempotent per session. */
   hydrate: (step: number) => void;
@@ -66,15 +65,34 @@ interface AccountOnboardingState {
   /** §5.4's restart-from-settings. Clears the flag server-side and reopens at step 1. */
   restart: () => Promise<void>;
   markWorkspaceNamed: () => void;
-  /** Step 4 dispatched a sample selection or a plan. See `agentStarted`. */
-  markAgentStarted: () => void;
+  /**
+   * The identity chosen on the first-agent step, waiting for an agent to belong to.
+   *
+   * THE STEP NO LONGER GENERATES ANYTHING. It asks the three things §6 asks — a name, a face and
+   * what sort of agent it is — and stops; the agent itself is described in the composer afterwards,
+   * because a description is the one input that cannot be a picker and does not belong on a screen
+   * whose job is to introduce the product.
+   *
+   * SO THE ANSWER HAS TO WAIT SOMEWHERE, and it waits here rather than in a workspace store for the
+   * reason this whole store is excluded from the workspace reset: it is a fact about a PERSON
+   * setting themselves up, not about a tenant's data. It survives the switch into the application
+   * and is consumed by the first plan that goes out.
+   *
+   * IN MEMORY, NOT PERSISTED. It lives exactly as long as the tab that chose it. A name and a face
+   * restored from storage a week later would be applied to an agent nobody was thinking about when
+   * they picked them, which is worse than asking again — and the composer shows what it is holding
+   * rather than applying it silently.
+   */
+  firstAgentIdentity: { name: string; category: string; avatarId: string } | null;
+  setFirstAgentIdentity: (identity: { name: string; category: string; avatarId: string }) => void;
+  /** Read it and clear it, so one choice reaches one agent. */
+  takeFirstAgentIdentity: () => { name: string; category: string; avatarId: string } | null;
 }
 
 export const useAccountOnboardingStore = create<AccountOnboardingState>((set, get) => ({
   step: null,
   skipped: false,
   workspaceNamed: false,
-  agentStarted: false,
 
   hydrate: (step) =>
     set((s) => {
@@ -122,11 +140,20 @@ export const useAccountOnboardingStore = create<AccountOnboardingState>((set, ge
     // AWAITED, unlike every other write here, because the caller is a settings screen with a button
     // on it and the person is watching that button. It also has to land before the local step moves,
     // or a failure would put somebody into a flow the server still thinks they finished.
-    set({ step: FIRST_STEP, skipped: false, workspaceNamed: false, agentStarted: false });
+    set({ step: FIRST_STEP, skipped: false, workspaceNamed: false });
   },
 
   markWorkspaceNamed: () => set({ workspaceNamed: true }),
-  markAgentStarted: () => set({ agentStarted: true }),
+  firstAgentIdentity: null,
+  setFirstAgentIdentity: (identity) => set({ firstAgentIdentity: identity }),
+  // TAKEN, NOT READ. One choice belongs to one agent: leaving it in place would put the same name
+  // and the same face on the second agent somebody describes, which is a duplicate nobody asked for
+  // and — for the name — a slug collision they would have to resolve.
+  takeFirstAgentIdentity: () => {
+    const held = get().firstAgentIdentity;
+    if (held) set({ firstAgentIdentity: null });
+    return held;
+  },
 }));
 
 /**

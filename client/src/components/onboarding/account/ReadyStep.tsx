@@ -50,16 +50,16 @@ const NEXT_WITHOUT_AGENT = [
 export function ReadyStep() {
   const finish = useAccountOnboardingStore((s) => s.finish);
   /**
-   * Did step 4 start anything?
+   * Does this workspace have an agent yet?
    *
-   * TWO SOURCES BECAUSE THERE ARE TWO WAYS TO HAVE ONE. `agentStarted` covers the generation this
-   * flow just dispatched, which is still in flight when this screen paints and therefore not in the
-   * list yet; the list covers a resume that landed on step 5 in a workspace that already has agents.
-   * Either is enough, and neither alone is.
+   * ONE SOURCE NOW, BECAUSE THERE IS ONE WAY. Step 4 used to dispatch a generation and set a flag,
+   * because the agent was still in flight when this screen painted and therefore not in the list —
+   * that flag is gone with the generation. The step collects an identity and nothing else, so the
+   * only way to arrive here with an agent is that the workspace already had one, which the list
+   * says.
    */
-  const started = useAccountOnboardingStore((s) => s.agentStarted);
   const hasAgent = useBuildStore((s) => s.agents.length > 0);
-  const next = started || hasAgent ? NEXT : NEXT_WITHOUT_AGENT;
+  const next = hasAgent ? NEXT : NEXT_WITHOUT_AGENT;
 
   return (
     <AuthNotice>

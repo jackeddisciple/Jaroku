@@ -94,7 +94,7 @@ export interface AuthShellProps {
    * measure makes a single input look lost. `wide` is a list of choices, where the labels need
    * room. A third would be somebody eyeballing it against whatever screen they had open.
    */
-  width?: "narrow" | "wide";
+  width?: "narrow" | "wide" | "wider";
 }
 
 export function AuthShell({
@@ -134,7 +134,9 @@ export function AuthShell({
         )}
 
         <div
-          className={`mt-8 w-full ${width === "narrow" ? "max-w-[420px]" : "max-w-[520px]"}
+          className={`mt-8 w-full ${
+            width === "narrow" ? "max-w-[420px]" : width === "wider" ? "max-w-[660px]" : "max-w-[520px]"
+          }
             rounded-modal border border-edge bg-elevated/80 p-7 shadow-overlay backdrop-blur-[2px]`}
         >
           {children}

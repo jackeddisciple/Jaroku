@@ -33,13 +33,13 @@ const check = (name: string, ok: boolean, detail = ""): void => {
   else { fail++; console.log(`  FAIL ${name}${detail ? ` — ${detail}` : ""}`); }
 };
 
-console.log("\ntwenty-five presets, grouped and sorted");
+console.log("\nforty presets, grouped and sorted");
 {
-  check("there are twenty-five", AGENT_CATEGORIES.length === 25, `${AGENT_CATEGORIES.length}`);
+  check("there are forty", AGENT_CATEGORIES.length === 40, `${AGENT_CATEGORIES.length}`);
   check("they are unique", new Set(AGENT_CATEGORIES).size === AGENT_CATEGORIES.length);
-  check("there are five groups", CATEGORY_GROUPS.length === 5, `${CATEGORY_GROUPS.length}`);
-  check("the group names are §6's",
-    CATEGORY_GROUPS.map((g) => g.label).join(",") === "Business,Data,Engineering,Content,General",
+  check("there are six groups", CATEGORY_GROUPS.length === 6, `${CATEGORY_GROUPS.length}`);
+  check("the groups are §6's five plus Operations",
+    CATEGORY_GROUPS.map((g) => g.label).join(",") === "Business,Operations,Data,Engineering,Content,General",
     CATEGORY_GROUPS.map((g) => g.label).join(","));
 
   // SORTED WITHIN GROUPS, not across them: the groups are ordered by expected use — Business first
@@ -57,17 +57,17 @@ console.log("\ntwenty-five presets, grouped and sorted");
   const biggest = Math.max(...CATEGORY_GROUPS.map((g) => g.categories.length));
   check("no group is longer than a glance", biggest <= 8, `${biggest}`);
 
-  // §6'S OWN TWENTY-FIVE, BY NAME. The grouping is this file's decision; the LIST is the brief's, and
-  // a preset quietly renamed is a category every agent already carrying it stops matching.
-  const expected = [
+  // §6'S OWN TWENTY-FIVE ARE ALL STILL HERE, BY NAME. The list grew to forty; it did not change.
+  // A preset quietly renamed or dropped is a category every agent already carrying it stops
+  // matching — and unlike a schema change, nothing would say so.
+  const brief = [
     "Analytics", "Billing", "Code Review", "Coding", "Data Entry", "Debugging", "Design", "DevOps",
     "Documentation", "Email Triage", "Marketing", "Monitoring", "Outreach", "Personal Assistant",
     "Reporting", "Research", "Sales", "Scheduling", "Scraping", "Social Media", "Summarization",
     "Support", "Testing", "Translation", "Writing",
   ];
-  check("they are the twenty-five §6 lists",
-    JSON.stringify([...AGENT_CATEGORIES].sort()) === JSON.stringify(expected),
-    [...AGENT_CATEGORIES].sort().filter((c) => !expected.includes(c)).join(", "));
+  const lost = brief.filter((c) => !AGENT_CATEGORIES.includes(c));
+  check("every one of §6's twenty-five survives", lost.length === 0, lost.join(", "));
 
   // THE NEUTRAL VALUE IS NOT ONE OF THEM. It is what an agent has when nobody has answered, and
   // offering it in the picker would make "I have not decided" a thing somebody chooses on purpose.

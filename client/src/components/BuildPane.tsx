@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { orderedFiles, useBuildStore } from "../store/buildStore.ts";
+import { useAccountOnboardingStore } from "../store/accountOnboardingStore.ts";
 import {
   isPlanning, pendingPlanId, threadFor, useChatStore,
   type ChatTurn, type GenTurn, type PlanTurn, type ProposalTurn, type ReplyTurn, type WorkTurn,
@@ -831,6 +832,24 @@ export function BuildPane({
   const setText = composerMode === "test" ? setTestDraft : setChatDraft;
 
   const [name, setName] = useState("");
+  /**
+   * What the onboarding step chose, waiting for an agent to belong to.
+   *
+   * THE STEP NO LONGER GENERATES ANYTHING — it asks for a name, a face and a kind of work, and the
+   * description is asked here, where descriptions belong. So the answer waits in
+   * `accountOnboardingStore` and the first plan that goes out carries it.
+   *
+   * IT IS SHOWN, NOT APPLIED SILENTLY. The name lands in the field below where somebody can see and
+   * change it, and the line under the composer says what else is being carried. An identity applied
+   * invisibly is a name and a face arriving on an agent for reasons nobody watching could explain.
+   */
+  const pendingIdentity = useAccountOnboardingStore((s) => s.firstAgentIdentity);
+  const [prefilled, setPrefilled] = useState(false);
+  useEffect(() => {
+    if (prefilled || !pendingIdentity) return;
+    setPrefilled(true);
+    if (pendingIdentity.name) setName(pendingIdentity.name);
+  }, [pendingIdentity, prefilled]);
   const [selected, setSelected] = useState<string[]>([]);
   // MCP tools are selected per TOOL, not per server. Connecting a server makes its tools
   // available to choose from; it grants an agent nothing on its own.
@@ -1533,12 +1552,17 @@ export function BuildPane({
     }));
 
     switch (intent.kind) {
-      case "generate":
+      case "generate": {
         // Never straight to generation: the plan gate is the only way in, so nothing gets
         // built that the user hasn't seen described first.
         plannedConnectors.current = connectorKey;
-        sendPlanAgent(trimmed, selected, name.trim() || undefined, undefined, selectedMcp, attachRefs);
+        // TAKEN, NOT READ. One onboarding choice belongs to one agent — left in place it would put
+        // the same face and the same name on the second agent somebody describes.
+        const identity = useAccountOnboardingStore.getState().takeFirstAgentIdentity();
+        sendPlanAgent(trimmed, selected, name.trim() || undefined, undefined, selectedMcp, attachRefs,
+          identity ? { category: identity.category, avatarId: identity.avatarId } : undefined);
         break;
+      }
       case "replan":
         // A revision is planned against the CURRENT selection, so that becomes the new baseline.
         plannedConnectors.current = connectorKey;

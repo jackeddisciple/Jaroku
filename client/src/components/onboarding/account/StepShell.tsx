@@ -33,7 +33,7 @@ export interface StepShellProps {
    * thing the screen does.
    */
   skip?: { label: string; onSkip: () => void };
-  width?: "narrow" | "wide";
+  width?: "narrow" | "wide" | "wider";
 }
 
 export function StepShell({ step, title, subtitle, children, skip, width = "narrow" }: StepShellProps) {

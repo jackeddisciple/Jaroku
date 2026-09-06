@@ -1,4 +1,4 @@
-// §6's twenty-five presets, and the one rule that makes them a vocabulary rather than a schema.
+// The category presets, and the one rule that makes them a vocabulary rather than a schema.
 //
 // THIS LIST IS NOT A CONSTRAINT ON ANYTHING. `agents.category` is `TEXT` — I6 is explicit, and the
 // reason is short: "the list will change, and a migration to add 'Compliance' to a preset list would
@@ -6,10 +6,17 @@
 // preset and a category somebody typed are the same value by the time either reaches the database,
 // and the ONLY difference between them is how much typing it took.
 //
-// WHICH MEANS THE LIST IS ALLOWED TO BE WRONG, and that is a feature. It is a guess at what
-// twenty-five agents are usually for, offered so the common case is one click; "Name your own" is
-// underneath it and stores identically. A picker that could only offer these would be a picker that
-// tells somebody their agent is not a kind of thing.
+// WHICH MEANS THE LIST IS ALLOWED TO BE WRONG, and that is a feature. It is a guess at what an
+// agent is usually for, offered so the common case is one click; "name your own" sits beside it and
+// stores identically. A picker that could only offer these would be a picker that tells somebody
+// their agent is not a kind of thing.
+//
+// FORTY RATHER THAN §6's TWENTY-FIVE. The brief's list is all still here — nothing was renamed or
+// dropped, so no agent already carrying a preset stops matching one — and fifteen were added, most
+// of them the operations work the original list had no room for at all: contracts, procurement,
+// recruiting, compliance, incident response. A longer list is only a cost if somebody has to READ
+// all of it, and they do not: it is grouped, sorted within groups, and the field beside it takes
+// anything.
 //
 // GROUPED, AND THE GROUPS ARE NOT STORED EITHER. They exist so a list of twenty-five is scannable —
 // five headings of five-ish beats one column of twenty-five — and nothing downstream knows they
@@ -45,16 +52,20 @@ export const CATEGORY_GROUPS: readonly CategoryGroup[] = [
     categories: ["Billing", "Email Triage", "Marketing", "Outreach", "Sales", "Scheduling", "Social Media", "Support"],
   },
   {
+    label: "Operations",
+    categories: ["Compliance", "Contracts", "Invoicing", "Notifications", "Onboarding", "Procurement", "Recruiting"],
+  },
+  {
     label: "Data",
-    categories: ["Analytics", "Data Entry", "Monitoring", "Reporting", "Research", "Scraping"],
+    categories: ["Analytics", "Dashboards", "Data Entry", "Forecasting", "Monitoring", "Reporting", "Research", "Scraping"],
   },
   {
     label: "Engineering",
-    categories: ["Code Review", "Coding", "Debugging", "DevOps", "Testing"],
+    categories: ["Code Review", "Coding", "Debugging", "DevOps", "Incident Response", "Migrations", "Security", "Testing"],
   },
   {
     label: "Content",
-    categories: ["Design", "Documentation", "Summarization", "Translation", "Writing"],
+    categories: ["Copywriting", "Design", "Documentation", "Editing", "Summarization", "Transcription", "Translation", "Writing"],
   },
   {
     label: "General",
@@ -62,7 +73,7 @@ export const CATEGORY_GROUPS: readonly CategoryGroup[] = [
   },
 ];
 
-/** All twenty-five, flat, in group order. What a search filters and what the suite counts. */
+/** All forty, flat, in group order. What a search filters and what the suite counts. */
 export const AGENT_CATEGORIES: readonly string[] = CATEGORY_GROUPS.flatMap((g) => g.categories);
 
 /**

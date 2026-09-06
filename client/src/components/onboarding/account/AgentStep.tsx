@@ -1,51 +1,39 @@
-// §5.1 step 4 — the first agent, which is the "wow" moment or is skipped entirely.
+// §5.1 step 4 — the first agent's IDENTITY. Three inputs, and not one of them is a description.
 //
-// THE SAMPLE IS THE DEFAULT AND THAT IS DELIBERATE. "Weather+calculator is the existing test agent,
-// which runs offline (dry-run) with no API key. This is deliberately the default recommendation
-// because it works for every user regardless of whether they set up a provider key." Which is the
-// same promise step 3's skip makes, kept one screen later — a flow where skipping the key screen
-// led to a screen you could not complete would have made that skip a lie.
+// WHAT THIS SCREEN USED TO DO AND WHY IT NO LONGER DOES. It offered a sample agent or a text box,
+// and generated from whichever you picked — the plan card appearing mid-onboarding was the "wow"
+// moment §5.1 was built around. What it also was, on somebody's fourth screen, was a composer: a
+// blank rectangle asking for a paragraph, from a person who has been in the product for ninety
+// seconds and does not yet know what it can build.
 //
-// "DESCRIBE YOUR OWN" IS THE OTHER HALF, and §5.1 is explicit about what it is for: it "kicks off
-// the normal agent generation flow — with the plan gate shown as a normal turn. The user sees their
-// first plan card as part of onboarding, which is the 'wow' moment." So it is not a special
-// onboarding generator; it is the product, on its first turn.
+// So the screen asks the three things a person CAN answer that early — what is it called, what does
+// it look like, what sort of thing is it — and the description is asked where descriptions belong,
+// in the composer, with the whole application around it for context. The identity waits in
+// `accountOnboardingStore` and the first plan that goes out carries it.
 //
-// AND SKIP LANDS SOMEBODY IN AN EMPTY APP RATHER THAN A FAKE ONE. "Skip lands the user in the main
-// app with an empty state ('Your first agent will appear here — generate one from the composer').
-// No fake sample data." A seeded example somebody then has to work out is not theirs is worse than
-// an empty panel that says what to do.
-//
-// THE SAMPLE IS OFFERED ONLY WHERE IT EXISTS, WHICH IS NOT EVERYWHERE. `startFirstAgent`'s sample
-// branch SELECTS the shipped agent rather than building one — that is the whole reason it needs no
-// key — and an agent is a row in ONE workspace. `runtime/agents/example_agent` is adopted by the
-// workspace the server itself acts in, and `agentFiles.ts` spends twenty lines arguing that no other
-// workspace may read that directory. So a personal workspace provisioned at sign-in has no sample in
-// it and never will, and the default recommendation on this screen was a control that answered "try
-// again in a moment" to every press, forever, on the one screen where a person has no way to know
-// that sentence is not about them.
-//
-// SO THE OPTION IS ABSENT RATHER THAN DISABLED. This codebase's discipline is to state what is true
-// rather than to hide a refused control, and the exception it already recognises is the right one
-// here: `RightPanel` drops its Agent tab when nothing is open because "this is not a refused action,
-// it is a view of an object that has not been chosen". A starting point that does not exist in this
-// workspace is the same shape — and a greyed radio explaining a tenancy rule is a paragraph about
-// Jaroku's internals on somebody's first screen.
+// EVERY ONE OF THE THREE IS OPTIONAL AND EVERY ONE IS PRE-ANSWERED. The avatar opens on a hashed
+// entry, the category defaults to nothing, and the name to nothing — so Continue is always
+// available and somebody who does not care can pass through in one click. §6 asks for exactly that
+// of the avatar; it is true of all three here because none of them is a fact the product needs.
 
 import { useId, useState } from "react";
-import { EXAMPLE_AGENT_ID } from "../useOnboarding.ts";
-import { startFirstAgent } from "../../../lib/firstAgent.ts";
+
 import { useAccountOnboardingStore } from "../../../store/accountOnboardingStore.ts";
-import { useBuildStore } from "../../../store/buildStore.ts";
-import { FormError, PrimaryButton } from "../../auth/controls.tsx";
+import { PrimaryButton } from "../../auth/controls.tsx";
 import { StepShell } from "./StepShell.tsx";
 import { AvatarCarousel } from "../../AvatarCarousel.tsx";
 import { GlossStageProvider } from "../../GlossAvatar.tsx";
+import { CheckIcon } from "../../panelIcons.tsx";
+import {
+  AGENT_CATEGORIES, UNCATEGORIZED, normalizeCategory,
+} from "../../../lib/agentCategories.ts";
 import { GLOSS_ROSTER, avatarIdFor } from "../../../lib/gloss/roster.ts";
-
-type Choice = "sample" | "describe";
+import { ICON, STATUS } from "../../../lib/tokens.ts";
 
 export function AgentStep() {
+  const advance = useAccountOnboardingStore((s) => s.advance);
+  const remember = useAccountOnboardingStore((s) => s.setFirstAgentIdentity);
+
   /**
    * A value to hash the opening avatar out of.
    *
@@ -53,197 +41,130 @@ export function AgentStep() {
    * cannot open on the avatar this agent will eventually be assigned. What it opens on only has to
    * satisfy two things: it must not always be the first entry, so the strip has characters on both
    * sides and reads as something to scroll; and it must not change while somebody is looking at it.
-   * A per-mount id gives both. The row's real default, if they never touch the strip, is the
-   * server's hash of its uuid.
    */
   const session = useId();
-  const advance = useAccountOnboardingStore((s) => s.advance);
-  // What the last screen needs to know. `advance` is called by the Skip beside this form too, so it
-  // is not the thing that says an agent was started — see the store's `agentStarted`.
-  const markAgentStarted = useAccountOnboardingStore((s) => s.markAgentStarted);
-  /**
-   * Whether the agent this screen names is in THIS workspace.
-   *
-   * BY ITS OWN ID, not "are there any agents". `startFirstAgent` falls back to the first agent it
-   * finds, which is correct as a safety net and wrong as a promise: a restarted tour in a workspace
-   * whose only agent is a support bot would offer "Weather + calculator" and select the support bot.
-   * The option is about one specific agent, so its condition is that one specific agent.
-   */
-  const hasSample = useBuildStore((s) => s.agents.some((a) => a.agent_id === EXAMPLE_AGENT_ID));
-  const [picked, setPicked] = useState<Choice>("sample");
-  // The list arrives over the socket, so `hasSample` can flip after the first paint. Deriving the
-  // effective choice rather than storing it is what makes both directions correct without an effect
-  // that would fight somebody who had already chosen.
-  const choice: Choice = hasSample ? picked : "describe";
-  const [description, setDescription] = useState("");
-  /**
-   * §6'S FIRST INPUT, ON THE FIRST SCREEN AN AGENT IS MADE FROM. Every agent has a name and this is
-   * where somebody gives it one — "Stacey", "John", "Claire". Free text, no preset list, no
-   * uniqueness constraint beyond whatever exists today.
-   *
-   * OPTIONAL, and deliberately so. Generation already takes a name from the description when none is
-   * given, and a required field on the one screen this flow exists for is a wall in front of the
-   * moment it is trying to produce.
-   */
-  const [name, setName] = useState("");
-  /**
-   * §6'S THIRD INPUT, AND THE ONLY PLACE IN THE PRODUCT IT IS ASKED. The pickers that used to sit in
-   * the New agent dialog and the agent detail are gone: choosing a face is a thing somebody does
-   * once, while they are being introduced to the product, and a control for it on two other screens
-   * is two more things competing with the work those screens are actually for. Every agent made
-   * afterwards takes the avatar its uuid hashes to.
-   *
-   * PRE-ANSWERED, so the strip is never empty and somebody who does not care can scroll past it.
-   */
-  const [avatarId, setAvatarId] = useState<string>(() => avatarIdFor(session) ?? GLOSS_ROSTER[0]!.id);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const generate = async (): Promise<void> => {
-    if (busy) return;
-    if (choice === "describe" && description.trim().length === 0) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await startFirstAgent(
-        choice === "sample"
-          ? { kind: "sample" }
-          : {
-              kind: "describe",
-              prompt: description.trim(),
-              name: name.trim() || undefined,
-              avatarId: avatarId || undefined,
-            },
-      );
-      markAgentStarted();
-      advance();
-    } catch (err) {
-      setError((err as Error).message);
-      setBusy(false);
-    }
+  const [name, setName] = useState("");
+  const [avatarId, setAvatarId] = useState<string>(() => avatarIdFor(session) ?? GLOSS_ROSTER[0]!.id);
+  /** The chosen preset, or null. §7's neutral value is an absence here, not an option. */
+  const [category, setCategory] = useState<string | null>(null);
+  /** "Or type your own", which stores identically — the column is TEXT and the presets are a list. */
+  const [custom, setCustom] = useState("");
+
+  const chosen = custom.trim() ? normalizeCategory(custom) : category ?? UNCATEGORIZED;
+
+  const keep = (): void => {
+    remember({ name: name.trim(), category: chosen, avatarId });
+    advance();
   };
 
   return (
     <StepShell
       step={4}
-      title="Generate your first agent"
-      subtitle={hasSample ? "Pick a starting point." : "Describe what you want and Jaroku will build it."}
+      title="Your first agent"
+      subtitle="Give it a name and a face. You will describe what it does next."
       skip={{ label: "Skip for now", onSkip: advance }}
-      width="wide"
+      // WIDER THAN EVERY OTHER STEP, and the carousel is the reason. A strip has to show a character
+      // either side of the centre one for the scroll to be legible at all; inside the 520px every
+      // other screen uses, the neighbours are clipped by the fade before they are visible.
+      width="wider"
     >
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          void generate();
+          keep();
         }}
         className="flex flex-col gap-5"
       >
-        {/* TWO OPTIONS OR NONE. With no sample to start from there is one starting point, and a
-            radio group of one is a control that cannot be operated — the heading and the box below
-            already say everything a second, unselectable row would. */}
-        {hasSample && (
-          <fieldset className="flex flex-col gap-2">
-            <legend className="sr-only">Starting point</legend>
-            <Option
-              id="sample"
-              checked={choice === "sample"}
-              onChoose={() => setPicked("sample")}
-              title="Weather + calculator"
-              detail="A simple two-tool agent. Runs offline, with no API key."
-            />
-            <Option
-              id="describe"
-              checked={choice === "describe"}
-              onChoose={() => setPicked("describe")}
-              title="Describe your own"
-              detail="Type what you want and Jaroku will generate it."
-            />
-          </fieldset>
-        )}
+        {/* 1. THE NAME. Free text, no preset list, no uniqueness constraint beyond whatever exists
+            today — "Stacey", "John", "Claire". Optional: generation takes a name from the
+            description when none is given. */}
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Name it — Stacey, John, Claire…"
+          aria-label="Name your agent"
+          autoFocus
+          className="w-full rounded-control border border-edge bg-void px-3.5 py-2.5 text-label
+            text-ink outline-none transition-colors duration-fast placeholder:text-faint
+            focus-visible:shadow-focusring focus:border-chrome"
+        />
 
-        {/* INLINE RATHER THAN A SECOND SCREEN, per §5.1's own drawing. The name and the textarea
-            appear under the option they belong to, so choosing it and filling it in is one movement.
+        {/* 2. THE FACE, and it is the largest thing on this screen on purpose: it is the one
+            decision here worth LOOKING at rather than reading. */}
+        <GlossStageProvider active className="relative isolate">
+          <AvatarCarousel current={avatarId} onChoose={setAvatarId} />
+        </GlossStageProvider>
 
-            THE NAME COMES FIRST, which is §6's order: a name is what you know before you have
-            finished describing the thing. It is one line above a four-line box, so it reads as a
-            label on what follows rather than as a second question. */}
-        {choice === "describe" && (
+        {/* 3. WHAT SORT OF AGENT IT IS. Forty presets and a field, and the field stores exactly what
+            a preset does — the column is TEXT and this list is a vocabulary, not a constraint (I6).
+            Grouped headings are dropped here: on a setup screen the groups are a second thing to
+            read, and the answer somebody wants is usually in the first line. */}
+        <div className="flex flex-col gap-2">
+          <span className="text-caption text-muted">What sort of agent is it?</span>
+          {/* THE ROW THAT GETS CUT IS FADED, NOT CLIPPED. Forty pills is seven rows and the card
+              cannot hold them all above the fold, so the list scrolls — and a hard cut through the
+              middle of a row of buttons reads as a rendering fault rather than as more below. The
+              mask says "keep going" in the one way that needs no label. */}
+          <div
+            className="flex max-h-[150px] flex-wrap gap-1.5 overflow-y-auto pb-1
+              [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            style={{
+              maskImage: "linear-gradient(to bottom, #000 78%, transparent)",
+              WebkitMaskImage: "linear-gradient(to bottom, #000 78%, transparent)",
+            }}
+          >
+            {AGENT_CATEGORIES.map((c) => {
+              const picked = !custom.trim() && category === c;
+              return (
+                <button
+                  key={c}
+                  type="button"
+                  aria-pressed={picked}
+                  onClick={() => {
+                    setCustom("");
+                    setCategory(picked ? null : c);
+                  }}
+                  className={`inline-flex items-center gap-1 rounded-chip border px-2 py-1 text-caption
+                    transition-colors duration-fast ${
+                      picked
+                        ? "border-transparent bg-active text-ink"
+                        : "border-edge text-muted hover:border-chrome hover:text-ink"
+                    }`}
+                >
+                  {/* THE TICK IS THE SELECTION AND IT IS GREEN, which is the one place in this
+                      product a green mark is right: it says "this is settled", not "this is
+                      healthy". `reserveIcon`'s argument applies — the slot is held whether or not
+                      the tick is in it, so a pill does not change width because you pressed it and
+                      shove the forty below it onto a different line. */}
+                  <span
+                    className="inline-flex w-3 shrink-0 justify-center"
+                    style={{ color: STATUS.ok }}
+                    aria-hidden
+                  >
+                    {picked && <CheckIcon size={ICON.badge} />}
+                  </span>
+                  {c}
+                </button>
+              );
+            })}
+          </div>
           <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Name it — Stacey, John, Claire…"
-            aria-label="Name your agent"
-            disabled={busy}
-            className="w-full rounded-control border border-edge bg-void px-3.5 py-2.5 text-label
+            value={custom}
+            onChange={(e) => {
+              setCustom(e.target.value);
+              if (e.target.value.trim()) setCategory(null);
+            }}
+            placeholder="…or type your own"
+            aria-label="Type your own category"
+            className="w-full rounded-control border border-edge bg-void px-3.5 py-2 text-caption
               text-ink outline-none transition-colors duration-fast placeholder:text-faint
-              focus-visible:shadow-focusring focus:border-chrome disabled:opacity-50"
+              focus-visible:shadow-focusring focus:border-chrome"
           />
-        )}
-        {/* THE AVATAR, BETWEEN THE NAME AND THE BRIEF, which is §6's order — name, then what it looks
-            like, then what it does. It is the largest thing on this screen on purpose: it is the one
-            decision here that is worth looking at rather than reading. */}
-        {choice === "describe" && (
-          <GlossStageProvider active className="relative isolate">
-            <AvatarCarousel current={avatarId} onChoose={setAvatarId} />
-          </GlossStageProvider>
-        )}
-        {choice === "describe" && (
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="An agent that reads my calendar and drafts a summary of tomorrow…"
-            aria-label="Describe your agent"
-            rows={4}
-            disabled={busy}
-            autoFocus
-            // The one deliberate exception to the type ladder, the same one the composer takes:
-            // this is the thing you type into, and it is allowed to be the largest text here.
-            className="w-full resize-none rounded-control border border-edge bg-void px-3.5 py-3 text-body
-              leading-[1.6] text-ink outline-none transition-colors duration-fast placeholder:text-faint
-              focus-visible:shadow-focusring focus:border-chrome disabled:opacity-50"
-          />
-        )}
+        </div>
 
-        {error && <FormError>{error}</FormError>}
-
-        <PrimaryButton type="submit" disabled={busy || (choice === "describe" && description.trim().length === 0)}>
-          {busy ? "Generating…" : "Generate"}
-        </PrimaryButton>
+        <PrimaryButton type="submit">Continue</PrimaryButton>
       </form>
     </StepShell>
-  );
-}
-
-function Option({
-  id,
-  checked,
-  onChoose,
-  title,
-  detail,
-}: {
-  id: string;
-  checked: boolean;
-  onChoose: () => void;
-  title: string;
-  detail: string;
-}) {
-  return (
-    <label
-      className={`flex cursor-pointer items-start gap-3 rounded-control border px-3.5 py-3 transition-colors
-        duration-fast ${checked ? "border-chrome bg-active" : "border-edge bg-void hover:border-chrome"}`}
-    >
-      <input type="radio" name="starting-point" value={id} checked={checked} onChange={onChoose} className="peer sr-only" />
-      <span
-        aria-hidden
-        className={`mt-[3px] flex h-[16px] w-[16px] shrink-0 items-center justify-center rounded-full border
-          transition-colors duration-fast peer-focus-visible:shadow-focusring ${checked ? "border-ink" : "border-edge"}`}
-      >
-        {checked && <span className="h-[7px] w-[7px] rounded-full bg-ink" />}
-      </span>
-      <span className="min-w-0">
-        <span className="block text-label leading-[1.4] text-ink">{title}</span>
-        <span className="mt-1 block text-caption leading-[1.5] text-muted">{detail}</span>
-      </span>
-    </label>
   );
 }

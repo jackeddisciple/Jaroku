@@ -1222,7 +1222,6 @@ jobs:
           # reports whether it sent. It also asserts the command is planAgent rather than
           # generate: a generate would work, produce an agent, and skip the plan card the step
           # exists for.
-          npm run test:first-agent
           # WHERE THE SESSION TOKEN GOES, and the assertion the suite exists for is where it does
           # NOT. Under a host with an OS credential store the token must never touch
           # localStorage, and a mirror is the easy implementation that leaves the protection

@@ -34,10 +34,10 @@ import { GLOSS_ROSTER } from "../lib/gloss/roster.ts";
  * would reflow the whole strip on every frame of a scroll — twenty-eight boxes changing width while
  * the browser is trying to scroll them — and a transform is composited instead of laid out.
  */
-const TILE = 104;
-const SCALE = { near: 1, far: 0.55 } as const;
+const TILE = 160;
+const SCALE = { near: 1, far: 0.5 } as const;
 /** How far from the centre a tile has to be before it is at `SCALE.far`, as a share of the rail. */
-const REACH = 0.42;
+const REACH = 0.38;
 
 export function AvatarCarousel({
   current,
@@ -138,7 +138,7 @@ export function AvatarCarousel({
       // look like a strip: with a tile either side of the centre and both of them clipped by the
       // fade, it reads as a list that continues; hemmed inside the padding it reads as three
       // options with two of them shrunk.
-      className="relative -mx-7"
+      className="relative -mx-7 sm:-mx-14"
       style={{
         maskImage: "linear-gradient(to right, transparent, #000 14%, #000 86%, transparent)",
         WebkitMaskImage: "linear-gradient(to right, transparent, #000 14%, #000 86%, transparent)",
