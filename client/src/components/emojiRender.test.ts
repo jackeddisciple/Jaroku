@@ -110,7 +110,6 @@ console.log("\nthe picker offers the whole palette and warns rather than blocks"
 {
   const picker = markup(
     createElement(EmojiPicker, {
-      uuid: "6f1c2a5e-0000-4000-8000-000000000001",
       current: EMOJI_PALETTE[0]!,
       takenBy: new Map([[EMOJI_PALETTE[1]!, "billing bot"]]),
       onChoose: () => {},
@@ -144,7 +143,11 @@ console.log("\nthe picker offers the whole palette and warns rather than blocks"
   // AND THE SHUFFLE RE-RUNS THE ASSIGNMENT rather than picking at random — the same function the
   // server uses at creation, so the picker cannot propose a mark the server would not have chosen.
   const source = read("src/components/EmojiPicker.tsx");
-  check("the shuffle uses the shared assignment", source.includes("assignEmoji("));
+  // THE SHUFFLE IS NOT THE CREATION ASSIGNMENT, and that is the fix for a control that did nothing.
+  // `assignEmoji` hashes the uuid, so on an agent still wearing its hashed mark it answers with the
+  // mark already on screen — which is every agent until somebody changes one.
+  check("the shuffle walks from the current mark", source.includes("shuffleEmoji(current"));
+  check("...and not from the creation assignment", !source.includes("assignEmoji("));
   check("...and nothing here reaches for Math.random", !source.includes("Math.random"));
 }
 

@@ -1,4 +1,4 @@
-// The 64 marks an agent can wear — the server's copy, and the assignment that writes one.
+// The 59 marks an agent can wear — the server's copy, and the assignment that writes one.
 //
 // WRITTEN TWICE ON PURPOSE, AND THE DRIFT IS WHAT GETS TESTED. The client cannot import from the
 // server and the server cannot import from the client — two packages, two builds — so this list
@@ -101,10 +101,6 @@ export const EMOJI_PALETTE: readonly string[] = [
   "🐳", // U+1F433
   "📌", // U+1F4CC
   "📎", // U+1F4CE
-  "📷", // U+1F4F7
-  "🔑", // U+1F511
-  "🔒", // U+1F512
-  "🔗", // U+1F517
   "🔧", // U+1F527
   "🔨", // U+1F528
   "🔩", // U+1F529
@@ -131,7 +127,6 @@ export const EMOJI_PALETTE: readonly string[] = [
   "🧪", // U+1F9EA
   "🧬", // U+1F9EC
   "🧭", // U+1F9ED
-  "🧲", // U+1F9F2
   "🧿", // U+1F9FF
 ] as const;
 
@@ -142,7 +137,7 @@ export const EMOJI_PALETTE: readonly string[] = [
  * cannot be tested. So the uuid hashes to a STARTING INDEX and the answer is deterministic for a
  * fixed workspace, which is the property `test:agent-emoji` asserts.
  *
- * AND THEN IT PROBES. With 64 entries and twenty agents the birthday paradox puts a duplicate at
+ * AND THEN IT PROBES. With 59 entries and twenty agents the birthday paradox puts a duplicate at
  * better than ninety-five percent, and two agents both showing the tractor defeats the only purpose
  * the feature has. So the hash gives a start and the assignment walks forward to the first mark this
  * workspace is not already using.
@@ -151,7 +146,7 @@ export const EMOJI_PALETTE: readonly string[] = [
  * workspace already holds, so it is not a pure function of the id — deriving it on every read would
  * make an agent's mark change when an unrelated agent was created.
  *
- * A FULL PALETTE FALLS BACK TO THE HASH rather than failing. Sixty-five agents is a workspace where
+ * A FULL PALETTE FALLS BACK TO THE HASH rather than failing. Sixty agents is a workspace where
  * two of them share a mark, which is a smaller problem than a workspace that cannot create the
  * sixty-fifth agent.
  */
@@ -163,4 +158,35 @@ export function assignEmoji(agentId: string, taken: readonly string[]): string {
     if (!used.has(candidate)) return candidate;
   }
   return EMOJI_PALETTE[start]!;
+}
+
+/**
+ * The next mark after this one that the workspace is not already using — §8.5's shuffle.
+ *
+ * A DIFFERENT FUNCTION FROM `assignEmoji`, AND THE DIFFERENCE IS THE WHOLE POINT. `assignEmoji`
+ * hashes the AGENT'S UUID, which is exactly right at creation: the same agent must get the same
+ * mark on every replica, for ever, and that is a property of the id. It is exactly wrong for a
+ * button. An agent wears its hashed mark from the moment it is created, so re-running the
+ * assignment answers with the mark it already has — which makes the shuffle a control that looks
+ * pressable and does nothing, on every agent, for ever. Found by pressing it.
+ *
+ * SO THE SHUFFLE WALKS FROM WHERE IT IS rather than from where the hash says. It starts at the
+ * entry after the current one and takes the first the workspace has free, which keeps every
+ * property the button needs: it always MOVES, it never lands on a mark another agent wears, it is
+ * deterministic given the workspace's state, and pressing it repeatedly walks the palette rather
+ * than oscillating between two.
+ *
+ * A FULL PALETTE STILL ANSWERS. Sixty-five agents means the next mark is somebody else's, and
+ * §8.5 permits that — taking a mark another agent has is allowed and warned. What is not permitted
+ * is answering with the mark that is already on this agent, because that is the dead control again.
+ */
+export function shuffleEmoji(current: string | null | undefined, taken: readonly string[]): string {
+  const used = new Set(taken);
+  const from = current ? EMOJI_PALETTE.indexOf(current) : -1;
+  for (let i = 1; i <= EMOJI_PALETTE.length; i++) {
+    const candidate = EMOJI_PALETTE[(from + i + EMOJI_PALETTE.length) % EMOJI_PALETTE.length]!;
+    if (!used.has(candidate) && candidate !== current) return candidate;
+  }
+  // Every mark is spoken for. Move anyway — the next one along, whoever else wears it.
+  return EMOJI_PALETTE[(from + 1 + EMOJI_PALETTE.length) % EMOJI_PALETTE.length]!;
 }

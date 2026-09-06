@@ -9,10 +9,12 @@
 // agent it collides with, and the server answers a duplicate with a notice on the agents channel
 // rather than a refusal.
 //
-// THE SHUFFLE RE-RUNS THE COLLISION-AVOIDING ASSIGNMENT rather than picking at random, which is the
-// same function the server uses at creation — `assignEmoji`, over the same palette, off the same
-// FNV-1a. A random button here would propose marks the server would then have to police, and the
-// two would disagree the first time the workspace was full.
+// THE SHUFFLE WALKS THE PALETTE rather than picking at random OR re-running the creation
+// assignment. `assignEmoji` hashes the uuid, so on an agent still wearing its hashed mark — which is
+// every agent until somebody changes one — it answers with the mark already on screen and the button
+// does nothing. `shuffleEmoji` starts from the CURRENT mark and takes the first the workspace has
+// free, so it always moves, never collides, and walks rather than oscillates. Random was never the
+// alternative: a random button would propose marks the server would then have to police.
 //
 // THE GRID CELLS ARE BUTTONS AND THE EMOJI INSIDE THEM ARE STILL BARE. §8.4's no-container rule is
 // about the RENDER SITES — the sidebar row, the card, the header — where a box around an identity
@@ -22,26 +24,23 @@
 //
 //   npm run test:emoji-render
 
-import { EMOJI_PALETTE, assignEmoji } from "../lib/emojiPalette.ts";
+import { EMOJI_PALETTE, shuffleEmoji } from "../lib/emojiPalette.ts";
 import { HIT_TARGET } from "./icons.ts";
 import { AgentEmoji, EMOJI_SIZE } from "./AgentEmoji.tsx";
 import { Icon } from "../lib/icons/registry.ts";
 import { IconButton } from "./IconButton.tsx";
 
 export function EmojiPicker({
-  uuid,
   current,
   takenBy,
   onChoose,
 }: {
-  /** The agent's uuid — what the shuffle hashes, exactly as the server's assignment does. */
-  uuid: string;
   current: string | null | undefined;
   /** Every mark this workspace already spends, by the name of the agent spending it. */
   takenBy: ReadonlyMap<string, string>;
   onChoose: (emoji: string) => void;
 }) {
-  const taken = [...takenBy.keys()].filter((e) => e !== current);
+  const taken = [...takenBy.keys()];
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
@@ -51,7 +50,7 @@ export function EmojiPicker({
         <IconButton
           icon={Icon.agents.shuffleEmoji}
           label="Pick a different mark"
-          onClick={() => onChoose(assignEmoji(uuid, taken))}
+          onClick={() => onChoose(shuffleEmoji(current, taken))}
         />
       </div>
       <div role="radiogroup" aria-label="Agent mark" className="flex flex-wrap gap-0.5">

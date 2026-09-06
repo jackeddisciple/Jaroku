@@ -165,7 +165,6 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
             already holds the name and the rename control, and therefore where somebody looks when
             they want to change what an agent looks like. */}
         <EmojiPicker
-          uuid={a.uuid}
           current={a.emoji}
           takenBy={takenBy}
           onChoose={(e) => sendSetAgentEmoji(a.slug, e)}

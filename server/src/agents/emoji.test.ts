@@ -24,7 +24,7 @@
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 
-import { EMOJI_PALETTE, assignEmoji, hash32 } from "./emojiPalette.ts";
+import { EMOJI_PALETTE, assignEmoji, hash32, shuffleEmoji } from "./emojiPalette.ts";
 import { openTestSqlite, testContext } from "../db/testDb.ts";
 import { AgentRepository } from "../db/repositories/agents.ts";
 
@@ -36,9 +36,13 @@ const check = (name: string, ok: boolean, detail = ""): void => {
 
 // --- 1. the palette ------------------------------------------------------------------------------
 
-console.log("\nsixty-four marks, explicitly sorted");
+console.log("\nfifty-nine marks, explicitly sorted");
 {
-  check("the palette has 64 entries", EMOJI_PALETTE.length === 64, `${EMOJI_PALETTE.length}`);
+  // FIFTY-NINE, NOT THE BRIEF'S "ROUGHLY 64". Five were withdrawn by hand after the palette was
+  // looked at on a real sidebar — 🔗 🔒 🔑 📷 🧲 — and the number is asserted rather than derived so
+  // that adding one back is a decision somebody makes on purpose. §8.1's birthday arithmetic is
+  // unaffected: the probe is what prevents duplicates, not the size of the palette.
+  check("the palette has 59 entries", EMOJI_PALETTE.length === 59, `${EMOJI_PALETTE.length}`);
   check("no duplicates", new Set(EMOJI_PALETTE).size === EMOJI_PALETTE.length);
 
   // THE SORT IS THE MAPPING. `assignEmoji` indexes this array, so the ORDER is load-bearing in
@@ -74,6 +78,12 @@ console.log("\nsixty-four marks, explicitly sorted");
     "🟧", "🍊", "🔶", "🧡", "🔥", "🍋", "🥕", "🧀", "👑", "🍁",
     "😀", "🙂", "😐", "👤", "👥", "🧑", "👩", "👨", "🤖",
     "🏳", "🏴", "🚩",
+    // AND THE FIVE WITHDRAWN BY HAND, so none of them comes back the next time somebody widens the
+    // list. `migration 067`'s backfill still names them: it ran before they were withdrawn, it is
+    // checksummed, and rewriting a migration that has been applied is the one thing this
+    // repository's migration discipline refuses. A row it backfilled with one of these keeps it —
+    // the picker simply no longer offers it, which is what retiring a mark means.
+    "🔗", "🔒", "🔑", "📷", "🧲",
   ];
   const present = EMOJI_PALETTE.filter((e) => EXCLUDED.includes(e));
   check("no status-shaped, amber-dominant, face or flag mark", present.length === 0, present.join(" "));
@@ -92,7 +102,7 @@ console.log("\nthe client's copy and the server's are the same list");
     [...readFileSync(path, "utf8").matchAll(/^  "(.+?)", \/\/ U\+/gm)].map((m) => m[1]!);
   const client = entries("../client/src/lib/emojiPalette.ts");
   const server = entries("src/agents/emojiPalette.ts");
-  check("the client's palette was actually read", client.length === 64, `${client.length}`);
+  check("the client's palette was actually read", client.length === EMOJI_PALETTE.length, `${client.length}`);
   check("the two lists are identical", JSON.stringify(client) === JSON.stringify(server),
     `${client.length} vs ${server.length}`);
   // AND THE HASH IS THE SAME FUNCTION, which matters as much as the list: the same uuid must reach
@@ -135,10 +145,39 @@ console.log("\nderived, then stored — and never the same twice in one workspac
   // workspace that cannot create its sixty-fifth agent is a worse outcome than one where two of them
   // share a mark.
   const all: string[] = [];
-  for (let i = 0; i < 64; i++) all.push(assignEmoji(randomUUID(), all));
-  check("sixty-four exhaust the palette", new Set(all).size === 64);
+  for (let i = 0; i < EMOJI_PALETTE.length; i++) all.push(assignEmoji(randomUUID(), all));
+  check("the palette is exhausted exactly", new Set(all).size === EMOJI_PALETTE.length);
   const overflow = assignEmoji(randomUUID(), all);
-  check("the sixty-fifth still gets one", EMOJI_PALETTE.includes(overflow), overflow);
+  check("one more still gets a mark", EMOJI_PALETTE.includes(overflow), overflow);
+}
+
+// --- 3b. the shuffle, which is a different question from the assignment ---------------------------
+
+console.log("\nthe shuffle always moves");
+{
+  // FOUND BY PRESSING IT. `assignEmoji` hashes the agent's uuid, which is exactly right at creation
+  // and exactly wrong for a button: an agent wears its hashed mark from the moment it exists, so
+  // re-running the assignment answers with the mark already on screen. The picker's shuffle did
+  // nothing, on every agent, for ever — a control that looks pressable and does not act, which is
+  // the shape `test:dead-controls` exists for one layer up.
+  const taken = [EMOJI_PALETTE[3]!, EMOJI_PALETTE[4]!];
+  let at = EMOJI_PALETTE[2]!;
+  const walk: string[] = [];
+  for (let i = 0; i < 6; i++) { at = shuffleEmoji(at, taken); walk.push(at); }
+  check("every press changes the mark", new Set(walk).size === walk.length, walk.join(""));
+  check("...and none of them is one somebody else wears",
+    walk.every((e) => !taken.includes(e)), walk.join(""));
+  check("...and all of them are in the palette", walk.every((e) => EMOJI_PALETTE.includes(e)));
+
+  // IT WALKS RATHER THAN OSCILLATES. Two presses landing back where they started would be a control
+  // that works once and then does not.
+  check("it does not bounce between two", walk[0] !== walk[2], walk.join(""));
+  // AND IT WRAPS. Starting at the last entry has to answer, not run off the end.
+  const wrapped = shuffleEmoji(EMOJI_PALETTE[EMOJI_PALETTE.length - 1]!, []);
+  check("it wraps at the end of the palette", wrapped === EMOJI_PALETTE[0], wrapped);
+  // A MARK THAT IS NO LONGER IN THE PALETTE still shuffles — a row backfilled by migration 067 with
+  // one of the five withdrawn marks must not be stuck.
+  check("a retired mark still moves", EMOJI_PALETTE.includes(shuffleEmoji("🔑", [])));
 }
 
 // --- 4. what the database actually holds -----------------------------------------------------------
