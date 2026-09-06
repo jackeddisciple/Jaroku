@@ -28,6 +28,7 @@ import { EmptyState } from "./EmptyState.tsx";
 import { ThreadFilterBar } from "./ThreadFilterBar.tsx";
 import { ThreadRow } from "./ThreadRow.tsx";
 import { SectionHeader } from "./SectionHeader.tsx";
+import { ToolbarCluster } from "./ToolbarCluster.tsx";
 import { useThreadKeys } from "./useThreadKeys.ts";
 import { SearchIcon } from "./panelIcons.tsx";
 
@@ -209,23 +210,28 @@ export function ThreadsView() {
             back. `sendListThreads` has existed since the feature shipped and nothing called it.
             Quiet and to the left of the action, because it is a way to check rather than a thing to
             do. */}
-        <button
-          onClick={() => sendListThreads()}
-          disabled={!connected}
-          className="ml-auto rounded-control p-1.5 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink disabled:pointer-events-none disabled:opacity-40"
-          title="Ask for the list again"
-        >
-          <Icon.threads.refresh size={ICON.sm} />
-        </button>
-        <button
-          onClick={() => sendCreateThread()}
-          disabled={!connected}
-          className="flex h-7 w-7 items-center justify-center rounded-control text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink disabled:pointer-events-none disabled:opacity-40"
-          title={connected ? "New thread" : "Reconnecting — a new thread needs a connection"}
-          aria-label="New thread"
-        >
-          <Icon.threads.new size={ICON.sm} />
-        </button>
+        {/* §5.3'S ONE UNAMBIGUOUS ACTION CLUSTER. Two independent verbs, adjacent, neither of them
+            a mode: pressing either does a thing and it springs back. They were two hand-rolled
+            buttons at two different geometries — `p-1.5` beside `h-7 w-7` — which is a 28px control
+            next to a 30px one in the same row, and the kind of difference nobody can name and
+            everybody sees. Both are 32×32 now, because both are `IconButton`s. */}
+        <ToolbarCluster
+          className="ml-auto"
+          members={[
+            {
+              icon: Icon.threads.refresh,
+              label: "Ask for the list again",
+              onClick: () => sendListThreads(),
+              disabledReason: connected ? null : "Reconnecting — the list cannot be refreshed",
+            },
+            {
+              icon: Icon.threads.new,
+              label: "New thread",
+              onClick: () => sendCreateThread(),
+              disabledReason: connected ? null : "Reconnecting — a new thread needs a connection",
+            },
+          ]}
+        />
       </div>
 
       <ThreadFilterBar

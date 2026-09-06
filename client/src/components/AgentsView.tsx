@@ -15,6 +15,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentCard } from "./AgentCard.tsx";
+import { Segmented } from "./Segmented.tsx";
+import { IconButton } from "./IconButton.tsx";
 import { Chip } from "./Chip.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import { useAgentKeys } from "./useAgentKeys.ts";
@@ -404,39 +406,38 @@ export function AgentsView() {
           options={AGENT_SORTS.map((s) => ({ value: s, label: SORT_LABEL[s] }))}
         />
 
-        {/* §4's density toggle. Two icon-only controls, each with a label and a tooltip. */}
-        <div className="flex shrink-0 items-center rounded-control border border-hair">
-          {(
-            [
-              ["comfortable", Icon.agents.viewGrid, "Comfortable — three per row, with the current work"],
-              ["compact", Icon.agents.viewTable, "Compact — more per row, shorter cards"],
-            ] as const
-          ).map(([id, Mark, title]) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setDensity(id)}
-              title={title}
-              aria-label={title}
-              aria-pressed={density === id}
-              className={`p-1.5 transition-colors duration-fast first:rounded-l-control last:rounded-r-control ${
-                density === id ? "bg-active text-ink" : "text-faint hover:text-ink"
-              }`}
-            >
-              <Mark size={AGENT_ICON.sm} />
-            </button>
-          ))}
-        </div>
+        {/* §4's density toggle, and §5.1's example of the distinction: this is a MODE, so it is a
+            `Segmented` rather than a cluster. It was `aria-pressed` on two independent-looking
+            buttons — announced as two toggles somebody has to try one at a time rather than as
+            "1 of 2, selected" — and it had no hairline between its members at all, so the two
+            controls shared an edge nobody drew. */}
+        <Segmented
+          className="shrink-0"
+          ariaLabel="Grid density"
+          value={density}
+          onChange={setDensity}
+          size={AGENT_ICON.sm}
+          options={[
+            { value: "comfortable", label: "Comfortable — three per row, with the current work", icon: Icon.agents.viewGrid },
+            { value: "compact", label: "Compact — more per row, shorter cards", icon: Icon.agents.viewTable },
+          ]}
+        />
 
-        <button
+        {/* A CLUSTER OF ONE IS NOT A CLUSTER — §5.2, so this is a bare `IconButton`. §5.3 pairs it
+            with `filterGrid` and `searchGrid`, and neither can join it: the filter is a popover
+            trigger that carries the NUMBER of filters that are on (a filter you cannot see is a
+            filter you forget you set), and the search is a live text field with `/` bound to it.
+            Folding either into an icon-only member would delete a working control to satisfy a
+            table. The refresh gains the 32×32 hit target it never had — it was a 12px mark in a
+            26px box, the smallest target in this header. */}
+        <IconButton
+          className="shrink-0"
+          icon={Icon.agents.refresh}
+          label="Ask for the grid again"
           onClick={() => sendListAgentGrid()}
-          disabled={!connected}
-          className="shrink-0 rounded-control p-1.5 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink disabled:pointer-events-none disabled:opacity-40"
-          title="Ask for the grid again"
-          aria-label="Ask for the grid again"
-        >
-          <Icon.agents.refresh size={12} />
-        </button>
+          disabledReason={connected ? null : "Reconnecting — the grid cannot be refreshed"}
+          size={AGENT_ICON.xs}
+        />
 
         {/* §9 keeps a label on the two `+ New` actions, which is where a label genuinely carries
             meaning. §5.4 is explicit that no `New` pill goes beside it — there it would read as a

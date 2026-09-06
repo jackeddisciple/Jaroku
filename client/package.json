@@ -67,6 +67,7 @@
     "test:status-amber": "tsx src/components/statusAmber.test.ts",
     "test:status-map": "tsx src/lib/statusMap.test.ts",
     "test:section-count": "tsx src/components/sectionCount.test.ts",
+    "test:toolbar-cluster": "tsx src/components/toolbarCluster.test.ts",
     "test:work-row": "tsx src/lib/workRow.test.ts",
     "test:work-window": "tsx src/lib/workWindow.test.ts",
     "test:work-live": "tsx src/lib/workLive.test.ts",

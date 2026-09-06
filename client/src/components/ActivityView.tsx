@@ -30,6 +30,7 @@ import { useActivityStore } from "../store/activityStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { Truncate } from "./Truncate.tsx";
+import { Segmented } from "./Segmented.tsx";
 import { Icon } from "../lib/icons/registry.ts";
 
 /**
@@ -117,27 +118,27 @@ function Header() {
       {/* THE GLOBAL RANGE. Text survives here because §4 names the range control as one of the five
           places a label carries irreplaceable meaning — `24h` is shorter and clearer than any glyph
           for it. The calendar marks the control; the values are words. */}
-      <div
-        className="flex items-center gap-1 rounded-control border border-hair p-0.5"
-        role="group"
-        aria-label="Date range"
-      >
-        <span className="pl-1.5 pr-0.5 text-faint" aria-hidden>
+      <div className="flex items-center gap-1.5">
+        {/* THE MARK STAYS OUTSIDE THE GROUP, which is a correction rather than a move: it was inside
+            the border, as a member-shaped span that could not be pressed — a dead cell in a row of
+            live ones. It labels the control; it is not one of its options. */}
+        <span className="text-faint" aria-hidden>
           <Icon.activity.dateRange size={ICON.xs} />
         </span>
-        {ACTIVITY_RANGES.filter((r) => r !== "custom" || range === "custom").map((r) => (
-          <button
-            key={r}
-            onClick={() => choose(r)}
-            aria-pressed={r === range}
-            title={`Show ${RANGE_LABEL[r]}`}
-            className={`rounded-chip px-2 py-1 text-tiny tabular-nums transition-colors duration-fast ${
-              r === range ? "bg-active text-ink" : "text-muted hover:text-ink"
-            }`}
-          >
-            {RANGE_LABEL[r]}
-          </button>
-        ))}
+        {/* TEXT-ONLY, WHICH §5.3 ASKS FOR BY NAME and the icon specification argues for at length:
+            `24h` is shorter and clearer than any glyph anybody would have to learn. And a real
+            `radiogroup` — it was `role="group"` with `aria-pressed`, which announces three
+            independent toggles rather than "2 of 3, selected". */}
+        <Segmented
+          ariaLabel="Date range"
+          value={range}
+          onChange={choose}
+          options={ACTIVITY_RANGES.filter((r) => r !== "custom" || range === "custom").map((r) => ({
+            value: r,
+            label: `Show ${RANGE_LABEL[r]}`,
+            text: RANGE_LABEL[r],
+          }))}
+        />
       </div>
     </div>
   );

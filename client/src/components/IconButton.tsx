@@ -55,6 +55,19 @@ export interface IconButtonProps {
   danger?: boolean;
   /** Pressed state for a toggle, and `aria-pressed` with it. */
   active?: boolean;
+  /**
+   * Selected state for one member of a `Segmented` group — `role="radio"` and `aria-checked`.
+   *
+   * A DIFFERENT ROLE FROM `active`, AND THAT IS THE WHOLE REASON IT EXISTS. `aria-pressed` says
+   * "this toggle is on", which is a fact about one control; `aria-checked` inside a `radiogroup`
+   * says "this is the one of several that is chosen", which is a fact about the group. A screen
+   * reader reads the second as "2 of 3, selected" and the first as "pressed", and a mode picker
+   * announced as three independent toggles is three controls somebody has to try.
+   *
+   * `Segmented` passes this; nothing else should. Setting both is a control claiming to be two
+   * kinds of thing, so `checked` wins and `aria-pressed` is not emitted.
+   */
+  checked?: boolean;
   /** The mark's own size. The button stays 32×32 whatever this is. */
   size?: number;
   /**
@@ -74,16 +87,25 @@ export function IconButton({
   disabledReason = null,
   danger = false,
   active = false,
+  checked,
   size = ICON.sm,
   stopPropagation = false,
   className,
 }: IconButtonProps) {
   const disabled = disabledReason !== null && disabledReason !== undefined;
+  // A CHOSEN SEGMENT IS HELD DOWN, NOT ACCENTED. `active` is a toggle that is on and takes the
+  // interaction accent; a chosen segment is the one of several you are looking at, and it says so by
+  // sitting on a filled surface the way every other selected thing in this app does. Two treatments,
+  // because §5.1 requires the two kinds of control not to look identical.
   const tone = danger
     ? "text-faint hover:text-err hover:bg-active"
-    : active
-      ? "text-accent hover:bg-active"
-      : "text-muted hover:text-ink hover:bg-active";
+    : checked === true
+      ? "bg-active text-ink"
+      : checked === false
+        ? "text-faint hover:text-ink hover:bg-active"
+        : active
+          ? "text-accent hover:bg-active"
+          : "text-muted hover:text-ink hover:bg-active";
 
   return (
     <button
@@ -92,7 +114,9 @@ export function IconButton({
       // reason and the accessible name stays the action.
       title={disabled ? (disabledReason as string) : label}
       aria-label={label}
-      aria-pressed={active ? true : undefined}
+      role={checked === undefined ? undefined : "radio"}
+      aria-checked={checked === undefined ? undefined : checked}
+      aria-pressed={checked === undefined && active ? true : undefined}
       disabled={disabled}
       onClick={(event) => {
         if (stopPropagation) event.stopPropagation();

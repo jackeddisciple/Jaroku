@@ -1474,6 +1474,15 @@ jobs:
           # worse than rendering nothing. The call sites are a TABLE in the suite rather than a
           # glob, because a paginated `.length` looks exactly like a correct one.
           npm run test:section-count
+          # §5's two components, and the distinction between them, which is not decoration: a
+          # cluster holds actions that spring back and a segmented control holds a MODE. If the two
+          # look identical, a grid/table toggle looks like a refresh button and somebody learns that
+          # pressing refresh changes a mode. The suite holds both — what a screen reader hears
+          # (radiogroup and aria-checked against nothing at all) and what is on screen — plus the
+          # failure that actually ships: two bordered buttons side by side put two 1px edges
+          # together, and a 2px seam in an app drawn entirely in single hairlines reads as a
+          # rendering fault nobody can name.
+          npm run test:toolbar-cluster
 
       # THE ICON SYSTEM, IN ITS OWN STEP, because the six suites guard six different invariants and
       # a reader looking at a red build should be able to tell which one broke without opening a

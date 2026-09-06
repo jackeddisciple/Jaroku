@@ -51,6 +51,7 @@ import { useUiStore } from "../store/uiStore.ts";
 import { useWorkStore } from "../store/workStore.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { FleetStrip } from "./FleetStrip.tsx";
+import { IconButton } from "./IconButton.tsx";
 import { WorkComposer } from "./WorkComposer.tsx";
 import { WorkDetail } from "./WorkDetail.tsx";
 import { WorkList } from "./WorkList.tsx";
@@ -96,16 +97,17 @@ function Header() {
       {/* ASK AGAIN. A full-snapshot channel that goes stale — a transition nothing broadcast, a
           frame dropped during a reconnect — otherwise has no remedy but reloading the page. BOTH
           reads, because they answer on different clocks and the relay volunteers only one of them. */}
-      <button
-        type="button"
+      {/* §5.3: SINGLE, no cluster below two members. A bare `IconButton`, which is what a lone
+          control is — and what makes the 32×32 hit target and the disabled control's own sentence
+          the default rather than something this header had to remember. */}
+      <IconButton
+        className="ml-auto"
+        icon={Icon.cockpit.refresh}
+        label={HEADER.refresh}
         onClick={() => { sendListWork(); sendListFleet(); }}
-        disabled={!connected}
-        className="ml-auto rounded-control p-1.5 text-faint transition-colors hover:bg-active hover:text-ink active:bg-chrome disabled:pointer-events-none disabled:opacity-40"
-        title={HEADER.refresh}
-        aria-label={HEADER.refresh}
-      >
-        <Icon.cockpit.refresh size={ICON.xs} />
-      </button>
+        disabledReason={connected ? null : OFFLINE.hint}
+        size={ICON.xs}
+      />
     </div>
   );
 }

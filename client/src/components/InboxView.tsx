@@ -53,6 +53,7 @@ import { useUiStore } from "../store/uiStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { InboxCard } from "./InboxCard.tsx";
 import { SectionHeader } from "./SectionHeader.tsx";
+import { IconButton } from "./IconButton.tsx";
 import { CockpitPointer } from "./CockpitPointer.tsx";
 import { InboxTray } from "./InboxTray.tsx";
 import { useInboxDrag } from "./useInboxDrag.ts";
@@ -480,14 +481,16 @@ export function InboxView() {
         {/* ASK AGAIN. A full-snapshot channel that goes stale — a transition nothing broadcast, a
             frame dropped during a reconnect — otherwise has no remedy but reloading the page. Quiet
             and to the left, because it is a way to check rather than a thing to do. */}
-        <button
+        {/* §5.3: SINGLE. It also had no `aria-label` at all — an icon-only button whose only name
+            was a `title`, which is the exact gap `IconButton` was written to close. */}
+        <IconButton
+          className="ml-auto"
+          icon={Icon.inbox.refresh}
+          label="Ask for the board again"
           onClick={() => sendListInbox()}
-          disabled={!connected}
-          className="ml-auto rounded-control p-1.5 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink disabled:pointer-events-none disabled:opacity-40"
-          title="Ask for the board again"
-        >
-          <Icon.inbox.refresh size={ICON.xs} />
-        </button>
+          disabledReason={connected ? null : "Reconnecting — the board cannot be refreshed"}
+          size={ICON.xs}
+        />
       </div>
 
       {error && (
