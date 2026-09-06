@@ -404,6 +404,31 @@ export class GlossStage {
   }
 
   /**
+   * What every slot's rectangle came out as, for the budget to rank.
+   *
+   * READ OFF THE LAST `measure`, NEVER FRESH. The whole point of batching the reads is that nothing
+   * downstream reaches for a rect of its own — a budget that measured while deciding would put a
+   * forced reflow between the measurement pass and the draw, which is the layout thrash §4.1 warns
+   * about arriving through the back door.
+   */
+  slotMetrics(): { key: string; onScreen: boolean; built: boolean; centreDistance: number }[] {
+    const cx = this.width / 2;
+    const cy = this.height / 2;
+    const out = [];
+    for (const slot of this.slots.values()) {
+      const x = slot.x + slot.size / 2;
+      const y = slot.y + slot.size / 2;
+      out.push({
+        key: slot.key,
+        onScreen: slot.onScreen,
+        built: slot.built !== null,
+        centreDistance: Math.hypot(x - cx, y - cy),
+      });
+    }
+    return out;
+  }
+
+  /**
    * What the animator has written to each built slot this frame.
    *
    * READ-ONLY, AND IT EXISTS FOR §11.5. Acceptance asks that "blink, gaze, saccade, idle, breath and

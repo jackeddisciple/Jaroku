@@ -1587,6 +1587,14 @@ jobs:
           # rather than as a bug — so gaze, the head following it, breath and sway are each asserted
           # to move, over a window long enough that a stochastic gaze cannot make it flaky.
           npm run test:gloss-stage
+          # I5, AND EVERY RULE IN IT IS INVISIBLE IN A SCREENSHOT. A grid that keeps animating behind
+          # another window looks exactly like one that does not; what tells them apart is a fan, a
+          # battery and a laptop somebody closes the app on. Same for the cap — twelve animating
+          # slots and forty are the same picture, and the machine that can tell is not the one this
+          # was built on. The reduced-motion case is the pedantic one on purpose: "stops" has to mean
+          # one frame and then nothing, which is neither a slower animation nor a blank card, and
+          # both of those are easy to ship by accident.
+          npm run test:gloss-budget
           npm run test:icon-generated
           # AND THE SAME PROPERTY THE OTHER WAY ROUND, which is not redundant: the suite above
           # catches a mark somebody edited by hand, and this catches a MANIFEST edit committed

@@ -22,7 +22,11 @@
 
 import { readdirSync, readFileSync } from "node:fs";
 
-import { GlossStage, type StageBindings } from "./GlossStage.ts";
+import { GlossStage } from "./GlossStage.ts";
+import {
+  box, installBrowserStubs, renderersConstructed, renderersDisposed, resetRendererCounts,
+  stageBindings,
+} from "./harness.ts";
 import { GLOSS_ROSTER } from "./roster.ts";
 
 let fail = 0;
@@ -31,70 +35,20 @@ const check = (name: string, ok: boolean, detail = ""): void => {
   else { fail++; console.log(`  FAIL ${name}${detail ? ` — ${detail}` : ""}`); }
 };
 
-// --- a browser, in the two respects the vendored code needs one ---------------------------------
-//
-// `clothPrint` bakes a screen-printed torso motif into a canvas, so a dressed humanoid reaches for
-// `document`. The shim records nothing and draws nothing: this suite is about how many contexts
-// exist and how much geometry is alive, and neither question has a pixel in it.
+// The renderer is counted and the browser is stubbed in `harness.ts`; `buildGloss` stays real.
 
-const canvasStub = (): unknown => {
-  const ctx: Record<string, unknown> = { canvas: null };
-  for (const name of [
-    "fillRect", "beginPath", "moveTo", "lineTo", "arc", "closePath", "fill", "stroke",
-    "bezierCurveTo", "quadraticCurveTo", "drawImage", "putImageData",
-  ]) ctx[name] = () => undefined;
-  const canvas = { width: 0, height: 0, getContext: () => ctx };
-  ctx["canvas"] = canvas;
-  return canvas;
-};
-(globalThis as { document?: unknown }).document ??= { createElement: () => canvasStub() };
-
-// --- the fake renderer, which is the thing being counted -----------------------------------------
-
-let renderersConstructed = 0;
-let rendererDisposed = 0;
-
-function bindings(): StageBindings {
-  return {
-    createRenderer: () => {
-      renderersConstructed++;
-      const el = {
-        getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }),
-      };
-      return {
-        domElement: el,
-        setPixelRatio: () => undefined,
-        setSize: () => undefined,
-        setViewport: () => undefined,
-        setScissor: () => undefined,
-        setScissorTest: () => undefined,
-        setClearAlpha: () => undefined,
-        clear: () => undefined,
-        render: () => undefined,
-        dispose: () => { rendererDisposed++; },
-      } as unknown as ReturnType<StageBindings["createRenderer"]>;
-    },
-    // A material is a bag the mesh holds and nothing here looks inside it.
-    makeMaterialFor: () => () => ({ dispose: () => undefined }),
-    // The studio needs a GL context to prefilter its environment. Nothing below it does.
-    dress: () => undefined,
-  };
-}
-
-/** A card's avatar box, at a position that is on screen. */
-const boxAt = (top: number): HTMLElement =>
-  ({ getBoundingClientRect: () => ({ left: 8, top, width: 96, height: 96 }) }) as unknown as HTMLElement;
+installBrowserStubs();
 
 // --- 1. exactly one context, whatever the grid does ----------------------------------------------
 
 console.log("\none WebGLRenderer, ever");
 {
-  renderersConstructed = 0;
-  const stage = new GlossStage(bindings());
+  resetRendererCounts();
+  const stage = new GlossStage(stageBindings());
   check("constructing the stage constructs one renderer", renderersConstructed === 1,
     `${renderersConstructed}`);
 
-  for (let i = 0; i < 20; i++) stage.mount(`a${i}`, boxAt(i * 100), GLOSS_ROSTER[i % GLOSS_ROSTER.length]!.id);
+  for (let i = 0; i < 20; i++) stage.mount(`a${i}`, box(i * 100), GLOSS_ROSTER[i % GLOSS_ROSTER.length]!.id);
   stage.measure();
   for (let i = 0; i < 30; i++) stage.frame(i / 30, 1 / 30);
   check("twenty mounts and thirty frames construct no more", renderersConstructed === 1,
@@ -102,8 +56,8 @@ console.log("\none WebGLRenderer, ever");
 
   for (let i = 0; i < 20; i++) stage.unmount(`a${i}`);
   stage.dispose();
-  check("disposing releases the context", rendererDisposed === 1, `${rendererDisposed}`);
-  check("a second dispose is a no-op", (stage.dispose(), rendererDisposed === 1), `${rendererDisposed}`);
+  check("disposing releases the context", renderersDisposed === 1, `${renderersDisposed}`);
+  check("a second dispose is a no-op", (stage.dispose(), renderersDisposed === 1), `${renderersDisposed}`);
 }
 
 // --- 2. and nothing else in the client constructs one --------------------------------------------
@@ -128,11 +82,11 @@ console.log("\nnothing else reaches for a context");
 
 console.log("\na hundred cycles leave nothing behind");
 {
-  const stage = new GlossStage(bindings());
+  const stage = new GlossStage(stageBindings());
   let peak = 0;
   for (let i = 0; i < 100; i++) {
     const avatar = GLOSS_ROSTER[i % GLOSS_ROSTER.length]!.id;
-    stage.mount(`row-${i}`, boxAt(20), avatar);
+    stage.mount(`row-${i}`, box(20), avatar);
     stage.measure();
     // Enough frames to drain the build budget for this one slot.
     for (let f = 0; f < 4; f++) stage.frame(f / 30, 1 / 30);
@@ -158,9 +112,9 @@ console.log("\nblink, gaze, breath and sway all reach the character");
   // like a design decision rather than a bug. Blink, gaze and the saccade live in the vendored
   // `gface.js`; breath and sway were re-typed from the page harness that was not copied. All four
   // have to be observable from outside, so this reads the transforms the stage writes.
-  const stage = new GlossStage(bindings());
+  const stage = new GlossStage(stageBindings());
   const rows = ["one", "two", "three", "four"];
-  rows.forEach((k, i) => stage.mount(k, boxAt(20 + i * 120), GLOSS_ROSTER[i]!.id));
+  rows.forEach((k, i) => stage.mount(k, box(20 + i * 120), GLOSS_ROSTER[i]!.id));
   stage.measure();
   for (let f = 0; f < 8; f++) stage.frame(f / 30, 1 / 30);
 
@@ -220,8 +174,8 @@ console.log("\nan id the roster does not have");
   // NOT A FALLBACK CHARACTER. The whole promise of the roster is that an avatar identifies an agent,
   // and quietly substituting a default is two agents wearing one identity with nothing to say so.
   // It also must not throw: an id can outlive its entry if somebody edits the roster.
-  const stage = new GlossStage(bindings());
-  stage.mount("ghost", boxAt(20), "no-such-avatar");
+  const stage = new GlossStage(stageBindings());
+  stage.mount("ghost", box(20), "no-such-avatar");
   stage.measure();
   for (let f = 0; f < 4; f++) stage.frame(f / 30, 1 / 30);
   check("it builds nothing and does not throw", stage.builtCount === 0, `${stage.builtCount}`);
