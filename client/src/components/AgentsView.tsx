@@ -39,7 +39,6 @@ import {
 import { Icon } from "../lib/icons/registry.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { useAgentGridStore } from "../store/agentGridStore.ts";
-import { useBuildStore } from "../store/buildStore.ts";
 import { useMemberStore } from "../store/memberStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
@@ -276,14 +275,6 @@ export function AgentsView() {
    * would have to be remembered to be cleared, which is how a dialog reopens on a workspace switch.
    */
   const [creating, setCreating] = useState(false);
-  /**
-   * The sidebar's own list, for §6's duplicate warning.
-   *
-   * `useBuildStore.agents` RATHER THAN THIS VIEW'S CARDS, because the warning has to name every
-   * agent wearing an avatar — including the archived ones this grid is filtering out. "Also used by
-   * X" that silently omitted X would be a warning that is wrong in exactly the case it exists for.
-   */
-  const allAgents = useBuildStore((s) => s.agents);
   /**
    * Is this surface the one on screen? The loop parks whenever it is not.
    *
@@ -641,11 +632,7 @@ export function AgentsView() {
       {/* §6. Rendered here rather than at the app root because this is where it is opened from, and
           its avatar picker holds a stage of its own — a modal that is never open costs nothing, and
           one mounted at the root would hold a WebGL context for the life of the session. */}
-      <NewAgentDialog
-        open={creating}
-        agents={allAgents}
-        onClose={() => setCreating(false)}
-      />
+      <NewAgentDialog open={creating} onClose={() => setCreating(false)} />
     </div>
   );
 }

@@ -1987,11 +1987,10 @@ export type ClientCommand =
   | { cmd: "renameAgent"; agentId: string; name: string }
   /** §8.5's picker. On the existing agent channel under the existing capability. */
   | { cmd: "setAgentEmoji"; agentId: string; emoji: string }
-  // §6's other two identity edits. `category` is any string — the presets are a vocabulary and the
-  // column is TEXT (I6) — and `avatarId` is a roster id the server checks, because an id nothing can
-  // draw is an agent with no face and nothing on screen to say so.
+  // §6's category, edited afterwards. Any string — the presets are a vocabulary and the column is
+  // TEXT (I6). There is no `setAgentAvatar` beside it: an avatar is chosen once, on the onboarding
+  // screen, and a command nothing sends is a control nothing can reach.
   | { cmd: "setAgentCategory"; agentId: string; category: string }
-  | { cmd: "setAgentAvatar"; agentId: string; avatarId: string }
   /** §7.5: the WHOLE grant set for an agent that already exists. See sendSetAgentTools. */
   | { cmd: "setAgentTools"; agentId: string; mcpTools: string[] }
   /**

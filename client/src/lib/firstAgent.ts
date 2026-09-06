@@ -41,7 +41,7 @@ export type FirstAgentChoice =
    * the description when none is given and a required field on an onboarding screen is a wall in
    * front of the one moment this flow exists for.
    */
-  | { kind: "describe"; prompt: string; name?: string; category?: string };
+  | { kind: "describe"; prompt: string; name?: string; category?: string; avatarId?: string };
 
 /**
  * The message a closed socket produces.
@@ -77,7 +77,10 @@ export interface FirstAgentDeps {
    * agent this produces is the first one somebody sees, and it should already be called what they
    * called it rather than whatever the model named it.
    */
-  planAgent: (prompt: string, identity?: { name?: string; category?: string }) => boolean;
+  planAgent: (
+    prompt: string,
+    identity?: { name?: string; category?: string; avatarId?: string },
+  ) => boolean;
   /** Move the progressive reveal along. */
   reveal: () => void;
 }
@@ -88,7 +91,9 @@ const REAL: FirstAgentDeps = {
   select: (agentId) => useBuildStore.getState().selectAgent(agentId),
   planAgent: (prompt, identity) =>
     sendPlanAgent(prompt, [], identity?.name, undefined, undefined, undefined,
-      identity?.category ? { category: identity.category } : undefined),
+      identity?.category || identity?.avatarId
+        ? { category: identity.category, avatarId: identity.avatarId }
+        : undefined),
   reveal: () => useUiStore.getState().setOnboardingStep("run"),
 };
 
@@ -139,7 +144,12 @@ export async function startFirstAgent(
   // AND THE NAME THE USER TYPED, which is §6's first input arriving on the first turn. Generation
   // takes the name from the APPROVED PLAN rather than from this command, so it has to be on the
   // plan — sending it later would be sending it to something that no longer decides.
-  const sent = deps.planAgent(prompt, { name: choice.name?.trim() || undefined, category: choice.category });
+  const sent = deps.planAgent(prompt, {
+    name: choice.name?.trim() || undefined,
+    category: choice.category,
+    // §6'S THIRD INPUT, chosen on this screen and nowhere else in the product.
+    avatarId: choice.avatarId,
+  });
   // See the header. This is the one `send` in the client whose false is acted on.
   if (!sent) throw new Error(NOT_CONNECTED);
   deps.reveal();

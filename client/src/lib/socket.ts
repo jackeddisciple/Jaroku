@@ -1270,16 +1270,6 @@ export function sendSetAgentCategory(agentId: string, category: string): void {
   send({ cmd: "setAgentCategory", agentId, category });
 }
 
-/**
- * §6's avatar, changed on an agent that already exists.
- *
- * A ROSTER ID, checked by the server because an id nothing can draw is an agent with no face and no
- * way to say so. A DUPLICATE is not refused — §6 allows it and warns — so a notice can come back on
- * the agents channel while the write succeeds.
- */
-export function sendSetAgentAvatar(agentId: string, avatarId: string): void {
-  send({ cmd: "setAgentAvatar", agentId, avatarId });
-}
 
 /**
  * §7.5's fork: connectors and the current manifest copied, MCP grants reset to zero.

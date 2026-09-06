@@ -175,11 +175,9 @@ export const COMMAND_ENTITLEMENT: Record<string, EntitlementKind | typeof NO_ENT
   renameAgent: NO_ENTITLEMENT,
   // Cosmetic, and bounded by the palette. Nothing to meter.
   setAgentEmoji: NO_ENTITLEMENT,
-  // Cosmetic too, and bounded the same way: an avatar is one of twenty-eight committed ids and a
-  // category is a label on the row. Neither costs anything to store and neither is counted, so
-  // there is nothing here a plan could sell.
+  // Cosmetic too, and bounded the same way: a category is a label on the row. Nothing to count, so
+  // nothing here a plan could sell.
   setAgentCategory: NO_ENTITLEMENT,
-  setAgentAvatar: NO_ENTITLEMENT,
   // Narrowing or repairing a grant on an agent that already exists. Nothing is counted and the
   // registry it draws from is already bounded by `maxMcpServers`, so there is no second limit here.
   setAgentTools: NO_ENTITLEMENT,

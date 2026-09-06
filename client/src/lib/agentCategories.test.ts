@@ -128,25 +128,24 @@ console.log("\n§6's dialog offers all of them, in this order");
   // twenty-five actually offered, and are the three inputs in §6's order. Both go wrong silently —
   // a group left out of a `map` is a category nobody can pick and nothing says so.
   const html = markup(
-    createElement(NewAgentDialog, { open: true, agents: [], onClose: () => undefined }),
+    createElement(NewAgentDialog, { open: true, onClose: () => undefined }),
   );
   const missing = AGENT_CATEGORIES.filter((c) => !html.includes(`>${c}<`));
   check("every preset is on screen", missing.length === 0, missing.join(", "));
   check("...and so is the custom fallback", html.includes("Name your own"));
 
-  // §6: "Three inputs, IN THIS ORDER." Name, then category, then avatar — and the order is the part
-  // a chip row cannot carry, which is the whole reason this is a dialog.
+  // §6's ORDER, for the two inputs this dialog still asks. Name, then category — and the order is
+  // the part a chip row cannot carry, which is the whole reason this is a dialog.
   const at = (needle: string): number => html.indexOf(needle);
   check("name comes before category", at(">Name<") >= 0 && at(">Name<") < at(">Category<"),
     `${at(">Name<")} / ${at(">Category<")}`);
-  check("category comes before avatar", at(">Category<") < at(">Avatar<"),
-    `${at(">Category<")} / ${at(">Avatar<")}`);
 
-  // THE AVATAR STEP IS PRE-ANSWERED, so the grid is never empty and somebody who does not care can
-  // skip it entirely — §6 asks for exactly that.
-  const checked = (html.match(/aria-checked="true"/g) ?? []).length;
-  check("exactly one avatar is preselected", checked === 1, `${checked}`);
-  check("the whole roster is offered", GLOSS_ROSTER.every((r) => html.includes(`aria-label="${r.label}"`)));
+  // AND THERE IS NO AVATAR STEP HERE. Choosing a face is asked once, on the onboarding screen, by
+  // the carousel — a picker here would be a third surface competing for the same decision on a form
+  // whose job is to get a brief written. An agent made from this dialog takes the avatar its uuid
+  // hashes to, which is the answer the server has always given when nobody chose.
+  check("the dialog offers no avatar picker",
+    !html.includes(">Avatar<") && !GLOSS_ROSTER.some((r) => html.includes(`aria-label="${r.label}"`)));
 
   // AND IT IS A DIALOG, not a div drawn on top of the application — `useDialog`'s whole argument.
   check("it announces itself as a dialog",

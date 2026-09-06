@@ -32,17 +32,31 @@
 // workspace is the same shape — and a greyed radio explaining a tenancy rule is a paragraph about
 // Jaroku's internals on somebody's first screen.
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { EXAMPLE_AGENT_ID } from "../useOnboarding.ts";
 import { startFirstAgent } from "../../../lib/firstAgent.ts";
 import { useAccountOnboardingStore } from "../../../store/accountOnboardingStore.ts";
 import { useBuildStore } from "../../../store/buildStore.ts";
 import { FormError, PrimaryButton } from "../../auth/controls.tsx";
 import { StepShell } from "./StepShell.tsx";
+import { AvatarCarousel } from "../../AvatarCarousel.tsx";
+import { GlossStageProvider } from "../../GlossAvatar.tsx";
+import { GLOSS_ROSTER, avatarIdFor } from "../../../lib/gloss/roster.ts";
 
 type Choice = "sample" | "describe";
 
 export function AgentStep() {
+  /**
+   * A value to hash the opening avatar out of.
+   *
+   * THE AGENT HAS NO UUID YET — it does not exist until generation writes the row — so the strip
+   * cannot open on the avatar this agent will eventually be assigned. What it opens on only has to
+   * satisfy two things: it must not always be the first entry, so the strip has characters on both
+   * sides and reads as something to scroll; and it must not change while somebody is looking at it.
+   * A per-mount id gives both. The row's real default, if they never touch the strip, is the
+   * server's hash of its uuid.
+   */
+  const session = useId();
   const advance = useAccountOnboardingStore((s) => s.advance);
   // What the last screen needs to know. `advance` is called by the Skip beside this form too, so it
   // is not the thing that says an agent was started — see the store's `agentStarted`.
@@ -72,6 +86,16 @@ export function AgentStep() {
    * moment it is trying to produce.
    */
   const [name, setName] = useState("");
+  /**
+   * §6'S THIRD INPUT, AND THE ONLY PLACE IN THE PRODUCT IT IS ASKED. The pickers that used to sit in
+   * the New agent dialog and the agent detail are gone: choosing a face is a thing somebody does
+   * once, while they are being introduced to the product, and a control for it on two other screens
+   * is two more things competing with the work those screens are actually for. Every agent made
+   * afterwards takes the avatar its uuid hashes to.
+   *
+   * PRE-ANSWERED, so the strip is never empty and somebody who does not care can scroll past it.
+   */
+  const [avatarId, setAvatarId] = useState<string>(() => avatarIdFor(session) ?? GLOSS_ROSTER[0]!.id);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -84,7 +108,12 @@ export function AgentStep() {
       await startFirstAgent(
         choice === "sample"
           ? { kind: "sample" }
-          : { kind: "describe", prompt: description.trim(), name: name.trim() || undefined },
+          : {
+              kind: "describe",
+              prompt: description.trim(),
+              name: name.trim() || undefined,
+              avatarId: avatarId || undefined,
+            },
       );
       markAgentStarted();
       advance();
@@ -149,6 +178,14 @@ export function AgentStep() {
               text-ink outline-none transition-colors duration-fast placeholder:text-faint
               focus-visible:shadow-focusring focus:border-chrome disabled:opacity-50"
           />
+        )}
+        {/* THE AVATAR, BETWEEN THE NAME AND THE BRIEF, which is §6's order — name, then what it looks
+            like, then what it does. It is the largest thing on this screen on purpose: it is the one
+            decision here that is worth looking at rather than reading. */}
+        {choice === "describe" && (
+          <GlossStageProvider active className="relative isolate">
+            <AvatarCarousel current={avatarId} onChoose={setAvatarId} />
+          </GlossStageProvider>
         )}
         {choice === "describe" && (
           <textarea

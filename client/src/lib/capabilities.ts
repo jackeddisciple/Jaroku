@@ -138,10 +138,9 @@ export const COMMAND_CAPABILITY: Record<string, string> = {
   renameAgent: "agent:write",
   // §8.2: the EXISTING capability. Re-marking an agent is a smaller act than renaming one.
   setAgentEmoji: "agent:write",
-  // §6's other two identity edits, on the same rung: what an agent is called, what it is for and
-  // what it looks like are one authority, not three. Neither reaches anything outside the row.
+  // §6's category, on the same rung: what an agent is called and what it is for is one authority,
+  // not two. It reaches nothing outside the row.
   setAgentCategory: "agent:write",
-  setAgentAvatar: "agent:write",
   setAgentTools: "agent:write",
   forkAgent: "agent:write",
   restoreAgentVersion: "agent:write",
@@ -526,7 +525,6 @@ export const COMMAND_AGENT_CAPABILITY: Record<string, AgentCapability> = {
   renameAgent: "edit",
   setAgentEmoji: "edit",
   setAgentCategory: "edit",
-  setAgentAvatar: "edit",
   setAgentTools: "edit",
   restoreAgentVersion: "edit",
 

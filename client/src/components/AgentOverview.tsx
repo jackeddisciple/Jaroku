@@ -22,11 +22,10 @@ import { AgentTagRow } from "./AgentTagRow.tsx";
 import { AgentSparkline } from "./AgentSparkline.tsx";
 import { PencilIcon } from "./panelIcons.tsx";
 import { ChevronDownIcon } from "./panelIcons.tsx";
-import { AvatarPicker, avatarUsage } from "./AvatarPicker.tsx";
 import { AVATAR_SIZE, GlossAvatar, GlossStageProvider } from "./GlossAvatar.tsx";
 import { EmojiPicker } from "./EmojiPicker.tsx";
 import { AGENT_CATEGORIES, normalizeCategory, showsCategory } from "../lib/agentCategories.ts";
-import { sendSetAgentAvatar, sendSetAgentCategory, sendSetAgentEmoji } from "../lib/socket.ts";
+import { sendSetAgentCategory, sendSetAgentEmoji } from "../lib/socket.ts";
 import { sendRenameAgent } from "../lib/socket.ts";
 import { fmtCost, relTime } from "../lib/format.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
@@ -50,14 +49,6 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
   const agents = useBuildStore((s) => s.agents);
   /** §6's "name your own", for an agent that already exists. Cleared once it has been sent. */
   const [customCategory, setCustomCategory] = useState("");
-
-  /**
-   * Which agents wear each avatar, with THIS one left out of its own warning.
-   *
-   * "Also used by itself" is not a warning, and it would appear the moment somebody opened the
-   * picker on an agent that already has an avatar — which is every agent.
-   */
-  const avatarUsedBy = useMemo(() => avatarUsage(agents, a.name), [agents, a.name]);
 
   const takenBy = useMemo(() => {
     const out = new Map<string, string>();
@@ -218,7 +209,7 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
               <ChevronDownIcon size={ICON.xs} />
             </span>
             Identity
-            <span className="ml-auto text-faint">mark, category, avatar</span>
+            <span className="ml-auto text-faint">mark, category</span>
           </summary>
 
           <div className="space-y-3 border-t border-hair p-2.5">
@@ -269,20 +260,12 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
               />
             </div>
 
-            {/* §6'S AVATAR, through the same picker the create dialog uses — one grid, one set of
-                tiles, one duplicate warning. This agent is left out of its own warning: "also used
-                by itself" is not a warning. */}
-            <div>
-              <span className={TYPE.sectionLabel}>Avatar</span>
-              <div className="mt-1.5">
-                <AvatarPicker
-                  current={a.avatar_id}
-                  usedBy={avatarUsedBy}
-                  onChoose={(id) => sendSetAgentAvatar(a.slug, id)}
-                  columns={6}
-                />
-              </div>
-            </div>
+            {/* THERE IS NO AVATAR PICKER HERE. It is chosen once, on the onboarding screen, by the
+                carousel — the one place in the product that asks. A picker on this panel would be a
+                control for a decision nobody comes here to make, sitting above the description, the
+                tag row and every fact on the header. What this section still owns is the mark and
+                the category, both of which change with how an agent is USED rather than with what it
+                looks like. */}
           </div>
         </details>
 

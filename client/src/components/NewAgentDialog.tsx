@@ -20,43 +20,22 @@
 // A DUPLICATE IS ALLOWED AND WARNED. "Also used by Stacey" under the grid, and Create stays enabled:
 // it is their workspace, and a hard block on a cosmetic choice is worse than a duplicate.
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
-import { AvatarPicker, avatarUsage } from "./AvatarPicker.tsx";
-import { GlossStageProvider } from "./GlossAvatar.tsx";
 import { Chip } from "./Chip.tsx";
 import { outlineBtn, primaryBtn, quietBtn } from "./buttons.ts";
 import {
   AGENT_CATEGORIES, CATEGORY_GROUPS, normalizeCategory, UNCATEGORIZED,
 } from "../lib/agentCategories.ts";
 import { useDialog } from "../lib/dialog.ts";
-import { GLOSS_ROSTER, avatarIdFor } from "../lib/gloss/roster.ts";
 import { sendPlanAgent } from "../lib/socket.ts";
 import { LAYER, TYPE } from "../lib/tokens.ts";
-import type { AgentSummary } from "../types.ts";
-
-/**
- * Which avatar the dialog opens on.
- *
- * HASHED FROM SOMETHING THAT DOES NOT EXIST YET, which is the one thing this cannot share with the
- * server: the agent has no uuid until generation writes the row. So the preselection is hashed from
- * the DIALOG's own session id — a value minted when it opens — which gives the same two properties
- * that matter here and no others: it is not always Alder, and it does not change while somebody is
- * looking at it. The row's real default, if they never touch the grid, is the server's hash of its
- * uuid; this is a starting point for a picker, not an assignment.
- */
-function openingAvatar(session: string): string {
-  return avatarIdFor(session) ?? GLOSS_ROSTER[0]!.id;
-}
 
 export function NewAgentDialog({
   open,
-  agents,
   onClose,
 }: {
   open: boolean;
-  /** For §6's duplicate warning. The sidebar's list, which every surface already has. */
-  agents: readonly AgentSummary[];
   onClose: () => void;
 }) {
   const labelId = useId();
@@ -68,7 +47,6 @@ export function NewAgentDialog({
   const [category, setCategory] = useState<string>(UNCATEGORIZED);
   const [custom, setCustom] = useState("");
   const [naming, setNaming] = useState(false);
-  const [avatarId, setAvatarId] = useState(() => openingAvatar(session));
   const briefRef = useRef<HTMLTextAreaElement>(null);
 
   // A FRESH DIALOG EVERY TIME IT OPENS. Left as it was, somebody who cancelled halfway through
@@ -81,11 +59,8 @@ export function NewAgentDialog({
     setCategory(UNCATEGORIZED);
     setCustom("");
     setNaming(false);
-    setAvatarId(openingAvatar(session));
   }, [open, session]);
 
-  /** Who else already wears each avatar. §6's warning, and it names them rather than counting them. */
-  const usage = useMemo(() => avatarUsage(agents), [agents]);
 
   const chosenCategory = naming ? normalizeCategory(custom) : category;
   const canCreate = brief.trim().length > 0;
@@ -97,7 +72,6 @@ export function NewAgentDialog({
       // The neutral value is what the server would write anyway; sending it says the same thing and
       // keeps the wire shape honest about what was on screen.
       category: chosenCategory,
-      avatarId,
     });
     onClose();
   };
@@ -188,36 +162,12 @@ export function NewAgentDialog({
             )}
           </div>
 
-          {/* ── 3. Avatar ──────────────────────────────────────────────────────────────────
-              RENDERED LIVE, THROUGH THE SAME STAGE the grid uses — §6. A picker of static images
-              would be a second rendering path to keep in step with the first, and the first is the
-              one whose output people compare these against.
-
-              ITS OWN PROVIDER, and therefore its own context, which is the one place this product
-              holds two at once. I1 says exactly one per app LIFETIME, and this does not break it in
-              the way that matters: the grid's stage is unmounted while a modal covers it only if the
-              modal is over the grid, so the honest statement is that at most two exist and only
-              while this dialog is open. The alternative — threading the grid's stage into a dialog
-              that can be opened from the sidebar, where there is no grid — would be a stage whose
-              lifetime is nobody's. */}
-          <div className="mt-4">
-            <span className={TYPE.sectionLabel}>Avatar</span>
-            {/* THE DIALOG OWNS THE STAGE, not the picker. I1 says one renderer per app LIFETIME and
-                this is the one place two exist at once — a dialog open over a grid that has one. It
-                is deliberate: the alternative is threading the grid's stage into a dialog that can
-                be opened where there is no grid, which is a stage whose lifetime belongs to nobody.
-                Both are disposed on unmount, and `test:gloss-stage` asserts a stage constructs
-                exactly one context and frees it.
-
-                THE SAME PICKER THE DETAIL'S IDENTITY SECTION USES. Two grids would be two sets of
-                tile sizes and two duplicate warnings, and one of them would stop matching what the
-                card draws. §6's warning names the agents rather than counting them. */}
-            <div className="mt-1.5">
-              <GlossStageProvider active={open}>
-                <AvatarPicker current={avatarId} usedBy={usage} onChoose={setAvatarId} />
-              </GlossStageProvider>
-            </div>
-          </div>
+          {/* THERE IS NO AVATAR STEP HERE ANY MORE. Choosing a face is a thing somebody does once,
+              while they are being introduced to the product, and the carousel on the onboarding
+              screen is the one place it is asked. A picker here would be a third surface competing
+              for the same decision, on a form whose actual job is to get a brief written — and an
+              agent made from this dialog takes the avatar its uuid hashes to, which is the same
+              answer the server has always given when nobody chose. */}
 
           {/* THE BRIEF, LAST AND REQUIRED, and it is not one of §6's three. §6 describes a form for
               a product where an agent is a row somebody fills in; here an agent is generated from a

@@ -211,8 +211,6 @@ export type RenameAgentCommand = { cmd: "renameAgent"; agentId: string; name: st
 export type SetAgentEmojiCommand = { cmd: "setAgentEmoji"; agentId: string; emoji: string };
 /** §6's category, edited afterwards. Any string — the presets are a vocabulary, not a constraint. */
 export type SetAgentCategoryCommand = { cmd: "setAgentCategory"; agentId: string; category: string };
-/** §6's avatar, edited afterwards. A roster id, checked, because an unknown one draws nothing. */
-export type SetAgentAvatarCommand = { cmd: "setAgentAvatar"; agentId: string; avatarId: string };
 
 /**
  * Duplicate an agent: its connectors and its current version, and none of its MCP grants (§7.5).
@@ -276,12 +274,11 @@ export type AgentCommand =
   | RestoreAgentVersionCommand
   | SetAgentToolsCommand
   | SetAgentEmojiCommand
-  | SetAgentCategoryCommand
-  | SetAgentAvatarCommand;
+  | SetAgentCategoryCommand;
 
 const AGENT_COMMANDS = new Set([
   "archiveAgent", "restoreAgent", "renameAgent", "forkAgent", "restoreAgentVersion",
-  "setAgentTools", "setAgentEmoji", "setAgentCategory", "setAgentAvatar",
+  "setAgentTools", "setAgentEmoji", "setAgentCategory",
 ]);
 
 /**
@@ -3209,7 +3206,6 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   archiveAgent: "agents", restoreAgent: "agents", renameAgent: "agents", setAgentTools: "agents",
   setAgentEmoji: "agents",
   setAgentCategory: "agents",
-  setAgentAvatar: "agents",
   forkAgent: "agents", restoreAgentVersion: "agents",
   // §4 and §6's three reads. On `agents` beside `listAgents` rather than on a channel of their own
   // — see ListAgentGridCommand for why this is not a new channel.

@@ -25,6 +25,7 @@
 //
 //   npm run test:first-agent
 
+import { readFileSync } from "node:fs";
 import { NOT_CONNECTED, startFirstAgent, type FirstAgentDeps } from "./firstAgent.ts";
 import { EXAMPLE_AGENT_ID } from "../components/onboarding/useOnboarding.ts";
 
@@ -161,13 +162,13 @@ console.log("\nthe name the user typed reaches the plan");
   // EVERY AGENT HAS A NAME AND THIS IS THE FIRST PLACE SOMEBODY GIVES IT ONE. It has to ride the
   // PLAN rather than the generate command, because generation builds what was approved and takes
   // the name off the record — a name sent later is a name sent to something that no longer decides.
-  type Sent = { prompt: string; identity?: { name?: string; category?: string } };
+  type Sent = { prompt: string; identity?: { name?: string; category?: string; avatarId?: string } };
   let seen: Sent | null = null;
   const deps = {
     connected: () => true,
     agents: () => [],
     select: () => undefined,
-    planAgent: (prompt: string, identity?: { name?: string; category?: string }) => {
+    planAgent: (prompt: string, identity?: { name?: string; category?: string; avatarId?: string }) => {
       seen = { prompt, identity };
       return true;
     },
@@ -189,6 +190,38 @@ console.log("\nthe name the user typed reaches the plan");
   await startFirstAgent({ kind: "describe", prompt: "chase invoices" }, deps);
   const none = seen as Sent | null;
   check("...and so is a name nobody typed", none?.identity?.name === undefined);
+
+  // AND THE AVATAR, which is the other thing this screen now asks and the ONLY place in the product
+  // that asks it. It rides the plan for the same reason the name does: generation builds what was
+  // approved, and an avatar sent afterwards would be sent to something that no longer decides.
+  seen = null;
+  await startFirstAgent({ kind: "describe", prompt: "chase invoices", avatarId: "quartz" }, deps);
+  const withAvatar = seen as Sent | null;
+  check("the chosen avatar is carried", withAvatar?.identity?.avatarId === "quartz");
+}
+
+console.log("\nthe carousel is the only place an avatar is chosen");
+{
+  // ONE SURFACE, ASSERTED. Choosing a face is a thing somebody does once, while they are being
+  // introduced to the product; a picker on the New agent dialog and another in the agent detail
+  // were two more controls competing with the work those screens are actually for. The rule is only
+  // worth what it can be broken by, which is somebody adding a third picker in six months.
+  const carousel = readFileSync("src/components/AvatarCarousel.tsx", "utf8");
+  check("the carousel offers the whole roster", carousel.includes("GLOSS_ROSTER.map"));
+  check("...and the size is the selection", /scale\(/.test(carousel));
+  check("...with both ends faded", /maskImage/.test(carousel));
+
+  for (const path of ["src/components/NewAgentDialog.tsx", "src/components/AgentOverview.tsx"]) {
+    const text = readFileSync(path, "utf8");
+    check(`${path.split("/").pop()} has no avatar picker`,
+      !text.includes("<AvatarCarousel") && !text.includes("<AvatarPicker"));
+  }
+
+  // AND NOTHING SENDS A LATE AVATAR CHANGE, because there is no command to send. A relay command
+  // nothing can reach is a control nothing can reach, which this repository tests against
+  // everywhere else and should not make an exception for here.
+  const socket = readFileSync("src/lib/socket.ts", "utf8");
+  check("there is no setAgentAvatar sender", !socket.includes("setAgentAvatar"));
 }
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
