@@ -1602,6 +1602,15 @@ jobs:
           # one frame and then nothing, which is neither a slower animation nor a blank card, and
           # both of those are easy to ship by accident.
           npm run test:gloss-budget
+          # I6, AND THE ASSERTION THAT MATTERS READS THE MIGRATION RATHER THAN THE LIST. "The column
+          # is TEXT, never an enum — the list will change, and a migration to add 'Compliance' to a
+          # preset list would be absurd." That rule does not get broken by editing twenty-five words;
+          # it gets broken by somebody adding a CHECK constraint in six months because the data
+          # looked untidy, at which point every agent carrying a category somebody typed becomes
+          # unsaveable. The suite also asserts the server holds no copy of the presets — a category
+          # is a vocabulary in the interface and a string in the database, and a second list would be
+          # a deploy ordering nobody wants.
+          npm run test:agent-category
           npm run test:icon-generated
           # AND THE SAME PROPERTY THE OTHER WAY ROUND, which is not redundant: the suite above
           # catches a mark somebody edited by hand, and this catches a MANIFEST edit committed

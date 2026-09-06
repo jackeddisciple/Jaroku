@@ -1,0 +1,120 @@
+// §8's `test:agent-category`: twenty-five presets, sorted, unique; custom text round-trips; the
+// column is TEXT and not an enum.
+//
+// THE LAST OF THOSE IS THE ONE WORTH HAVING, and it is asserted against the MIGRATION rather than
+// against this file. I6 is a rule about the database — "the column is TEXT, never an enum — the list
+// will change, and a migration to add 'Compliance' to a preset list would be absurd" — and the way
+// it gets broken is not by editing this list. It is by somebody adding a `CHECK (category IN (...))`
+// in six months because the data looked untidy, at which point every agent carrying a category
+// somebody typed becomes unsaveable.
+//
+// THE OTHER HALF IS THE COUNT AND THE SORT, and neither indexes anything: unlike the emoji palette
+// and the avatar roster, nothing hashes into this list, so reordering it is harmless. It is asserted
+// because a hand-maintained list of twenty-five drifts into the order things were thought of in, and
+// twenty-five items in no order is a list you read all of to find one.
+//
+//   npm run test:agent-category
+
+import { readFileSync } from "node:fs";
+
+import {
+  AGENT_CATEGORIES, CATEGORY_GROUPS, UNCATEGORIZED, isPresetCategory, normalizeCategory,
+  showsCategory,
+} from "./agentCategories.ts";
+
+let fail = 0;
+const check = (name: string, ok: boolean, detail = ""): void => {
+  if (ok) console.log(`  ok   ${name}`);
+  else { fail++; console.log(`  FAIL ${name}${detail ? ` — ${detail}` : ""}`); }
+};
+
+console.log("\ntwenty-five presets, grouped and sorted");
+{
+  check("there are twenty-five", AGENT_CATEGORIES.length === 25, `${AGENT_CATEGORIES.length}`);
+  check("they are unique", new Set(AGENT_CATEGORIES).size === AGENT_CATEGORIES.length);
+  check("there are five groups", CATEGORY_GROUPS.length === 5, `${CATEGORY_GROUPS.length}`);
+  check("the group names are §6's",
+    CATEGORY_GROUPS.map((g) => g.label).join(",") === "Business,Data,Engineering,Content,General",
+    CATEGORY_GROUPS.map((g) => g.label).join(","));
+
+  // SORTED WITHIN GROUPS, not across them: the groups are ordered by expected use — Business first
+  // because it is the largest and the commonest, General last because it is the fallback — and a
+  // picker whose first heading is "Content" makes somebody read all five to find the one they meant.
+  for (const group of CATEGORY_GROUPS) {
+    check(`${group.label} is sorted`,
+      JSON.stringify([...group.categories].sort()) === JSON.stringify([...group.categories]),
+      group.categories.join(", "));
+    check(`${group.label} is not empty`, group.categories.length > 0);
+  }
+
+  // NO GROUP IS A GRAB BAG. Nothing enforces where a category lands, so the only guard against the
+  // list decaying into twenty in "Other" is that every group is small enough to scan.
+  const biggest = Math.max(...CATEGORY_GROUPS.map((g) => g.categories.length));
+  check("no group is longer than a glance", biggest <= 8, `${biggest}`);
+
+  // §6'S OWN TWENTY-FIVE, BY NAME. The grouping is this file's decision; the LIST is the brief's, and
+  // a preset quietly renamed is a category every agent already carrying it stops matching.
+  const expected = [
+    "Analytics", "Billing", "Code Review", "Coding", "Data Entry", "Debugging", "Design", "DevOps",
+    "Documentation", "Email Triage", "Marketing", "Monitoring", "Outreach", "Personal Assistant",
+    "Reporting", "Research", "Sales", "Scheduling", "Scraping", "Social Media", "Summarization",
+    "Support", "Testing", "Translation", "Writing",
+  ];
+  check("they are the twenty-five §6 lists",
+    JSON.stringify([...AGENT_CATEGORIES].sort()) === JSON.stringify(expected),
+    [...AGENT_CATEGORIES].sort().filter((c) => !expected.includes(c)).join(", "));
+
+  // THE NEUTRAL VALUE IS NOT ONE OF THEM. It is what an agent has when nobody has answered, and
+  // offering it in the picker would make "I have not decided" a thing somebody chooses on purpose.
+  check("Uncategorized is not a preset", !AGENT_CATEGORIES.includes(UNCATEGORIZED));
+}
+
+console.log("\ncustom text is the same column");
+{
+  // I6, AT THE LEVEL A USER MEETS IT: a preset and something typed are indistinguishable once
+  // stored. The only difference between them is how much typing it took.
+  check("a preset is recognised", isPresetCategory("Billing"));
+  check("...with surrounding space", isPresetCategory("  Billing  "));
+  check("something typed is not a preset", !isPresetCategory("Vendor chasing"));
+  check("a typed category round-trips", normalizeCategory("  Vendor chasing  ") === "Vendor chasing",
+    normalizeCategory("  Vendor chasing  "));
+  // NOT NULL MEANS EMPTY IS NOT AN OPTION. "" would render as a name, an em dash, and nothing —
+  // which reads as a bug rather than as an absence.
+  check("empty becomes the neutral value", normalizeCategory("   ") === UNCATEGORIZED);
+  check("the neutral value stays itself", normalizeCategory(UNCATEGORIZED) === UNCATEGORIZED);
+
+  // §7'S SIDEBAR RULE, decided here so the row does not have to know about it.
+  check("Uncategorized is not shown", !showsCategory(UNCATEGORIZED));
+  check("null is not shown", !showsCategory(null));
+  check("empty is not shown", !showsCategory(""));
+  check("a real category is shown", showsCategory("Billing"));
+}
+
+console.log("\nthe column is TEXT, and stays TEXT");
+{
+  // THE ASSERTION THIS SUITE EXISTS FOR, and it reads the MIGRATION rather than this file. I6 is a
+  // rule about the database, and it does not get broken by editing a list — it gets broken by
+  // somebody adding a CHECK constraint in six months because the data looked untidy, at which point
+  // every agent carrying a category somebody typed becomes unsaveable.
+  for (const dialect of ["sqlite", "postgres"]) {
+    // COMMENTS STRIPPED BEFORE MATCHING, the same way `db/expandContract.ts` reads a migration: the
+    // file ARGUES for TEXT over an enum at some length, and a scan that could not tell the argument
+    // from the statement would fail on a migration that does exactly what it says.
+    const sql = readFileSync(`../server/migrations/${dialect}/068_agent_identity.sql`, "utf8")
+      .replace(/--[^\n]*/g, " ");
+    const line = sql.split("\n").find((l) => /ADD COLUMN category/.test(l)) ?? "";
+    check(`${dialect}: the column is TEXT`, /\bTEXT\b/.test(line), line);
+    check(`${dialect}: no CHECK constraint on it`, !/CHECK\s*\(/i.test(line), line);
+    check(`${dialect}: no enum type anywhere in the migration`, !/CREATE TYPE|\bENUM\b/i.test(sql));
+  }
+
+  // AND THERE IS NO SECOND COPY OF THE LIST. The server neither validates nor knows these words —
+  // it stores a string — so a preset added here is a preset available immediately, with no deploy
+  // ordering to think about and no drift test to keep two lists honest.
+  const serverSources = ["../server/src/db/repositories/agents.ts", "../server/src/agents/avatarRoster.ts"];
+  const leaked = serverSources.filter((f) => readFileSync(f, "utf8").includes("Email Triage"));
+  check("the server holds no copy of the presets", leaked.length === 0, leaked.join(", "));
+}
+
+console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
+(globalThis as { process?: { exit(code: number): void } }).process?.exit(fail === 0 ? 0 : 1);
