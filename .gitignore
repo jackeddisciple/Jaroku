@@ -93,3 +93,19 @@ src-tauri/target/
 src-tauri/gen/
 src-tauri/binaries/
 src-tauri/resources/
+
+# The avatar work's scratch checkout, and it is the one entry in this file that guards against a
+# single keystroke rather than against a build artefact accumulating.
+#
+# `avatarcodebase/` is a local clone of albertobeiz/kindergrimm, dropped beside the repository so
+# the gloss character system could be read and copied out of it. It is roughly 13 MB — 4 MB of mp3,
+# an entire game, and thousands of files that have nothing to do with Jaroku — and it gets deleted
+# when the work is done. One `git add -A` puts every byte of it in this repository permanently, and
+# history is the one thing here that cannot be tidied up afterwards. So the rule lands BEFORE
+# anything is copied out, rather than after.
+avatarcodebase/
+
+# And its specification, under the convention the four PDFs above already follow: a spec is what
+# the work was written against, and what ships is the work. Named rather than globbed to `*.pdf`
+# for the reason stated up there — a blanket rule would also swallow a PDF somebody meant to ship.
+avatar.pdf
