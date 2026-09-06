@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentCard } from "./AgentCard.tsx";
+import { NewAgentDialog } from "./NewAgentDialog.tsx";
 import { Segmented } from "./Segmented.tsx";
 import { IconButton } from "./IconButton.tsx";
 import { Chip } from "./Chip.tsx";
@@ -37,6 +38,7 @@ import {
 import { Icon } from "../lib/icons/registry.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { useAgentGridStore } from "../store/agentGridStore.ts";
+import { useBuildStore } from "../store/buildStore.ts";
 import { useMemberStore } from "../store/memberStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
@@ -241,6 +243,22 @@ export function AgentsView() {
   const [filters, setFilters] = useState<AgentFilterState>(NO_FILTERS);
   const [sort, setSort] = useState<AgentSort>("active");
   const [density, setDensity] = useState<AgentDensity>("comfortable");
+  /**
+   * §6's dialog, open or not.
+   *
+   * LOCAL, like every other piece of this view's state and for the same reason: it is a fact about
+   * this session at this moment, and local state clears itself when the view unmounts. A store
+   * would have to be remembered to be cleared, which is how a dialog reopens on a workspace switch.
+   */
+  const [creating, setCreating] = useState(false);
+  /**
+   * The sidebar's own list, for §6's duplicate warning.
+   *
+   * `useBuildStore.agents` RATHER THAN THIS VIEW'S CARDS, because the warning has to name every
+   * agent wearing an avatar — including the archived ones this grid is filtering out. "Also used by
+   * X" that silently omitted X would be a warning that is wrong in exactly the case it exists for.
+   */
+  const allAgents = useBuildStore((s) => s.agents);
   const [cursor, setCursor] = useState<string | null>(null);
   const searchInput = useRef<HTMLInputElement | null>(null);
 
@@ -442,14 +460,15 @@ export function AgentsView() {
         {/* §9 keeps a label on the two `+ New` actions, which is where a label genuinely carries
             meaning. §5.4 is explicit that no `New` pill goes beside it — there it would read as a
             label ON the button rather than as a description of anything. */}
+        {/* §6'S DIALOG, AND THE COMPOSER IS STILL THERE. This opens the three-input form — name,
+            category, avatar — which asks for a plan exactly as the composer's first move does. The
+            composer path is untouched for anybody who would rather just start typing; what this
+            adds is the ORDER, which is the thing a chip row cannot carry. */}
         <button
-          onClick={() => {
-            useUiStore.getState().closeNav();
-            useUiStore.getState().focusChat();
-          }}
+          onClick={() => setCreating(true)}
           disabled={!connected}
           className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink disabled:pointer-events-none disabled:opacity-40"
-          title={connected ? "Describe a new agent in the composer" : "Reconnecting — a new agent needs a connection"}
+          title={connected ? "New agent — name, category and avatar" : "Reconnecting — a new agent needs a connection"}
           aria-label="New agent"
         >
           <Icon.agents.new size={ICON.sm} />
@@ -567,6 +586,15 @@ export function AgentsView() {
           </div>
         )}
       </div>
+
+      {/* §6. Rendered here rather than at the app root because this is where it is opened from, and
+          its avatar picker holds a stage of its own — a modal that is never open costs nothing, and
+          one mounted at the root would hold a WebGL context for the life of the session. */}
+      <NewAgentDialog
+        open={creating}
+        agents={allAgents}
+        onClose={() => setCreating(false)}
+      />
     </div>
   );
 }

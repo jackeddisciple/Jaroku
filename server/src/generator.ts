@@ -80,6 +80,15 @@ export interface GenerateOptions {
   /** The servers those tools came from, for their endpoints and credential key names. */
   mcpServers?: McpServerView[];
   name?: string;
+  /**
+   * §6's second and third inputs, from the approved plan.
+   *
+   * BOTH OPTIONAL, AND ABSENT IS THE ORDINARY CASE. Every entry point but the New agent dialog
+   * plans an agent from a brief alone, and `agents.create` answers undefined with the neutral
+   * category and the avatar the uuid hashes to — which is what makes §6's avatar step skippable.
+   */
+  category?: string;
+  avatarId?: string;
   /** The plan the user confirmed at the pre-generation gate, verbatim (planner.ts). Absent =
    *  an unplanned generation, whose prompt stays byte-identical to the pre-gate one. */
   plan?: string;
@@ -361,6 +370,8 @@ export class Generator extends EventEmitter<GeneratorEvents> {
         required_env: [...requiredEnv(selected), ...manifestEnv(manifest)],
         default_provider: "fake",
         creation_cost: round8((opts.planUsage?.cost_usd ?? 0) + usage.cost_usd),
+        category: opts.category,
+        avatarId: opts.avatarId,
       });
       const { version } = await projects.publishStaging(ctx, agentUuid, stagingId, {
         source: "generation",

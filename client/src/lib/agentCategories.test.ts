@@ -16,6 +16,11 @@
 //   npm run test:agent-category
 
 import { readFileSync } from "node:fs";
+import { createElement } from "react";
+
+import { NewAgentDialog } from "../components/NewAgentDialog.tsx";
+import { GLOSS_ROSTER } from "./gloss/roster.ts";
+import { markup } from "./testRender.ts";
 
 import {
   AGENT_CATEGORIES, CATEGORY_GROUPS, UNCATEGORIZED, isPresetCategory, normalizeCategory,
@@ -114,6 +119,38 @@ console.log("\nthe column is TEXT, and stays TEXT");
   const serverSources = ["../server/src/db/repositories/agents.ts", "../server/src/agents/avatarRoster.ts"];
   const leaked = serverSources.filter((f) => readFileSync(f, "utf8").includes("Email Triage"));
   check("the server holds no copy of the presets", leaked.length === 0, leaked.join(", "));
+}
+
+console.log("\n§6's dialog offers all of them, in this order");
+{
+  // A STRUCTURAL TEST, NOT A CLICK TEST. `renderToStaticMarkup` gives the markup the browser would
+  // start from, which is enough for the two questions worth asking of a picker: are all
+  // twenty-five actually offered, and are the three inputs in §6's order. Both go wrong silently —
+  // a group left out of a `map` is a category nobody can pick and nothing says so.
+  const html = markup(
+    createElement(NewAgentDialog, { open: true, agents: [], onClose: () => undefined }),
+  );
+  const missing = AGENT_CATEGORIES.filter((c) => !html.includes(`>${c}<`));
+  check("every preset is on screen", missing.length === 0, missing.join(", "));
+  check("...and so is the custom fallback", html.includes("Name your own"));
+
+  // §6: "Three inputs, IN THIS ORDER." Name, then category, then avatar — and the order is the part
+  // a chip row cannot carry, which is the whole reason this is a dialog.
+  const at = (needle: string): number => html.indexOf(needle);
+  check("name comes before category", at(">Name<") >= 0 && at(">Name<") < at(">Category<"),
+    `${at(">Name<")} / ${at(">Category<")}`);
+  check("category comes before avatar", at(">Category<") < at(">Avatar<"),
+    `${at(">Category<")} / ${at(">Avatar<")}`);
+
+  // THE AVATAR STEP IS PRE-ANSWERED, so the grid is never empty and somebody who does not care can
+  // skip it entirely — §6 asks for exactly that.
+  const checked = (html.match(/aria-checked="true"/g) ?? []).length;
+  check("exactly one avatar is preselected", checked === 1, `${checked}`);
+  check("the whole roster is offered", GLOSS_ROSTER.every((r) => html.includes(`aria-label="${r.label}"`)));
+
+  // AND IT IS A DIALOG, not a div drawn on top of the application — `useDialog`'s whole argument.
+  check("it announces itself as a dialog",
+    html.includes('role="dialog"') && html.includes('aria-modal="true"'));
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

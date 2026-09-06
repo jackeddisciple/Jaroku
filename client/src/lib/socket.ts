@@ -1144,6 +1144,14 @@ export function sendPlanAgent(
   /** Scoped MCP tools, as `"server/tool"` refs — per tool, never per server. */
   mcpTools?: string[],
   attachments?: readonly CommandAttachment[],
+  /**
+   * §6's category and avatar, from the New agent dialog.
+   *
+   * AT THE END AND OPTIONAL, because every other caller of this function is the composer, which has
+   * a brief and a name and nothing else. They ride the plan rather than the generate command so that
+   * the gate stays the single source of what gets built — the same reason the connector list does.
+   */
+  identity?: { category?: string; avatarId?: string },
 ): boolean {
   // THE ONE SENDER IN THIS FILE THAT RETURNS WHETHER IT SENT, and it does because it has a caller
   // that cannot recover on its own. Every other `send` here is fired from a composer sitting inside
@@ -1153,6 +1161,8 @@ export function sendPlanAgent(
   // reports success and generated nothing — with an empty app behind it and no way to tell why.
   return send({
     cmd: "planAgent", prompt, connectors, mcpTools, name, revisePlanId,
+    ...(identity?.category ? { category: identity.category } : {}),
+    ...(identity?.avatarId ? { avatarId: identity.avatarId } : {}),
     threadId: activeThread(), ...withAttachments(attachments),
   });
 }

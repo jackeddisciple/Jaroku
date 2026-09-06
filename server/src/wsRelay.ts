@@ -103,6 +103,22 @@ export type GenerateCommand = {
    */
   mcpTools?: string[];
   name?: string;
+  /**
+   * §6'S SECOND AND THIRD INPUTS, TRAVELLING THROUGH THE GATE WITH THE NAME.
+   *
+   * They ride the plan for the same reason the name does: "everything downstream comes from the
+   * RECORD, not from this command", because the dialog and the plan card are separate entry points
+   * that can disagree. Somebody who picks an avatar, plans, changes their mind about the avatar and
+   * then presses Generate should get the agent the plan described — and the plan is what was on
+   * screen when they pressed it.
+   *
+   * Both optional, and absent is a real answer: no category means the neutral value, and no avatar
+   * means the one the uuid hashes to. §6 requires that — "a user who does not care can skip the step
+   * entirely" — and it is also what every non-dialog entry point sends, since the composer still
+   * plans an agent with nothing but a brief.
+   */
+  category?: string;
+  avatarId?: string;
   /** A plan the user confirmed. The server builds what that plan describes, not what this
    *  command's other fields say — see planner.take(). */
   planId?: string;
@@ -129,6 +145,22 @@ export type PlanAgentCommand = {
   /** Scoped MCP tools, as `"server/tool"` refs. See GenerateCommand.mcpTools. */
   mcpTools?: string[];
   name?: string;
+  /**
+   * §6'S SECOND AND THIRD INPUTS, TRAVELLING THROUGH THE GATE WITH THE NAME.
+   *
+   * They ride the plan for the same reason the name does: "everything downstream comes from the
+   * RECORD, not from this command", because the dialog and the plan card are separate entry points
+   * that can disagree. Somebody who picks an avatar, plans, changes their mind about the avatar and
+   * then presses Generate should get the agent the plan described — and the plan is what was on
+   * screen when they pressed it.
+   *
+   * Both optional, and absent is a real answer: no category means the neutral value, and no avatar
+   * means the one the uuid hashes to. §6 requires that — "a user who does not care can skip the step
+   * entirely" — and it is also what every non-dialog entry point sends, since the composer still
+   * plans an agent with nothing but a brief.
+   */
+  category?: string;
+  avatarId?: string;
   revisePlanId?: string;
   attachments?: CommandAttachment[];
   /**

@@ -4254,6 +4254,11 @@ const relay = new WsRelay({
         // rather than be derived: the assignment probes against what the workspace already holds,
         // and a browser cannot know that.
         emoji: a.emoji,
+        // §5.1'S TWO, BESIDE IT AND FOR THE SAME REASON: both are columns on the row, so this costs
+        // nothing, and both have to travel rather than be derived — a browser cannot know what a
+        // deterministic assignment probed against.
+        category: a.category,
+        avatar_id: a.avatar_id,
         deployment: d ? { id: d.id, status: d.status, url: d.url } : null,
         archived_at: a.archived_at,
       };
@@ -11119,6 +11124,9 @@ async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<voi
       connectors: cmd.connectors,
       mcpTools,
       name: cmd.name,
+      // §6'S OTHER TWO INPUTS, carried on the record with the name. Neither reaches the model.
+      category: cmd.category,
+      avatarId: cmd.avatarId,
       revisePlanId: cmd.revisePlanId,
       // §3.2, REACHING THE REQUEST. Resolved against the thread the brief was written in, so a
       // conversation set to High plans at High rather than at the provider default.
@@ -11170,7 +11178,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
   let plan: string | undefined;
   let planUsage: UsageSummary | undefined;
   let mcpRefs: string[] = cmd.mcpTools ?? [];
-  let { prompt, connectors, name } = cmd;
+  let { prompt, connectors, name, category, avatarId } = cmd;
   // THE RECORD `take()` REMOVED, held for as long as this build can still fail. A plan is spent
   // when a generation STARTS; if that generation never produces an agent, the approval it carried
   // was spent on nothing and belongs back in the workspace's slot. Null on the unplanned path,
@@ -11252,7 +11260,10 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     // card with no Generate, no Revise and no Discard, and the user re-typing a brief they had
     // already had planned. See `onError` below and `planner.restore`.
     spentPlan = planner.take(ctx.workspaceId, cmd.planId);
-    ({ prompt, connectors, name } = rec);
+    // THE RECORD WINS OVER THE COMMAND, for §6's identity exactly as for the brief and the
+    // connectors: the dialog and the plan card are separate entry points that can disagree, and
+    // building what was approved is the whole point of the gate.
+    ({ prompt, connectors, name, category, avatarId } = rec);
     mcpRefs = approvedRefs;
     plan = rec.plan.raw;
     planUsage = rec.usage;
@@ -11379,6 +11390,9 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     const mcpServers = await mcpRegistry.list(genCtx);
     void generator.generate({
       runtimeDir: RUNTIME_DIR, ctx: genCtx, prompt, connectors, mcpTools, mcpServers, name, plan, planUsage,
+      // §6, ARRIVING AT THE ROW. Both are undefined on every path but the New agent dialog, and
+      // `agents.create` answers undefined with the neutral category and the hashed avatar.
+      category, avatarId,
       effort: (genEffort = await effortForThread(ctx, genThread, GENERATION_MODEL, GEN_MAX_TOKENS)),
       // See planAgent: undefined unless this workspace asked that its own key pay for the
       // platform's calls, and undefined is the platform's key.

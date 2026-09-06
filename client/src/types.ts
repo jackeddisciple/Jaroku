@@ -86,6 +86,21 @@ export interface AgentSummary {
    * rather than four payloads growing a column each.
    */
   emoji?: string | null;
+  /**
+   * §5.1's two identity columns, on the list every surface already receives.
+   *
+   * `category` IS HERE FOR §7'S SIDEBAR LINE, which is the surface it was designed for: emoji, name,
+   * an em dash, category, on one line, with the category taking whatever width is left.
+   *
+   * `avatar_id` IS HERE FOR THE DUPLICATE WARNING as much as for the card. §6's picker says "also
+   * used by X", and X is a name off this list — deriving it from anywhere else would be a second
+   * fetch for a fact the sidebar already holds.
+   *
+   * Both optional on the type and always present on the wire, for the same reason `emoji` is: a
+   * rolling deploy can put a client in front of a server that predates them.
+   */
+  category?: string;
+  avatar_id?: string | null;
   edit_count?: number; // applied edits available to undo (fix loop)
   /**
    * This agent's current deployment, or null if it has never been deployed.
@@ -1936,8 +1951,12 @@ export type ClientCommand =
   | { cmd: "loadHistory"; limit?: number }
   // `mcpTools` is per-TOOL (`"server/tool"` refs), never per-server: a connected server's
   // whole catalogue is never handed to an agent just because the server is connected.
-  | { cmd: "generate"; prompt: string; connectors?: string[]; mcpTools?: string[]; name?: string; planId?: string; threadId?: string }
-  | { cmd: "planAgent"; prompt: string; connectors?: string[]; mcpTools?: string[]; name?: string; revisePlanId?: string; threadId?: string }
+  // §6's three inputs ride the plan gate together: the name was already here, and the category and
+  // the avatar join it because generation builds what was APPROVED rather than what the form says by
+  // the time Generate is pressed. Both optional — an agent planned from the composer has neither,
+  // and the server answers that with the neutral category and the hashed avatar.
+  | { cmd: "generate"; prompt: string; connectors?: string[]; mcpTools?: string[]; name?: string; category?: string; avatarId?: string; planId?: string; threadId?: string }
+  | { cmd: "planAgent"; prompt: string; connectors?: string[]; mcpTools?: string[]; name?: string; category?: string; avatarId?: string; revisePlanId?: string; threadId?: string }
   | { cmd: "discardPlan"; planId: string }
   | { cmd: "listAgents" }
   /**

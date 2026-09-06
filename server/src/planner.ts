@@ -58,6 +58,15 @@ export interface PlanOptions {
    */
   mcpTools?: McpToolView[];
   name?: string;
+  /**
+   * §6's category and avatar, carried and never read here.
+   *
+   * The planner does not show them to the model: a category is not a design constraint on the code
+   * and an avatar is not a fact about it. They are on the RECORD so that generation builds what was
+   * approved, which is the same reason the connector list is.
+   */
+  category?: string;
+  avatarId?: string;
   /** Present when the user asked for a change to the plan they were shown. */
   revisePlanId?: string;
   feedback?: string;
@@ -96,6 +105,13 @@ export interface PendingPlan {
    */
   mcpTools: string[];
   name?: string;
+  /**
+   * §6's category and avatar, recorded for the same reason `connectors` and `mcpTools` are:
+   * generation builds what was APPROVED. Absent means the neutral category and the hashed avatar,
+   * which is what an agent planned from the composer gets and is why the avatar step is skippable.
+   */
+  category?: string;
+  avatarId?: string;
   plan: AgentPlan;
   warnings: string[];
   usage: UsageSummary;
@@ -332,6 +348,11 @@ export class Planner extends EventEmitter<PlannerEvents> {
         connectors: selected.map((c) => c.id),
         mcpTools: mcpTools.map((t) => `${t.server_id}/${t.name}`),
         name,
+        // CARRIED, NOT USED. Neither reaches the model — a category is not a design constraint and
+        // an avatar is not a fact about the code — so they sit on the record and are read again at
+        // generation, which is what makes the gate the single source of what gets built.
+        category: opts.category,
+        avatarId: opts.avatarId,
         plan,
         warnings: reconcileWithSelection(plan, selected, mcpTools),
         usage,
