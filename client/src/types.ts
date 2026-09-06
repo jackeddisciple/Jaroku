@@ -317,11 +317,28 @@ export interface EvalTarget {
   model: string;
 }
 
+/**
+ * What an eval run can be, as the server's own `EvalRunStatus`.
+ *
+ * IT WAS A BARE `string`, which is why `aborted_over_budget` could be compared against in one
+ * component and mapped nowhere. A union here is what makes the phase map exhaustive at compile time
+ * — I4 — and it is a mirror of `server/src/evalStore.ts`'s union rather than a second opinion about
+ * it: a status the server can write and the client has never heard of is a blank glyph.
+ */
+export type EvalRunStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  /** Stopped itself at the spending ceiling. Its own state, never folded into `error`. */
+  | "aborted_over_budget"
+  | "cancelled"
+  | "error";
+
 export interface EvalRunSummary {
   id: string;
   dataset_id: string;
   agent_id: string;
-  status: string;
+  status: EvalRunStatus;
   targets: EvalTarget[];
   budget_usd: number | null;
   judge_cost_usd: number;

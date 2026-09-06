@@ -1457,6 +1457,14 @@ jobs:
           # one `waiting: STATUS.pending` added by somebody who reasoned correctly that a job
           # waiting on a human is in flight, after which the amber down a column answers nothing.
           npm run test:status-amber
+          # I3 and I4. The typechecker already refuses a `Record<WorkStatus, Phase>` with a member
+          # missing, which is the guard that matters because it fires on the state somebody adds
+          # next year. This is its second half: the unions are read out of `types.ts` AS TEXT and
+          # every map held to them, so a union widened elsewhere, a map made Partial, or a
+          # comparison state given a phase to silence the compiler all fail here. It also holds
+          # §3's three exclusions as ABSENCES, which is the direction they fail in — nobody maps
+          # `ahead` to `done` on purpose.
+          npm run test:status-map
 
       # THE ICON SYSTEM, IN ITS OWN STEP, because the six suites guard six different invariants and
       # a reader looking at a red build should be able to tell which one broke without opening a
