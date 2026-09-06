@@ -8,6 +8,90 @@ release notes and the commits in that release's range.
 
 ---
 
+## v0.3.14 : Agent Avatars — a Curated Cast, One WebGL Context, and a Category
+
+Every agent had a name, a slug and — since the last release — one emoji. What it did not have was a
+FACE. Twenty agents in a grid of near-identical cards is a list you read rather than one you scan,
+and the emoji only reaches as far as an emoji does: at 16px it is a shape in a sidebar, and at card
+size it is a small picture in a large box.
+
+This release gives every agent a **glossy 3D character**, drawn from a **frozen, curated roster of
+twenty-eight**, and a **category** it can be filtered and grouped by. The character system is
+vendored from [albertobeiz/kindergrimm](https://github.com/albertobeiz/kindergrimm) at commit
+`5857b1e1`, released under the Unlicense — twenty-five source files plus a pinned Three.js — and it
+is pinned, not tracked: `client/src/lib/gloss/PROVENANCE.md` records where every byte came from and
+says plainly that editing anything under it restyles every agent in every workspace.
+
+The whole thing runs on **one WebGL context**, for the whole application, and that is the invariant
+everything else hangs off. Browsers cap live contexts at roughly eight to sixteen and silently kill
+the oldest past that, so a per-card canvas is a grid whose cards go blank at random — on the
+workspaces with the most agents, and never on a developer's four-agent one.
+
+### Added
+
+- **`client/src/lib/gloss/`** — the vendored character system: recipe → bones → meshes, the studio
+  and its eleven materials, the palettes, the species tables, and `gface.js`'s autonomic life
+  (blink, gaze with saccades, the head whipping after the gaze, idle). Twenty-five files, unedited
+  but for seven import specifiers, all seven listed in `PROVENANCE.md`.
+- **`client/vendor/three.module.js`** — Three.js, as upstream pinned it. Deliberately not the npm
+  package: a minor release that changes a default on `MeshPhysicalMaterial` restyles every agent
+  with nothing in a lockfile to say so. `test:gloss-vendor` fails if `three` appears in
+  `package.json`.
+- **`client/src/lib/gloss/roster.ts`** — twenty-eight frozen recipes, sorted by id, humanoid and
+  biped, spread across all eleven materials. Picked off a contact sheet rendered at 96px — the size
+  a card draws — rather than at contact-sheet size. `docs/avatars/roster.png` is that sheet.
+- **`client/src/lib/gloss/GlossStage.ts`** — one `WebGLRenderer`, one canvas over the grid, a
+  scissor pass per card. Rect reads are batched into one measurement pass per frame, because a
+  `getBoundingClientRect` per card per frame is a layout thrash that shows up as scroll jank long
+  before the WebGL cost does.
+- **`client/src/lib/gloss/GlossBudget.ts`** — the throttle, shipped with the engine rather than
+  after it. The loop PARKS — requests no frames at all — when the Agents surface is not up or the
+  window is blurred; under `prefers-reduced-motion` it draws until every character exists and then
+  stops moving; offscreen slots hold their last frame; and beyond twelve animating slots the ones
+  nearest the centre keep moving.
+- **`client/src/components/GlossAvatar.tsx`** — a transparent hole in a card that tells the stage
+  where it is. It shows the agent's emoji until the character lands, and for ever on a machine with
+  no WebGL — which is the product minus one feature rather than a product with holes in it.
+- **`client/src/lib/agentCategories.ts`** — twenty-five presets in five groups, sorted within each,
+  plus "name your own". A vocabulary in the interface and a `TEXT` column in the database; there is
+  no second copy of the list on the server, and nothing validates against it.
+- **`client/src/components/NewAgentDialog.tsx`** — name, category, avatar, in that order, and then
+  a PLAN rather than a generation: the gate stays the only way anything gets built.
+- **`client/src/components/AgentIdentityLine.tsx`** — the sidebar's `[emoji] name — category`. The
+  name never truncates; the category does.
+- **Migration 068** — `agents.category` (`TEXT NOT NULL DEFAULT 'Uncategorized'`) and
+  `agents.avatar_id` (`TEXT`, nullable). Both backfilled in SQL, both in workspace export.
+- **Seven suites**: `test:gloss-vendor`, `test:gloss-roster`, `test:gloss-stage`,
+  `test:gloss-budget`, `test:agent-category`, `test:agent-avatar`, `test:sidebar-identity`.
+- **`docs/avatars/`** — the contact sheet, and §10's four decisions written out.
+
+### Changed
+
+- **The Agents grid card** leads with the character at 64px, the largest element on the card, with
+  the name beside it and the slug under that. The sparkline row is rendered only when there are
+  bars or a deploy dot to draw — blank on every card, it was a band of empty space.
+- **The agent detail header** draws the character too, and gained an Identity section that edits the
+  mark, the category and the avatar. Its generated gradient band is **gone**: D6 recorded that the
+  band and the emoji said two unrelated things about one agent and that retiring the band was the
+  fix if it ever mattered. A third picture arriving made it matter.
+- **The sidebar row** is `[emoji] name — category` on one line. The name is `shrink-0` — a cut name
+  is a different agent, in the list whose whole job is telling them apart — and the row's auto
+  margins went, because an auto margin absorbs a flex line's free space before `flex-grow` sees any
+  and the category was being allocated none of it.
+- **Thread rows and Cockpit work rows** carry the category inside the agent column, so it sheds with
+  the name rather than becoming a column of its own competing with the cost figure.
+- **A fork** inherits its parent's category and is guaranteed a different avatar. Fork and parent sit
+  adjacent in the grid and are exactly the pair that must not look identical.
+
+### Notes
+
+- `avatarcodebase/` — the scratch checkout the character system was copied out of — is in
+  `.gitignore` and appears nowhere in this repository's history. `git log --all --stat | grep
+  avatarcodebase` returns nothing.
+- The animating cap of twelve has **not** been measured on a low-powered machine. See D2.
+
+---
+
 ## v0.3.13 : Five Cross-Cutting Patterns — One Status Vocabulary, and a Mark Per Agent
 
 Seven surfaces drew status seven ways. A run was a spinning loader in the sidebar, a work item was a

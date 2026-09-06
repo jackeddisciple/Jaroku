@@ -18,6 +18,7 @@ breaking change to the product, not as a refactor.
 | Commit date | 2026-08-24 |
 | Licence | [The Unlicense](https://unlicense.org) — public domain: copy, modify, publish, sell, commercial use, no attribution required |
 | Taken on | 2026-09-06 |
+| Vendored in | v0.3.14 |
 
 The commit is not a guess. The local checkout the files came from was an archive with no `.git`,
 so every file below was hashed with `git hash-object` and matched against the upstream trees over
@@ -96,6 +97,14 @@ and it is the fact a reader of `grig.js` needs anyway.
 The `.d.ts` files beside the sources are **not** upstream. They are hand-written declarations of
 the export surface TypeScript call sites use, added because this package has `allowJs` off; they
 describe the vendored code and never change it.
+
+## Where the rest of the record lives
+
+| | |
+|---|---|
+| The characters, as a picture | [`docs/avatars/roster.png`](../../../../docs/avatars/roster.png), and [`docs/avatars/README.md`](../../../../docs/avatars/README.md) for how to change the list |
+| Why twenty-eight, why twelve, why any of this | [`docs/avatars/decisions.md`](../../../../docs/avatars/decisions.md) — §10's D1–D4 |
+| What shipped | `CHANGELOG.md`, v0.3.14 |
 
 ## Reproducing the extraction
 

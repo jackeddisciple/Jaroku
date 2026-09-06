@@ -565,6 +565,13 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   renameAgent: "agent:write",
   // §8.2: the EXISTING capability. Re-marking an agent is a smaller act than renaming one.
   setAgentEmoji: "agent:write",
+  // §6's other two identity edits, on the same rung and for the same reason: changing what an agent
+  // is called, what it looks like and what kind of work it is for are one authority, not three.
+  // Neither reaches anything outside the row — a category is free text on that agent and an avatar
+  // is one of twenty-eight ids — so a narrower capability would be a fourth thing to grant that
+  // nobody could ever hold without also holding this one.
+  setAgentCategory: "agent:write",
+  setAgentAvatar: "agent:write",
   // Changing which MCP tools an agent may call. `agent:write` rather than something narrower for
   // the reason the whole per-tool design rests on: what bounds a grant is the REGISTRY, which only
   // holds servers this workspace connected, so this can never widen past what somebody with
@@ -1074,6 +1081,10 @@ export const COMMAND_AGENT_CAPABILITY: Record<string, AgentCapability> = {
   restoreAgent: "edit",
   renameAgent: "edit",
   setAgentEmoji: "edit",
+  // The same narrowing the three above take: what an agent is called, what it is for and what it
+  // looks like are all facts about the agent, and deciding them is what editing is.
+  setAgentCategory: "edit",
+  setAgentAvatar: "edit",
   // Publishing a NEW version that points at an old manifest. It rewrites no history and moves no
   // pointer backwards, which makes it the same act as applying an edit.
   restoreAgentVersion: "edit",
