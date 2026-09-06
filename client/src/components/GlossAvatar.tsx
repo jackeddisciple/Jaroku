@@ -47,7 +47,7 @@ export const AVATAR_SIZE = {
    * chose these characters by looking at them at 96px; 64 is what a compact card can spare and is
    * still a face rather than a blob.
    */
-  card: 112,
+  card: 36,
   /**
    * The compact density's card, and the floor this product draws 3D at.
    *
@@ -57,7 +57,7 @@ export const AVATAR_SIZE = {
    * this the haircut and the glasses that separate two characters stop being separable, and what is
    * left is a coloured blob with the renderer's cost attached.
    */
-  compact: 72,
+  compact: 30,
   /** The agent detail header, where there is room for the character to be looked at. */
   header: 128,
 } as const;

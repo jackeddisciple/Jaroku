@@ -21,7 +21,12 @@ function Tag({ tag }: { tag: AgentTag }) {
     // StatusBadge's are authored lowercase and uppercased by the chip — so `Idle` rendered in
     // title case beside `CONNECTED` in uppercase, one row apart, two badge systems and two
     // casings. The labels are lowercase at the source now and the transform is the chip's.
-    <Chip caps size="sm" color={TAG_COLOR[tag.tone]} title={tag.title} className="shrink-0">
+    // BARE, NOT FILLED. These are system metadata — IDLE, UNVERIFIED, DRAFT, FORKED — and a row of
+    // filled pills is the loudest thing on a card whose primary element is meant to be the agent's
+    // NAME. Bare keeps every word and every tone and spends no border and no background on them, so
+    // the row reads as a line of small caps rather than as four buttons. The colour still carries
+    // the tone, which is what the ladder is for.
+    <Chip caps size="sm" variant="bare" color={TAG_COLOR[tag.tone]} title={tag.title} className="shrink-0">
       {tag.label}
     </Chip>
   );

@@ -96,7 +96,7 @@ function Overflow({
         aria-expanded={open}
         className="rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active active:bg-chrome hover:text-ink"
       >
-        <Icon.agents.more size={ICON.sm} />
+        <Icon.agents.more size={ICON.xs} />
       </button>
       {open && (
         <>
@@ -223,68 +223,45 @@ export function AgentCard({
         focused ? "shadow-glow" : "hover:shadow-glow"
       } ${agent.archived_at ? "opacity-70" : ""}`}
     >
-      {/* THE AVATAR, ON TOP, IN A BAND OF ITS OWN — and it is the only identity mark left on this
-          card. §5.2's split: the emoji is the sidebar, thread rows, Cockpit rows and the palette;
-          the avatar is the card and the detail header — "not two systems, one identity at two
-          fidelities". Both on one card would be D6's warning arriving in the place it was warning
-          about.
+      <div className={`flex min-w-0 flex-1 flex-col ${compact ? "gap-1.5 p-2.5" : "gap-2 p-3"}`}>
+        {/* THE IDENTITY HEADER: avatar, name, slug, and the card's own actions in the top right.
+            §5.2's split still holds — the emoji is the small sizes, the character is the card — and
+            what changed is the WEIGHT it is given. A 112px character centred above the text made
+            the picture the hero and left a band of empty space between it and the name; the name is
+            the primary element on this card and the avatar is what supports it, so the avatar comes
+            back down beside the name at identity size.
 
-          The emoji has not gone anywhere: `GlossAvatar` draws it inside this box while the character
-          is still in the build queue, and for ever on a machine with no WebGL. So the card shows the
-          same mark the sidebar does until it can show more of it.
+            THIRTY-SIX PIXELS. Small enough to read as an identity indicator rather than as an
+            illustration, large enough that the haircut and the glasses the curation pass chose these
+            characters for still separate two of them. It is above I4's floor and well below the
+            size at which a glossy character starts competing with type.
 
-          A BAND RATHER THAN A COLUMN BESIDE THE TITLE. Inline it competed with the name for the
-          first glance and capped the character at the height of a line of text; on top it is the
-          first thing seen, at a size the curation pass actually chose these characters at, and the
-          text below it is a block rather than a column squeezed against a picture.
-
-          NO FILL, NO SEPARATOR UNDER IT. The band is the card's own surface with air around the
-          character — a tinted strip would be the first filled box in a product drawn in hairlines,
-          and the shadow the character casts is already doing the separating.
-
-          §I4 IS WHY THERE IS A FLOOR AND NOT A SCALE. Compact drops to 72 and stops; below that a
-          glossy character is a smudge, and running the renderer to produce a smudge is the worst of
-          both. */}
-      <div className={`flex shrink-0 justify-center ${compact ? "pt-2.5" : "pt-3.5"}`}>
-        <GlossAvatar
-          agentKey={agent.slug}
-          avatarId={agent.avatar_id}
-          emoji={agent.emoji}
-          size={compact ? AVATAR_SIZE.compact : AVATAR_SIZE.card}
-        />
-      </div>
-
-      <div className={`flex min-w-0 flex-1 flex-col ${compact ? "gap-1.5 p-2.5 pt-1.5" : "gap-2 p-3 pt-2"}`}>
-        {/* Title, slug, and the actions that belong to the card rather than to the grid. */}
-        <div className="flex min-w-0 items-start gap-2">
-          {/* THE PHASE GLYPH, IN THE TITLE ROW, WHERE THE THUMBNAIL MARK USED TO BE — §2.3's "left
-              of the row's primary text, 20px on cards".
-
-              WHAT WAS THERE AND WHY IT IS NOT. A `ThumbnailMark`: the Jaroku wordmark, identical on
-              every card, which by §2.4's own argument carries zero information — "a glyph repeated
-              identically on every card carries zero information and costs a column of width". The
-              one thing it DID vary was a `stream-pulse` when the agent was running, generating or
-              deploying, which is a hand-rolled status indicator wearing an identity mark: the app's
-              in-flight motion, applied to a logo, on a card whose tag row already says "running".
-
-              So the slot now holds the runtime axis as a real mark. D1: the glyph answers "what is
-              it doing right now" — Running, Idle, Never run, and Archived from the lifecycle rung
-              above it — and Failing and Unverified stay in the tag row, where tag precedence already
-              ranks them. The two axes are separate on purpose; "Idle · Failing" is a real state and
-              a card that collapsed it would be lying about the agent.
-
-              The mark itself is not deleted: `AgentOverview` still draws it at `BRAND.screen`, which
-              is a screen's own mark rather than a per-row decoration. */}
-          <span className="mt-px">
-            <StatusGlyph phase={agentPhase(agent)} size={GLYPH_SIZE.card} title={RUNTIME_WORD(agent)} />
-          </span>
+            NO BOX AROUND IT — no ring, no tint, no rounded container. The card already has a radius
+            and an elevation; a second one around a 36px character is the box-around-the-glyph the
+            emoji work spent a whole commit removing one size down. */}
+        <div className="flex min-w-0 items-start gap-2.5">
+          <GlossAvatar
+            agentKey={agent.slug}
+            avatarId={agent.avatar_id}
+            emoji={agent.emoji}
+            size={compact ? AVATAR_SIZE.compact : AVATAR_SIZE.card}
+            // Against the two lines beside it rather than against the row's top edge: the character
+            // is drawn with air above its head, so aligned flush it reads as sitting high.
+            className="-mt-0.5"
+          />
           <div className="min-w-0 flex-1">
-            <div className="flex min-w-0 items-baseline gap-1.5">
-              {/* THE EMOJI USED TO BE HERE AND IS NOW IN THE AVATAR BOX to the left, as its
-                  placeholder. §5.2 settles the two-identities problem by splitting the SURFACES
-                  rather than the marks — small sizes wear the emoji, card and detail wear the
-                  character — and a card carrying both would be exactly the "blue one here, tractor
-                  there" D6 warned about, on one card, at once. */}
+            <div className="flex min-w-0 items-center gap-1.5">
+              {/* THE PHASE GLYPH, WITH THE NAME rather than in a column of its own. It answers "what
+                  is it doing right now" — Running, Idle, Never run, Archived — and D1 keeps that
+                  separate from the HEALTH axis in the tag row below. Beside the name it is one
+                  glyph on the line it qualifies; in its own column it was a third element competing
+                  with the avatar for the left edge. */}
+              <span className="shrink-0">
+                <StatusGlyph phase={agentPhase(agent)} size={GLYPH_SIZE.card} title={RUNTIME_WORD(agent)} />
+              </span>
+              {/* THE NAME IS THE PRIMARY ELEMENT ON THIS CARD, and everything around it is sized
+                  against that: the avatar supports it, the slug is secondary under it, the tags
+                  below are metadata and the footer is tertiary. */}
               <Truncate className={TYPE.title} title={agent.name}>
                 {agent.name}
               </Truncate>
@@ -298,47 +275,55 @@ export function AgentCard({
               {agent.slug}
             </Truncate>
           </div>
-          {/* §5.2's primary action, ON THE CARD, and now a glyph beside the other two rather than
-              a full-width outlined button under everything. Absent for an archived agent, which §4
-              requires: an agent that has been put away should not be offering work.
+          {/* THE ACTIONS, AS ONE CLUSTER IN THE TOP RIGHT, and deliberately the quietest thing in
+              this row. They were three separately-spaced glyphs at full faint weight competing with
+              the name for the first glance; grouped and held back to seventy percent until the
+              pointer is on the card, they are present, findable and no longer arguing with the one
+              piece of text the card exists to show.
 
-              A full-width button per card is the heaviest per-item affordance there is, and the
-              grid renders three across — so three cards meant three outlined bars of equal weight
-              competing with the three agent names above them. */}
-          {!agent.archived_at && (
+              NOT HIDDEN UNTIL HOVER. A control that does not exist until you move the mouse is a
+              control nobody finds and nobody can reach on a touch screen — and `focus-within` puts
+              them back at full weight for the keyboard, which hover alone would strand. */}
+          <div className="-mr-1 flex shrink-0 items-center gap-0.5 opacity-70 transition-opacity duration-fast focus-within:opacity-100 group-hover:opacity-100">
+            {/* §5.2's primary action, ON THE CARD, and a glyph rather than a full-width outlined
+                button under everything: three cards across meant three outlined bars of equal
+                weight competing with the three agent names above them. Absent for an archived
+                agent, which §4 requires — an agent that has been put away should not offer work. */}
+            {!agent.archived_at && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onNewThread();
+                }}
+                title={`Start a new thread on ${agent.name}`}
+                aria-label={`Start a new thread on ${agent.name}`}
+                className="rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active active:bg-chrome hover:text-ink"
+              >
+                <Icon.agents.newThread size={ICON.xs} />
+              </button>
+            )}
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                onNewThread();
+                void copyContext();
               }}
-              title={`Start a new thread on ${agent.name}`}
-              aria-label={`Start a new thread on ${agent.name}`}
-              className="shrink-0 rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active active:bg-chrome hover:text-ink"
+              title={copied ? "Copied" : "Copy this agent's context as markdown"}
+              aria-label={`Copy ${agent.name}'s context`}
+              className="rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active active:bg-chrome hover:text-ink"
             >
-              <Icon.agents.newThread size={ICON.sm} />
+              <Icon.agentDetail.copy size={ICON.xs} />
             </button>
-          )}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              void copyContext();
-            }}
-            title={copied ? "Copied" : "Copy this agent's context as markdown"}
-            aria-label={`Copy ${agent.name}'s context`}
-            className="shrink-0 rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active active:bg-chrome hover:text-ink"
-          >
-            <Icon.agentDetail.copy size={ICON.sm} />
-          </button>
-          <Overflow
-            agent={agent}
-            onFork={onFork}
-            onRename={onRename}
-            onExport={onExport}
-            onArchive={onArchive}
-            onRestore={onRestore}
-          />
+            <Overflow
+              agent={agent}
+              onFork={onFork}
+              onRename={onRename}
+              onExport={onExport}
+              onArchive={onArchive}
+              onRestore={onRestore}
+            />
+          </div>
         </div>
 
         {/* §5.4's tag row, beside the title, because these are properties of the AGENT. */}
@@ -394,7 +379,12 @@ export function AgentCard({
           </div>
         )}
 
-        {/* §5.5's clickable sparkline, and the deploy dot beside it. */}
+        {/* §5.5's clickable sparkline, and the deploy dot beside it — RENDERED ONLY WHEN EITHER HAS
+            SOMETHING TO SAY. An agent that has never run has no bars and one that is not deployed
+            has no dot, so on a fresh workspace this row was a band of empty space between the
+            current-work line and the footer, on every card at once. A row that is blank on every
+            card is not a row; it is the awkward vertical gap it looks like. */}
+        {(agent.outcomes.length > 0 || agent.deployment?.status === "live") && (
         <div className="flex min-w-0 items-center gap-2">
           <AgentSparkline outcomes={agent.outcomes} max={compact ? 12 : 20} height={compact ? 10 : 12} />
           {agent.deployment?.status === "live" && (
@@ -412,6 +402,7 @@ export function AgentCard({
             </span>
           )}
         </div>
+        )}
 
         {/* §5.2's footer, and the one action the card owns. `mt-auto` so a card with a short
             current-work line still puts its footer on the bottom edge — a grid whose footers sit at
