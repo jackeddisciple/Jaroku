@@ -37,6 +37,7 @@ import { ICON, TYPE } from "../lib/tokens.ts";
 import { useDialog } from "../lib/dialog.ts";
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { Chip } from "./Chip.tsx";
+import { DateChip } from "./Chip.tsx";
 import { EmptyState, LoadingLine } from "./EmptyState.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { ActivityIcon, AlertTriangleIcon, CheckIcon, DollarSignIcon, GithubIcon, KeyIcon, PlugIcon, TicketIcon, UserCircleIcon } from "./panelIcons.tsx";
@@ -603,9 +604,8 @@ function MemberRow({ member, canManage, isSelf }: { member: Member; canManage: b
           {member.display_name && (
             <Truncate className="min-w-0 text-tiny text-faint" title={member.email}>{member.email}</Truncate>
           )}
-          <span className="shrink-0 text-tiny text-faint" title={absTime(member.created_at)}>
-            joined {relTime(member.created_at)}
-          </span>
+          {/* §7.2: MEMBER JOINED. */}
+          <DateChip at={member.created_at} className="shrink-0" title={`Joined ${absTime(member.created_at)}`} />
         </div>
       </div>
 
@@ -670,8 +670,10 @@ function InviteRow({ invite, canManage }: { invite: Invite; canManage: boolean }
             that decides whether the row is still worth anything — a link created three days ago
             with an hour left is a different thing to chase than one created an hour ago. */}
         <span className={`text-tiny ${isExpired(invite.expires_at) ? "text-err" : "text-faint"}`}>
-          <span title={absTime(invite.created_at)}>invited {relTime(invite.created_at)}</span>
-          {" · "}expires {fmtUntil(invite.expires_at)}
+          {/* §7.2: INVITE SENT. The expiry stays as prose beside it — it is a countdown rather
+              than a date, and `fmtUntil` is the formatter for that half. */}
+          <DateChip at={invite.created_at} title={`Invited ${absTime(invite.created_at)}`} />
+          {" expires "}{fmtUntil(invite.expires_at)}
         </span>
       </div>
       <Chip size="sm" tone="faint">{invite.role}</Chip>

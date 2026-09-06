@@ -18,16 +18,17 @@
 // border instead of brightening it, which is the same treatment arriving from the other direction.
 
 import { useState } from "react";
-import { Chip } from "./Chip.tsx";
+import { Chip, DateChip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { AgentTagRow } from "./AgentTagRow.tsx";
 import { AgentSparkline } from "./AgentSparkline.tsx";
 import { ArchiveIcon, ArchiveRestoreIcon } from "./agentIcons.tsx";
 import { StatusGlyph, GLYPH_SIZE } from "./StatusGlyph.tsx";
 import { agentPhase } from "../lib/domainPhase.ts";
+import { stateBorder } from "../lib/stateBorder.ts";
 import { AlertTriangleIcon, GitForkIcon, PencilIcon } from "./panelIcons.tsx";
 import { agentContextMarkdown } from "../lib/agentContext.ts";
-import { absTime, fmtCost, relTime } from "../lib/format.ts";
+import { absTime, fmtCost } from "../lib/format.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { ICON, STATUS, TYPE } from "../lib/tokens.ts";
 import { spendFor, useAgentGridStore } from "../store/agentGridStore.ts";
@@ -161,6 +162,15 @@ export function AgentCard({
   const [copied, setCopied] = useState(false);
   const compact = density === "compact";
   const spend = spendFor(agent, liveSpend);
+  // THE THREE FACTS §9's LADDER TAKES, read off the card rather than derived twice. `failed` is the
+  // HEALTH axis and not the runtime one — D1 keeps them separate, and what a rose edge answers is
+  // "is this agent well", which is exactly what the `Failing` tag beside it says in a word.
+  const cardState = {
+    archived: Boolean(agent.archived_at),
+    selected: focused,
+    failed: agent.health === "failing",
+    running: agent.runtime === "running" || agent.runtime === "generating" || agent.runtime === "deploying",
+  };
 
   const copyContext = async (): Promise<void> => {
     try {
@@ -195,8 +205,21 @@ export function AgentCard({
       // re-renders whenever a broadcast lands, so a hovered card lost its glow every time an
       // unrelated agent's run emitted a step. `shadow-glow` is the same token from `tailwind.config`
       // that `GLOW.hover` is in `tokens.ts`, so nothing about the appearance changes.
-      className={`group flex cursor-pointer flex-col overflow-hidden rounded-card border bg-panel text-left transition-shadow duration-fast ${
-        focused ? "border-edge shadow-glow" : "border-hair hover:border-edge hover:shadow-glow"
+      // §6.1: THE COLOUR MOVES, THE WIDTH DOES NOT. The card keeps `border` — one hairline, the
+      // same one at every state — and `stateBorder` recolours it. A `border-2` on a running card
+      // would reflow its contents by a pixel every time a run starts, which on a grid that
+      // re-renders whenever a broadcast lands is a visible twitch several times a minute.
+      //
+      // §9's LADDER RESOLVES THE THREE FACTS THIS CARD CAN HOLD AT ONCE. Archived is quiet whatever
+      // it used to be doing; then the card you are on; then failing; then running. And the glyph in
+      // the title row is EXEMPT — a selected running card has a strong edge and an amber glyph, so
+      // "you are here" and "it is running" are both said and neither has to win.
+      //
+      // ROSE HERE DUPLICATES THE `Failing` TAG DELIBERATELY (§6.2): the colour is the glance and the
+      // tag is the word, which is also what keeps I8 true — no border on this card travels alone.
+      style={{ borderColor: stateBorder(cardState) }}
+      className={`group flex cursor-pointer flex-col overflow-hidden rounded-card border bg-panel text-left transition-[box-shadow,border-color] duration-fast ${
+        focused ? "shadow-glow" : "hover:shadow-glow"
       } ${agent.archived_at ? "opacity-70" : ""}`}
     >
       <div className={`flex min-w-0 flex-1 flex-col ${compact ? "gap-1.5 p-2.5" : "gap-2 p-3"}`}>
@@ -376,12 +399,9 @@ export function AgentCard({
               </span>
             </>
           )}
-          {agent.last_run_at && (
-            <>
-              <span aria-hidden>·</span>
-              <span title={absTime(agent.last_run_at)}>{relTime(agent.last_run_at)}</span>
-            </>
-          )}
+          {/* §7.2: LAST ACTIVE. The dot separator goes with it — a chip is its own boundary, and a
+              `·` before a bordered pill is a separator between a sentence and an object. */}
+          {agent.last_run_at && <DateChip at={agent.last_run_at} title={`Last active ${absTime(agent.last_run_at)}`} />}
           {/* Team workspaces only. In a personal one this is a picture of the only person who could
               have made it, which is a pixel spent saying nothing. */}
           {creatorInitial && (

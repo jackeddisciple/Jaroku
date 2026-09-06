@@ -24,7 +24,8 @@
 
 import { ACCENT, ELEVATION, ICON, MOTION, RADIUS, SURFACE, TEXT } from "../lib/tokens.ts";
 import { ageFraction } from "../lib/inboxBoard.ts";
-import { absTime, relTime } from "../lib/format.ts";
+import { absTime } from "../lib/format.ts";
+import { DateChip } from "./Chip.tsx";
 import { INBOX_ICON } from "./inboxIcons.tsx";
 import { InboxCardActions } from "./InboxCardActions.tsx";
 import { InboxEvidence } from "./InboxEvidence.tsx";
@@ -204,7 +205,11 @@ export function InboxCard({
       {/* The context line: what it is about, and how long it has been waiting. Indented to the
           subject's column, so the icon gutter stays a gutter. */}
       <div className="ml-6 mt-0.5 flex items-center gap-1.5 text-tiny text-muted">
-        <span className="text-faint" title={absTime(item.first_seen_at)}>{relTime(item.first_seen_at)}</span>
+        {/* §7.2: FIRST SEEN. The Inbox takes no status GLYPH (§2.4 — every card is in the same
+            phase, so a mark repeated identically on all of them carries nothing), and this is a
+            different pattern with a different argument: an age is the one fact that genuinely
+            differs card to card here, and it is what the age bar beside it is drawn from. */}
+        <DateChip at={item.first_seen_at} title={`First seen ${absTime(item.first_seen_at)}`} />
         {item.snoozed_until && (
           <>
             <span className="text-faint">·</span>

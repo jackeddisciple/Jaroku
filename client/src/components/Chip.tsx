@@ -15,7 +15,10 @@
 // the panels that own them already call them chip strips — but a control that performs an
 // action rather than selecting a thing belongs in buttons.ts, at a control's geometry.
 
-import { RADIUS, SURFACE } from "../lib/tokens.ts";
+import { ICON, RADIUS, SURFACE } from "../lib/tokens.ts";
+import { absTime, relTime } from "../lib/format.ts";
+import { Icon } from "../lib/icons/registry.ts";
+import { Truncate } from "./Truncate.tsx";
 
 export type ChipSize = "sm" | "md" | "lg";
 export type ChipTone = "ink" | "muted" | "faint";
@@ -233,3 +236,59 @@ export function Chip({
 
 /** The chip radius, for the rare consumer that needs the number (a canvas, an inline style). */
 export const CHIP_RADIUS = RADIUS.chip;
+
+// ── The date variant ────────────────────────────────────────────────────────
+//
+// A TIMESTAMP, AS A CHIP. Calendar mark, then the formatted date, in one hairline pill at the
+// chip's existing height. It is a VARIANT rather than a second component in the strict sense that
+// matters: no second geometry, no second radius, no second file — it is `Chip` with its icon slot
+// filled and its content formatted, and every size, padding and tone decision above still owns it.
+// A `DateChip.tsx` would be the twelfth chip this codebase had to reconcile.
+//
+// THERE IS NO OVERDUE STATE, AND THERE IS NOT GOING TO BE ONE. Jaroku has no due dates — every one
+// of the twelve sites this renders at is a TIMESTAMP: last activity, published, deployed at, run
+// finished, first seen, last rotated, dispatched at. A red date chip would be a deadline this
+// product does not have, and an amber one would be worse, because amber means a run is in flight
+// right now and a date is by definition a thing that already happened. If `work_items` ever grows a
+// deadline column, that is a conversation, not a colour.
+//
+// ONE FORMATTER, WHICH IS `lib/format.ts`'s. `relTime` on the face and `absTime` in the tooltip —
+// the same pair every timestamp in this product already uses, so a date in a chip and the same date
+// in a row read identically. A second date formatter would be a second answer to "how long ago",
+// and the two would disagree at exactly the boundaries people notice.
+//
+// LONG VALUES FADE THROUGH `Truncate`, never a hard cut — the chip has a max width at several of
+// its sites and an absolute date in a narrow column is the case that overflows.
+//
+//   npm run test:date-chip
+
+export function DateChip({
+  at,
+  size = "sm",
+  className = "",
+  title,
+}: {
+  /** An ISO timestamp. `null` renders nothing at all — see below. */
+  at: string | null | undefined;
+  size?: ChipSize;
+  className?: string;
+  /** A better sentence than the absolute date — "Last synced 4 March, 09:12". */
+  title?: string;
+}) {
+  // NOTHING RATHER THAN A DASH. A missing count is a section that exists and has an unknown size,
+  // which is worth saying; a missing timestamp is an event that has not happened, and a calendar
+  // pill containing an em dash claims there is a date to know.
+  if (!at) return null;
+  return (
+    <Chip
+      size={size}
+      variant="outline"
+      tone="faint"
+      className={`max-w-[180px] ${className}`}
+      title={title ?? absTime(at)}
+      icon={<Icon.activity.dateRange size={ICON.badge} />}
+    >
+      <Truncate title={title ?? absTime(at)}>{relTime(at)}</Truncate>
+    </Chip>
+  );
+}

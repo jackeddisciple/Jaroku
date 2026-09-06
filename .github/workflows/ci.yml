@@ -1483,6 +1483,22 @@ jobs:
           # together, and a 2px seam in an app drawn entirely in single hairlines reads as a
           # rendering fault nobody can name.
           npm run test:toolbar-cluster
+          # I7 AND I8. The ladder is an ORDERING, and an ordering is the one thing a palette check
+          # cannot see: five correct colours are compatible with `selected` outranking `archived`,
+          # which is the arrangement where an agent that was failing when it was archived comes back
+          # shouting. So every pair of facts that can be true at once is actually set to true. I7 is
+          # asserted at the CALL SITES rather than in the module — the module returns a colour and
+          # nothing else — because a `border-2` conditioned on a state is a card whose contents
+          # reflow by a pixel on every run start, and the symptom is a twitch nobody can photograph.
+          npm run test:state-border
+          # §7, AND THE TEMPTATION IT EXISTS FOR IS A RED ONE. Every board UI a date chip could be
+          # copied from has an overdue state, and it is the most natural thing in the world to add.
+          # Jaroku has no due dates — all twelve sites are timestamps, things that already happened —
+          # so red would be a deadline that does not exist and amber would be worse, because amber
+          # here means a run is in flight RIGHT NOW. Beside it, one formatter: the client had three
+          # spellings of a timestamp, including a raw `toLocaleString` in the secrets rotation
+          # history, which is the one view where somebody is comparing dates to each other.
+          npm run test:date-chip
 
       # THE ICON SYSTEM, IN ITS OWN STEP, because the six suites guard six different invariants and
       # a reader looking at a red build should be able to tell which one broke without opening a

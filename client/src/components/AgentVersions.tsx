@@ -20,6 +20,7 @@
 
 import { useState } from "react";
 import { Chip } from "./Chip.tsx";
+import { DateChip } from "./Chip.tsx";
 import { DiffStat } from "./DiffStat.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { CollapsibleRegion } from "./CollapsibleRegion.tsx";
@@ -118,8 +119,11 @@ function VersionRow({
             undone
           </Chip>
         )}
-        <span className="ml-auto shrink-0 text-tiny text-faint" title={version.created_at}>
-          {relTime(version.created_at)}
+        {/* §7.2: VERSION PUBLISHED. It also gains the app's one date formatter in its tooltip —
+            it was passing the raw ISO string, so the hover on this row read `2026-03-04T09:12:44.201Z`
+            while every other timestamp in the product read "4 March, 09:12". */}
+        <span className="ml-auto shrink-0">
+          <DateChip at={version.created_at} />
         </span>
       </div>
 

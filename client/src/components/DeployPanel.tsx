@@ -41,6 +41,7 @@ import { EmptyState, LoadingLine } from "./EmptyState.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
 import { StatusGlyph } from "./StatusGlyph.tsx";
 import { DEPLOY_PHASE } from "../lib/domainPhase.ts";
+import { rowEdge } from "../lib/stateBorder.ts";
 import { Truncate } from "./Truncate.tsx";
 import {
   AlertTriangleIcon, CheckIcon, GlobeIcon, KeyIcon, RocketIcon, XIcon,
@@ -568,16 +569,25 @@ function DeployDetail({ deployment }: { deployment: Deployment }) {
         <div className="absolute bottom-3 left-[9px] top-3 w-px bg-hair" />
         {STAGES.map((s, i) => {
           const state = stageState(i);
+          // §6.2: AMBER = THE LIVE STAGE, and exactly one row wears it at a time — which is a
+          // property of `stageState`, not of this line: it returns `active` for the stage the
+          // deploy is in and nothing else. A row, not a card, so a 2px left edge (`rowEdge`)
+          // rather than a border; the rail behind it is the list's own hairline and must not move.
+          const edge = rowEdge({ running: state === "active", failed: state === "error" });
           return (
-            <ActionRow
-              key={s.id}
-              kind={state === "done" ? "done" : state === "error" ? "fail" : "wait"}
-              state={state}
-              verb={state === "active" ? s.active : state === "done" ? s.done : s.active}
-              object={null}
-              detail={<span className="text-faint">{s.detail}</span>}
-              className="pl-1"
-            />
+            <div key={s.id} className="relative">
+              {edge && (
+                <span aria-hidden className="absolute inset-y-0 left-0 w-0.5" style={{ backgroundColor: edge }} />
+              )}
+              <ActionRow
+                kind={state === "done" ? "done" : state === "error" ? "fail" : "wait"}
+                state={state}
+                verb={state === "active" ? s.active : state === "done" ? s.done : s.active}
+                object={null}
+                detail={<span className="text-faint">{s.detail}</span>}
+                className="pl-1"
+              />
+            </div>
           );
         })}
       </div>

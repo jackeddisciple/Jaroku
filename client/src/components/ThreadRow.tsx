@@ -25,16 +25,16 @@
 // there.
 
 import { useEffect, useRef, useState } from "react";
-import { relTime } from "../lib/format.ts";
 import { resumeHint } from "../lib/threadResume.ts";
 import { fmtRunningCost, fmtThreadCost } from "../lib/threadCost.ts";
 import { STATUS } from "../lib/tokens.ts";
 import { agentChipLabel, threadEvalProgress, threadSpend, useThreadStore } from "../store/threadStore.ts";
 import { ThreadGlyph } from "./ThreadGlyph.tsx";
+import { rowEdge } from "../lib/stateBorder.ts";
 import { useMemberStore } from "../store/memberStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import type { ThreadView } from "../types.ts";
-import { Chip } from "./Chip.tsx";
+import { Chip, DateChip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { ICON } from "../lib/tokens.ts";
 import { AlertTriangleIcon } from "./panelIcons.tsx";
@@ -178,6 +178,15 @@ export function ThreadRow({
     if (next) onRename(next);
   };
 
+  // §9's ladder, over the two facts a thread row can hold besides selection. `archived` is quiet:
+  // an archived thread has left the default list entirely, and marking it in the one view that
+  // shows it would make "archived" a decoration rather than a state.
+  const edge = rowEdge({
+    archived: thread.archived_at !== null,
+    failed: thread.status === "errored",
+    running: thread.status === "running",
+  });
+
   return (
     // A BUTTON IN EVERYTHING BUT TAG NAME. It cannot be a real <button> — it contains an <input>
     // during a rename and two action buttons on hover, and a control inside a control is invalid
@@ -203,7 +212,21 @@ export function ThreadRow({
         selected ? "bg-active" : "hover:bg-active/40"
       }`}
     >
-      {selected && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-accent" />}
+      {/* A ROW, NOT A CARD — §6.2. A 2px left edge, never a full border: a thread row has no border
+          of its own to recolour, and drawing one around a single row of a list would make that row a
+          card, which is a heavier claim than "this one is running".
+
+          §9's LADDER, WITH SELECTION STILL WINNING. The accent edge stays what it was — the user's
+          own focus outranks the row's state, because they are looking at it right now — and a row
+          that is neither selected nor live draws nothing at all, because this app spends nothing on
+          saying "ordinary". The glyph two pixels to the right is exempt and keeps saying `running`
+          under a selected row's accent, which is the whole reason state is on the edge and phase is
+          on the mark. */}
+      {selected ? (
+        <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-accent" />
+      ) : (
+        edge && <span aria-hidden className="absolute left-0 top-1 bottom-1 w-0.5" style={{ backgroundColor: edge }} />
+      )}
 
       {/* line 1: glyph, title, time */}
       <div className="flex items-center gap-2">
@@ -255,10 +278,11 @@ export function ThreadRow({
             {hint}
           </span>
         ) : null}
-        <span
-          className={`ml-auto shrink-0 text-tiny text-faint tabular-nums ${hint ? "group-hover:hidden" : ""}`}
-        >
-          {relTime(thread.last_activity_at)}
+        {/* §7.2's first site. A timestamp with a calendar mark on it, in the chip geometry every
+            other tag-shaped thing in this product already uses — rather than a bare number at the
+            end of a row, which is what every one of these twelve sites was. */}
+        <span className={`ml-auto shrink-0 ${hint ? "group-hover:hidden" : ""}`}>
+          <DateChip at={thread.last_activity_at} />
         </span>
       </div>
 

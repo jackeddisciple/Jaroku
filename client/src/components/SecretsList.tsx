@@ -24,6 +24,8 @@ import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import { SectionHeader } from "./SectionHeader.tsx";
+import { DateChip } from "./Chip.tsx";
+import { absTime, relTime } from "../lib/format.ts";
 import { KeyIcon, RefreshIcon, XIcon, PlugIcon, CheckIcon } from "./panelIcons.tsx";
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { ICON, STATUS } from "../lib/tokens.ts";
@@ -248,7 +250,12 @@ function RotationHistory({ rotations }: { rotations: RotationRecord[] }) {
     <div className="space-y-1 pt-1 text-tiny">
       {rotations.map((r) => (
         <div key={r.rotated_at} className="flex items-start gap-2">
-          <span className="shrink-0 text-faint">{new Date(r.rotated_at).toLocaleString()}</span>
+          {/* §7.2: LAST ROTATED — and §7.1's "do not add a second date formatter", which this line
+              was: a raw `toLocaleString` is a THIRD spelling of a timestamp in this
+              product: it answers in the browser's locale, at full precision, beside rows elsewhere
+              reading "4d ago". The rotation history is exactly where a reader is comparing dates,
+              so it is the worst place for the one that does not match. */}
+          <DateChip at={r.rotated_at} className="shrink-0" />
           <span className="min-w-0 flex-1 text-muted">
             {r.reason ?? "no reason recorded"}
             {r.rotated_by ? <span className="text-faint"> · {r.rotated_by}</span> : null}
@@ -298,7 +305,7 @@ function UsageView({ sites }: { sites: UsageSite[] }) {
         ) : (
           runtime.map((s) => (
             <div key={`rt:${s.agent_id}`} className="text-muted">
-              · {s.hits} read{s.hits === 1 ? "" : "s"}, last {new Date(s.detected_at).toLocaleString()}
+              · {s.hits} read{s.hits === 1 ? "" : "s"}, last <span title={absTime(s.detected_at)}>{relTime(s.detected_at)}</span>
             </div>
           ))
         )}
@@ -487,8 +494,8 @@ function SecretRow({ secret, onChanged }: { secret: SecretSummary; onChanged: ()
       }
       detail={
         <span className="text-faint">
-          {secret.lastUsedAt ? `last used ${new Date(secret.lastUsedAt).toLocaleString()}` : "never used"}
-          {secret.rotatedAt ? ` · rotated ${new Date(secret.rotatedAt).toLocaleDateString()}` : ""}
+          {secret.lastUsedAt ? `last used ${absTime(secret.lastUsedAt)}` : "never used"}
+          {secret.rotatedAt ? ` · rotated ${absTime(secret.rotatedAt)}` : ""}
           {managed && secret.connectorId ? ` · via ${secret.connectorId} connector` : ""}
         </span>
       }
