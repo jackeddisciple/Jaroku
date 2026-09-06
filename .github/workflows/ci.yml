@@ -1436,6 +1436,28 @@ jobs:
           # either would pass on the two shapes the rule exists to forbid.
           npm run test:access-tab
 
+      # THE FIVE CROSS-CUTTING PATTERNS, IN THEIR OWN STEP, for the same reason the icon system
+      # below has one: what these guard is a property of the WHOLE client rather than of a tab. One
+      # status vocabulary, one amber, one count rule, one border rule — and a rule like that is
+      # worth what it can be broken by, which is any of three hundred files. A reader looking at a
+      # red build should be able to tell which invariant broke without opening a log.
+      - name: the cross-cutting patterns
+        working-directory: client
+        run: |
+          # I2, and the only honest version of it: seven phases rendered with the colour STRIPPED,
+          # compared pairwise. A status vocabulary is never wrong in a way a per-case assertion
+          # catches — every phase returns a mark and every mark renders. What goes wrong is that
+          # two of them are the same shape in two colours, which passes every check about either
+          # one and fails for about one man in twelve, at 14px, and in every greyscale screenshot.
+          npm run test:status-glyph
+          # I1, which is the law this product has spent forty-eight call sites, a node glow and a
+          # stream pulse teaching people. It extends `test:agent-tags` rather than inventing a
+          # second rule: that one holds the agent card's tag row to three ambers, this one holds
+          # the vocabulary underneath it to one. The way the rule dies is never a decision — it is
+          # one `waiting: STATUS.pending` added by somebody who reasoned correctly that a job
+          # waiting on a human is in flight, after which the amber down a column answers nothing.
+          npm run test:status-amber
+
       # THE ICON SYSTEM, IN ITS OWN STEP, because the six suites guard six different invariants and
       # a reader looking at a red build should be able to tell which one broke without opening a
       # log. They are here rather than in the block above for the same reason the server's gates are
