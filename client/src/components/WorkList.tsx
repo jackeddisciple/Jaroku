@@ -23,6 +23,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useBuildStore } from "../store/buildStore.ts";
 import { emojiBySlug } from "../lib/agentEmoji.ts";
+import { categoryBySlug } from "../lib/agentCategory.ts";
 import { AgentEmoji } from "./AgentEmoji.tsx";
 
 import { DESTRUCTIVE, EMPTY, FAILURE_SENTENCE, FILTERS, HEADER, LIVE, STATUS_WORD } from "../lib/cockpitCopy.ts";
@@ -78,11 +79,13 @@ const FIRST_PAINT_ROWS = 20;
  * most common way a list stops feeling solid under the cursor." So the slot is a fixed width and
  * only its opacity moves, and it holds that width for a role that cannot use the verb at all.
  */
-function Row({ item, columns, marks }: {
+function Row({ item, columns, marks, categories }: {
   item: WorkItemView;
   columns: RowColumns;
   /** slug -> identity mark, built once by the list. See `lib/agentEmoji.ts` for why not per row. */
   marks: ReadonlyMap<string, string>;
+  /** §14's category, by agent slug. Absent for an agent nobody has categorised — §7's rule. */
+  categories: ReadonlyMap<string, string>;
 }) {
   const openId = useWorkStore((s) => s.open?.id ?? s.openingId);
   const active = openId === item.id;
@@ -170,10 +173,24 @@ function Row({ item, columns, marks }: {
               <Truncate
                 variant="prose"
                 className="max-w-[20ch] shrink-0 text-caption text-muted"
-                title={item.agent_name ?? undefined}
+                title={
+                  categories.get(item.agent_id)
+                    ? `${item.agent_name ?? ""} — ${categories.get(item.agent_id)}`
+                    : item.agent_name ?? undefined
+                }
               >
                 {item.agent_name ?? "an agent that has been deleted"}
               </Truncate>
+              {/* §14'S OTHER READ-ONLY CONSUMER, and it rides INSIDE the agent column exactly as the
+                  mark does — so §13's shedding order is untouched. When the row narrows and the
+                  agent column goes, the category goes with it rather than becoming a fragment
+                  attached to nothing, and it is never a column of its own competing with the cost
+                  figure §13 spends its sharpest paragraph protecting. */}
+              {categories.get(item.agent_id) && (
+                <span className="hidden shrink-0 text-tiny text-faint xl:inline">
+                  · {categories.get(item.agent_id)}
+                </span>
+              )}
             </span>
           )}
 
@@ -529,6 +546,9 @@ export function WorkList() {
   // statement counts to, one layer up.
   const agents = useBuildStore((s) => s.agents);
   const marks = useMemo(() => emojiBySlug(agents), [agents]);
+  // §14, and built once per render pass rather than once per row: this list is virtualised at ten
+  // thousand rows, where a scan per row over forty agents is an N+1 nobody sees in review.
+  const categories = useMemo(() => categoryBySlug(agents), [agents]);
 
   // §6's day grouping, computed once per render of the list rather than per row. `useMemo` because
   // the list can be ten thousand rows (§18) and the grouping walks all of them.
@@ -694,7 +714,7 @@ export function WorkList() {
                   // like a fragment." And a day with no items renders nothing at all, which falls
                   // out of deriving the groups from the items — see `groupByDay`.
                   ? <DayHeading key={entry.key} label={entry.label} />
-                  : <Row key={entry.key} item={entry.item} columns={columns} marks={marks} />
+                  : <Row key={entry.key} item={entry.item} columns={columns} marks={marks} categories={categories} />
               ))}
             </ul>
             <div style={{ height: Math.max(0, view.totalHeight - view.end * ROW_HEIGHT) }} aria-hidden />

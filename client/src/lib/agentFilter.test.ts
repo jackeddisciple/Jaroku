@@ -12,7 +12,8 @@
 //   npm run test:agent-filter
 
 import {
-  NO_FILTERS, activeAt, connectorOptions, describeFilters, filterAgents, hasActiveFilters,
+  NO_FILTERS, activeAt, categoryOptions, connectorOptions, describeFilters, filterAgents,
+  hasActiveFilters,
   matchesQuery, sortAgents, visibleAgents,
 } from "./agentFilter.ts";
 import type { AgentCardView } from "../types.ts";
@@ -194,6 +195,37 @@ console.log("\nvisibleAgents is filter-then-sort, in that order");
   ];
   check("the filter decides what is eligible and the sort orders what is left",
     visibleAgents(rows, { ...NO_FILTERS, status: "failing" }, "active").map((c) => c.slug).join() === "a,b");
+}
+
+console.log("\n§14: the grid filters by category");
+{
+  // FROM THE DATA, NOT FROM THE PRESET LIST. I6 means a typed category is as real as a preset one,
+  // so a picker built from `AGENT_CATEGORIES` would offer twenty-five options in a workspace that
+  // uses four and could not offer the custom one half the grid is in.
+  const grid = [
+    card({ slug: "a", category: "Billing" }),
+    card({ slug: "b", category: "Billing" }),
+    card({ slug: "c", category: "Vendor chasing" }),
+    card({ slug: "d", category: "Uncategorized" }),
+  ];
+  check("the options are what the workspace actually holds",
+    categoryOptions(grid).join(",") === "Billing,Uncategorized,Vendor chasing",
+    categoryOptions(grid).join(","));
+  // `Uncategorized` IS AN OPTION HERE, unlike in the sidebar and the picker. It is a bucket with
+  // agents in it, and "which of these has nobody sorted yet" is the commonest question in a
+  // workspace that predates the column.
+  check("Uncategorized is offered when something is in it", categoryOptions(grid).includes("Uncategorized"));
+
+  const only = filterAgents(grid, { ...NO_FILTERS, category: "Billing" });
+  check("the filter narrows to one category", only.map((a) => a.slug).join(",") === "a,b",
+    only.map((a) => a.slug).join(","));
+  check("a typed category filters like a preset",
+    filterAgents(grid, { ...NO_FILTERS, category: "Vendor chasing" }).length === 1);
+  check("null means any", filterAgents(grid, NO_FILTERS).length === 4);
+  check("it counts as an active filter", hasActiveFilters({ ...NO_FILTERS, category: "Billing" }));
+  check("...and names itself in the empty state",
+    describeFilters({ ...NO_FILTERS, category: "Billing" }).includes("Billing"),
+    describeFilters({ ...NO_FILTERS, category: "Billing" }).join(", "));
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

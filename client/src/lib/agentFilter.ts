@@ -52,6 +52,16 @@ export interface AgentFilterState {
   status: AgentCardView["health"] | null;
   /** A connector id every shown agent must have, or null for any. */
   connector: string | null;
+  /**
+   * A category every shown agent must be in, or null for any.
+   *
+   * THE EXACT STRING, not a preset id, because there is no such thing: the column is TEXT and a
+   * category somebody typed is as real as one off the list (I6). So the options come from what the
+   * workspace's agents actually carry rather than from `agentCategories.ts` — a filter offering
+   * twenty-five presets in a workspace that uses four of them is twenty-one dead options, and one
+   * that could not offer "Vendor chasing" would be a filter that cannot find half the grid.
+   */
+  category: string | null;
   /** True: deployed only. False: not deployed. Null: either. */
   deployed: boolean | null;
   /** A user id, for Team workspaces. Null for anybody. */
@@ -64,6 +74,7 @@ export const NO_FILTERS: AgentFilterState = {
   query: "",
   status: null,
   connector: null,
+  category: null,
   deployed: null,
   createdBy: null,
   archived: false,
@@ -75,6 +86,7 @@ export function hasActiveFilters(f: AgentFilterState): boolean {
     f.query.trim() !== "" ||
     f.status !== null ||
     f.connector !== null ||
+    f.category !== null ||
     f.deployed !== null ||
     f.createdBy !== null ||
     f.archived
@@ -93,6 +105,7 @@ export function describeFilters(f: AgentFilterState): string[] {
   if (f.query.trim()) out.push(`matching ${f.query.trim()}`);
   if (f.status) out.push(f.status);
   if (f.connector) out.push(f.connector);
+  if (f.category) out.push(f.category);
   if (f.deployed === true) out.push("deployed");
   if (f.deployed === false) out.push("not deployed");
   if (f.createdBy) out.push("created by one person");
@@ -120,6 +133,7 @@ export function filterAgents(agents: readonly AgentCardView[], f: AgentFilterSta
     if (f.archived !== (a.archived_at !== null)) return false;
     if (f.status !== null && a.health !== f.status) return false;
     if (f.connector !== null && !a.connectors.includes(f.connector)) return false;
+    if (f.category !== null && a.category !== f.category) return false;
     if (f.deployed !== null && f.deployed !== (a.deployment !== null && a.deployment.status === "live")) return false;
     if (f.createdBy !== null && a.created_by !== f.createdBy) return false;
     return matchesQuery(a, f.query);
@@ -181,4 +195,21 @@ export function visibleAgents(
 /** Every connector any agent in the workspace has, sorted, for the connector picker. */
 export function connectorOptions(agents: readonly AgentCardView[]): string[] {
   return [...new Set(agents.flatMap((a) => a.connectors))].sort();
+}
+
+/**
+ * Every category this workspace's agents are actually in, sorted, for the category picker.
+ *
+ * FROM THE DATA, NOT FROM THE PRESET LIST, and that is I6 arriving at the filter bar. The presets
+ * are a vocabulary the CREATE flow offers; what a workspace holds is whatever anybody typed. A
+ * picker built from `AGENT_CATEGORIES` would show twenty-five options in a workspace that uses four
+ * — twenty-one of them finding nothing — and would be unable to offer the custom one that half the
+ * grid is in.
+ *
+ * `Uncategorized` IS OFFERED WHEN ANYTHING IS IN IT, because "which of these has nobody sorted yet"
+ * is a real question and the commonest one in a workspace that predates the column. It is not a
+ * placeholder here; it is a bucket with agents in it.
+ */
+export function categoryOptions(agents: readonly AgentCardView[]): string[] {
+  return [...new Set(agents.map((a) => a.category).filter((c): c is string => Boolean(c)))].sort();
 }

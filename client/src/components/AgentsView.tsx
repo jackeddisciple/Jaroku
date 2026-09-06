@@ -27,7 +27,7 @@ import { SearchIcon, SparklesIcon } from "./panelIcons.tsx";
 import { Select } from "./Select.tsx";
 import { Truncate } from "./Truncate.tsx";
 import {
-  AGENT_SORTS, NO_FILTERS, SORT_LABEL, connectorOptions, describeFilters, hasActiveFilters,
+  AGENT_SORTS, NO_FILTERS, SORT_LABEL, categoryOptions, connectorOptions, describeFilters, hasActiveFilters,
   visibleAgents, type AgentDensity, type AgentFilterState, type AgentSort,
 } from "../lib/agentFilter.ts";
 import { openAgentDetail, startAgentThread } from "../lib/agentNav.ts";
@@ -104,12 +104,14 @@ function FilterMenu({
   filters,
   onChange,
   connectors,
+  categories,
   team,
   members,
 }: {
   filters: AgentFilterState;
   onChange: (next: AgentFilterState) => void;
   connectors: string[];
+  categories: string[];
   team: boolean;
   members: { id: string; name: string }[];
 }) {
@@ -117,6 +119,7 @@ function FilterMenu({
   const active = [
     filters.status !== null,
     filters.connector !== null,
+    filters.category !== null,
     filters.deployed !== null,
     filters.createdBy !== null,
     filters.archived,
@@ -170,6 +173,27 @@ function FilterMenu({
                     size="sm"
                     selected={filters.connector === c}
                     onClick={() => onChange({ ...filters, connector: filters.connector === c ? null : c })}
+                  >
+                    {c}
+                  </Chip>
+                )),
+              )}
+            {/* §14: THE GRID FILTERS BY CATEGORY. The options come from what this workspace's agents
+                actually carry rather than from the preset list — I6 means a typed category is as real
+                as a preset one, so a picker built from `AGENT_CATEGORIES` would show twenty-five
+                options in a workspace that uses four and could not offer the custom one half the
+                grid is in. `Uncategorized` appears when anything is in it, because "which of these
+                has nobody sorted yet" is the commonest question in a workspace that predates the
+                column. */}
+            {categories.length > 1 &&
+              row(
+                "Category",
+                categories.map((c) => (
+                  <Chip
+                    key={c}
+                    size="sm"
+                    selected={filters.category === c}
+                    onClick={() => onChange({ ...filters, category: filters.category === c ? null : c })}
                   >
                     {c}
                   </Chip>
@@ -291,6 +315,9 @@ export function AgentsView() {
 
   const visible = useMemo(() => visibleAgents(cards, filters, sort), [cards, filters, sort]);
   const connectors = useMemo(() => connectorOptions(cards), [cards]);
+  // FROM THE CARDS, NOT FROM THE PRESETS — see `categoryOptions`. One option is not a filter, so the
+  // row does not render until the workspace holds at least two.
+  const categories = useMemo(() => categoryOptions(cards), [cards]);
   /**
    * The workspace's people, as the `created_by` filter and the creator avatar need them.
    *
@@ -417,6 +444,7 @@ export function AgentsView() {
           filters={filters}
           onChange={setFilters}
           connectors={connectors}
+          categories={categories}
           team={team}
           members={memberOptions}
         />

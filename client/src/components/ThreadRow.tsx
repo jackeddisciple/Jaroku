@@ -27,6 +27,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useBuildStore } from "../store/buildStore.ts";
 import { emojiBySlug } from "../lib/agentEmoji.ts";
+import { categoryBySlug } from "../lib/agentCategory.ts";
 import { AgentEmoji } from "./AgentEmoji.tsx";
 import { resumeHint } from "../lib/threadResume.ts";
 import { fmtRunningCost, fmtThreadCost } from "../lib/threadCost.ts";
@@ -187,6 +188,9 @@ export function ThreadRow({
   // save a `Map` construction per render would be the more expensive change.
   const agents = useBuildStore((s) => s.agents);
   const marks = useMemo(() => emojiBySlug(agents), [agents]);
+  // §14: the category, on the surfaces that name an agent. Built once per render pass rather than
+  // once per row — the Threads list is unbounded.
+  const categories = useMemo(() => categoryBySlug(agents), [agents]);
 
   // §9's ladder, over the two facts a thread row can hold besides selection. `archived` is quiet:
   // an archived thread has left the default list entirely, and marking it in the one view that
@@ -308,7 +312,13 @@ export function ThreadRow({
             size="sm"
             tone="faint"
             variant="bare"
-            title={thread.agent_id ? `Go to ${agentChipLabel(thread)}` : undefined}
+            title={
+              thread.agent_id
+                ? `Go to ${agentChipLabel(thread)}${
+                    categories.get(thread.agent_id) ? ` — ${categories.get(thread.agent_id)}` : ""
+                  }`
+                : undefined
+            }
             className={`${thread.agent_deleted ? "opacity-60" : ""} ${thread.agent_id ? "hover:text-ink" : ""}`}
             // §8.4: 14px, WITH THE AGENT ATTRIBUTION. In the chip's own icon slot rather than
             // outside it, so the mark travels with the name it belongs to — a chip that navigates
@@ -316,6 +326,13 @@ export function ThreadRow({
             icon={<AgentEmoji emoji={marks.get(thread.agent_id ?? "")} />}
           >
             {agentChipLabel(thread)}
+            {/* §14'S READ-ONLY CONSUMER. Inside the chip rather than beside it, so it travels with
+                the name it belongs to and sheds with it when the row narrows — the same rule the
+                mark in the icon slot follows. `Uncategorized` is absent rather than shown, which is
+                §7's sidebar rule one surface over. */}
+            {categories.get(thread.agent_id ?? "") && (
+              <span className="ml-1 text-faint">· {categories.get(thread.agent_id ?? "")}</span>
+            )}
           </Chip>
         </span>
         {/* PART 3 §11'S MARKER. "It also appears in the Threads list, VISIBLY MARKED as an operate
