@@ -1565,6 +1565,15 @@ jobs:
           # and not a lint error. It is a module-resolution failure in a browser on the first card
           # that tries to draw.
           npm run test:gloss-vendor
+          # AND THE ROSTER'S SHAPE, whose load-bearing assertion is the SORT. Migration 068's backfill
+          # hashes an agent's uuid into that array by index, so a reordering moves every backfilled
+          # agent to a different face with nothing in the diff to say so — the same property
+          # `test:agent-emoji` asserts of `EMOJI_PALETTE`, one package over, for the same reason.
+          # Beside it §3.3's amber rule applied at the grain that matters: not "is this palette
+          # orange" but "is the one colour this character is actually poured in orange", resolved
+          # through the runtime's own dealer, because amber means running everywhere else in the
+          # product and a permanently-orange agent is a colour lying about state.
+          npm run test:gloss-roster
           npm run test:icon-generated
           # AND THE SAME PROPERTY THE OTHER WAY ROUND, which is not redundant: the suite above
           # catches a mark somebody edited by hand, and this catches a MANIFEST edit committed
