@@ -72,6 +72,16 @@ export interface BudgetInputs {
   reducedMotion: boolean;
   /** Every mounted slot, from the last measurement pass. */
   slots: readonly { key: string; onScreen: boolean; built: boolean; centreDistance: number }[];
+  /**
+   * Are there characters still waiting to be built?
+   *
+   * FOUND BY LOOKING AT IT. Reduced motion draws one frame and parks, and one frame drains one
+   * frame's worth of the build queue — so a grid of twenty-four came up with two characters and
+   * twenty-two emoji placeholders, and stayed that way. The setting asks for no MOTION; a grid that
+   * mostly never renders is a different and worse thing, and it looked exactly like a bug in the
+   * queue rather than like a rule being obeyed.
+   */
+  building?: boolean;
   cap?: number;
 }
 
@@ -107,7 +117,10 @@ export function decideBudget(inputs: BudgetInputs): BudgetDecision {
   if (!inputs.active) return { animate: false, drawOnce: false, animating: none, reason: "inactive" };
   // BEHIND ANOTHER WINDOW. The grid stays painted, so nothing is redrawn either.
   if (!inputs.focused) return { animate: false, drawOnce: false, animating: none, reason: "blurred" };
-  // ONE FRAME, THEN STOP. Not a slower animation — no animation.
+  // ONE FRAME, THEN STOP — but "then" is after the characters exist. `drawOnce` keeps being true
+  // while anything is still queued, so the grid FILLS IN and only then goes still. Nothing moves at
+  // any point: `animating` is empty in both cases, so every frame drawn here is the same first frame
+  // of every character. Not a slower animation, and not a half-empty grid either.
   if (inputs.reducedMotion) {
     return { animate: false, drawOnce: true, animating: none, reason: "reduced-motion" };
   }
@@ -222,6 +235,7 @@ export class GlossLoop {
       focused: this.env.focused(),
       reducedMotion: this.env.reducedMotion(),
       slots: this.stage.slotMetrics(),
+      building: this.stage.pending > 0,
       cap: this.cap,
     });
   }
@@ -255,10 +269,14 @@ export class GlossLoop {
       this.stage.frame(now / 1000, dt, (key) => decision.animating.has(key));
     }
 
-    if (decision.animate) {
+    if (decision.animate || (decision.drawOnce && this.stage.pending > 0)) {
+      // THE SECOND CLAUSE IS THE REDUCED-MOTION FILL. A single frame builds about two characters
+      // against the eight-millisecond budget, so parking after one leaves a grid of placeholders.
+      // Frames keep being asked for until the queue is empty, and then it parks for good — the
+      // whole sequence still moves nothing, because `animating` is empty throughout.
       this.handle = this.env.requestFrame((t) => this.tick(t));
     } else {
-      // `drawOnce` — reduced motion. One frame, and then nothing until something wakes it.
+      // `drawOnce` with nothing left to build. One frame, and then nothing until something wakes it.
       this.parked = true;
     }
   }

@@ -47,9 +47,19 @@ export const AVATAR_SIZE = {
    * chose these characters by looking at them at 96px; 64 is what a compact card can spare and is
    * still a face rather than a blob.
    */
-  card: 64,
+  card: 112,
+  /**
+   * The compact density's card, and the floor this product draws 3D at.
+   *
+   * §4: "Compact drops the current-work subtitle line and SHRINKS THE THUMBNAIL; it does not shrink
+   * the type." The avatar is the thumbnail, so it is the thing that shrinks — and it stops here.
+   * I4's argument is about 16px, but the principle sets a floor rather than a slope: below about
+   * this the haircut and the glasses that separate two characters stop being separable, and what is
+   * left is a coloured blob with the renderer's cost attached.
+   */
+  compact: 72,
   /** The agent detail header, where there is room for the character to be looked at. */
-  header: 96,
+  header: 128,
 } as const;
 
 interface StageHandle {
@@ -150,8 +160,13 @@ export function GlossStageProvider({
   return (
     // `position: relative` so the canvas can be inset to this box, and `isolation: isolate` so the
     // canvas's z-index is scoped to the grid rather than competing with the app's modals.
-    <div ref={hostRef} className="relative isolate h-full min-h-0">
-      {children}
+    <div ref={hostRef} className="relative isolate flex h-full min-h-0 flex-col">
+      {/* THE LINE THIS WHOLE ARRANGEMENT DEPENDS ON, and it was missing. Without it the provider
+          renders its children, appends a canvas, runs a loop — and every `GlossAvatar` under it
+          reads the default context, finds no stage, and never registers a slot. The grid then looks
+          exactly like a grid whose characters have not finished building: every card showing its
+          emoji placeholder, for ever, with no error anywhere. */}
+      <StageContext.Provider value={handle}>{children}</StageContext.Provider>
     </div>
   );
 }

@@ -34,6 +34,8 @@ const card = (over: Partial<AgentCardView> & { slug: string }): AgentCardView =>
   hand_written: false,
   forked_from: null,
   emoji: "🐢",
+  category: "Uncategorized",
+  avatar_id: "alder",
   current_version: 3,
   version_source: "edit",
   creation_cost: null,

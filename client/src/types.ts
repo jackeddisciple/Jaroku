@@ -1173,6 +1173,19 @@ export interface AgentCardView {
    * why every render site treats it as optional rather than assuming.
    */
   emoji: string | null;
+  /**
+   * §5.1's two identity columns.
+   *
+   * `avatar_id` IS A ROSTER ID, NOT A RECIPE. The frozen recipe lives on the client beside the
+   * renderer that draws it; what travels is which of the twenty-eight, so an agent's face is a fact
+   * about the agent rather than an accident of whichever version of the code drew it last. Null only
+   * for a row written before migration 068's backfill, which is why every render site treats it as
+   * optional rather than assuming.
+   *
+   * `category` is free text and never an enum (I6). `Uncategorized` is a real value, not an absence.
+   */
+  category: string;
+  avatar_id: string | null;
 
   current_version: number;
   version_source: "generation" | "edit" | "import" | "deploy" | null;

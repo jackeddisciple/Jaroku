@@ -5961,6 +5961,11 @@ async function agentGridSnapshot(ctx: TenantContext): Promise<AgentGridSnapshot>
       // than re-derived in the browser, because the assignment probes against what the workspace
       // holds and a client cannot know that.
       emoji: a.emoji,
+      // §5.1'S TWO. `avatar_id` is what the card renders and what the picker warns about; `category`
+      // is what §14's filter reads and what the detail header edits. Both are columns on the row
+      // already assembled here, so neither costs a query.
+      category: a.category,
+      avatar_id: a.avatar_id,
       current_version: a.current_version,
       version_source: versionSource,
       creation_cost: a.creation_cost,

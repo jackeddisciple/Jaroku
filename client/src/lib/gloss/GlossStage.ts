@@ -351,6 +351,19 @@ export class GlossStage {
     } while (this.queue.length > 0 && now() < until);
   }
 
+  /**
+   * How many slots are still waiting to be built.
+   *
+   * THE BUDGET NEEDS THIS AND ONLY LEARNED SO BY BEING LOOKED AT. Reduced motion draws ONE frame and
+   * parks, and one frame drains one frame's worth of the build queue — about two characters — so a
+   * grid of twenty-four came up with two faces and twenty-two placeholders, permanently. "No motion"
+   * has to mean the characters still arrive and then hold still; it cannot mean most of them never
+   * arrive. See `decideBudget`.
+   */
+  get pending(): number {
+    return this.queue.length;
+  }
+
   /** Does this slot have a character on screen right now? The card's placeholder asks. */
   hasCharacter(key: string): boolean {
     return this.slots.get(key)?.built != null;

@@ -156,7 +156,8 @@ console.log("\nthe loop asks for no frames when it is not drawing");
 
   // The canvas the loop believes it is drawing into, so the four boxes below are on screen.
   const stage = new GlossStage(stageBindings({ width: 400, height: 400 }));
-  for (let i = 0; i < 4; i++) stage.mount(`k${i}`, box(10 + i * 100), GLOSS_ROSTER[i]!.id);
+  const rows = ["k0", "k1", "k2", "k3"];
+  rows.forEach((k, i) => stage.mount(k, box(10 + i * 100), GLOSS_ROSTER[i]!.id));
 
   const loop = new GlossLoop(stage, env);
   loop.start();
@@ -183,12 +184,26 @@ console.log("\nthe loop asks for no frames when it is not drawing");
   check("...and nothing keeps ticking", pump(5) === 0);
 
   loop.setActive(true);
+  // FOUR MORE, UNBUILT, so there is a queue when reduced motion comes on. Without this the earlier
+  // frames have already drained everything and one frame is genuinely the right answer — which is
+  // how the real bug hid: it only appears on a grid that is still filling in, which is every grid
+  // for the first few hundred milliseconds and no grid a second later.
+  ["k4", "k5", "k6", "k7"].forEach((k, i) => stage.mount(k, box(10 + i * 100), GLOSS_ROSTER[i + 4]!.id));
   reduced = true;
   listeners.forEach((l) => l());
-  pump(4);
-  check("reduced motion draws and then parks", loop.isParked, loop.lastDecision?.reason ?? "none");
+  // FOUND BY LOOKING AT A REAL GRID. One frame drains one frame's worth of the build queue — about
+  // two characters against the eight-millisecond budget — so parking after a single frame left
+  // twenty-two of twenty-four cards showing an emoji placeholder for ever. It looked like a broken
+  // queue and was a rule obeyed too literally: "no motion" cannot mean "most characters never
+  // arrive". So frames keep being drawn until nothing is queued, and nothing moves in any of them.
+  const drew = pump(40);
+  check("reduced motion keeps drawing until the characters exist", drew > 1, `${drew} frame(s)`);
+  check("...and nothing animates while it does", loop.lastDecision?.animating.size === 0,
+    `${loop.lastDecision?.animating.size}`);
+  check("...then parks", loop.isParked, loop.lastDecision?.reason ?? "none");
   check("...having drawn something", loop.lastDecision?.drawOnce === true);
   check("...and asks for no more frames", pump(5) === 0);
+  check("...with every character built", stage.builtCount === 8, `${stage.builtCount}/8`);
 
   loop.stop();
   check("stop lets go of the listeners", listeners.length === 0, `${listeners.length}`);

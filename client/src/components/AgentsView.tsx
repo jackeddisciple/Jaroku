@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentCard } from "./AgentCard.tsx";
 import { NewAgentDialog } from "./NewAgentDialog.tsx";
+import { GlossStageProvider } from "./GlossAvatar.tsx";
 import { Segmented } from "./Segmented.tsx";
 import { IconButton } from "./IconButton.tsx";
 import { Chip } from "./Chip.tsx";
@@ -259,6 +260,15 @@ export function AgentsView() {
    * X" that silently omitted X would be a warning that is wrong in exactly the case it exists for.
    */
   const allAgents = useBuildStore((s) => s.agents);
+  /**
+   * Is this surface the one on screen? The loop parks whenever it is not.
+   *
+   * `navView`, NOT `navSection`, AND THAT IS THE OPPOSITE OF THE SIDEBAR'S RULE. The sidebar item
+   * stays lit through the collapse to three panes — §2's fourth rule — because it is still where
+   * you are. The GRID is not still on screen: opening a card collapses the full-width view, and a
+   * mounted-but-hidden view animating twenty characters is exactly the case I5 exists to stop.
+   */
+  const agentsSurfaceActive = useUiStore((s) => s.navView === "agents");
   const [cursor, setCursor] = useState<string | null>(null);
   const searchInput = useRef<HTMLInputElement | null>(null);
 
@@ -491,11 +501,22 @@ export function AgentsView() {
         </div>
       )}
 
+      {/* §4.1'S ONE CANVAS, OVER THE GRID — and it wraps the SCROLLER rather than the scrolled
+          content, which is the difference between a canvas the size of the viewport and one the
+          size of a hundred cards. The provider is `position: relative`; the canvas is inset to it,
+          so it stays put while cards scroll under it and every slot rect is measured against a box
+          that does not move.
+
+          `active` IS THE AGENTS SURFACE BEING ON SCREEN. This view unmounts when you leave it, so
+          the flag is true for as long as it exists — but a full-width view that has collapsed to a
+          three-pane one is still mounted and no longer the thing being looked at, which is what
+          `navSection` answers. */}
+      <GlossStageProvider active={agentsSurfaceActive}>
       <div className="min-h-0 flex-1 overflow-auto p-5">
         {!loaded ? (
           // NOT A SPINNER (§9). Skeleton cards at the card's own geometry, so the grid does not jump
           // when the real ones land.
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(340px,1fr))] gap-4">
             {[0, 1, 2, 3, 4, 5].map((i) => (
               <div key={i} className="overflow-hidden rounded-card border border-hair bg-panel">
                 <div className="h-[104px] w-full bg-active" />
@@ -538,8 +559,8 @@ export function AgentsView() {
               // than a fixed column count, so the grid reflows honestly when somebody drags the
               // sidebar instead of overflowing at a width nobody tested.
               density === "compact"
-                ? "grid-cols-[repeat(auto-fill,minmax(210px,1fr))]"
-                : "grid-cols-[repeat(auto-fill,minmax(300px,1fr))]"
+                ? "grid-cols-[repeat(auto-fill,minmax(240px,1fr))]"
+                : "grid-cols-[repeat(auto-fill,minmax(340px,1fr))]"
             }`}
           >
             {visible.map((agent) => (
@@ -586,6 +607,8 @@ export function AgentsView() {
           </div>
         )}
       </div>
+
+      </GlossStageProvider>
 
       {/* §6. Rendered here rather than at the app root because this is where it is opened from, and
           its avatar picker holds a stage of its own — a modal that is never open costs nothing, and

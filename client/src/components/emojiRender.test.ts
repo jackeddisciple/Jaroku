@@ -63,7 +63,14 @@ console.log("\nthe seven sites §8.4 names");
   // trace but a screenshot, and a site that wrote its own pixel count is off the ladder.
   const SITES: [string, string][] = [
     ["components/Sidebar.tsx", "EMOJI_SIZE.sidebar"],       // 16 — the reason this exists
-    ["components/AgentCard.tsx", "EMOJI_SIZE.card"],        // 18
+    // THE CARD'S MARK MOVED INTO `GlossAvatar`, which is where it now lives on that surface. §5.2
+    // splits the SEVEN SITES by fidelity rather than by mark: small sizes wear the emoji, the card
+    // and the detail header wear the 3D character — "not two systems, one identity at two
+    // fidelities". So the card still shows the emoji, at avatar size, as the placeholder while the
+    // character builds and for ever on a machine with no WebGL, and the component that draws it is
+    // this one. A card drawing BOTH would be exactly the "blue one here, tractor there" D6 warned
+    // about, on one card, at once.
+    ["components/GlossAvatar.tsx", "AgentEmoji"],           // the card, at avatar size
     ["components/AgentOverview.tsx", "EMOJI_SIZE.header"],  // 20
     ["components/ThreadRow.tsx", "AgentEmoji"],             // 14 — the row default
     ["components/FleetStrip.tsx", "AgentEmoji"],            // 14
@@ -97,11 +104,13 @@ console.log("\nit is identity, so it never enters the tag row");
   check("the tag row draws no mark", !read("src/components/AgentTagRow.tsx").includes("AgentEmoji"));
   check("the tag builder has never heard of it", !read("src/lib/agentTags.ts").includes("emoji"));
 
-  // AND ON THE CARD IT SITS WITH THE NAME, above the tag row rather than in it. Read positionally,
-  // because "not in the tag row" is a claim about ORDER that no import check can see.
+  // AND ON THE CARD THE IDENTITY SITS ABOVE THE TAG ROW rather than in it. Read positionally,
+  // because "not in the tag row" is a claim about ORDER that no import check can see. What is read
+  // for is `<GlossAvatar` now: the card's identity is the character, and the emoji is inside it as
+  // the placeholder — the same claim about the same pixels, one component down.
   const card = read("src/components/AgentCard.tsx");
-  check("on the card the mark comes before the tag row",
-    card.indexOf("<AgentEmoji") < card.indexOf("<AgentTagRow"), `${card.indexOf("<AgentEmoji")}`);
+  check("on the card the identity comes before the tag row",
+    card.indexOf("<GlossAvatar") < card.indexOf("<AgentTagRow"), `${card.indexOf("<GlossAvatar")}`);
 }
 
 // --- 4. the picker ---------------------------------------------------------------------------------

@@ -24,7 +24,7 @@ import { AgentTagRow } from "./AgentTagRow.tsx";
 import { AgentSparkline } from "./AgentSparkline.tsx";
 import { ArchiveIcon, ArchiveRestoreIcon } from "./agentIcons.tsx";
 import { StatusGlyph, GLYPH_SIZE } from "./StatusGlyph.tsx";
-import { AgentEmoji, EMOJI_SIZE } from "./AgentEmoji.tsx";
+import { AVATAR_SIZE, GlossAvatar } from "./GlossAvatar.tsx";
 import { agentPhase } from "../lib/domainPhase.ts";
 import { stateBorder } from "../lib/stateBorder.ts";
 import { AlertTriangleIcon, GitForkIcon, PencilIcon } from "./panelIcons.tsx";
@@ -223,7 +223,38 @@ export function AgentCard({
         focused ? "shadow-glow" : "hover:shadow-glow"
       } ${agent.archived_at ? "opacity-70" : ""}`}
     >
-      <div className={`flex min-w-0 flex-1 flex-col ${compact ? "gap-1.5 p-2.5" : "gap-2 p-3"}`}>
+      {/* THE AVATAR, ON TOP, IN A BAND OF ITS OWN — and it is the only identity mark left on this
+          card. §5.2's split: the emoji is the sidebar, thread rows, Cockpit rows and the palette;
+          the avatar is the card and the detail header — "not two systems, one identity at two
+          fidelities". Both on one card would be D6's warning arriving in the place it was warning
+          about.
+
+          The emoji has not gone anywhere: `GlossAvatar` draws it inside this box while the character
+          is still in the build queue, and for ever on a machine with no WebGL. So the card shows the
+          same mark the sidebar does until it can show more of it.
+
+          A BAND RATHER THAN A COLUMN BESIDE THE TITLE. Inline it competed with the name for the
+          first glance and capped the character at the height of a line of text; on top it is the
+          first thing seen, at a size the curation pass actually chose these characters at, and the
+          text below it is a block rather than a column squeezed against a picture.
+
+          NO FILL, NO SEPARATOR UNDER IT. The band is the card's own surface with air around the
+          character — a tinted strip would be the first filled box in a product drawn in hairlines,
+          and the shadow the character casts is already doing the separating.
+
+          §I4 IS WHY THERE IS A FLOOR AND NOT A SCALE. Compact drops to 72 and stops; below that a
+          glossy character is a smudge, and running the renderer to produce a smudge is the worst of
+          both. */}
+      <div className={`flex shrink-0 justify-center ${compact ? "pt-2.5" : "pt-3.5"}`}>
+        <GlossAvatar
+          agentKey={agent.slug}
+          avatarId={agent.avatar_id}
+          emoji={agent.emoji}
+          size={compact ? AVATAR_SIZE.compact : AVATAR_SIZE.card}
+        />
+      </div>
+
+      <div className={`flex min-w-0 flex-1 flex-col ${compact ? "gap-1.5 p-2.5 pt-1.5" : "gap-2 p-3 pt-2"}`}>
         {/* Title, slug, and the actions that belong to the card rather than to the grid. */}
         <div className="flex min-w-0 items-start gap-2">
           {/* THE PHASE GLYPH, IN THE TITLE ROW, WHERE THE THUMBNAIL MARK USED TO BE — §2.3's "left
@@ -249,17 +280,11 @@ export function AgentCard({
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-baseline gap-1.5">
-              {/* §8.4 ASKS FOR IT "BELOW THE AVATAR", AND THE CARD NO LONGER HAS ONE. The avatar was
-                  the Jaroku wordmark, identical on every card, and the phase glyph replaced it when
-                  the status vocabulary landed — so "below the avatar" has nothing to be below. It
-                  goes with the name instead, which is where §8.4's own construction rule puts it
-                  anyway: on the text baseline, with normal inline spacing, no container.
-
-                  D6's consequence is therefore SMALLER than it was written to be. It warned that an
-                  agent would be "the blue one" on the card and "the tractor" in the sidebar, two
-                  facts that do not reinforce each other. On the card the gradient is already gone;
-                  the detail header is the one surface where both still appear. */}
-              <AgentEmoji emoji={agent.emoji} size={EMOJI_SIZE.card} />
+              {/* THE EMOJI USED TO BE HERE AND IS NOW IN THE AVATAR BOX to the left, as its
+                  placeholder. §5.2 settles the two-identities problem by splitting the SURFACES
+                  rather than the marks — small sizes wear the emoji, card and detail wear the
+                  character — and a card carrying both would be exactly the "blue one here, tractor
+                  there" D6 warned about, on one card, at once. */}
               <Truncate className={TYPE.title} title={agent.name}>
                 {agent.name}
               </Truncate>
