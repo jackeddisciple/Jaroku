@@ -167,7 +167,64 @@ console.log("\nblink, gaze, breath and sway all reach the character");
   stage.dispose();
 }
 
-// --- 5. an unknown avatar draws nothing ------------------------------------------------------------
+// --- 5. the head follows the pointer inside its card -----------------------------------------------
+
+console.log("\nthe head turns toward the pointer while it is on the card");
+{
+  // TWO THINGS GO WRONG SILENTLY HERE. A head that never tracks looks like a head with its own life,
+  // which is what it has the rest of the time — so the feature simply appears not to exist. And a
+  // head that SNAPS between its own gaze and the pointer reads as a glitch rather than as attention,
+  // which is why the hand-off is a weight that moves rather than a branch.
+  const stage = new GlossStage(stageBindings({ width: 800, height: 600 }));
+
+  // A card, and the avatar box inside it. The stage tracks the pointer against the CARD, because a
+  // 64px box inside a 320px card is a target nobody would find.
+  const card = { left: 100, top: 100, width: 300, height: 200 };
+  const region = { getBoundingClientRect: () => card } as unknown as HTMLElement;
+  stage.mount("hovered", box(120, 140), GLOSS_ROSTER[0]!.id, region);
+  stage.mount("elsewhere", box(400), GLOSS_ROSTER[1]!.id, region2());
+  stage.measure();
+  for (let f = 0; f < 6; f++) stage.frame(f / 30, 1 / 30);
+
+  const yawOf = (key: string): number =>
+    stage.debugTransforms().find((s) => s.key === key)?.yaw ?? 0;
+
+  // POINTER AT THE RIGHT EDGE OF THE CARD. Held there for a second of clock, which is long enough
+  // for the follow to arrive and short enough that a random gaze could not account for it.
+  stage.setPointer({ x: card.left + card.width - 1, y: card.top + card.height / 2 });
+  for (let f = 0; f < 60; f++) stage.frame(10 + f / 60, 1 / 60);
+  const right = yawOf("hovered");
+
+  stage.setPointer({ x: card.left + 1, y: card.top + card.height / 2 });
+  for (let f = 0; f < 60; f++) stage.frame(20 + f / 60, 1 / 60);
+  const left = yawOf("hovered");
+
+  check("it turns one way at one edge and the other way at the other", right * left < 0,
+    `${right.toFixed(3)} vs ${left.toFixed(3)}`);
+  // THE RANGE IS `gface.js`'s OWN. A pointer-driven head must not turn further than a gaze-driven
+  // one, or one character has two vocabularies depending on where somebody's mouse is.
+  check("...and no further than the vendored gaze would",
+    Math.abs(right) <= 0.35 && Math.abs(left) <= 0.35, `${right.toFixed(3)} / ${left.toFixed(3)}`);
+  check("...far enough to see", Math.abs(right) > 0.15 && Math.abs(left) > 0.15,
+    `${right.toFixed(3)} / ${left.toFixed(3)}`);
+
+  // A CARD THE POINTER IS NOT ON IS UNAFFECTED. Twenty-four heads turning together would be a
+  // novelty; one turning is attention.
+  const otherWhileHovering = stage.debugTransforms().find((s) => s.key === "elsewhere");
+  check("a card the pointer is not on keeps its own gaze",
+    Math.abs(otherWhileHovering?.yaw ?? 0) < 0.35);
+
+  // AND IT LETS GO. Slower than it follows, so the character hands control back to its own life
+  // rather than dropping it.
+  stage.setPointer(null);
+  for (let f = 0; f < 180; f++) stage.frame(30 + f / 60, 1 / 60);
+  const released = stage.debugTransforms().find((s) => s.key === "hovered");
+  check("the pointer's hold decays once it leaves", Math.abs(released?.yaw ?? 0) < Math.abs(left),
+    `${released?.yaw.toFixed(3)} vs ${left.toFixed(3)}`);
+  stage.dispose();
+}
+
+// --- 6. an unknown avatar draws nothing ------------------------------------------------------------
 
 console.log("\nan id the roster does not have");
 {
@@ -184,3 +241,10 @@ console.log("\nan id the roster does not have");
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 (globalThis as { process?: { exit(code: number): void } }).process?.exit(fail === 0 ? 0 : 1);
+
+/** A second card, far from the first, for the "not this one" assertion. */
+function region2(): HTMLElement {
+  return {
+    getBoundingClientRect: () => ({ left: 500, top: 380, width: 300, height: 200 }),
+  } as unknown as HTMLElement;
+}

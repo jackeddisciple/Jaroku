@@ -62,6 +62,25 @@ export const TARGET_FPS = 30;
 
 const MIN_FRAME_MS = 1000 / TARGET_FPS;
 
+/**
+ * How long after an interaction the loop draws at the display's full rate instead of at 30.
+ *
+ * THIRTY FRAMES A SECOND IS RIGHT FOR IDLE FACES AND WRONG FOR A SCROLL, and the difference shows
+ * up in the worst possible way. The canvas does not scroll — it is inset to the pane and the cards
+ * move under it — so a character is only in the right place on the frames the loop redraws. At 30
+ * fps on a 120 Hz display that is one frame in four, and the other three show cards that have moved
+ * and characters that have not: every avatar appears to float free of its card, drifting and
+ * catching up, which is exactly what it was reported as.
+ *
+ * So a scroll, a resize, a mount or a pointer move opens a window in which the gate is off and every
+ * animation frame is drawn. Two hundred milliseconds is long enough to cover the momentum after a
+ * trackpad flick and short enough that an idle grid is back to 30 within a fifth of a second.
+ *
+ * It costs nothing when nothing is happening, which is the whole point: the expensive case is a grid
+ * nobody is touching, and that one is untouched.
+ */
+const INTERACTIVE_MS = 200;
+
 /** What the world looks like when the loop asks whether to run. */
 export interface BudgetInputs {
   /** Is the Agents surface the one on screen? */
@@ -194,6 +213,8 @@ export class GlossLoop {
   private active = false;
   private last = 0;
   private lastDraw = -Infinity;
+  /** Until when every animation frame is drawn rather than one in every `MIN_FRAME_MS`. */
+  private liveUntil = -Infinity;
   private parked = true;
   private stopped = false;
   /** The last decision, so a caller (and the suite) can see why nothing is moving. */
@@ -219,9 +240,16 @@ export class GlossLoop {
     this.wake();
   }
 
-  /** Something changed — a scroll, a mount, a resize. Re-decide, and draw if there is a reason to. */
+  /**
+   * Something changed — a scroll, a mount, a resize, a pointer move. Re-decide, and draw.
+   *
+   * IT ALSO OPENS THE INTERACTIVE WINDOW. Everything that calls this moves something under a canvas
+   * that does not move with it, so for the next fraction of a second the frame gate comes off and
+   * the characters stay attached to whatever is carrying them. See `INTERACTIVE_MS`.
+   */
   wake(): void {
     if (this.stopped) return;
+    this.liveUntil = this.env.now() + INTERACTIVE_MS;
     this.parked = false;
     if (this.handle === null) {
       this.last = this.env.now();
@@ -264,7 +292,10 @@ export class GlossLoop {
     // THE GATE IS HERE AND NOT INSIDE `stage.frame`, so a caller driving frames by hand still gets
     // every one it asks for. Gating the draw itself silently swallowed half of them upstream and
     // filled the sheet at half speed under test.
-    if (now - this.lastDraw >= MIN_FRAME_MS - 0.5) {
+    // AND THE GATE IS OFF DURING AN INTERACTION. A scrolling grid redraws on every frame, because a
+    // character repositioned on one frame in four visibly floats away from the card carrying it.
+    const live = now < this.liveUntil;
+    if (live || now - this.lastDraw >= MIN_FRAME_MS - 0.5) {
       this.lastDraw = now;
       this.stage.frame(now / 1000, dt, (key) => decision.animating.has(key));
     }

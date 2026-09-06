@@ -89,6 +89,21 @@ interface Slot {
   y: number;
   size: number;
   onScreen: boolean;
+  /**
+   * The region the pointer has to be inside for this character to look at it, or null.
+   *
+   * THE WHOLE CARD, NOT THE AVATAR BOX. Looking at somebody only while the pointer is on their face
+   * is a behaviour nobody would find: the box is 64px in a card of 320, and by the time the cursor
+   * is on it you are already looking at the character. The card marks itself with
+   * `data-gloss-gaze`, so a surface that wants this opts in and one that does not is unaffected.
+   */
+  gaze: HTMLElement | null;
+  /** That region in CLIENT coordinates, from the same measurement pass. Null when there is none. */
+  gazeRect: { left: number; top: number; width: number; height: number } | null;
+  /** Where the head is looking because of the pointer, and how much of it is the pointer's doing. */
+  lookX: number;
+  lookY: number;
+  lookWeight: number;
 }
 
 /**
@@ -149,6 +164,39 @@ export const REAL_BINDINGS: StageBindings = {
  */
 const BUILD_BUDGET_MS = 8;
 
+/**
+ * How a spring's state becomes a head offset.
+ *
+ * THESE ARE `gface.js`'s OWN FIVE NUMBERS, re-typed rather than re-derived, so a head driven by the
+ * pointer moves through exactly the range a head driven by the vendored gaze does — the same
+ * maximum turn, the same lean, the same slight roll. Anything else would give one character two
+ * different vocabularies depending on whether somebody's mouse happened to be over it.
+ *
+ * `u` is the body radius (`built.L.s`), which is why the two translations are scaled by it and the
+ * three rotations are not: the first pair is a distance in the character's own units and the second
+ * trio is radians.
+ */
+const HEAD = { x: 0.16, y: 0.11, yaw: 0.34, pitch: -0.22, rot: -0.07 } as const;
+
+/**
+ * How fast the head follows the pointer, and how fast it lets go.
+ *
+ * EXPONENTIAL SMOOTHING RATHER THAN `gface.js`'s CRITICALLY-DAMPED SPRING, deliberately. That spring
+ * models a GLANCE — something catches the eye, is looked at, and is released — and it is ballistic
+ * on purpose. A cursor is not a glance: it is a thing being followed, continuously, and the right
+ * behaviour is a lag that never overshoots. `1 - exp(-k·dt)` is also unconditionally stable at any
+ * frame time, which matters on the frame after a twenty-millisecond character build.
+ *
+ * `follow` is faster than `release`, so the head snaps to the cursor and drifts back to its own life
+ * rather than the other way round.
+ */
+const LOOK = { follow: 11, release: 5 } as const;
+
+/** `a` toward `b`, framerate-independent. */
+function approach(a: number, b: number, rate: number, dt: number): number {
+  return a + (b - a) * (1 - Math.exp(-rate * dt));
+}
+
 export class GlossStage {
   readonly renderer: THREE.WebGLRenderer;
   private readonly scene: THREE.Scene;
@@ -161,6 +209,8 @@ export class GlossStage {
   private width = 0;
   private height = 0;
   private disposed = false;
+  /** Where the pointer is, in client coordinates, or null when it is not over this surface. */
+  private pointer: { x: number; y: number } | null = null;
 
   constructor(bindings: StageBindings = REAL_BINDINGS) {
     this.renderer = bindings.createRenderer();
@@ -175,6 +225,17 @@ export class GlossStage {
     // distance, so a character is the same size in every card whatever the card is doing.
     this.camera.position.set(0, 0, 0.5 / Math.tan((FOV * Math.PI) / 360) + 1);
     this.camera.lookAt(0, 0, 0);
+  }
+
+  /**
+   * Where the pointer is, in client coordinates. Null when it has left the surface.
+   *
+   * STORED, NOT ACTED ON. A `pointermove` fires far more often than a frame, and doing anything
+   * here — measuring, computing a target, touching a mesh — would be work thrown away before it
+   * could be drawn. The loop reads this once per frame, alongside every other measurement.
+   */
+  setPointer(client: { x: number; y: number } | null): void {
+    this.pointer = client;
   }
 
   /** The canvas to position over the grid. `pointer-events: none` is the caller's business. */
@@ -218,9 +279,10 @@ export class GlossStage {
    * whatever placeholder it drew for itself, which is the difference between a grid that fills in
    * and a grid that freezes.
    */
-  mount(key: string, element: HTMLElement, avatarId: string): void {
+  mount(key: string, element: HTMLElement, avatarId: string, gaze: HTMLElement | null = null): void {
     const existing = this.slots.get(key);
     if (existing) {
+      existing.gaze = gaze;
       // A REMOUNT WITH A DIFFERENT AVATAR IS A REBUILD, and one with the same avatar is not. The
       // second case is the common one — React re-runs an effect because a parent re-rendered — and
       // rebuilding there would throw away twenty milliseconds of work per card per broadcast.
@@ -238,6 +300,8 @@ export class GlossStage {
       rate: 0.85 + Math.random() * 0.35,
       phase: Math.random() * 20,
       x: 0, y: 0, size: 0, onScreen: false,
+      gaze, gazeRect: null,
+      lookX: 0, lookY: 0, lookWeight: 0,
     };
     this.slots.set(key, slot);
     this.queue.push(slot);
@@ -268,6 +332,9 @@ export class GlossStage {
     slot.built = null;
     slot.holder = null;
     slot.life = null;
+    slot.lookX = 0;
+    slot.lookY = 0;
+    slot.lookWeight = 0;
     for (const listener of this.builtListeners) listener(slot.key);
   }
 
@@ -300,6 +367,15 @@ export class GlossStage {
       slot.y = Math.round(this.height - (r.top - base.top + (r.height - side) / 2) - side);
       slot.onScreen =
         side > 0 && slot.x + side > 0 && slot.x < this.width && slot.y + side > 0 && slot.y < this.height;
+      // THE GAZE REGION, IN THE SAME PASS. It is a second `getBoundingClientRect` per slot, and it
+      // is here rather than in a pointer handler for exactly the reason the first one is: all reads
+      // happen together, before any write, so nothing interleaves them into forced reflows.
+      if (slot.gaze && slot.onScreen) {
+        const g = slot.gaze.getBoundingClientRect();
+        slot.gazeRect = { left: g.left, top: g.top, width: g.width, height: g.height };
+      } else {
+        slot.gazeRect = null;
+      }
     }
   }
 
@@ -425,6 +501,7 @@ export class GlossStage {
     if (!slot.built || !slot.holder || !slot.life) return;
     const own = t * slot.rate + slot.phase;
     const head = slot.life.update(own, dt);
+    const look = this.lookAtPointer(slot, dt);
 
     const sy = 1 + Math.sin(own * LIFE.breathRate) * LIFE.breathDepth;
     slot.holder.position.set(
@@ -432,9 +509,22 @@ export class GlossStage {
       Math.cos(own * LIFE.swayYRate) * LIFE.swayYDepth,
       0,
     );
+    // THE POINTER WINS BY WEIGHT, NOT BY BRANCH. `w` is 0 when the cursor is elsewhere and 1 when it
+    // is inside this card, and it MOVES between them — so a character does not snap out of its own
+    // gaze the instant a mouse crosses a border and does not snap back when it leaves. Between the
+    // two the character is doing a little of each, which is what makes the hand-off invisible.
+    const w = slot.lookWeight;
     const h = slot.built.head;
-    h.position.set(head.x, h.userData.restY + head.y, 0);
-    h.rotation.set(head.pitch, head.yaw, head.rot);
+    h.position.set(
+      head.x * (1 - w) + look.x * w,
+      h.userData.restY + (head.y * (1 - w) + look.y * w),
+      0,
+    );
+    h.rotation.set(
+      head.pitch * (1 - w) + look.pitch * w,
+      head.yaw * (1 - w) + look.yaw * w,
+      head.rot * (1 - w) + look.rot * w,
+    );
     // Volume-preserving. See LIFE.
     const root = Math.sqrt(sy);
     slot.holder.scale.set(slot.scale / root, slot.scale * sy, slot.scale / root);
@@ -498,6 +588,56 @@ export class GlossStage {
       });
     }
     return out;
+  }
+
+  /**
+   * Where this character's head would be if it were looking at the cursor, and how much it is.
+   *
+   * THE TARGET IS THE POINTER'S POSITION IN THE CARD, normalised to the same [-1, 1] the vendored
+   * gaze springs work in — so the corners of a card are the furthest the head ever turns, and that
+   * furthest is exactly `gface.js`'s own maximum. A cursor at the middle of a card is a head facing
+   * forward, which is the resting state and therefore continuous with everything else.
+   *
+   * IT IS THE CARD'S RECTANGLE, NOT THE AVATAR'S. Tracking only while the pointer is on the
+   * character would be a behaviour nobody discovers — the box is 64px inside a card of 320 — and it
+   * would also mean the head only turns once you are already looking at it.
+   *
+   * THE WEIGHT IS SMOOTHED IN BOTH DIRECTIONS and the release is slower than the follow, so a
+   * character hands control back to its own gaze rather than dropping it.
+   */
+  private lookAtPointer(slot: Slot, dt: number): {
+    x: number; y: number; yaw: number; pitch: number; rot: number;
+  } {
+    const rect = slot.gazeRect;
+    const p = this.pointer;
+    const inside =
+      rect !== null && p !== null &&
+      p.x >= rect.left && p.x <= rect.left + rect.width &&
+      p.y >= rect.top && p.y <= rect.top + rect.height;
+
+    if (inside && rect && p) {
+      // `-y` BECAUSE THE DOM'S y GROWS DOWNWARD AND THE CHARACTER'S DOES NOT. Without it the head
+      // looks away from the cursor vertically while following it horizontally, which reads as the
+      // character avoiding you.
+      const tx = Math.max(-1, Math.min(1, (p.x - (rect.left + rect.width / 2)) / (rect.width / 2)));
+      const ty = Math.max(-1, Math.min(1, -(p.y - (rect.top + rect.height / 2)) / (rect.height / 2)));
+      slot.lookX = approach(slot.lookX, tx, LOOK.follow, dt);
+      slot.lookY = approach(slot.lookY, ty, LOOK.follow, dt);
+      slot.lookWeight = approach(slot.lookWeight, 1, LOOK.follow, dt);
+    } else {
+      slot.lookWeight = approach(slot.lookWeight, 0, LOOK.release, dt);
+      slot.lookX = approach(slot.lookX, 0, LOOK.release, dt);
+      slot.lookY = approach(slot.lookY, 0, LOOK.release, dt);
+    }
+
+    const u = slot.built!.L.s;
+    return {
+      x: slot.lookX * u * HEAD.x,
+      y: slot.lookY * u * HEAD.y,
+      yaw: slot.lookX * HEAD.yaw,
+      pitch: slot.lookY * HEAD.pitch,
+      rot: slot.lookX * HEAD.rot,
+    };
   }
 
   /** Free everything. After this the stage is inert and a second call is a no-op. */

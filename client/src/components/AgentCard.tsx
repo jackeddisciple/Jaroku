@@ -200,6 +200,10 @@ export function AgentCard({
         }
       }}
       data-agent-card={agent.slug}
+      // THE CHARACTER LOOKS AT THE POINTER WHILE IT IS ANYWHERE ON THIS CARD. The whole card rather
+      // than the avatar box, because a 64px target inside a 320px card is a behaviour nobody finds —
+      // and by the time the cursor is on the character's face you are already looking at it.
+      data-gloss-gaze
       aria-label={agent.name}
       // THE HOVER IS A CLASS, NOT AN IMPERATIVE STYLE, and the difference is not tidiness. Writing
       // `element.style.boxShadow` from a pointer handler on an element whose `style` prop React also

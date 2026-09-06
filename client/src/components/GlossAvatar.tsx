@@ -156,17 +156,42 @@ export function GlossStageProvider({
    */
   useEffect(() => {
     const loop = handle.loop;
+    const stage = handle.stage;
     const host = hostRef.current;
     if (!loop || !host) return;
     const wake = () => loop.wake();
     window.addEventListener("scroll", wake, true);
     const observer = new ResizeObserver(wake);
     observer.observe(host);
+
+    /**
+     * WHERE THE POINTER IS, STORED AND NOTHING ELSE. A `pointermove` fires far more often than a
+     * frame; measuring or computing anything here would be work thrown away before it could be
+     * drawn, and it would put a forced reflow between the loop's measurement pass and its draw —
+     * the layout thrash §4.1 exists to avoid, arriving through the back door.
+     *
+     * ON THE HOST, NOT THE WINDOW. The canvas is `pointer-events: none`, so these events come from
+     * the cards underneath and bubble here; a window listener would also track the pointer across
+     * the sidebar and the composer, where there is nothing to look at.
+     */
+    const move = (e: PointerEvent) => {
+      stage?.setPointer({ x: e.clientX, y: e.clientY });
+      loop.wake();
+    };
+    const leave = () => {
+      stage?.setPointer(null);
+      loop.wake();
+    };
+    host.addEventListener("pointermove", move);
+    host.addEventListener("pointerleave", leave);
+
     return () => {
       window.removeEventListener("scroll", wake, true);
       observer.disconnect();
+      host.removeEventListener("pointermove", move);
+      host.removeEventListener("pointerleave", leave);
     };
-  }, [handle.loop]);
+  }, [handle.loop, handle.stage]);
 
   return (
     // `position: relative` so the canvas can be inset to this box, and `isolation: isolate` so the
@@ -215,7 +240,10 @@ export function GlossAvatar({
   useLayoutEffect(() => {
     const box = boxRef.current;
     if (!stage || !box || !avatarId) return;
-    stage.mount(agentKey, box, avatarId);
+    // THE REGION THE POINTER HAS TO BE IN FOR THIS CHARACTER TO LOOK AT IT — the nearest ancestor
+    // that has opted in, and nothing if there is none. A card marks itself; a picker tile does not,
+    // because twenty-eight heads all turning at once is a novelty rather than a life.
+    stage.mount(agentKey, box, avatarId, box.closest<HTMLElement>("[data-gloss-gaze]"));
     loop?.wake();
     return () => {
       stage.unmount(agentKey);

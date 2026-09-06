@@ -60,7 +60,11 @@ export function resetRendererCounts(): void {
  * `canvas` is the size of the canvas the stage believes it is drawing into; slot rects are measured
  * against it, so it decides what counts as on screen.
  */
-export function stageBindings(canvas = { width: 800, height: 600 }): StageBindings {
+export function stageBindings(
+  canvas = { width: 800, height: 600 },
+  /** Called on every `renderer.render`, for suites that count DRAWS rather than frames. */
+  onRender?: () => void,
+): StageBindings {
   return {
     createRenderer: () => {
       renderersConstructed++;
@@ -75,7 +79,7 @@ export function stageBindings(canvas = { width: 800, height: 600 }): StageBindin
         setScissorTest: () => undefined,
         setClearAlpha: () => undefined,
         clear: () => undefined,
-        render: () => undefined,
+        render: () => onRender?.(),
         dispose: () => { renderersDisposed++; },
       } as unknown as ReturnType<StageBindings["createRenderer"]>;
     },

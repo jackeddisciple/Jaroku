@@ -115,7 +115,9 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
     // header only exists while the agent detail is on screen, and the loop parks itself on blur and
     // under reduced motion regardless.
     <GlossStageProvider active className="relative isolate shrink-0">
-    <div className="border-b border-hair">
+    {/* The header is this character's gaze region too, so it follows the pointer while somebody is
+        reading the agent it belongs to — the same behaviour the card has, on the other 3D surface. */}
+    <div className="border-b border-hair" data-gloss-gaze>
       {/* THE GRADIENT BAND IS GONE, AND D6 IS WHAT RETIRED IT. That decision recorded a live
           consequence on exactly this surface: the band above said "the blue one" and the mark beside
           the name said "the tractor", two facts about one agent that do not reinforce each other —

@@ -128,6 +128,7 @@ console.log("\nthe loop asks for no frames when it is not drawing");
   let focused = true;
   let reduced = false;
   let requested = 0;
+  let rendered = 0;
   let pending: ((now: number) => void) | null = null;
   let listeners: (() => void)[] = [];
   let clock = 0;
@@ -155,7 +156,7 @@ console.log("\nthe loop asks for no frames when it is not drawing");
   };
 
   // The canvas the loop believes it is drawing into, so the four boxes below are on screen.
-  const stage = new GlossStage(stageBindings({ width: 400, height: 400 }));
+  const stage = new GlossStage(stageBindings({ width: 400, height: 400 }, () => { rendered++; }));
   const rows = ["k0", "k1", "k2", "k3"];
   rows.forEach((k, i) => stage.mount(k, box(10 + i * 100), GLOSS_ROSTER[i]!.id));
 
@@ -177,6 +178,38 @@ console.log("\nthe loop asks for no frames when it is not drawing");
   focused = true;
   listeners.forEach((l) => l());
   check("focus wakes it", pump(3) === 3 && !loop.isParked, loop.lastDecision?.reason ?? "none");
+
+  // THE INTERACTIVE WINDOW, AND THE BUG IT EXISTS FOR. The canvas does not scroll — it is inset to
+  // the pane and the cards move under it — so a character is only in the right place on the frames
+  // the loop redraws. At 30 fps on a 120 Hz display that is one frame in four, and the other three
+  // show cards that have moved and characters that have not: every avatar appears to float free of
+  // the card carrying it. So `wake` opens a window in which every animation frame is drawn.
+  //
+  // The clock steps by half a frame here, which the 30 fps gate would otherwise swallow.
+  const half = 1000 / TARGET_FPS / 2;
+  const halfStep = (n: number): number => {
+    let drew = 0;
+    for (let i = 0; i < n; i++) {
+      const next = pending;
+      if (!next) break;
+      pending = null;
+      clock += half;
+      const before = rendered;
+      next(clock);
+      if (rendered > before) drew++;
+    }
+    return drew;
+  };
+  loop.wake();
+  const duringInteraction = halfStep(6);
+  check("every frame is drawn while something is moving", duringInteraction === 6,
+    `${duringInteraction}/6`);
+
+  // AND IT CLOSES. Two hundred milliseconds later the grid is idle again and back to 30, which is
+  // the cost this whole file exists to keep down — the expensive case is a grid nobody is touching.
+  clock += 400;
+  const whenIdle = halfStep(6);
+  check("...and only every other one once it is idle", whenIdle > 0 && whenIdle < 6, `${whenIdle}/6`);
 
   loop.setActive(false);
   pump(2);
