@@ -11,6 +11,7 @@
 
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { EMOJI_PALETTE } from "./agents/emojiPalette.ts";
+import { AVATAR_IDS } from "./agents/avatarRoster.ts";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -2148,6 +2149,68 @@ async function setAgentEmoji(ctx: TenantContext, agentId: string, emoji: unknown
     relay.sendAgents(ctx, ctx.requestId, {
       type: "notice",
       message: `${clash[0]!.display_name ?? clash[0]!.slug} already wears that mark`,
+      agentId: slug,
+    });
+  }
+  await relay.broadcastAgents();
+  await relay.broadcastAgentGrid();
+}
+
+/**
+ * §6's category, changed on an agent that already exists.
+ *
+ * NO VALIDATION AGAINST THE PRESET LIST, and that is I6 rather than an omission: the column is TEXT
+ * and the twenty-five presets are a vocabulary in the interface. A guard here would refuse "name
+ * your own", which is half the feature — and would refuse it for a value the picker had just
+ * offered, the day somebody edits the list.
+ *
+ * A LENGTH CAP IS THE ONLY GUARD, because "any string" is not the same as "any megabyte". It is a
+ * label on a row, and a category longer than a sidebar can hold is already truncated by §7.
+ */
+async function setAgentCategory(ctx: TenantContext, agentId: string, category: unknown): Promise<void> {
+  const slug = String(agentId ?? "");
+  const next = typeof category === "string" ? category.trim().slice(0, 80) : "";
+  const agent = (await agentRepo.list(ctx, { includeArchived: true })).find((a) => a.slug === slug);
+  if (!agent) {
+    refuseAgent(ctx, `no agent called ${slug} in this workspace`, slug);
+    return;
+  }
+  await agentRepo.setCategory(ctx, agent.id, next);
+  await relay.broadcastAgents();
+  await relay.broadcastAgentGrid();
+}
+
+/**
+ * §6's avatar, changed on an agent that already exists.
+ *
+ * FROM THE ROSTER, OR NOT AT ALL. An id nothing can draw is an agent with no face and no way to say
+ * so — `GlossStage` builds nothing for an unknown id, deliberately, because a silent substitution is
+ * two agents wearing one identity. So the membership test happens here, where there is somebody to
+ * refuse.
+ *
+ * A DUPLICATE IS NOT REFUSED, only reported. §6: "Taking an avatar another agent already uses is
+ * allowed but warned — it is their workspace, and a hard block on a cosmetic choice is worse than a
+ * duplicate." Exactly the arrangement `setAgentEmoji` has one function up, and for the same reason.
+ */
+async function setAgentAvatar(ctx: TenantContext, agentId: string, avatarId: unknown): Promise<void> {
+  const slug = String(agentId ?? "");
+  const next = typeof avatarId === "string" ? avatarId : "";
+  if (!AVATAR_IDS.includes(next)) {
+    refuseAgent(ctx, "that is not one of the avatars an agent can wear", slug);
+    return;
+  }
+  const agent = (await agentRepo.list(ctx, { includeArchived: true })).find((a) => a.slug === slug);
+  if (!agent) {
+    refuseAgent(ctx, `no agent called ${slug} in this workspace`, slug);
+    return;
+  }
+  await agentRepo.setAvatar(ctx, agent.id, next);
+  const clash = (await agentRepo.list(ctx, { includeArchived: true }))
+    .filter((a) => a.id !== agent.id && a.avatar_id === next);
+  if (clash.length > 0) {
+    relay.sendAgents(ctx, ctx.requestId, {
+      type: "notice",
+      message: `${clash[0]!.display_name ?? clash[0]!.slug} already uses that avatar`,
       agentId: slug,
     });
   }
@@ -5844,7 +5907,7 @@ const GRID_WINDOW_30_MS = 30 * 24 * 60 * 60 * 1000;
 
 const AGENT_COMMAND_NAMES = new Set([
   "archiveAgent", "restoreAgent", "renameAgent", "forkAgent", "restoreAgentVersion",
-  "setAgentEmoji",
+  "setAgentEmoji", "setAgentCategory", "setAgentAvatar",
 ]);
 
 /** A refusal on the agents channel, to the socket that earned it and nobody else. */
@@ -6426,6 +6489,8 @@ async function handleAgentCommand(ctx: TenantContext, cmd: AgentCommand): Promis
     else if (cmd.cmd === "restoreAgent") await setAgentArchived(ctx, cmd.agentId, false);
     else if (cmd.cmd === "renameAgent") await renameAgent(ctx, cmd.agentId, cmd.name);
     else if (cmd.cmd === "setAgentEmoji") await setAgentEmoji(ctx, cmd.agentId, cmd.emoji);
+    else if (cmd.cmd === "setAgentCategory") await setAgentCategory(ctx, cmd.agentId, cmd.category);
+    else if (cmd.cmd === "setAgentAvatar") await setAgentAvatar(ctx, cmd.agentId, cmd.avatarId);
     else if (cmd.cmd === "forkAgent") await forkAgent(ctx, cmd.agentId);
     else if (cmd.cmd === "restoreAgentVersion") await restoreAgentVersion(ctx, cmd.agentId, cmd.version);
     else if (cmd.cmd === "setAgentTools") await setAgentTools(ctx, cmd.agentId, cmd.mcpTools);

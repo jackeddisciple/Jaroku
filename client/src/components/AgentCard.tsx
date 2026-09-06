@@ -96,7 +96,7 @@ function Overflow({
         aria-expanded={open}
         className="rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active active:bg-chrome hover:text-ink"
       >
-        <Icon.agents.more size={ICON.xs} />
+        <Icon.agents.more size={ICON.sm} />
       </button>
       {open && (
         <>
@@ -231,15 +231,20 @@ export function AgentCard({
             the primary element on this card and the avatar is what supports it, so the avatar comes
             back down beside the name at identity size.
 
-            THIRTY-SIX PIXELS. Small enough to read as an identity indicator rather than as an
-            illustration, large enough that the haircut and the glasses the curation pass chose these
-            characters for still separate two of them. It is above I4's floor and well below the
-            size at which a glossy character starts competing with type.
+            SIXTY-FOUR PIXELS, AND IT IS THE LARGEST ELEMENT ON THE CARD — larger than the name,
+            which is the next thing the eye lands on. The hierarchy is picture, name, slug, tags,
+            current work, footer, and each step down is a real step: 64px of character, 14px of
+            title, 11px of faint mono-ish slug, 10px caps tags, 12px prose, 10px faint figures.
+
+            It is the size the curation pass judged these characters at, near enough — they were
+            chosen at 96px for being tellable apart, and 64 is where that still holds. Below about
+            forty the haircut and the glasses that separate two of them stop separating anything,
+            which is I4's floor argument arriving from the other end.
 
             NO BOX AROUND IT — no ring, no tint, no rounded container. The card already has a radius
             and an elevation; a second one around a 36px character is the box-around-the-glyph the
             emoji work spent a whole commit removing one size down. */}
-        <div className="flex min-w-0 items-start gap-2.5">
+        <div className="flex min-w-0 items-start gap-3">
           <GlossAvatar
             agentKey={agent.slug}
             avatarId={agent.avatar_id}
@@ -247,15 +252,16 @@ export function AgentCard({
             size={compact ? AVATAR_SIZE.compact : AVATAR_SIZE.card}
             // Against the two lines beside it rather than against the row's top edge: the character
             // is drawn with air above its head, so aligned flush it reads as sitting high.
-            className="-mt-0.5"
+            // Flush with the top of the title block, so the picture and the two lines beside it
+            // read as one unit rather than as a picture with text floating next to it.
+            className="mt-px"
           />
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-1.5">
-              {/* THE PHASE GLYPH, WITH THE NAME rather than in a column of its own. It answers "what
-                  is it doing right now" — Running, Idle, Never run, Archived — and D1 keeps that
-                  separate from the HEALTH axis in the tag row below. Beside the name it is one
-                  glyph on the line it qualifies; in its own column it was a third element competing
-                  with the avatar for the left edge. */}
+              {/* THE PHASE GLYPH, ON THE NAME'S LINE. It answers "what is it doing right now" —
+                  Running, Idle, Never run, Archived — and D1 keeps that separate from the HEALTH
+                  axis the tag row carries below. It leads the name rather than taking a column of
+                  its own, which the avatar now owns. */}
               <span className="shrink-0">
                 <StatusGlyph phase={agentPhase(agent)} size={GLYPH_SIZE.card} title={RUNTIME_WORD(agent)} />
               </span>
@@ -300,7 +306,7 @@ export function AgentCard({
                 aria-label={`Start a new thread on ${agent.name}`}
                 className="rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active active:bg-chrome hover:text-ink"
               >
-                <Icon.agents.newThread size={ICON.xs} />
+                <Icon.agents.newThread size={ICON.sm} />
               </button>
             )}
             <button
@@ -313,7 +319,7 @@ export function AgentCard({
               aria-label={`Copy ${agent.name}'s context`}
               className="rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active active:bg-chrome hover:text-ink"
             >
-              <Icon.agentDetail.copy size={ICON.xs} />
+              <Icon.agentDetail.copy size={ICON.sm} />
             </button>
             <Overflow
               agent={agent}

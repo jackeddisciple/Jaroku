@@ -1260,6 +1260,28 @@ export function sendSetAgentEmoji(agentId: string, emoji: string): void {
 }
 
 /**
+ * §6's category, changed on an agent that already exists.
+ *
+ * ANY STRING, because the column is TEXT and the presets are a vocabulary (I6). The server trims and
+ * caps the length; nothing on either side validates against the preset list, which is what makes
+ * "name your own" work at all.
+ */
+export function sendSetAgentCategory(agentId: string, category: string): void {
+  send({ cmd: "setAgentCategory", agentId, category });
+}
+
+/**
+ * §6's avatar, changed on an agent that already exists.
+ *
+ * A ROSTER ID, checked by the server because an id nothing can draw is an agent with no face and no
+ * way to say so. A DUPLICATE is not refused — §6 allows it and warns — so a notice can come back on
+ * the agents channel while the write succeeds.
+ */
+export function sendSetAgentAvatar(agentId: string, avatarId: string): void {
+  send({ cmd: "setAgentAvatar", agentId, avatarId });
+}
+
+/**
  * §7.5's fork: connectors and the current manifest copied, MCP grants reset to zero.
  *
  * Answered with a refreshed grid plus a notice naming the new slug, so there is nothing here to

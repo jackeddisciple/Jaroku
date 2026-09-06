@@ -21,14 +21,15 @@ import { Truncate } from "./Truncate.tsx";
 import { AgentTagRow } from "./AgentTagRow.tsx";
 import { AgentSparkline } from "./AgentSparkline.tsx";
 import { PencilIcon } from "./panelIcons.tsx";
-import { artFor } from "../lib/agentArt.ts";
-import { ThumbnailMark } from "./agentIcons.tsx";
-import { AgentEmoji, EMOJI_SIZE } from "./AgentEmoji.tsx";
+import { ChevronDownIcon } from "./panelIcons.tsx";
+import { AvatarPicker, avatarUsage } from "./AvatarPicker.tsx";
+import { AVATAR_SIZE, GlossAvatar, GlossStageProvider } from "./GlossAvatar.tsx";
 import { EmojiPicker } from "./EmojiPicker.tsx";
-import { sendSetAgentEmoji } from "../lib/socket.ts";
+import { AGENT_CATEGORIES, normalizeCategory, showsCategory } from "../lib/agentCategories.ts";
+import { sendSetAgentAvatar, sendSetAgentCategory, sendSetAgentEmoji } from "../lib/socket.ts";
 import { sendRenameAgent } from "../lib/socket.ts";
 import { fmtCost, relTime } from "../lib/format.ts";
-import { BRAND, ICON, TYPE } from "../lib/tokens.ts";
+import { ICON, TYPE } from "../lib/tokens.ts";
 import type { AgentDetailView } from "../types.ts";
 
 /** One fact, as a label over a value. The `well` level of §9's three-level nesting. */
@@ -47,6 +48,17 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
   // §8.5's warning. Off the agent list the sidebar is already built from, so it costs no request,
   // and this agent's own mark is excluded because it is not a collision with itself.
   const agents = useBuildStore((s) => s.agents);
+  /** §6's "name your own", for an agent that already exists. Cleared once it has been sent. */
+  const [customCategory, setCustomCategory] = useState("");
+
+  /**
+   * Which agents wear each avatar, with THIS one left out of its own warning.
+   *
+   * "Also used by itself" is not a warning, and it would appear the moment somebody opened the
+   * picker on an agent that already has an avatar — which is every agent.
+   */
+  const avatarUsedBy = useMemo(() => avatarUsage(agents, a.name), [agents, a.name]);
+
   const takenBy = useMemo(() => {
     const out = new Map<string, string>();
     for (const other of agents) {
@@ -98,18 +110,36 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
   };
 
   return (
-    <div className="shrink-0 border-b border-hair">
-      {/* The gradient again, as a band rather than a card thumbnail — the same asset for the same
-          agent, which is what makes the detail recognisable as the card that was clicked. */}
-      <div className="relative h-16 w-full overflow-hidden bg-active" aria-hidden>
-        <img src={artFor(a.uuid)} alt="" decoding="async" className="h-full w-full object-cover" />
-        <div className="absolute inset-0 flex items-center justify-center">
-          <ThumbnailMark size={BRAND.screen} />
-        </div>
-      </div>
+    // ONE STAGE FOR THE WHOLE HEADER, so the character beside the name and the twenty-eight tiles in
+    // the identity picker share a context rather than opening two. `active` is unconditional: this
+    // header only exists while the agent detail is on screen, and the loop parks itself on blur and
+    // under reduced motion regardless.
+    <GlossStageProvider active className="relative isolate shrink-0">
+    <div className="border-b border-hair">
+      {/* THE GRADIENT BAND IS GONE, AND D6 IS WHAT RETIRED IT. That decision recorded a live
+          consequence on exactly this surface: the band above said "the blue one" and the mark beside
+          the name said "the tractor", two facts about one agent that do not reinforce each other —
+          "recorded rather than solved: the fix, if it turns out to matter in use, is to retire the
+          gradient, never to put a box around the emoji". It matters now, because a third identity
+          arrived. The character IS the agent's face; a generated gradient above it is a second
+          picture of the same agent that agrees with nothing.
 
+          Nothing else used the band, and `artFor` is still what the thumbnail path uses elsewhere. */}
       <div className="space-y-3 p-4">
-        <div className="flex min-w-0 items-start gap-2">
+        <div className="flex min-w-0 items-start gap-3">
+          {/* §I4'S SECOND SURFACE, and the only other one that draws 3D: "the avatar renders in the
+              Agents grid card and the agent detail header." Larger than the card's identity mark
+              because there is room to look at it here, and still beside the name rather than above
+              it — the name is the primary element on this header exactly as it is on the card. */}
+          {!renaming && (
+            <GlossAvatar
+              agentKey={`detail:${a.slug}`}
+              avatarId={a.avatar_id}
+              emoji={a.emoji}
+              size={AVATAR_SIZE.header}
+              className="-mt-0.5"
+            />
+          )}
           <div className="min-w-0 flex-1">
             {renaming ? (
               <input
@@ -130,12 +160,10 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
               />
             ) : (
               <div className="flex min-w-0 items-center gap-1.5">
-                {/* §8.4: 20px, LEFT OF THE DISPLAY NAME. This is the one surface where D6's
-                    consequence is still live — the gradient band above says "the blue one" and this
-                    says "the tractor", two facts about one agent that do not reinforce each other.
-                    Recorded rather than solved: the fix, if it turns out to matter in use, is to
-                    retire the gradient, never to put a box around the emoji. */}
-                <AgentEmoji emoji={a.emoji} size={EMOJI_SIZE.header} />
+                {/* THE EMOJI IS NOT ON THIS LINE ANY MORE. It is inside the character to the left,
+                    as its placeholder — §5.2's split applied to the second 3D surface exactly as it
+                    is to the first. D6's "the blue one here, the tractor there" was true of this
+                    header and is not any more: there is one picture of this agent on it. */}
                 <Truncate className={TYPE.title} title={a.name}>
                   {a.name}
                 </Truncate>
@@ -157,18 +185,104 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
               <Chip size="sm" tone="faint" title="The version currently live">
                 v{a.current_version}
               </Chip>
+              {/* §6'S CATEGORY, WHERE THE OTHER TWO IDENTIFIERS ARE. `Uncategorized` is left out on
+                  the same rule §7 gives the sidebar: an agent nobody has categorised should read as
+                  a name, not as a name and a placeholder. The control that SETS it is in the
+                  identity section below, with the emoji and the avatar. */}
+              {showsCategory(a.category) && (
+                <Chip size="sm" tone="faint" title="What this agent is for">
+                  {a.category}
+                </Chip>
+              )}
             </div>
           </div>
         </div>
 
-        {/* §8.5'S PICKER, in the identity section beside the avatar — which is the region that
-            already holds the name and the rename control, and therefore where somebody looks when
-            they want to change what an agent looks like. */}
-        <EmojiPicker
-          current={a.emoji}
-          takenBy={takenBy}
-          onChoose={(e) => sendSetAgentEmoji(a.slug, e)}
-        />
+        {/* §6: "All three are editable afterwards from the agent identity section. None is editable
+            from the grid." The name is the pencil above; the other two are here, with the mark that
+            was already here — one region, three controls, and it is where somebody looks when they
+            want to change what an agent looks like.
+
+            BEHIND A DISCLOSURE, CLOSED. The emoji picker alone is fifty-nine cells; a category list
+            is twenty-five and an avatar grid is twenty-eight. Open by default that is a hundred and
+            twelve controls above the description, the tag row and every fact on the header — a page
+            about changing an agent's appearance rather than about the agent. Editing identity is
+            something somebody does once; reading the header is what they do every time. */}
+        <details className="group/identity rounded-control border border-hair">
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2.5 py-1.5 text-tiny text-muted transition-colors duration-fast hover:text-ink">
+            {/* A CHEVRON, NOT A WORD — the app's one disclosure vocabulary. Down when open, ninety
+                degrees when closed, as every tree and section here. */}
+            <span className="text-faint transition-transform duration-fast group-open/identity:rotate-0 -rotate-90" aria-hidden>
+              <ChevronDownIcon size={ICON.xs} />
+            </span>
+            Identity
+            <span className="ml-auto text-faint">mark, category, avatar</span>
+          </summary>
+
+          <div className="space-y-3 border-t border-hair p-2.5">
+            {/* §8.5'S PICKER, unchanged and first, because it is the mark six of the seven surfaces
+                actually show. */}
+            <div>
+              <span className={TYPE.sectionLabel}>Mark</span>
+              <div className="mt-1.5">
+                <EmojiPicker
+                  current={a.emoji}
+                  takenBy={takenBy}
+                  onChoose={(e) => sendSetAgentEmoji(a.slug, e)}
+                />
+              </div>
+            </div>
+
+            {/* §6'S CATEGORY. The same twenty-five presets the create dialog offers plus a typed
+                one, because they are the same question and a second vocabulary here would be a
+                second list to keep in step. Stored identically either way (I6). */}
+            <div>
+              <span className={TYPE.sectionLabel}>Category</span>
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {AGENT_CATEGORIES.map((c) => (
+                  <Chip
+                    key={c}
+                    size="sm"
+                    onClick={() => sendSetAgentCategory(a.slug, c)}
+                    selected={a.category === c}
+                    variant={a.category === c ? undefined : "outline"}
+                  >
+                    {c}
+                  </Chip>
+                ))}
+              </div>
+              <input
+                value={customCategory}
+                onChange={(e) => setCustomCategory(e.target.value)}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === "Enter" && customCategory.trim()) {
+                    sendSetAgentCategory(a.slug, normalizeCategory(customCategory));
+                    setCustomCategory("");
+                  }
+                }}
+                placeholder="…or name your own, then Enter"
+                aria-label="Name your own category"
+                className="mt-1.5 w-full rounded-control border border-edge bg-panel px-2.5 py-1 text-caption text-ink outline-none placeholder:text-faint focus:shadow-focusring"
+              />
+            </div>
+
+            {/* §6'S AVATAR, through the same picker the create dialog uses — one grid, one set of
+                tiles, one duplicate warning. This agent is left out of its own warning: "also used
+                by itself" is not a warning. */}
+            <div>
+              <span className={TYPE.sectionLabel}>Avatar</span>
+              <div className="mt-1.5">
+                <AvatarPicker
+                  current={a.avatar_id}
+                  usedBy={avatarUsedBy}
+                  onChoose={(id) => sendSetAgentAvatar(a.slug, id)}
+                  columns={6}
+                />
+              </div>
+            </div>
+          </div>
+        </details>
 
         {/* The tag row again, in full: the detail has room, so nothing is behind an overflow chip
             here — `AgentTagRow` trims at three and reveals on hover, which at this width is one
@@ -216,5 +330,6 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
         )}
       </div>
     </div>
+    </GlossStageProvider>
   );
 }

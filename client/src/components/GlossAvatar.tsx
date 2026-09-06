@@ -47,7 +47,7 @@ export const AVATAR_SIZE = {
    * chose these characters by looking at them at 96px; 64 is what a compact card can spare and is
    * still a face rather than a blob.
    */
-  card: 36,
+  card: 64,
   /**
    * The compact density's card, and the floor this product draws 3D at.
    *
@@ -57,9 +57,9 @@ export const AVATAR_SIZE = {
    * this the haircut and the glasses that separate two characters stop being separable, and what is
    * left is a coloured blob with the renderer's cost attached.
    */
-  compact: 30,
+  compact: 52,
   /** The agent detail header, where there is room for the character to be looked at. */
-  header: 128,
+  header: 96,
 } as const;
 
 interface StageHandle {
@@ -85,10 +85,21 @@ const StageContext = createContext<StageHandle>({ stage: null, loop: null });
  */
 export function GlossStageProvider({
   active,
+  className = "relative isolate flex min-h-0 flex-col",
   children,
 }: {
   /** Is this surface the one on screen? The loop parks whenever it is not. */
   active: boolean;
+  /**
+   * The host's own box, which the caller decides.
+   *
+   * IT MUST STAY `position: relative`, because the canvas is inset to it and every slot rect is
+   * measured against it. What varies is the HEIGHT: the grid's host fills its pane so the canvas
+   * covers a viewport that stays put while cards scroll under it, and the detail header's grows
+   * with its content. A single `h-full` served the first and clipped the second — the identity
+   * picker's tiles were cut off by a host that had been told to be exactly as tall as its parent.
+   */
+  className?: string;
   children: React.ReactNode;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -160,7 +171,7 @@ export function GlossStageProvider({
   return (
     // `position: relative` so the canvas can be inset to this box, and `isolation: isolate` so the
     // canvas's z-index is scoped to the grid rather than competing with the app's modals.
-    <div ref={hostRef} className="relative isolate flex h-full min-h-0 flex-col">
+    <div ref={hostRef} className={className}>
       {/* THE LINE THIS WHOLE ARRANGEMENT DEPENDS ON, and it was missing. Without it the provider
           renders its children, appends a canvas, runs a loop — and every `GlossAvatar` under it
           reads the default context, finds no stage, and never registers a slot. The grid then looks

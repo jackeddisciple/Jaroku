@@ -66,25 +66,36 @@ console.log("\nthe seven sites §8.4 names");
     // emoji, the name that never truncates, and the category that does. The mark did not change
     // register — it is still `EMOJI_SIZE.sidebar`, still bare, still 16px — it is drawn one
     // component down, beside the two rules it shares a line with.
-    ["components/AgentIdentityLine.tsx", "EMOJI_SIZE.sidebar"], // 16 — the reason this exists
-    // THE CARD'S MARK MOVED INTO `GlossAvatar`, which is where it now lives on that surface. §5.2
-    // splits the SEVEN SITES by fidelity rather than by mark: small sizes wear the emoji, the card
-    // and the detail header wear the 3D character — "not two systems, one identity at two
-    // fidelities". So the card still shows the emoji, at avatar size, as the placeholder while the
-    // character builds and for ever on a machine with no WebGL, and the component that draws it is
-    // this one. A card drawing BOTH would be exactly the "blue one here, tractor there" D6 warned
-    // about, on one card, at once.
-    ["components/GlossAvatar.tsx", "AgentEmoji"],           // the card, at avatar size
-    ["components/AgentOverview.tsx", "EMOJI_SIZE.header"],  // 20
+    ["components/AgentIdentityLine.tsx", "AgentEmoji"],     // 16 — the reason this exists
+    // THE TWO 3D SURFACES REACH THE MARK THROUGH `GlossAvatar`, which is where §5.2's split lands:
+    // small sizes wear the emoji directly, and the card and the detail header wear the character
+    // with the emoji inside it — as the placeholder while it builds, and for ever on a machine with
+    // no WebGL. "Not two systems, one identity at two fidelities." A surface drawing BOTH would be
+    // exactly the "blue one here, tractor there" D6 warned about, on one card, at once — which is
+    // what the detail header did until the gradient band was retired.
+    ["components/AgentCard.tsx", "GlossAvatar"],            // the grid card, at avatar size
+    ["components/AgentOverview.tsx", "GlossAvatar"],        // the detail header, at avatar size
+    ["components/GlossAvatar.tsx", "AgentEmoji"],           // and the one component that draws it
     ["components/ThreadRow.tsx", "AgentEmoji"],             // 14 — the row default
     ["components/FleetStrip.tsx", "AgentEmoji"],            // 14
     ["components/WorkList.tsx", "AgentEmoji"],              // 14
     ["components/CommandPalette.tsx", "AgentEmoji"],        // 14
   ];
+  // THE MARK REACHES A SURFACE ONE OF TWO WAYS, and both count. Six sites mount `<AgentEmoji`
+  // directly at a named register; the two that draw 3D mount `<GlossAvatar`, which holds the emoji
+  // inside it as the placeholder and as the no-WebGL fallback. Requiring `<AgentEmoji` in all eight
+  // would have failed the card and the detail for doing exactly what §5.2 asks of them.
   for (const [path, needle] of SITES) {
     const text = read(`src/${path}`);
-    check(`${path} draws the mark`, text.includes("<AgentEmoji") && text.includes(needle), needle);
+    check(`${path} draws the mark`, text.includes(`<${needle}`), needle);
   }
+  // AND THE FOUR REGISTERS ARE STILL NAMED, which is the half the needle above stopped covering
+  // when two sites moved behind `GlossAvatar`. A size written against the card it looked right on
+  // is a size nothing can move.
+  check("the sidebar's register is named",
+    read("src/components/AgentIdentityLine.tsx").includes("EMOJI_SIZE.sidebar"));
+  check("the avatar box sizes its placeholder off its own box, not a literal",
+    read("src/components/GlossAvatar.tsx").includes("Math.round(size *"));
   check("the picker is the eighth site", read("src/components/AgentOverview.tsx").includes("<EmojiPicker"));
 
   // NO CALL SITE WRITES A PIXEL COUNT. The four registers are named for the same reason the icon

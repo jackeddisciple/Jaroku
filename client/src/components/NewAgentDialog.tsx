@@ -22,9 +22,9 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 
-import { GlossAvatar, GlossStageProvider } from "./GlossAvatar.tsx";
+import { AvatarPicker, avatarUsage } from "./AvatarPicker.tsx";
+import { GlossStageProvider } from "./GlossAvatar.tsx";
 import { Chip } from "./Chip.tsx";
-import { Truncate } from "./Truncate.tsx";
 import { outlineBtn, primaryBtn, quietBtn } from "./buttons.ts";
 import {
   AGENT_CATEGORIES, CATEGORY_GROUPS, normalizeCategory, UNCATEGORIZED,
@@ -34,9 +34,6 @@ import { GLOSS_ROSTER, avatarIdFor } from "../lib/gloss/roster.ts";
 import { sendPlanAgent } from "../lib/socket.ts";
 import { LAYER, TYPE } from "../lib/tokens.ts";
 import type { AgentSummary } from "../types.ts";
-
-/** The avatar tiles in the picker. Big enough to tell two characters apart — §3's own 96px. */
-const PICKER_TILE = 84;
 
 /**
  * Which avatar the dialog opens on.
@@ -87,11 +84,8 @@ export function NewAgentDialog({
     setAvatarId(openingAvatar(session));
   }, [open, session]);
 
-  /** Who else already wears this one. §6's warning, and it names them rather than counting them. */
-  const alsoUsedBy = useMemo(
-    () => agents.filter((a) => a.avatar_id === avatarId).map((a) => a.name),
-    [agents, avatarId],
-  );
+  /** Who else already wears each avatar. §6's warning, and it names them rather than counting them. */
+  const usage = useMemo(() => avatarUsage(agents), [agents]);
 
   const chosenCategory = naming ? normalizeCategory(custom) : category;
   const canCreate = brief.trim().length > 0;
@@ -208,48 +202,21 @@ export function NewAgentDialog({
               lifetime is nobody's. */}
           <div className="mt-4">
             <span className={TYPE.sectionLabel}>Avatar</span>
-            <GlossStageProvider active={open}>
-              <div
-                role="radiogroup"
-                aria-label="Avatar"
-                className="mt-1.5 grid max-h-[220px] grid-cols-5 gap-1.5 overflow-y-auto rounded-card border border-hair p-1.5"
-              >
-                {GLOSS_ROSTER.map((entry) => {
-                  const picked = entry.id === avatarId;
-                  return (
-                    <button
-                      key={entry.id}
-                      type="button"
-                      role="radio"
-                      aria-checked={picked}
-                      aria-label={entry.label}
-                      onClick={() => setAvatarId(entry.id)}
-                      className={`flex flex-col items-center rounded-control p-1 transition-colors duration-fast ${
-                        picked ? "bg-active" : "hover:bg-active"
-                      }`}
-                    >
-                      <GlossAvatar
-                        agentKey={`picker:${entry.id}`}
-                        avatarId={entry.id}
-                        emoji={null}
-                        size={PICKER_TILE}
-                      />
-                      <Truncate className="mt-0.5 w-full text-center text-tiny text-faint">
-                        {entry.label}
-                      </Truncate>
-                    </button>
-                  );
-                })}
-              </div>
-            </GlossStageProvider>
-            {/* §6: ALLOWED BUT WARNED. Create stays enabled — a hard block on a cosmetic choice is
-                worse than a duplicate, and it is their workspace. */}
-            {alsoUsedBy.length > 0 && (
-              <p className="mt-1.5 text-tiny text-muted">
-                Also used by {alsoUsedBy.slice(0, 3).join(", ")}
-                {alsoUsedBy.length > 3 ? ` and ${alsoUsedBy.length - 3} more` : ""}.
-              </p>
-            )}
+            {/* THE DIALOG OWNS THE STAGE, not the picker. I1 says one renderer per app LIFETIME and
+                this is the one place two exist at once — a dialog open over a grid that has one. It
+                is deliberate: the alternative is threading the grid's stage into a dialog that can
+                be opened where there is no grid, which is a stage whose lifetime belongs to nobody.
+                Both are disposed on unmount, and `test:gloss-stage` asserts a stage constructs
+                exactly one context and frees it.
+
+                THE SAME PICKER THE DETAIL'S IDENTITY SECTION USES. Two grids would be two sets of
+                tile sizes and two duplicate warnings, and one of them would stop matching what the
+                card draws. §6's warning names the agents rather than counting them. */}
+            <div className="mt-1.5">
+              <GlossStageProvider active={open}>
+                <AvatarPicker current={avatarId} usedBy={usage} onChoose={setAvatarId} />
+              </GlossStageProvider>
+            </div>
           </div>
 
           {/* THE BRIEF, LAST AND REQUIRED, and it is not one of §6's three. §6 describes a form for

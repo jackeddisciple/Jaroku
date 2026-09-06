@@ -511,7 +511,7 @@ export function AgentsView() {
           the flag is true for as long as it exists — but a full-width view that has collapsed to a
           three-pane one is still mounted and no longer the thing being looked at, which is what
           `navSection` answers. */}
-      <GlossStageProvider active={agentsSurfaceActive}>
+      <GlossStageProvider active={agentsSurfaceActive} className="relative isolate flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 overflow-auto p-5">
         {!loaded ? (
           // NOT A SPINNER (§9). Skeleton cards at the card's own geometry, so the grid does not jump
