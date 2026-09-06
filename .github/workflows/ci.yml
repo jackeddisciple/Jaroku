@@ -1552,6 +1552,19 @@ jobs:
           npm run test:icon-a11y
           # I3, and it runs LAST because it rewrites the working tree. It runs the generator for
           # real and compares byte for byte, which catches a hand-edited mark.
+          # THE VENDORED GLOSS RUNTIME, and three of its four sections assert an ABSENCE, which is the
+          # shape this failure actually takes. Nothing goes red when a vendored file quietly imports
+          # out of the scratch checkout — it builds on the machine that has that directory and fails
+          # on every other one, which is this runner, the desktop bundle, and everybody else. Same
+          # for `three` arriving from npm: the app runs, and every avatar in every workspace is drawn
+          # by a version of Three.js nobody chose, with nothing in the diff to say so.
+          #
+          # ITS FOURTH IS THE IMPORT CLOSURE, and that is the mistake this extraction was one step
+          # from making. The specification names seven gloss files; those seven need eighteen more to
+          # resolve. A missing one is not a type error — `allowJs` is off, so `tsc` never opens them —
+          # and not a lint error. It is a module-resolution failure in a browser on the first card
+          # that tries to draw.
+          npm run test:gloss-vendor
           npm run test:icon-generated
           # AND THE SAME PROPERTY THE OTHER WAY ROUND, which is not redundant: the suite above
           # catches a mark somebody edited by hand, and this catches a MANIFEST edit committed

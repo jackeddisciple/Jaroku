@@ -15,6 +15,14 @@ declare module "node:fs" {
   /** Recursive, for the browser-storage audit: it reads every source file looking for keys. */
   export function readdirSync(path: string, options: { recursive: true }): string[];
   export function readFileSync(path: string, encoding: "utf8"): string;
+  /**
+   * For `test:gloss-vendor`, which walks the vendored tree's relative imports and asserts every
+   * target is on disk. A missing member of that closure is not a type error — `allowJs` is off, so
+   * `tsc` never opens those files — and not a lint error either; it is a resolution failure in a
+   * browser on the first card that draws. Reaching for `readFileSync` in a `try` would work and
+   * would say "unreadable" where the question is "present".
+   */
+  export function existsSync(path: string): boolean;
 }
 
 /**
