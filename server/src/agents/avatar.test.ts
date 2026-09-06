@@ -217,5 +217,65 @@ console.log("\nthe columns, the backfill and what leaves in an export");
   check("...as whole rows", exp.includes("SELECT * FROM ${table}"));
 }
 
+// --- 4. the row onboarding writes, and what building into it may do ---------------------------------
+
+console.log("\na draft is an identity with no code, and a build fills it in without touching it");
+{
+  const db = await openTestSqlite();
+  const ctx = testContext();
+  const repo = new AgentRepository(db);
+
+  // WHAT `createDraftAgent` LEAVES BEHIND: a name, a face, a category, and nothing a generation
+  // would produce. It is in the Agents tab from that moment, which is the whole point of writing it.
+  const draft = await repo.create(ctx, {
+    id: randomUUID(), slug: "tracey", display_name: "Tracey", hand_written: false,
+    category: "Content", avatarId: AVATAR_IDS[3]!,
+  });
+  check("a draft carries the identity somebody chose",
+    draft.display_name === "Tracey" && draft.category === "Content" && draft.avatar_id === AVATAR_IDS[3],
+    `${draft.display_name}/${draft.category}/${draft.avatar_id}`);
+  check("...and nothing a generation would have written",
+    draft.description === null && draft.connectors.length === 0 && draft.creation_cost === null,
+    `${draft.description}/${draft.connectors.length}/${draft.creation_cost}`);
+  // THE TEST THE GENERATOR USES, and the reason it is `<= 1` rather than a column of its own: a
+  // fresh row claims version 1 with no version rows behind it, so the first publish is v2. Anything
+  // that has ever been built is at 2 or above. Asserted here because the guard is only as good as
+  // this number, and this number is set by `create`.
+  check("a fresh row is at version 1, which is what identifies it as a draft",
+    draft.current_version === 1, String(draft.current_version));
+
+  await repo.adopt(ctx, draft.id, {
+    description: "drafts release notes from merged pull requests",
+    connectors: ["github"], mcp_tools: ["linear/issues"], required_env: ["GITHUB_TOKEN"],
+    creation_cost: 0.0413,
+  });
+  const filled = (await repo.bySlug(ctx, "tracey"))!;
+  check("a build writes what it produced",
+    filled.description === "drafts release notes from merged pull requests"
+      && filled.connectors.join() === "github" && filled.required_env.join() === "GITHUB_TOKEN"
+      && filled.creation_cost === 0.0413,
+    JSON.stringify({ d: filled.description, c: filled.connectors, e: filled.required_env }));
+  // THE HALF THAT MATTERS. A person picked the name, the face and the category; a build that
+  // overwrote any of them would throw away the only part of the agent that existed before it.
+  check("...and leaves every chosen thing alone",
+    filled.id === draft.id && filled.slug === "tracey" && filled.display_name === "Tracey"
+      && filled.category === "Content" && filled.avatar_id === draft.avatar_id
+      && filled.emoji === draft.emoji,
+    `${filled.display_name}/${filled.category}/${filled.avatar_id}/${filled.emoji}`);
+  check("...on the same row, rather than beside it",
+    (await repo.list(ctx, { includeArchived: true })).filter((a) => a.slug === "tracey").length === 1);
+
+  // AND THE GUARD, read from the source: an id that names a REAL agent must fall through to
+  // creating one. Without it a stale or hand-edited id would let a generate replace a working
+  // agent's description and publish over it — an edit, through a path with no diff and no Apply.
+  const gen = readFileSync("src/generator.ts", "utf8");
+  check("the generator only adopts a row that is still a draft",
+    /current_version <= 1 \? named : undefined/.test(gen), "generator.ts");
+  // AND IT LOOKS THE ROW UP RATHER THAN TRUSTING THE ID, which is what makes the workspace scoping
+  // free: `bySlug` filters on `workspace_id`.
+  check("...looked up workspace-scoped rather than trusted",
+    /await agents\.bySlug\(ctx, opts\.intoAgentId\)/.test(gen), "generator.ts");
+}
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 process.exit(fail === 0 ? 0 : 1);

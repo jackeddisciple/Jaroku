@@ -178,6 +178,10 @@ export const COMMAND_ENTITLEMENT: Record<string, EntitlementKind | typeof NO_ENT
   // Cosmetic too, and bounded the same way: a category is a label on the row. Nothing to count, so
   // nothing here a plan could sell.
   setAgentCategory: NO_ENTITLEMENT,
+  // A ROW, AND NOTHING ELSE. No model call, no objects, no version — there is nothing here to meter
+  // and nothing a plan could sell. What a plan DOES gate is the generation that fills it in, which
+  // goes through `generate` and is counted there.
+  createDraftAgent: NO_ENTITLEMENT,
   // Narrowing or repairing a grant on an agent that already exists. Nothing is counted and the
   // registry it draws from is already bounded by `maxMcpServers`, so there is no second limit here.
   setAgentTools: NO_ENTITLEMENT,

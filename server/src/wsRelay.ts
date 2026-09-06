@@ -119,6 +119,14 @@ export type GenerateCommand = {
    */
   category?: string;
   avatarId?: string;
+  /**
+   * An agent that already exists to build INTO, rather than creating one.
+   *
+   * The onboarding step writes a row with an identity and no code; the first description finds that
+   * row through this rather than making a second agent beside it. It rides the PLAN for the same
+   * reason the name does — generation builds what was approved, and the plan is what was on screen.
+   */
+  intoAgentId?: string;
   /** A plan the user confirmed. The server builds what that plan describes, not what this
    *  command's other fields say — see planner.take(). */
   planId?: string;
@@ -161,6 +169,14 @@ export type PlanAgentCommand = {
    */
   category?: string;
   avatarId?: string;
+  /**
+   * An agent that already exists to build INTO, rather than creating one.
+   *
+   * The onboarding step writes a row with an identity and no code; the first description finds that
+   * row through this rather than making a second agent beside it. It rides the PLAN for the same
+   * reason the name does — generation builds what was approved, and the plan is what was on screen.
+   */
+  intoAgentId?: string;
   revisePlanId?: string;
   attachments?: CommandAttachment[];
   /**
@@ -211,6 +227,28 @@ export type RenameAgentCommand = { cmd: "renameAgent"; agentId: string; name: st
 export type SetAgentEmojiCommand = { cmd: "setAgentEmoji"; agentId: string; emoji: string };
 /** §6's category, edited afterwards. Any string — the presets are a vocabulary, not a constraint. */
 export type SetAgentCategoryCommand = { cmd: "setAgentCategory"; agentId: string; category: string };
+/**
+ * An agent that exists before any of it has been built — §6's three inputs and nothing else.
+ *
+ * The onboarding step sends this so the agent is in the Agents tab from the moment somebody finishes
+ * setting up, rather than appearing later out of a generation they had to sit through. Every field
+ * is optional: §6 makes all three skippable, and an unnamed agent is better than a screen that
+ * refuses to move on.
+ */
+export type CreateDraftAgentCommand = {
+  cmd: "createDraftAgent";
+  name?: string;
+  category?: string;
+  avatarId?: string;
+  /**
+   * An agent that already exists to build INTO, rather than creating one.
+   *
+   * The onboarding step writes a row with an identity and no code; the first description finds that
+   * row through this rather than making a second agent beside it. It rides the PLAN for the same
+   * reason the name does — generation builds what was approved, and the plan is what was on screen.
+   */
+  intoAgentId?: string;
+};
 
 /**
  * Duplicate an agent: its connectors and its current version, and none of its MCP grants (§7.5).
@@ -274,11 +312,12 @@ export type AgentCommand =
   | RestoreAgentVersionCommand
   | SetAgentToolsCommand
   | SetAgentEmojiCommand
-  | SetAgentCategoryCommand;
+  | SetAgentCategoryCommand
+  | CreateDraftAgentCommand;
 
 const AGENT_COMMANDS = new Set([
   "archiveAgent", "restoreAgent", "renameAgent", "forkAgent", "restoreAgentVersion",
-  "setAgentTools", "setAgentEmoji", "setAgentCategory",
+  "setAgentTools", "setAgentEmoji", "setAgentCategory", "createDraftAgent",
 ]);
 
 /**
@@ -3206,6 +3245,7 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   archiveAgent: "agents", restoreAgent: "agents", renameAgent: "agents", setAgentTools: "agents",
   setAgentEmoji: "agents",
   setAgentCategory: "agents",
+  createDraftAgent: "agents",
   forkAgent: "agents", restoreAgentVersion: "agents",
   // §4 and §6's three reads. On `agents` beside `listAgents` rather than on a channel of their own
   // — see ListAgentGridCommand for why this is not a new channel.

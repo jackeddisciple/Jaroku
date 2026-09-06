@@ -13,7 +13,16 @@ export type ExplainSubject =
   | { kind: "agent" };
 
 export type Intent =
-  | { kind: "generate" }
+  /**
+   * `into` NAMES AN EXISTING ROW TO BUILD INTO, and is absent for the ordinary case.
+   *
+   * A generate with no target creates an agent. A generate WITH one adopts the identity that is
+   * already there — the name, the face and the category somebody chose at onboarding — and fills in
+   * everything else. It is one field rather than a second kind because the destination is the same
+   * planner, the same plan card and the same Approve; what differs is one row's worth of identity,
+   * which is exactly what an optional field is for.
+   */
+  | { kind: "generate"; into?: string }
   | { kind: "replan"; planId: string }
   /**
    * `grounding` NAMES WHAT THE EDIT IS ABOUT, and changes nothing about where it goes.
@@ -44,6 +53,17 @@ export type ComposerContext = {
    * §B's governing constraint is that nothing adds a second way to make code land.
    */
   hasReviewComment?: boolean;
+  /**
+   * Whether the selected agent is an identity with no code behind it (`AgentSummary.draft`).
+   *
+   * IT SHORT-CIRCUITS THE WHOLE LADDER, ahead of even the question test, and that is deliberate.
+   * Every route below this line needs something a draft does not have: a step to re-run, an error
+   * to fix, code to edit, a trace to explain. And the sentence somebody types at a draft is a
+   * DESCRIPTION of the agent they want — which routinely opens "when a customer emails…", a word
+   * `RE_EXPLAIN` matches. Ranking the draft check below it would send the commonest first sentence
+   * in the product to a route that has nothing to answer with.
+   */
+  agentIsDraft?: boolean;
 };
 
 const RE_EXPLAIN = /^(why|what|whats|what's|how|when|where|which|who|explain|describe|tell me|walk me)\b|\bexplain\b/i;
@@ -58,6 +78,14 @@ export function classifyIntent(text: string, ctx: ComposerContext): Intent {
   const t = text.trim();
   if (!ctx.agentId) {
     return ctx.pendingPlanId ? { kind: "replan", planId: ctx.pendingPlanId } : { kind: "generate" };
+  }
+  // A DRAFT IS A NAME AND A FACE. Nothing below this line applies to it, so it never reaches them.
+  // The pending-plan rule still comes first for the same reason it does above: while a plan is on
+  // screen awaiting a decision, what somebody types is feedback on THAT plan.
+  if (ctx.agentIsDraft) {
+    return ctx.pendingPlanId
+      ? { kind: "replan", planId: ctx.pendingPlanId }
+      : { kind: "generate", into: ctx.agentId };
   }
 
   const step = ctx.step;
@@ -82,7 +110,7 @@ export function classifyIntent(text: string, ctx: ComposerContext): Intent {
  *  routing is transparent and teachable. */
 export function routeLabel(intent: Intent): string {
   switch (intent.kind) {
-    case "generate": return "plan a new agent";
+    case "generate": return intent.into ? `plan ${intent.into}` : "plan a new agent";
     case "replan": return "revise the plan";
     case "edit":
       return intent.grounding === "review" ? "edit this agent, from the review comment" : "edit this agent";

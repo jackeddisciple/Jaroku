@@ -11,6 +11,7 @@
 
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { EMOJI_PALETTE } from "./agents/emojiPalette.ts";
+import { AVATAR_IDS } from "./agents/avatarRoster.ts";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -102,7 +103,9 @@ import { EMAIL_ENV, emailConfigFrom, emailTransport } from "./email/transport.ts
 import { magicLinkRoutes } from "./http/magicLink.ts";
 import { signInRoutes } from "./http/signIn.ts";
 import { MAGIC_LINK_LIMITS, rateKeyForIp } from "./auth/signIn.ts";
-import { Generator, agentsDir, MAX_TOKENS as GEN_MAX_TOKENS, type UsageSummary } from "./generator.ts";
+import {
+  Generator, agentsDir, slugify, uniqueAgentSlug, MAX_TOKENS as GEN_MAX_TOKENS, type UsageSummary,
+} from "./generator.ts";
 import { Planner, PLAN_MODEL, MAX_TOKENS as PLAN_MAX_TOKENS, type PendingPlan } from "./planner.ts";
 import { Editor, EDIT_MODEL, MAX_TOKENS as EDIT_MAX_TOKENS } from "./editor.ts";
 import { scanAgentDirectory } from "./agents.ts";
@@ -2151,6 +2154,51 @@ async function setAgentEmoji(ctx: TenantContext, agentId: string, emoji: unknown
       agentId: slug,
     });
   }
+  await relay.broadcastAgents();
+  await relay.broadcastAgentGrid();
+}
+
+/**
+ * An agent that exists before any of it has been built.
+ *
+ * §6's THREE INPUTS AND NOTHING ELSE. The onboarding step asks for a name, a face and what sort of
+ * agent it is, and this is what it writes: a row with those three and every other column at its
+ * default. It is in the Agents tab from that moment — the card renders it as `DRAFT`, because the
+ * tag already means exactly this ("nothing has been published for this agent yet"), and every other
+ * figure on the card is honestly absent rather than zero.
+ *
+ * NO VERSION, NO OBJECTS, NO CODE. Nothing is staged and nothing is published, so there is nothing
+ * to clean up if the person never describes it — an empty agent is a row somebody can rename, put
+ * away, or build into whenever they get round to it.
+ *
+ * THE FIRST GENERATION BUILDS INTO IT rather than beside it: `generate` carries `intoAgentId` and
+ * `agentRepo.adopt` writes what the build produced while leaving the identity alone.
+ */
+async function createDraftAgent(
+  ctx: TenantContext,
+  input: { name?: unknown; category?: unknown; avatarId?: unknown },
+): Promise<void> {
+  const name = (typeof input.name === "string" ? input.name.trim() : "").slice(0, 60);
+  // A NAME NOBODY TYPED IS STILL AN AGENT. §6 makes all three optional, and an unnamed one is
+  // better than a screen that refuses to move on — `Untitled agent` is a placeholder somebody can
+  // rename in two clicks from either the sidebar or the detail header.
+  const display = name || "Untitled agent";
+  const slug = await uniqueAgentSlug(agentRepo, ctx, RUNTIME_DIR, slugify(display));
+  if (!slug) {
+    refuseAgent(ctx, "there are already too many agents with that name — try another", display);
+    return;
+  }
+  const avatarId = typeof input.avatarId === "string" && AVATAR_IDS.includes(input.avatarId)
+    ? input.avatarId
+    : undefined;
+  await agentRepo.create(ctx, {
+    id: randomUUID(),
+    slug,
+    display_name: display,
+    hand_written: false,
+    category: typeof input.category === "string" ? input.category.trim().slice(0, 80) : undefined,
+    avatarId,
+  });
   await relay.broadcastAgents();
   await relay.broadcastAgentGrid();
 }
@@ -4283,6 +4331,16 @@ const relay = new WsRelay({
         // deterministic assignment probed against.
         category: a.category,
         avatar_id: a.avatar_id,
+        /**
+         * NOTHING PUBLISHED AND NOTHING ON DISK — an agent that has an identity and no code.
+         *
+         * It is the row the onboarding step writes, and the composer needs to know: with a draft
+         * selected, a typed description GENERATES into it rather than trying to edit code that does
+         * not exist. Derived from the same two facts `runnable` is, which is why it costs nothing:
+         * `published` is one query for the whole workspace and `onDisk` is the directory scan that
+         * already happened.
+         */
+        draft: !published.has(a.slug) && !onDisk.has(a.slug),
         deployment: d ? { id: d.id, status: d.status, url: d.url } : null,
         archived_at: a.archived_at,
       };
@@ -5868,7 +5926,7 @@ const GRID_WINDOW_30_MS = 30 * 24 * 60 * 60 * 1000;
 
 const AGENT_COMMAND_NAMES = new Set([
   "archiveAgent", "restoreAgent", "renameAgent", "forkAgent", "restoreAgentVersion",
-  "setAgentEmoji", "setAgentCategory",
+  "setAgentEmoji", "setAgentCategory", "createDraftAgent",
 ]);
 
 /** A refusal on the agents channel, to the socket that earned it and nobody else. */
@@ -6439,6 +6497,13 @@ async function restoreAgentVersion(ctx: TenantContext, slug: string, version: un
 
 async function handleAgentCommand(ctx: TenantContext, cmd: AgentCommand): Promise<void> {
   try {
+    // THE ONE COMMAND ON THIS CHANNEL THAT NAMES NO AGENT, because its whole job is to make one.
+    // It is handled before the shape check rather than exempted inside it: an `agentId` guard with a
+    // hole in it is a guard somebody widens next time.
+    if (cmd.cmd === "createDraftAgent") {
+      await createDraftAgent(ctx, cmd);
+      return;
+    }
     // SHAPE-CHECKED BEFORE ANYTHING ELSE SEES IT. The relay forwards any member of AGENT_COMMANDS
     // without checking its fields — deliberately, so the refusal can be written here and land on the
     // channel the grid is waiting on rather than in the status bar.
@@ -6459,7 +6524,8 @@ async function handleAgentCommand(ctx: TenantContext, cmd: AgentCommand): Promis
     // throws on this path is usually a database driver, and nothing a driver wrote was written for a
     // person to read.
     console.error(`[agents] ${cmd.cmd} failed:`, (err as Error)?.message ?? err);
-    refuseAgent(ctx, "that did not work — the grid is unchanged", cmd.agentId);
+    refuseAgent(ctx, "that did not work — the grid is unchanged",
+      "agentId" in cmd ? cmd.agentId : undefined);
   }
 }
 
@@ -11157,6 +11223,8 @@ async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<voi
       // §6'S OTHER TWO INPUTS, carried on the record with the name. Neither reaches the model.
       category: cmd.category,
       avatarId: cmd.avatarId,
+      // The row this build is for, when the onboarding step already wrote one.
+      intoAgentId: cmd.intoAgentId,
       revisePlanId: cmd.revisePlanId,
       // §3.2, REACHING THE REQUEST. Resolved against the thread the brief was written in, so a
       // conversation set to High plans at High rather than at the provider default.
@@ -11208,7 +11276,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
   let plan: string | undefined;
   let planUsage: UsageSummary | undefined;
   let mcpRefs: string[] = cmd.mcpTools ?? [];
-  let { prompt, connectors, name, category, avatarId } = cmd;
+  let { prompt, connectors, name, category, avatarId, intoAgentId } = cmd;
   // THE RECORD `take()` REMOVED, held for as long as this build can still fail. A plan is spent
   // when a generation STARTS; if that generation never produces an agent, the approval it carried
   // was spent on nothing and belongs back in the workspace's slot. Null on the unplanned path,
@@ -11293,7 +11361,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     // THE RECORD WINS OVER THE COMMAND, for §6's identity exactly as for the brief and the
     // connectors: the dialog and the plan card are separate entry points that can disagree, and
     // building what was approved is the whole point of the gate.
-    ({ prompt, connectors, name, category, avatarId } = rec);
+    ({ prompt, connectors, name, category, avatarId, intoAgentId } = rec);
     mcpRefs = approvedRefs;
     plan = rec.plan.raw;
     planUsage = rec.usage;
@@ -11423,6 +11491,8 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
       // §6, ARRIVING AT THE ROW. Both are undefined on every path but the New agent dialog, and
       // `agents.create` answers undefined with the neutral category and the hashed avatar.
       category, avatarId,
+      // And the row to build INTO, when onboarding already wrote one.
+      intoAgentId,
       effort: (genEffort = await effortForThread(ctx, genThread, GENERATION_MODEL, GEN_MAX_TOKENS)),
       // See planAgent: undefined unless this workspace asked that its own key pay for the
       // platform's calls, and undefined is the platform's key.

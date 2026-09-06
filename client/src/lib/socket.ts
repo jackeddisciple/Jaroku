@@ -1151,7 +1151,7 @@ export function sendPlanAgent(
    * a brief and a name and nothing else. They ride the plan rather than the generate command so that
    * the gate stays the single source of what gets built — the same reason the connector list does.
    */
-  identity?: { category?: string; avatarId?: string },
+  identity?: { category?: string; avatarId?: string; intoAgentId?: string },
 ): boolean {
   // THE ONE SENDER IN THIS FILE THAT RETURNS WHETHER IT SENT, and it does because it has a caller
   // that cannot recover on its own. Every other `send` here is fired from a composer sitting inside
@@ -1163,8 +1163,26 @@ export function sendPlanAgent(
     cmd: "planAgent", prompt, connectors, mcpTools, name, revisePlanId,
     ...(identity?.category ? { category: identity.category } : {}),
     ...(identity?.avatarId ? { avatarId: identity.avatarId } : {}),
+    // THE ROW THIS BUILD IS FOR, when onboarding already wrote one. It rides the PLAN rather than
+    // the generate command for the same reason the name does: generation builds what was approved.
+    ...(identity?.intoAgentId ? { intoAgentId: identity.intoAgentId } : {}),
     threadId: activeThread(), ...withAttachments(attachments),
   });
+}
+
+/**
+ * Write an agent that has an identity and no code.
+ *
+ * SENT BY THE ONBOARDING STEP AND NOTHING ELSE. It is what puts the agent in the Agents tab at the
+ * moment somebody finishes setting up — a name, a face and a category, with every other figure on
+ * the card honestly absent rather than zero. The first description then builds INTO that row.
+ */
+export function sendCreateDraftAgent(input: {
+  name?: string;
+  category?: string;
+  avatarId?: string;
+}): void {
+  send({ cmd: "createDraftAgent", ...input });
 }
 
 export function sendDiscardPlan(planId: string): void {

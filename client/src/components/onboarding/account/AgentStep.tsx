@@ -19,6 +19,7 @@
 import { useId, useState } from "react";
 
 import { useAccountOnboardingStore } from "../../../store/accountOnboardingStore.ts";
+import { sendCreateDraftAgent } from "../../../lib/socket.ts";
 import { PrimaryButton } from "../../auth/controls.tsx";
 import { StepShell } from "./StepShell.tsx";
 import { AvatarCarousel } from "../../AvatarCarousel.tsx";
@@ -54,6 +55,13 @@ export function AgentStep() {
   const chosen = custom.trim() ? normalizeCategory(custom) : category ?? UNCATEGORIZED;
 
   const keep = (): void => {
+    // THE ROW IS WRITTEN HERE, NOT LATER. The agent is in the Agents tab from this moment — a name,
+    // a face and a category, with every other figure on the card honestly absent rather than zero.
+    // Waiting until somebody described it would mean finishing setup and finding an empty product.
+    sendCreateDraftAgent({ name: name.trim(), category: chosen, avatarId });
+    // AND THE IDENTITY IS REMEMBERED ANYWAY, because the composer needs to know which row the first
+    // description belongs to. The list arrives over the socket a moment after this, so the answer
+    // cannot be read out of it yet — what is held is the name, which is what the composer matches on.
     remember({ name: name.trim(), category: chosen, avatarId });
     advance();
   };
@@ -62,7 +70,7 @@ export function AgentStep() {
     <StepShell
       step={4}
       title="Your first agent"
-      subtitle="Give it a name and a face. You will describe what it does next."
+      subtitle="Give it a name and a face. It appears in Agents right away; you describe what it does next."
       skip={{ label: "Skip for now", onSkip: advance }}
       // WIDER THAN EVERY OTHER STEP, and the carousel is the reason. A strip has to show a character
       // either side of the centre one for the scroll to be legible at all; inside the 520px every

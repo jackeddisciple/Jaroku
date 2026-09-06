@@ -81,6 +81,24 @@ export interface GenerateOptions {
   mcpServers?: McpServerView[];
   name?: string;
   /**
+   * An existing agent to build INTO, rather than creating one.
+   *
+   * THE ONBOARDING STEP WRITES A ROW BEFORE THERE IS ANY CODE — a name, a face and a category, with
+   * nothing published — so the agent is in the Agents tab from the moment somebody finishes setting
+   * up rather than appearing later out of a generation they have to wait for. This is how the first
+   * description finds that row instead of making a second one beside it.
+   *
+   * A SLUG, LIKE EVERY OTHER AGENT ID ON THE WIRE. "A slug is what a person recognises and what
+   * every other surface calls an agent id" — the uuid never leaves the server except on the grid's
+   * own payload, and a second convention here would be one more thing to get the wrong way round.
+   *
+   * IT KEEPS THE IDENTITY AND REPLACES EVERYTHING ELSE. The name, the slug, the avatar, the mark and
+   * the category are what a person chose; the description, the connectors, the required environment
+   * and the cost are what the generation produced. A build that overwrote the first set would throw
+   * away the only part of the agent that existed before it.
+   */
+  intoAgentId?: string;
+  /**
    * §6's second and third inputs, from the approved plan.
    *
    * BOTH OPTIONAL, AND ABSENT IS THE ORDINARY CASE. Every entry point but the New agent dialog
@@ -135,7 +153,7 @@ export function agentsDir(runtimeDir: string): string {
  * materialising a new agent over a directory another workspace is running out of would be a
  * local-only data loss that no hosted test would ever see.
  */
-async function uniqueAgentSlug(
+export async function uniqueAgentSlug(
   agents: AgentRepository,
   ctx: TenantContext,
   runtimeDir: string,
@@ -200,8 +218,26 @@ export class Generator extends EventEmitter<GeneratorEvents> {
     const all = loadConnectors(runtimeDir);
     const selected = resolveSelected(all, opts.connectors);
 
-    const name = (opts.name?.trim() || opts.prompt.trim().split("\n")[0] || "agent").slice(0, 60);
-    const slug = await uniqueAgentSlug(agents, ctx, runtimeDir, slugify(opts.name?.trim() || opts.prompt));
+    // THE ROW THIS BUILD IS FOR, IF THERE ALREADY IS ONE. Looked up rather than trusted: an id that
+    // names nothing, or an agent in another workspace, falls back to creating one rather than
+    // failing — a generation is expensive and refusing it over a stale id would spend the model call
+    // and produce nothing. `bySlug` is workspace-scoped, so the second case cannot arise.
+    //
+    // AND IT MUST STILL BE A DRAFT. `current_version <= 1` is the whole test, because of how the
+    // numbering works: a fresh row claims 1 with no version rows behind it, so the FIRST publish is
+    // v2 (see `nextVersionNumber`) and anything that has ever been generated is at 2 or above.
+    // Without this, a stale or hand-edited id would let a generate quietly replace a working
+    // agent's description and publish over it — an edit, through a path with no diff and no Apply.
+    const named = opts.intoAgentId ? await agents.bySlug(ctx, opts.intoAgentId) : undefined;
+    const draft = named && named.current_version <= 1 ? named : undefined;
+
+    // THE NAME AND THE SLUG COME FROM THE DRAFT WHEN THERE IS ONE. They are what a person chose on
+    // the onboarding screen, and the slug in particular cannot move: it is the directory on disk and
+    // the id every run row will name.
+    const name = draft?.display_name
+      ?? (opts.name?.trim() || opts.prompt.trim().split("\n")[0] || "agent").slice(0, 60);
+    const slug = draft?.slug
+      ?? (await uniqueAgentSlug(agents, ctx, runtimeDir, slugify(opts.name?.trim() || opts.prompt)));
 
     // THE AGENT'S UUID IS MINTED HERE AND ITS ROW IS WRITTEN AT THE END.
     //
@@ -209,7 +245,12 @@ export class Generator extends EventEmitter<GeneratorEvents> {
     // recording. Writing the row up front instead would leave an agent with no version behind
     // every failed generation — visible in the sidebar, unopenable, and needing its own cleanup
     // path. The keyspace does not care whether a row exists; the sidebar does.
-    const agentUuid = randomUUID();
+    //
+    // UNLESS THERE IS ALREADY A ROW TO BUILD INTO, which is the onboarding case: an agent that has
+    // a name and a face and nothing else. Then the uuid is ITS uuid, so the staging objects land
+    // under the prefix its published version will be read from — a generation staged under a fresh
+    // uuid and published under an existing one names paths that resolve to nothing at all.
+    const agentUuid = draft?.id ?? randomUUID();
     const stagingId = newStagingId();
 
     const buffers = new Map<string, string>();
@@ -360,19 +401,29 @@ export class Generator extends EventEmitter<GeneratorEvents> {
 
       // The row, then the version. In that order because a version hangs off an agent, and in
       // one direction because a failure here leaves staging objects rather than a half-agent.
-      await agents.create(ctx, {
-        id: agentUuid,
-        slug,
-        display_name: name,
+      //
+      // OR THE ROW THAT WAS ALREADY THERE. `adopt` writes only what a generation produces — the
+      // description, the connectors, the grants, the required environment and the cost — and leaves
+      // the name, the slug, the mark, the category and the avatar exactly as somebody chose them.
+      const built = {
         description: opts.prompt.trim().slice(0, 500),
         connectors: selected.map((c) => c.id),
         mcp_tools: manifestRefs(manifest),
         required_env: [...requiredEnv(selected), ...manifestEnv(manifest)],
-        default_provider: "fake",
         creation_cost: round8((opts.planUsage?.cost_usd ?? 0) + usage.cost_usd),
-        category: opts.category,
-        avatarId: opts.avatarId,
-      });
+      };
+      if (draft) await agents.adopt(ctx, draft.id, built);
+      else {
+        await agents.create(ctx, {
+          id: agentUuid,
+          slug,
+          display_name: name,
+          default_provider: "fake",
+          category: opts.category,
+          avatarId: opts.avatarId,
+          ...built,
+        });
+      }
       const { version } = await projects.publishStaging(ctx, agentUuid, stagingId, {
         source: "generation",
         summary: name,

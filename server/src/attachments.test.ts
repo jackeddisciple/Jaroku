@@ -216,10 +216,14 @@ console.log("\nthe attachments actually reach a turn, and the turn's prompt");
   // BOTH `sendPlanAgent` CALLS — a fresh brief and a revision of one. Counted rather than matched
   // once, because a revision is the same gesture to a user and the two calls are eleven lines
   // apart, which is exactly the distance at which one of them gets missed.
-  check(
-    `...on both plan commands (${(client.match(/sendPlanAgent\(.*attachRefs\)/g) ?? []).length} of 2)`,
-    (client.match(/sendPlanAgent\(.*attachRefs\)/g) ?? []).length === 2,
-  );
+  //
+  // NOT ANCHORED TO THE END OF A LINE. It was `attachRefs\)` once, which asserted that the refs were
+  // the LAST argument on a SINGLE line — two facts about formatting that the rule has no interest
+  // in. `sendPlanAgent` has since grown an identity argument after them, so the fresh-brief call
+  // wraps and this read "1 of 2" while both calls carried the refs perfectly well. `[^;]` is what
+  // keeps the match inside one statement: it spans newlines and cannot run on into the next call.
+  const planCalls = client.match(/sendPlanAgent\((?:[^;])*?attachRefs/g) ?? [];
+  check(`...on both plan commands (${planCalls.length} of 2)`, planCalls.length === 2);
   check("...on the edit command", /sendEdit\(activeAgentId, trimmed, attachRefs\)/.test(client));
   check("...and on the explain command", /attachRefs,\s*\);/.test(client));
   check("...and clears them with the draft they belonged to", /setAttachments\(\[\]\);\s*\};/.test(client));

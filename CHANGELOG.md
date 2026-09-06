@@ -82,6 +82,23 @@ workspaces with the most agents, and never on a developer's four-agent one.
   the name rather than becoming a column of its own competing with the cost figure.
 - **A fork** inherits its parent's category and is guaranteed a different avatar. Fork and parent sit
   adjacent in the grid and are exactly the pair that must not look identical.
+- **Onboarding's first-agent step is identity only** — a name, a face picked from a horizontal
+  carousel of all twenty-eight, and one of forty category pills. The generate composer that used to
+  sit on it is gone: choosing a face and describing a workflow are two different acts, and asking
+  for both at once made the face an obstacle in front of the thing somebody came to do.
+- **Finishing onboarding puts the agent in the grid, empty.** The step writes a real row — name,
+  face, category, and nothing else — so the agent is there the moment setup ends rather than
+  appearing later out of a generation the user had to sit through. It carries the `draft` tag until
+  something is built into it.
+- **Describing a draft builds INTO it** rather than beside it. With a draft selected the composer
+  routes to generation instead of the edit loop, the plan carries the row's id, and the build adopts
+  that row: same id, same slug, same name, same face. Everything a generation produces is written
+  in; nothing a person chose is touched. The name field locks and says why, the same way it already
+  did once a plan was on the table.
+- **Adoption is refused for anything that is not a draft.** `current_version <= 1` is the whole test
+  — a fresh row claims version 1 and the first publish is v2 — so a stale or hand-edited id falls
+  through to creating a new agent instead of publishing over a working one through a path with no
+  diff and no Apply.
 
 ### Notes
 

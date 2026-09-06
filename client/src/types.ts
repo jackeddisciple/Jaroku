@@ -101,6 +101,20 @@ export interface AgentSummary {
    */
   category?: string;
   avatar_id?: string | null;
+  /**
+   * An identity with no code behind it: nothing published and nothing on disk.
+   *
+   * WHAT THE COMPOSER NEEDS TO KNOW BEFORE IT DECIDES WHAT A SENTENCE MEANS. With an ordinary agent
+   * selected, typing is an EDIT — the intent classifier's default, and the right one, because there
+   * is code to change. With the row onboarding wrote, there is none: it has a name, a face and a
+   * category and nothing else, so the same sentence has to GENERATE, into that row.
+   *
+   * DERIVED SERVER-SIDE FROM THE TWO FACTS `runnable` IS ALREADY DERIVED FROM, so it costs nothing —
+   * one workspace-wide query for published versions and the directory scan that has already
+   * happened. The browser cannot compute it: `current_version` is on the grid payload and the
+   * composer only ever has this list.
+   */
+  draft?: boolean;
   edit_count?: number; // applied edits available to undo (fix loop)
   /**
    * This agent's current deployment, or null if it has never been deployed.
@@ -1968,8 +1982,8 @@ export type ClientCommand =
   // the avatar join it because generation builds what was APPROVED rather than what the form says by
   // the time Generate is pressed. Both optional — an agent planned from the composer has neither,
   // and the server answers that with the neutral category and the hashed avatar.
-  | { cmd: "generate"; prompt: string; connectors?: string[]; mcpTools?: string[]; name?: string; category?: string; avatarId?: string; planId?: string; threadId?: string }
-  | { cmd: "planAgent"; prompt: string; connectors?: string[]; mcpTools?: string[]; name?: string; category?: string; avatarId?: string; revisePlanId?: string; threadId?: string }
+  | { cmd: "generate"; prompt: string; connectors?: string[]; mcpTools?: string[]; name?: string; category?: string; avatarId?: string; intoAgentId?: string; planId?: string; threadId?: string }
+  | { cmd: "planAgent"; prompt: string; connectors?: string[]; mcpTools?: string[]; name?: string; category?: string; avatarId?: string; intoAgentId?: string; revisePlanId?: string; threadId?: string }
   | { cmd: "discardPlan"; planId: string }
   | { cmd: "listAgents" }
   /**
@@ -1991,6 +2005,11 @@ export type ClientCommand =
   // TEXT (I6). There is no `setAgentAvatar` beside it: an avatar is chosen once, on the onboarding
   // screen, and a command nothing sends is a control nothing can reach.
   | { cmd: "setAgentCategory"; agentId: string; category: string }
+  // §6's three inputs and nothing else, so the agent is in the Agents tab the moment onboarding
+  // finishes rather than appearing later out of a generation somebody had to sit through. Every
+  // field is optional — all three are skippable, and an unnamed agent beats a screen that refuses
+  // to move on.
+  | { cmd: "createDraftAgent"; name?: string; category?: string; avatarId?: string }
   /** §7.5: the WHOLE grant set for an agent that already exists. See sendSetAgentTools. */
   | { cmd: "setAgentTools"; agentId: string; mcpTools: string[] }
   /**

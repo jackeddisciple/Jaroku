@@ -95,6 +95,39 @@ const userTexts = () => turns().filter((t) => t.role === "user").map((t) => (t a
     [routeLabel(fresh), routeLabel(revise)]);
 }
 
+// 4c — A DRAFT IS AN IDENTITY WITH NO CODE, so a typed message builds INTO it rather than editing
+//      it. Every route below the draft check needs something a draft has not got, and the check
+//      therefore sits ABOVE the question test — which matters, because "when a customer emails us,
+//      reply with…" is both an ordinary first description and a `RE_EXPLAIN` match.
+{
+  const i = classifyIntent("triage inbound support email and draft a reply", {
+    agentId: "tracey", agentIsDraft: true,
+  });
+  check("a draft routes to generate, not edit", i.kind === "generate", i);
+  check("...and names the row to build into", i.kind === "generate" && i.into === "tracey", i);
+  check("...and the hint says which agent", routeLabel(i) === "plan tracey", routeLabel(i));
+
+  const worded = classifyIntent("when a customer emails us, reply with the refund policy", {
+    agentId: "tracey", agentIsDraft: true,
+  });
+  check("a description that opens like a question is still a description",
+    worded.kind === "generate", worded);
+
+  // AND THE PENDING PLAN STILL WINS, the same as it does with nothing selected: while a plan is on
+  // screen awaiting a decision, what somebody types is feedback on that plan.
+  const revising = classifyIntent("drop the summariser", {
+    agentId: "tracey", agentIsDraft: true, pendingPlanId: "p9",
+  });
+  check("a plan pending beats the draft route", revising.kind === "replan", revising);
+
+  // AND AN ORDINARY AGENT IS UNTOUCHED — the flag is the only thing that moves it.
+  const ordinary = classifyIntent("triage inbound support email", { agentId: "tracey" });
+  check("without the flag it is still an edit", ordinary.kind === "edit", ordinary);
+  // A GENERATE WITH NO TARGET STILL SAYS "a new agent", so the two labels stay distinguishable.
+  check("an untargeted generate keeps its old label",
+    routeLabel(classifyIntent("x", { agentId: null })) === "plan a new agent");
+}
+
 // --- turn lifecycle -------------------------------------------------------------------
 //
 // Every one of these runs inside ONE session, because that is what a conversation is now (§3.1):

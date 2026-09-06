@@ -141,6 +141,8 @@ export const COMMAND_CAPABILITY: Record<string, string> = {
   // §6's category, on the same rung: what an agent is called and what it is for is one authority,
   // not two. It reaches nothing outside the row.
   setAgentCategory: "agent:write",
+  // Writing an agent that has an identity and no code — creating an agent, so `agent:write`.
+  createDraftAgent: "agent:write",
   setAgentTools: "agent:write",
   forkAgent: "agent:write",
   restoreAgentVersion: "agent:write",

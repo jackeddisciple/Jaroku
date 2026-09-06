@@ -67,6 +67,8 @@ export interface PlanOptions {
    */
   category?: string;
   avatarId?: string;
+  /** The row this build is for, when the onboarding step already wrote one. Carried, never read. */
+  intoAgentId?: string;
   /** Present when the user asked for a change to the plan they were shown. */
   revisePlanId?: string;
   feedback?: string;
@@ -112,6 +114,7 @@ export interface PendingPlan {
    */
   category?: string;
   avatarId?: string;
+  intoAgentId?: string;
   plan: AgentPlan;
   warnings: string[];
   usage: UsageSummary;
@@ -353,6 +356,7 @@ export class Planner extends EventEmitter<PlannerEvents> {
         // generation, which is what makes the gate the single source of what gets built.
         category: opts.category,
         avatarId: opts.avatarId,
+        intoAgentId: opts.intoAgentId,
         plan,
         warnings: reconcileWithSelection(plan, selected, mcpTools),
         usage,

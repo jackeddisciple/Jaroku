@@ -1009,8 +1009,42 @@ export function BuildPane({
   // second table in this client is what put the catalogue four models behind the price sheet once.
   const selectedModel = useProviderStore((s) => s.models.find((m) => m.id === model));
 
+  /**
+   * SELECT THE ROW ONBOARDING WROTE, once it has arrived.
+   *
+   * The step creates the agent before it advances, so by the time this pane mounts the row is
+   * usually already on the list — but not always: the create broadcasts, and a broadcast is a frame
+   * that may land after the first render. So this watches `agents` rather than firing once on mount.
+   *
+   * MATCHED ON NAME AND DRAFTNESS, because the step has no id to remember: it sends a name and the
+   * server mints the slug, and a `createDraftAgent` that answered with one would be a second reply
+   * shape on a channel whose whole contract is "the broadcast is the answer". Two drafts called the
+   * same thing is the one ambiguous case, and taking the first is right there too — they are
+   * indistinguishable, so either is the one somebody meant.
+   *
+   * IT DOES NOT CONSUME THE IDENTITY. Selecting is not building; the identity is spent by the send
+   * path below, which is the point at which it has actually been applied to something.
+   */
+  const selectedDraft = useRef(false);
+  useEffect(() => {
+    if (selectedDraft.current || !pendingIdentity || activeAgentId) return;
+    const row = agents.find((a) => a.draft && a.name === pendingIdentity.name);
+    if (!row) return;
+    selectedDraft.current = true;
+    useBuildStore.getState().selectAgent(row.agent_id);
+  }, [agents, pendingIdentity, activeAgentId]);
+
   const agent = agents.find((a) => a.agent_id === activeAgentId);
-  const mode: "generate" | "edit" = activeAgentId ? "edit" : "generate";
+  /**
+   * A selected agent with no code behind it — the row onboarding writes, name and face and nothing
+   * else. It is `AgentSummary.draft`, computed server-side; see there.
+   */
+  const agentIsDraft = agent?.draft ?? false;
+  // A DRAFT COMPOSES LIKE A NEW AGENT, because that is what it is: everything this mode turns on —
+  // the connector picker, the MCP list, the "New agent" heading — is about deciding what gets
+  // BUILT, and none of it has ever had anything to do with which agent is selected. What made
+  // selection the test was that until now a selected agent always had code.
+  const mode: "generate" | "edit" = activeAgentId && !agentIsDraft ? "edit" : "generate";
   const turns = threadFor({ threads, pending: pendingThread }, activeThreadId);
   // A plan on screen awaiting a decision. It routes a typed message to a revision and, when
   // the connector selection changes, is what gets invalidated.
@@ -1181,6 +1215,8 @@ export function BuildPane({
   // ⌘↵ will send it. Pure heuristics; no per-keystroke network/LLM cost.
   const intent = classifyIntent(text, {
     agentId: activeAgentId, pendingPlanId: planId, step: selectedStep, nodeId: selectedNodeId,
+    // What turns a typed description into a build INTO the selected row rather than an edit of it.
+    agentIsDraft,
     // §B.5.2's one new signal. It changes no destination — a review-grounded message already routed
     // to the edit loop — and changes what the route label SAYS, which is the visible half.
     hasReviewComment: github.attachments.some((a) => a.kind === "reviewComment"),
@@ -1559,8 +1595,12 @@ export function BuildPane({
         // TAKEN, NOT READ. One onboarding choice belongs to one agent — left in place it would put
         // the same face and the same name on the second agent somebody describes.
         const identity = useAccountOnboardingStore.getState().takeFirstAgentIdentity();
+        // `intent.into` IS SET WHEN A DRAFT IS SELECTED, and it is what stops the first description
+        // producing a SECOND agent beside the one onboarding just put in the grid. With it, the
+        // planner's build adopts that row: same id, same name, same slug, same face, everything
+        // else written in.
         sendPlanAgent(trimmed, selected, name.trim() || undefined, undefined, selectedMcp, attachRefs,
-          identity ? { category: identity.category, avatarId: identity.avatarId } : undefined);
+          { ...(identity ?? {}), ...(intent.into ? { intoAgentId: intent.into } : {}) });
         break;
       }
       case "replan":
@@ -1946,12 +1986,21 @@ export function BuildPane({
               // reads, and it is still empty, which is what makes generation take the name from
               // the description. See `standalone` for why it is not on screen there.
               hidden={standalone}
-              disabled={busy || Boolean(planId)}
-              placeholder={planId ? "name (set by the plan)" : "name (optional)"}
+              // A DRAFT'S NAME IS SETTLED THE SAME WAY A PLAN'S IS, and locking says so. Generation
+              // into an existing row keeps that row's name and slug — that is the whole point of
+              // building into it — so a field that still accepted typing would be the
+              // editable-but-ignored control the comment above rejects, one surface along.
+              disabled={busy || Boolean(planId) || agentIsDraft}
+              placeholder={
+                agentIsDraft ? `name (${agent?.name ?? "chosen"})`
+                  : planId ? "name (set by the plan)" : "name (optional)"
+              }
               title={
-                planId
-                  ? "The name is fixed once a plan is on the table — discard the plan to change it"
-                  : "Optional. Otherwise the name is taken from your description."
+                agentIsDraft
+                  ? "This agent already has a name — describing it fills in everything else"
+                  : planId
+                    ? "The name is fixed once a plan is on the table — discard the plan to change it"
+                    : "Optional. Otherwise the name is taken from your description."
               }
               className="ml-auto w-40 bg-panel text-ink placeholder:text-faint rounded-control px-2.5 py-1 text-caption outline-none focus:shadow-focusring disabled:opacity-50"
             />

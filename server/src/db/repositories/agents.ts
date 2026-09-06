@@ -517,6 +517,49 @@ export class AgentRepository {
   }
 
   /**
+   * Fill in an agent that had only an identity.
+   *
+   * THE ONBOARDING STEP WRITES A ROW WITH A NAME, A FACE AND A CATEGORY AND NOTHING ELSE, so the
+   * agent is in the Agents tab from the moment somebody finishes setting up rather than appearing
+   * later out of a generation they had to sit through. This is what the first generation does to
+   * that row instead of inserting a second one beside it.
+   *
+   * IT WRITES ONLY WHAT A GENERATION PRODUCES. The name, the slug, the mark, the category and the
+   * avatar are absent from this statement on purpose: they are what a PERSON chose, and a build that
+   * overwrote them would throw away the only part of the agent that existed before it — the same
+   * rule `upsertFromDisk` follows one method down, for the same reason.
+   *
+   * NOT AN UPSERT. The row is known to exist because the caller looked it up; an insert branch here
+   * would be a second creation path with a different set of defaults.
+   */
+  async adopt(
+    ctx: TenantContext,
+    id: string,
+    built: {
+      description: string;
+      connectors: string[];
+      mcp_tools: string[];
+      required_env: string[];
+      creation_cost: number | null;
+    },
+  ): Promise<void> {
+    await this.q(ctx).run(
+      `UPDATE agents
+          SET description = ?, connectors = ?, mcp_tools = ?, required_env = ?, creation_cost = ?
+        WHERE id = ? AND workspace_id = ?`,
+      [
+        built.description,
+        JSON.stringify(built.connectors),
+        JSON.stringify(built.mcp_tools),
+        JSON.stringify(built.required_env),
+        built.creation_cost,
+        id,
+        ctx.workspaceId,
+      ],
+    );
+  }
+
+  /**
    * Set the agent's category.
    *
    * IT TAKES ANY STRING, because the column takes any string (I6). A preset and a typed one are the

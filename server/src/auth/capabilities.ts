@@ -568,6 +568,14 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   // §6's category, on the same rung and for the same reason: changing what an agent is called and
   // what kind of work it is for is one authority, not two. It reaches nothing outside the row.
   setAgentCategory: "agent:write",
+  // Writing an agent that has an identity and no code. `agent:write` because that is what it is —
+  // creating an agent — and there is no narrower authority to invent: the row it writes holds three
+  // things a person chose and every other column at its default.
+  //
+  // IT IS NOT IN THE AGENT-LEVEL TABLE BELOW, and cannot be: an agent-level grant is checked against
+  // the agent a command NAMES, and this one names none because its whole job is to make one. The
+  // suite asserts that absence rather than leaving it to memory.
+  createDraftAgent: "agent:write",
   // Changing which MCP tools an agent may call. `agent:write` rather than something narrower for
   // the reason the whole per-tool design rests on: what bounds a grant is the REGISTRY, which only
   // holds servers this workspace connected, so this can never widen past what somebody with
