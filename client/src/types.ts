@@ -76,6 +76,16 @@ export interface AgentSummary {
   created_at: string | null;
   hand_written: boolean;
   runnable: boolean;
+  /**
+   * The agent's identity mark — one emoji, assigned at creation.
+   *
+   * ON THIS LIST BECAUSE THE SIDEBAR IS BUILT FROM IT, and the sidebar is the reason the feature
+   * exists: twenty agents each carrying the same robot glyph is a list nobody can scan. It is also
+   * what every OTHER surface resolves against — a thread row, a work row and a fleet card all name
+   * an agent by slug and none of their payloads carries a mark, so `emojiFor` looks it up here
+   * rather than four payloads growing a column each.
+   */
+  emoji?: string | null;
   edit_count?: number; // applied edits available to undo (fix loop)
   /**
    * This agent's current deployment, or null if it has never been deployed.

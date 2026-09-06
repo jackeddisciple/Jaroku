@@ -1508,6 +1508,14 @@ jobs:
           # spellings of a timestamp, including a raw `toLocaleString` in the secrets rotation
           # history, which is the one view where somebody is comparing dates to each other.
           npm run test:date-chip
+          # §8.4'S NO-CONTAINER RULE, WHICH IS THE ONE A SUITE HAS TO HOLD because a box is the
+          # most natural thing in the world to add: a circle, a rounded square, a tinted cell, a
+          # gradient backdrop — every one looks tidier in isolation and every one would be the first
+          # filled container in a product that draws structure in hairlines. At 16px the container is
+          # larger and louder than the thing inside it, which is how "tidier" becomes worse. Beside
+          # it the rule that keeps the mark out of the tag row: that row trims to three plus a `+n`
+          # chip, so an identity mark in it would vanish exactly when the card is busiest.
+          npm run test:emoji-render
 
       # THE ICON SYSTEM, IN ITS OWN STEP, because the six suites guard six different invariants and
       # a reader looking at a red build should be able to tell which one broke without opening a

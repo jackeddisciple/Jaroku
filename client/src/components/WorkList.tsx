@@ -21,6 +21,9 @@
 // so rather than a string that simply stops.
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useBuildStore } from "../store/buildStore.ts";
+import { emojiBySlug } from "../lib/agentEmoji.ts";
+import { AgentEmoji } from "./AgentEmoji.tsx";
 
 import { DESTRUCTIVE, EMPTY, FAILURE_SENTENCE, FILTERS, HEADER, LIVE, STATUS_WORD } from "../lib/cockpitCopy.ts";
 import { cockpitCost, cockpitTime } from "../lib/cockpitFormat.ts";
@@ -75,7 +78,12 @@ const FIRST_PAINT_ROWS = 20;
  * most common way a list stops feeling solid under the cursor." So the slot is a fixed width and
  * only its opacity moves, and it holds that width for a role that cannot use the verb at all.
  */
-function Row({ item, columns }: { item: WorkItemView; columns: RowColumns }) {
+function Row({ item, columns, marks }: {
+  item: WorkItemView;
+  columns: RowColumns;
+  /** slug -> identity mark, built once by the list. See `lib/agentEmoji.ts` for why not per row. */
+  marks: ReadonlyMap<string, string>;
+}) {
   const openId = useWorkStore((s) => s.open?.id ?? s.openingId);
   const active = openId === item.id;
   const live = item.status === "queued" || item.status === "running" || item.status === "waiting";
@@ -153,13 +161,20 @@ function Row({ item, columns }: { item: WorkItemView; columns: RowColumns }) {
                  §22 NAMES THE CASE: "Test with a display name at the truncation boundary."
                  `Truncate` is what handles it, and a ceiling is what makes it reachable. */}
           {columns.agent && (
-            <Truncate
-              variant="prose"
-              className="max-w-[20ch] shrink-0 text-caption text-muted"
-              title={item.agent_name ?? undefined}
-            >
-              {item.agent_name ?? "an agent that has been deleted"}
-            </Truncate>
+            <span className="flex min-w-0 shrink-0 items-baseline gap-1">
+              {/* §8.4: 14px, left of the agent name. It rides INSIDE the agent column rather than
+                  beside it, so §13's shedding order is untouched — when the row narrows and the
+                  agent column goes, its mark goes with it rather than leaving a glyph attached to
+                  nothing. */}
+              <AgentEmoji emoji={marks.get(item.agent_id)} />
+              <Truncate
+                variant="prose"
+                className="max-w-[20ch] shrink-0 text-caption text-muted"
+                title={item.agent_name ?? undefined}
+              >
+                {item.agent_name ?? "an agent that has been deleted"}
+              </Truncate>
+            </span>
           )}
 
           {/* 4. ACTOR, in the `all` view only, and the first thing to go. §6 puts it at `text-faint`
@@ -509,6 +524,11 @@ export function WorkList() {
     return () => observer.disconnect();
   }, [host]);
   const columns = rowColumns(width, filters);
+  // ONE MAP FOR TEN THOUSAND ROWS. The list is virtualised, so a `find` per row over forty agents
+  // would run on every scroll frame — which is exactly the N+1 shape §16 holds the server's
+  // statement counts to, one layer up.
+  const agents = useBuildStore((s) => s.agents);
+  const marks = useMemo(() => emojiBySlug(agents), [agents]);
 
   // §6's day grouping, computed once per render of the list rather than per row. `useMemo` because
   // the list can be ten thousand rows (§18) and the grouping walks all of them.
@@ -674,7 +694,7 @@ export function WorkList() {
                   // like a fragment." And a day with no items renders nothing at all, which falls
                   // out of deriving the groups from the items — see `groupByDay`.
                   ? <DayHeading key={entry.key} label={entry.label} />
-                  : <Row key={entry.key} item={entry.item} columns={columns} />
+                  : <Row key={entry.key} item={entry.item} columns={columns} marks={marks} />
               ))}
             </ul>
             <div style={{ height: Math.max(0, view.totalHeight - view.end * ROW_HEIGHT) }} aria-hidden />

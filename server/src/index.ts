@@ -4249,6 +4249,11 @@ const relay = new WsRelay({
         hand_written: a.hand_written,
         runnable: published.has(a.slug) || (onDisk.get(a.slug)?.runnable ?? false),
         edit_count: edits.get(a.id) ?? 0,
+        // THE IDENTITY MARK, ON THE LIST THE SIDEBAR IS BUILT FROM — which is the surface the whole
+        // feature exists for. It is a column on the row, so this costs nothing, and it has to travel
+        // rather than be derived: the assignment probes against what the workspace already holds,
+        // and a browser cannot know that.
+        emoji: a.emoji,
         deployment: d ? { id: d.id, status: d.status, url: d.url } : null,
         archived_at: a.archived_at,
       };

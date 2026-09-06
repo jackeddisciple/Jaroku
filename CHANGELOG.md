@@ -8,6 +8,110 @@ release notes and the commits in that release's range.
 
 ---
 
+## v0.3.13 : Five Cross-Cutting Patterns — One Status Vocabulary, and a Mark Per Agent
+
+Seven surfaces drew status seven ways. A run was a spinning loader in the sidebar, a work item was a
+clock and a pulsing pause in the Cockpit, a thread was a filled diamond, a deploy was a coloured dot
+folded from eleven states onto four, an MCP server was a badge, an eval was a coloured word, and an
+agent card said "running" by pulsing the Jaroku wordmark. Every one of them was correct for its own
+tab and unrelated to the six beside it — which is a vocabulary a person has to learn seven times, and
+therefore one nobody learns: they hover.
+
+This release replaces all seven with **one ramp of seven phases**, drawn as **one circle**, so a
+state is a shape before it is a colour and survives greyscale, 14px and a screenshot. Beside it: one
+section-count grammar, two toolbar components that deliberately do not look alike, state on the
+border rather than the fill, a date chip, and **one emoji per agent** — the only server change in the
+release.
+
+### Added
+
+- **`client/src/lib/statusPhase.ts`** — seven phases (`pending`, `ready`, `active`, `waiting`,
+  `done`, `failed`, `halted`), their words and their colours. Exactly one is amber.
+- **`client/src/components/StatusGlyph.tsx`** — all seven as variations on Lucide's own `r=10`
+  circle, on the shared 24-unit grid, at `ICON.strokeWidth`. The two filled marks knock their symbol
+  out with an even-odd fill rather than drawing it on top, so a check shows the surface behind it on
+  the canvas, on a card, on a sidebar row and inside a popover — with no mask, no id and no `useId`
+  collision in a list of forty.
+- **`client/src/lib/domainPhase.ts`** — eight `Record<Union, Phase>` maps, so a state added without
+  a phase fails `tsc`. §3's three comparison families are typed OUT rather than omitted.
+- **`client/src/components/SectionHeader.tsx`** — name, then the count. `number | null`; null renders
+  the dash `format.ts` already uses for every unknown figure.
+- **`client/src/components/ToolbarCluster.tsx`** and **`Segmented.tsx`** — one hairline between
+  members, radius on the outer corners only, 32×32 whatever the mark. A cluster of one is a bare
+  `IconButton`.
+- **`client/src/lib/stateBorder.ts`** — §9's precedence ladder, as an ordering: archived, selected,
+  failed, running, default. Returns a colour and nothing else.
+- **A `date` variant on `Chip.tsx`** — calendar mark, `relTime` on the face, `absTime` in the
+  tooltip. No red variant and no amber one, because Jaroku has no due dates.
+- **`agents.emoji`** (migration 067), **`lib/emojiPalette.ts`** in both packages, collision-avoiding
+  assignment at creation, `setAgentEmoji` on the existing agent channel under the existing
+  capability, and a picker in the agent identity section.
+- **Nine suites**: `test:status-glyph`, `test:status-amber`, `test:status-map`,
+  `test:section-count`, `test:toolbar-cluster`, `test:state-border`, `test:date-chip`,
+  `test:agent-emoji`, `test:emoji-render`.
+
+### Changed
+
+- **`succeeded` is no longer green and `waiting` is no longer amber.** A finished job is a row with
+  nothing outstanding in it, not an achievement — a column of green ticks is a column where the two
+  rows that need somebody are the hardest things to find. And amber that means two things means
+  neither: `waiting` has its own geometry now, which survives greyscale in a way two ambers separated
+  by motion never did.
+- **Nothing spins.** Forty running rows with forty spinners is a seizure risk and a paint-cost
+  problem. The `active` arc pulses in `stream-pulse` and drops under `prefers-reduced-motion`.
+- **The Agents grid count reflects the filters.** It read the workspace's own total, so nine agents
+  filtered to two said 9 — over two cards, beside a notice offering to clear the filters that
+  produced the disagreement.
+- **The sidebar's Runs count renders a dash until the history is complete.** `listRuns` takes a cap
+  and the column has a "load older" control, so the length was a window and not a total.
+- **The secrets rotation history uses the app's one date formatter.** It was
+  `toLocaleString` — full precision, in the browser's locale — in the one view where somebody is
+  comparing dates to each other.
+- **`removed` and `superseded` deploys are no longer drawn in the error red.** Both are stopped
+  deliberately; only `interrupted` stays a failure.
+
+### The decisions
+
+- **D1 · The agent card glyph takes Runtime, not Health.** Accepted. The grid holds them as separate
+  axes deliberately — "Idle · Failing" is a real state and a card that collapsed it would be lying
+  about the agent. Failing and Unverified stay in the tag row, where tag precedence ranks them.
+- **D2 · `unreachable` and `error` share a glyph.** Accepted. The difference needs a sentence, not a
+  shape, and an eighth phase for it would break the rule that a shape means one thing in every tab.
+  `StatusGlyph` takes a `title`, so the tooltip says which; the label beside it does too.
+- **D3 · Trace transport is not a toolbar cluster.** Accepted, and left alone. Pause/resume/stop are
+  a transport control over a live thing rather than a group of independent actions.
+- **D5b · `LoaderCircleIcon` is kept.** DECLINED. The Running filter chip is a noun and the row glyph
+  is a state; the recommendation was to retire the key, and the cost of doing so is the only registry
+  deletion this work would have made. This release deletes no registry key at all.
+- **D6 · The emoji does not go on the thumbnail.** Resolved, and its consequence shrank: the agent
+  card's wordmark was removed when the phase glyph took its slot, so "the blue one on the card and
+  the tractor in the sidebar" now applies only to the detail header, where the gradient band remains.
+- **D7 · Emoji fonts are not a given on Linux.** RESOLVED BY RESTRICTING THE PALETTE rather than
+  bundling Noto Color Emoji. Sixty-four single-code-point marks, no variation selector, no ZWJ, no
+  skin tone, nothing added after Unicode 12 — enforceable, and enforced by `test:agent-emoji`.
+  Bundling the font would have cost ten megabytes, a new asset in `src-tauri` and a loading path
+  nothing tests.
+- **D8 · Colour enters a monochrome UI.** Accepted, and it is the one thing on the §13 walk that no
+  amount of reasoning settles from here: the sidebar with twenty agents either reads as warm and
+  scannable or it reads as noise.
+
+### Three departures from the brief, stated rather than silent
+
+- **`agents.emoji` is nullable, not `NOT NULL`.** `db/expandContract.ts` already refuses
+  `ADD COLUMN ... NOT NULL` without a default — the version still serving does not name the column
+  in its INSERTs — and `migrate:check` runs in CI between build and migrate. The brief's actual
+  requirement is that no row exists without going through assignment, and that is enforced at the
+  write path, where the suite reads both insert paths and fails on one that does not assign.
+- **The fleet strip keeps its own mark.** Two of its four connection states are not phases: a public
+  URL is a configuration somebody chose, and a connected card deliberately draws nothing because
+  healthy is not worth announcing. Mapping it would invent an eighth meaning or delete a decision.
+- **Four payloads carry no total, so four sections carry no count.** The Activity feed (keyset
+  cursor, virtualised at ten thousand rows), the Cockpit work list (cursor-paginated; `WorkCounts` is
+  per status, not per day), the workspace audit list (`listAudit` takes a limit), and the sidebar's
+  runs — which is the one that can say both, and renders the dash until `historyComplete`.
+
+---
+
 ## v0.3.12 : One Mark Per Verb — The Icon System, Wired
 
 The client had three icon paths. `panelIcons.tsx` drew Lucide geometry at `ICON.strokeWidth`;

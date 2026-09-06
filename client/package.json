@@ -70,6 +70,7 @@
     "test:toolbar-cluster": "tsx src/components/toolbarCluster.test.ts",
     "test:state-border": "tsx src/lib/stateBorder.test.ts",
     "test:date-chip": "tsx src/components/dateChip.test.ts",
+    "test:emoji-render": "tsx src/components/emojiRender.test.ts",
     "test:work-row": "tsx src/lib/workRow.test.ts",
     "test:work-window": "tsx src/lib/workWindow.test.ts",
     "test:work-live": "tsx src/lib/workLive.test.ts",

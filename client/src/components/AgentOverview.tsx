@@ -14,7 +14,8 @@
 // zero and §6 restates it for this line specifically, which is why the check is `=== null` rather
 // than falsy — a generation that genuinely cost nothing is a different fact from one nobody priced.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useBuildStore } from "../store/buildStore.ts";
 import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { AgentTagRow } from "./AgentTagRow.tsx";
@@ -22,6 +23,9 @@ import { AgentSparkline } from "./AgentSparkline.tsx";
 import { PencilIcon } from "./panelIcons.tsx";
 import { artFor } from "../lib/agentArt.ts";
 import { ThumbnailMark } from "./agentIcons.tsx";
+import { AgentEmoji, EMOJI_SIZE } from "./AgentEmoji.tsx";
+import { EmojiPicker } from "./EmojiPicker.tsx";
+import { sendSetAgentEmoji } from "../lib/socket.ts";
 import { sendRenameAgent } from "../lib/socket.ts";
 import { fmtCost, relTime } from "../lib/format.ts";
 import { BRAND, ICON, TYPE } from "../lib/tokens.ts";
@@ -39,6 +43,17 @@ function Fact({ label, value, title }: { label: string; value: React.ReactNode; 
 
 export function AgentOverview({ detail }: { detail: AgentDetailView }) {
   const a = detail.card;
+  // WHO ELSE WEARS WHAT, so the picker can say "already worn by X" before somebody chooses it —
+  // §8.5's warning. Off the agent list the sidebar is already built from, so it costs no request,
+  // and this agent's own mark is excluded because it is not a collision with itself.
+  const agents = useBuildStore((s) => s.agents);
+  const takenBy = useMemo(() => {
+    const out = new Map<string, string>();
+    for (const other of agents) {
+      if (other.agent_id !== a.slug && other.emoji) out.set(other.emoji, other.name);
+    }
+    return out;
+  }, [agents, a.slug]);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(a.name);
   const input = useRef<HTMLInputElement | null>(null);
@@ -115,6 +130,12 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
               />
             ) : (
               <div className="flex min-w-0 items-center gap-1.5">
+                {/* §8.4: 20px, LEFT OF THE DISPLAY NAME. This is the one surface where D6's
+                    consequence is still live — the gradient band above says "the blue one" and this
+                    says "the tractor", two facts about one agent that do not reinforce each other.
+                    Recorded rather than solved: the fix, if it turns out to matter in use, is to
+                    retire the gradient, never to put a box around the emoji. */}
+                <AgentEmoji emoji={a.emoji} size={EMOJI_SIZE.header} />
                 <Truncate className={TYPE.title} title={a.name}>
                   {a.name}
                 </Truncate>
@@ -139,6 +160,16 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
             </div>
           </div>
         </div>
+
+        {/* §8.5'S PICKER, in the identity section beside the avatar — which is the region that
+            already holds the name and the rename control, and therefore where somebody looks when
+            they want to change what an agent looks like. */}
+        <EmojiPicker
+          uuid={a.uuid}
+          current={a.emoji}
+          takenBy={takenBy}
+          onChoose={(e) => sendSetAgentEmoji(a.slug, e)}
+        />
 
         {/* The tag row again, in full: the detail has room, so nothing is behind an overflow chip
             here — `AgentTagRow` trims at three and reveals on hover, which at this width is one

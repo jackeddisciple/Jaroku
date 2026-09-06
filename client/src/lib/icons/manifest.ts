@@ -67,6 +67,11 @@ export const MANIFEST = {
     fork: "GitForkIcon",
     more: "MoreHorizontalIcon",
     restore: "RestoreBinIcon",
+    // §8.5's shuffle, and it is a SHUFFLE rather than one of the three refresh marks. D3 separated
+    // those three by what they do — sync with an external system, re-fetch a local list, retry a
+    // failed operation — and this is none of them: it re-runs the collision-avoiding assignment and
+    // proposes a different mark, which is a change rather than a repeat.
+    shuffleEmoji: "ShuffleIcon",
   },
 
   // ── §5/§6 Auth and onboarding ─────────────────────────────────────────────

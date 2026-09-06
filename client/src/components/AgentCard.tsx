@@ -24,6 +24,7 @@ import { AgentTagRow } from "./AgentTagRow.tsx";
 import { AgentSparkline } from "./AgentSparkline.tsx";
 import { ArchiveIcon, ArchiveRestoreIcon } from "./agentIcons.tsx";
 import { StatusGlyph, GLYPH_SIZE } from "./StatusGlyph.tsx";
+import { AgentEmoji, EMOJI_SIZE } from "./AgentEmoji.tsx";
 import { agentPhase } from "../lib/domainPhase.ts";
 import { stateBorder } from "../lib/stateBorder.ts";
 import { AlertTriangleIcon, GitForkIcon, PencilIcon } from "./panelIcons.tsx";
@@ -247,9 +248,22 @@ export function AgentCard({
             <StatusGlyph phase={agentPhase(agent)} size={GLYPH_SIZE.card} title={RUNTIME_WORD(agent)} />
           </span>
           <div className="min-w-0 flex-1">
-            <Truncate className={TYPE.title} title={agent.name}>
-              {agent.name}
-            </Truncate>
+            <div className="flex min-w-0 items-baseline gap-1.5">
+              {/* §8.4 ASKS FOR IT "BELOW THE AVATAR", AND THE CARD NO LONGER HAS ONE. The avatar was
+                  the Jaroku wordmark, identical on every card, and the phase glyph replaced it when
+                  the status vocabulary landed — so "below the avatar" has nothing to be below. It
+                  goes with the name instead, which is where §8.4's own construction rule puts it
+                  anyway: on the text baseline, with normal inline spacing, no container.
+
+                  D6's consequence is therefore SMALLER than it was written to be. It warned that an
+                  agent would be "the blue one" on the card and "the tractor" in the sidebar, two
+                  facts that do not reinforce each other. On the card the gradient is already gone;
+                  the detail header is the one surface where both still appear. */}
+              <AgentEmoji emoji={agent.emoji} size={EMOJI_SIZE.card} />
+              <Truncate className={TYPE.title} title={agent.name}>
+                {agent.name}
+              </Truncate>
+            </div>
             {/* The slug at the smaller size — §5.2. It was also in the mono face, on the argument
                 that it is an identifier and the prose/code split tells a reader which of the two
                 lines they can type. typography.pdf §04 names "agent IDs/slugs" in its Sans list

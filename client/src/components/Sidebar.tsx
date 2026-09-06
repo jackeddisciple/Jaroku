@@ -28,6 +28,7 @@ import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
 import { StatusGlyph } from "./StatusGlyph.tsx";
+import { AgentEmoji, EMOJI_SIZE } from "./AgentEmoji.tsx";
 import { SectionHeader } from "./SectionHeader.tsx";
 import { RUN_PHASE } from "../lib/domainPhase.ts";
 import { EmptyState } from "./EmptyState.tsx";
@@ -323,7 +324,14 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
               className="min-w-0 flex-1 rounded-control bg-mist-50 px-1.5 py-0.5 text-label text-ink outline-none focus-visible:shadow-focusring"
             />
           ) : (
-            <Truncate className={active ? "text-accent" : "text-ink"} title={agent.name}>{agent.name}</Truncate>
+            <>
+              {/* §8.4'S EXPLICIT ASK, AND THE REASON THE FEATURE EXISTS. Twenty agents each carrying
+                  the same robot mark is a list nobody can scan, and the eye finds a shape far faster
+                  than it reads a truncated name. Bare, on the baseline, with normal inline spacing —
+                  no box, because at 16px the box would be larger and louder than the glyph in it. */}
+              <AgentEmoji emoji={agent.emoji} size={EMOJI_SIZE.sidebar} />
+              <Truncate className={active ? "text-accent" : "text-ink"} title={agent.name}>{agent.name}</Truncate>
+            </>
           )}
           {archived && <Chip size="sm" tone="faint" variant="bare">archived</Chip>}
           {github?.badge && (

@@ -24,7 +24,10 @@
 // stated in §1.1 — is to answer which threads need you, not to let you act on them without going
 // there.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useBuildStore } from "../store/buildStore.ts";
+import { emojiBySlug } from "../lib/agentEmoji.ts";
+import { AgentEmoji } from "./AgentEmoji.tsx";
 import { resumeHint } from "../lib/threadResume.ts";
 import { fmtRunningCost, fmtThreadCost } from "../lib/threadCost.ts";
 import { STATUS } from "../lib/tokens.ts";
@@ -178,6 +181,13 @@ export function ThreadRow({
     if (next) onRename(next);
   };
 
+  // §8.4's mark, resolved out of the agent list — a thread row names its agent by slug and this
+  // payload carries no mark. One map per row is acceptable here in a way it is not in the Cockpit:
+  // the Threads list is not virtualised, and threading a map through `ThreadRow`'s six callers to
+  // save a `Map` construction per render would be the more expensive change.
+  const agents = useBuildStore((s) => s.agents);
+  const marks = useMemo(() => emojiBySlug(agents), [agents]);
+
   // §9's ladder, over the two facts a thread row can hold besides selection. `archived` is quiet:
   // an archived thread has left the default list entirely, and marking it in the one view that
   // shows it would make "archived" a decoration rather than a state.
@@ -300,6 +310,10 @@ export function ThreadRow({
             variant="bare"
             title={thread.agent_id ? `Go to ${agentChipLabel(thread)}` : undefined}
             className={`${thread.agent_deleted ? "opacity-60" : ""} ${thread.agent_id ? "hover:text-ink" : ""}`}
+            // §8.4: 14px, WITH THE AGENT ATTRIBUTION. In the chip's own icon slot rather than
+            // outside it, so the mark travels with the name it belongs to — a chip that navigates
+            // to the agent, carrying that agent's mark, is one target saying one thing.
+            icon={<AgentEmoji emoji={marks.get(thread.agent_id ?? "")} />}
           >
             {agentChipLabel(thread)}
           </Chip>

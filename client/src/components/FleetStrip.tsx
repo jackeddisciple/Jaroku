@@ -20,7 +20,8 @@
 // `restartsService` precisely so this can say it first — §9's own sentence is "A restart nobody was
 // warned about is how a control plane loses trust in one click."
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useBuildStore } from "../store/buildStore.ts";
 
 import { CONNECTION_LABEL, DESTRUCTIVE, FILTERS, OFFLINE } from "../lib/cockpitCopy.ts";
 import { cockpitCost } from "../lib/cockpitFormat.ts";
@@ -39,6 +40,8 @@ import { StatusDot } from "./StatusBadge.tsx";
 import { SectionHeader } from "./SectionHeader.tsx";
 import { GlobeIcon, KeyIcon, PlugIcon } from "./panelIcons.tsx";
 import { Truncate } from "./Truncate.tsx";
+import { AgentEmoji } from "./AgentEmoji.tsx";
+import { emojiBySlug } from "../lib/agentEmoji.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { IconButton } from "./IconButton.tsx";
 
@@ -277,8 +280,10 @@ function CardMenu({ card }: { card: FleetCardView }) {
  * is absolutely positioned to fill the card behind the content, so the whole surface is the target
  * and the sparkline sits above it in the stacking order with its own clicks intact.
  */
-function FleetCard({ card, tabIndex, onArrow }: {
+function FleetCard({ card, emoji, tabIndex, onArrow }: {
   card: FleetCardView;
+  /** The agent's identity mark, resolved by the strip so forty cards do one lookup rather than forty. */
+  emoji: string | undefined;
   /** §12's roving tabindex. Exactly one card in the strip is `0`; see `FleetStrip`. */
   tabIndex: number;
   onArrow: (delta: 1 | -1, track: HTMLElement | null) => void;
@@ -341,6 +346,10 @@ function FleetCard({ card, tabIndex, onArrow }: {
           the same size as the version chip beside it. */}
       <div className="pointer-events-none relative z-10 flex items-center gap-2">
         <ConnectionDot card={card} />
+        {/* §8.4: 14px, left of the agent name. Resolved out of the agent list rather than off this
+            payload — a fleet card names its agent by slug, and a fifth copy of a mark that changes
+            on one table is four ways for it to go stale. */}
+        <AgentEmoji emoji={emoji} />
         <Truncate className="min-w-0 text-title text-ink" title={card.agent_name}>
           {card.agent_name}
         </Truncate>
@@ -505,6 +514,11 @@ function moveCardFocus(from: number, delta: 1 | -1, track: HTMLElement | null, c
 
 export function FleetStrip() {
   const fleet = useWorkStore((s) => s.fleet);
+  // ONE MAP FOR THE WHOLE STRIP. A `find` per card over forty agents is the shape of an N+1 that
+  // never shows up in review and is instantly visible in a real workspace — the same rule
+  // `test:agent-grid` holds the server's statement count to.
+  const agents = useBuildStore((s) => s.agents);
+  const marks = useMemo(() => emojiBySlug(agents), [agents]);
   const notice = useWorkStore((s) => s.notice);
   const connected = useTraceStore((s) => s.connection === "open");
   const { ref, fade } = useEdgeFade();
@@ -544,6 +558,7 @@ export function FleetStrip() {
           <FleetCard
             key={card.deployment_id}
             card={card}
+            emoji={marks.get(card.agent_slug)}
             // THE FIRST CARD IS THE ENTRY POINT, unlike the sparkline's, whose entry is its LAST
             // bar. The two differ because the questions differ: a sparkline is asked about its most
             // recent run, and a strip is read left to right from its first agent.

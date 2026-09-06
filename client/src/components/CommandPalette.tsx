@@ -24,6 +24,7 @@ import { useAgentGridStore } from "../store/agentGridStore.ts";
 import { useWorkStore } from "../store/workStore.ts";
 import { openThread } from "../lib/threadNav.ts";
 import { openAgentDetail } from "../lib/agentNav.ts";
+import { AgentEmoji } from "./AgentEmoji.tsx";
 import { relTime } from "../lib/format.ts";
 import { paneOwnsBareKey } from "../lib/bareKeys.ts";
 import { keyHint } from "../lib/modKey.ts";
@@ -238,6 +239,9 @@ export function CommandPalette() {
                   onSelect={run(() => openAgentDetail(a.slug))}
                   meta={a.health === "healthy" ? undefined : a.health}
                 >
+                  {/* §8.4: 14px, left of the name. A palette list is scanned faster than it is
+                      read, which is the same argument the sidebar makes. */}
+                  <AgentEmoji emoji={a.emoji} />
                   <Truncate>{a.name}</Truncate>
                   <span className="shrink-0 text-tiny text-faint">{a.slug}</span>
                 </Item>

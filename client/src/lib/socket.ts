@@ -1244,6 +1244,11 @@ export function sendRenameAgent(agentId: string, name: string): void {
   send({ cmd: "renameAgent", agentId, name });
 }
 
+/** §8.5's picker. The server refuses anything outside the palette and warns on a duplicate. */
+export function sendSetAgentEmoji(agentId: string, emoji: string): void {
+  send({ cmd: "setAgentEmoji", agentId, emoji });
+}
+
 /**
  * §7.5's fork: connectors and the current manifest copied, MCP grants reset to zero.
  *
