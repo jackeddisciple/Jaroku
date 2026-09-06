@@ -14,9 +14,15 @@
 // distinguishable only by hovering. Both shipped. Both looked fine.
 //
 // THREE AXES, NOT ONE. §9's table gives each status a colour role, a mark and a motion, and two
-// statuses may legitimately share any ONE of the three — `running` and `waiting` share amber by
-// design, `queued` and `cancelled` share neutral. What may never happen is two sharing all three,
-// so the suite checks the whole rendering and then checks each axis behaves as the table says.
+// statuses may legitimately share any ONE of the three — four of the six share the neutral. What may
+// never happen is two sharing all three, so the suite checks the whole rendering and then checks
+// each axis behaves as the table says.
+//
+// §9'S COLOUR AND MOTION COLUMNS HAVE MOVED, and this suite moved with them rather than being
+// deleted. The Cockpit's six statuses now map into the product's seven phases, so `waiting` gives up
+// the amber it shared with `running`, `succeeded` gives up the ok green, and `running` stops turning.
+// What did not change is the property §24 asks for by name and this file exists for: six statuses,
+// six distinct marks, and a failure that names the pair that collapsed. That check is untouched.
 //
 //   npm run test:work-glyphs
 
@@ -59,37 +65,50 @@ console.log("\nthe test that fails if two collapse onto one");
 
   // THE PAIR §9 CALLS OUT BY NAME, asserted on its own so a regression reads as itself: "a static
   // mark distinct from `succeeded`'s".
-  check("queued is not succeeded's tick", of("queued") !== of("succeeded"));
+  check("queued is not succeeded's check", of("queued") !== of("succeeded"));
   // AND THE PAIR THE OLD BUILD ACTUALLY HAD TROUBLE WITH — `cancelled` reading as `failed`, which
   // would file an operational decision under "something went wrong".
   check("cancelled is not failed's cross", of("cancelled") !== of("failed"));
-  // AND THE ONE §9 IS MOST WORRIED ABOUT, since these two share a colour on purpose.
-  check("waiting is not running's loader", of("waiting") !== of("running"));
+  // AND THE ONE §9 IS MOST WORRIED ABOUT. These two shared a colour on purpose and were separated
+  // by motion alone, which is a difference that does not survive a screenshot; they are two
+  // different geometries now — a quarter arc and a ring with a centre dot.
+  check("waiting is not running's arc", of("waiting") !== of("running"));
 }
 
-// --- 2. the colour column of §9's table ------------------------------------------------------------
+// --- 2. the colour column, after the vocabulary took amber back --------------------------------
 
-console.log("\namber means in flight, and only in flight");
+console.log("\namber means the machine is working, and only that");
 {
   const has = (status: WorkStatus, colour: string): boolean => of(status).includes(colour);
 
-  // §9: "`running` and `waiting` share amber because both are genuinely in flight — one on the
-  // machine, one on a person — and they are separated by mark and by motion, never by inventing a
-  // seventh colour." This build changed its mind here: `waiting` was the `warn` blue.
+  // §9 GAVE `waiting` AMBER TOO, and this build takes it back. Its argument was that `running` and
+  // `waiting` "are both genuinely in flight — one on the machine, one on a person", which is true
+  // and is a good argument for one tab. It is a bad one for a product: the Cockpit is not the only
+  // place a person is being waited on, and an amber that means two things means neither. The
+  // separation §9 wanted is now geometry — a quarter arc against a ring with a centre dot — which
+  // survives greyscale in a way two ambers separated by motion never did.
   check("running is amber", has("running", STATUS.pending), of("running"));
-  check("waiting is amber too", has("waiting", STATUS.pending), of("waiting"));
-  check("...and not the caution blue", !has("waiting", STATUS.warn), of("waiting"));
+  check("waiting is no longer amber", !has("waiting", STATUS.pending), of("waiting"));
+  check("...and is not the caution blue either", !has("waiting", STATUS.warn), of("waiting"));
 
-  check("succeeded is the ok green", has("succeeded", STATUS.ok));
+  // AND `succeeded` GIVES UP THE GREEN. A finished job is a row with nothing outstanding in it, not
+  // an achievement — and a column of green ticks is a column where the two rows that need somebody
+  // are the hardest things to find. `ThreadGlyph` made this argument about `idle` first.
+  check("succeeded is neutral, not the ok green", !has("succeeded", STATUS.ok) && has("succeeded", STATUS.neutral), of("succeeded"));
   check("failed is the error red", has("failed", STATUS.error));
 
-  // NEITHER OF THE SETTLED-BUT-UNREMARKABLE STATES BORROWS A STATUS COLOUR. §9 gives both
-  // `STATUS.neutral`, which recedes rather than signals.
-  check("queued is neutral", has("queued", STATUS.neutral));
-  check("cancelled is neutral", has("cancelled", STATUS.neutral));
+  // THE FOUR QUIET STATES SHARE ONE NEUTRAL, which is what makes them recede together. Four slightly
+  // different greys would be four statuses each quietly claiming a little attention.
+  for (const status of ["queued", "waiting", "succeeded", "cancelled"] as const) {
+    check(`${status} is neutral`, has(status, STATUS.neutral), of(status));
+  }
 
-  // AND NOTHING OUTSIDE THE FOUR IS USED. A seventh colour is exactly what §9 forbids, and the way
-  // it arrives is somebody reaching for a hex to separate two statuses that share a hue.
+  // EXACTLY ONE OF THE SIX IS AMBER, which is `test:status-amber`'s law read from this tab's end.
+  const ambered = STATUSES.filter((s) => has(s, STATUS.pending));
+  check("exactly one status is amber", ambered.length === 1, ambered.join(", "));
+
+  // AND NOTHING OUTSIDE THE KNOWN COLOURS IS USED. A seventh colour arrives as a hex somebody
+  // reached for to separate two statuses that shared a hue.
   const KNOWN = [STATUS.ok, STATUS.pending, STATUS.error, STATUS.warn, STATUS.neutral];
   for (const status of STATUSES) {
     const hexes = of(status).match(/#[0-9a-fA-F]{3,8}/g) ?? [];
@@ -104,19 +123,21 @@ console.log("\nmotion means this is changing right now, and nothing else");
 {
   const moves = (status: WorkStatus): boolean => /animate-(spin|stream-pulse)/.test(of(status));
 
-  // §9: "Two of six statuses move." Exactly two, which is the assertion that fails if somebody
-  // makes `queued` pulse to look busier.
+  // ONE OF SIX MOVES NOW, NOT TWO. §9's second mover was `waiting`, which pulsed because it shared a
+  // colour with `running` and needed something else to separate them. It has its own shape now, so
+  // the motion is spent only on the state motion is actually about.
   const moving = STATUSES.filter(moves);
-  check(`exactly two statuses move (${moving.join(", ")})`, moving.length === 2, moving.join(", "));
-  check("...and they are the two that are in flight",
-    moving.includes("running") && moving.includes("waiting"), moving.join(", "));
+  check(`exactly one status moves (${moving.join(", ")})`, moving.length === 1, moving.join(", "));
+  check("...and it is the one on the machine", moving[0] === "running", String(moving[0]));
 
-  // THE TWO MOVE DIFFERENTLY, which is half of what separates them given a shared colour.
-  check("running turns", /animate-spin/.test(of("running")));
-  check("waiting pulses rather than turning", /animate-stream-pulse/.test(of("waiting")) && !/animate-spin/.test(of("waiting")));
+  // NOTHING SPINS. A list of forty running jobs with forty spinners is a seizure risk and a paint-
+  // cost problem — which is why the arc pulses rather than turning, and why §9's loader is gone.
+  check("nothing turns", !STATUSES.some((s) => /animate-spin/.test(of(s))),
+    STATUSES.filter((s) => /animate-spin/.test(of(s))).join(", "));
+  check("running pulses instead", /animate-stream-pulse/.test(of("running")), of("running"));
 
-  // §9: "`stream-pulse`, never `animate-pulse`." Tailwind's own pulse is a different curve and is
-  // the one somebody reaches for without knowing this app has its own.
+  // §9: "`stream-pulse`, never `animate-pulse`." Tailwind's own is a different curve and is the one
+  // somebody reaches for without knowing this app has its own.
   check("nothing uses Tailwind's own pulse",
     !STATUSES.some((s) => /animate-pulse\b/.test(of(s))),
     STATUSES.filter((s) => /animate-pulse\b/.test(of(s))).join(", "));

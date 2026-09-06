@@ -27,10 +27,12 @@ import { WorkspaceSwitcher } from "./WorkspaceSwitcher.tsx";
 import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
+import { StatusGlyph } from "./StatusGlyph.tsx";
+import { RUN_PHASE } from "../lib/domainPhase.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { keyHint } from "../lib/modKey.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
-import { ActivityIcon, CheckIcon, GlobeIcon, RocketIcon, LoaderIcon, PauseIcon, SearchIcon, SparklesIcon, XIcon } from "./panelIcons.tsx";
+import { ActivityIcon, CheckIcon, GlobeIcon, RocketIcon, LoaderIcon, SearchIcon, SparklesIcon, XIcon } from "./panelIcons.tsx";
 
 /**
  * §2's nav buttons, in the order the spec lists them.
@@ -51,24 +53,30 @@ const NAV_DESTINATIONS: { id: NavDestination; label: string; icon: IconComponent
 // "archived" a decoration instead of a state. It is last, after the states that describe live work.
 type Filter = "all" | "running" | "deployed" | "synced" | "drafts" | "archived";
 
-// A run's outcome, in the same marks the rest of the app uses for the same facts.
-// It was font characters — a pulsing ●, a ✗ and a ✓ — which sat on the text baseline at
-// whatever weight the row happened to be and never optically matched the icons two panels over.
+// A run's outcome, in the product's one status vocabulary.
 //
-// `paused` is exhaustive here on purpose. It arrived after the other three and fell through to
-// the ✓, so a run halted mid-graph wore the same green tick as one that ran to completion — and
-// this list is the only place a paused run can be found and resumed from.
-function StatusGlyph({ status }: { status: RunStatus }) {
-  switch (status) {
-    case "running":
-      return <StatusDot state="pending" icon={LoaderIcon} spin title="running" />;
-    case "paused":
-      return <StatusDot state="pending" icon={PauseIcon} title="paused — resumable" />;
-    case "error":
-      return <StatusDot state="error" icon={XIcon} title="error" />;
-    case "completed":
-      return <StatusDot state="ok" title="completed" />;
-  }
+// IT WAS FONT CHARACTERS ONCE — a pulsing ●, a ✗ and a ✓ — which sat on the text baseline at
+// whatever weight the row happened to be and never optically matched the icons two panels over.
+// Then it was four `StatusDot`s: a spinning loader, a pause, a cross and a tick, in three colours.
+// Both were right about this list and unrelated to the six the Cockpit drew for the same four facts
+// one tab over. `RUN_PHASE` is what makes them the same marks now.
+//
+// `paused` STILL DOES NOT FALL THROUGH TO THE TICK, which is the defect this function was rewritten
+// for once already: it arrived after the other three and wore the same green as a run that finished,
+// and this list is the only place a paused run can be found and resumed from. `RUN_PHASE` is a
+// `Record<RunStatus, Phase>`, so a fifth status is a compile error rather than a silent fall-through.
+//
+// THE WORDS ARE THIS LIST'S OWN. "paused — resumable" says the thing somebody scanning for a run to
+// pick back up is looking for, which the phase's own "stopped" does not.
+const RUN_WORD: Record<RunStatus, string> = {
+  running: "running",
+  paused: "paused — resumable",
+  error: "error",
+  completed: "completed",
+};
+
+function RunPhaseGlyph({ status }: { status: RunStatus }) {
+  return <StatusGlyph phase={RUN_PHASE[status]} title={RUN_WORD[status]} />;
 }
 
 // FIVE STATES, FIVE MARKS. It was five states and TWO colours: `running` and `deploying` were
@@ -125,7 +133,7 @@ function RunRow({ run }: { run: RunSummary }) {
             </span>
           </>
         )}
-        <StatusGlyph status={run.status} />
+        <RunPhaseGlyph status={run.status} />
         <Truncate className={`text-caption ${active ? "text-accent" : "text-ink"}`} title={run.agent_id}>{run.agent_id}</Truncate>
         {/* `min-w-0` ON THE FIGURES TOO. The group is `shrink-0` so the run id truncates first,
             which is right — but at the width the sidebar reaches on a 1024px screen there is

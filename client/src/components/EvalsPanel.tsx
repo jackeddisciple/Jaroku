@@ -19,6 +19,25 @@ import { Chip } from "./Chip.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import { ActivityIcon, DatabaseIcon } from "./panelIcons.tsx";
 import { ICON } from "../lib/tokens.ts";
+import { EVAL_PHASE } from "../lib/domainPhase.ts";
+import { StatusGlyph } from "./StatusGlyph.tsx";
+import type { EvalRunStatus } from "../types.ts";
+
+/**
+ * This panel's word for each eval status, beside the phase's shape.
+ *
+ * "over budget" IS THE ONE THAT MATTERS. `aborted_over_budget` maps to `failed` — it did not finish
+ * and it did not succeed — but a reader comparing two runs needs to know that the second one stopped
+ * itself at a ceiling rather than breaking, and that is a sentence rather than a shape.
+ */
+const EVAL_WORD: Record<EvalRunStatus, string> = {
+  queued: "queued",
+  running: "running",
+  completed: "completed",
+  aborted_over_budget: "over budget",
+  cancelled: "cancelled",
+  error: "error",
+};
 
 type Mode = "dataset" | "results";
 
@@ -119,14 +138,15 @@ export function EvalsPanel() {
                   onClick={() => selectEval(e.id)}
                   selected={e.id === selectedEvalId}
                   tone="faint"
-                  title={`${e.status} · ${e.targets.map((t) => t.model).join(", ")}`}
+                  title={`${EVAL_WORD[e.status]} · ${e.targets.map((t) => t.model).join(", ")}`}
+                  icon={<StatusGlyph phase={EVAL_PHASE[e.status]} size={ICON.xs} title={EVAL_WORD[e.status]} />}
                 >
                   {relTime(e.started_at)}
-                  {e.status !== "completed" && (
-                    <span className={e.status === "aborted_over_budget" ? "text-err" : "text-muted"}>
-                      {e.status === "aborted_over_budget" ? "over budget" : e.status}
-                    </span>
-                  )}
+                  {/* THE WORD IS NO LONGER COLOURED. It was `text-err` for one status and
+                      `text-muted` for the rest — a status word rendered as coloured text, which is
+                      the second of the three things §2.5 removes. The glyph carries the state now
+                      and the word carries which state, which is the division I8 asks for. */}
+                  {e.status !== "completed" && <span className="text-muted">{EVAL_WORD[e.status]}</span>}
                 </Chip>
               ))}
               {/* OLDER COMPARISONS. It widens the strip first and then asks the server for a bigger

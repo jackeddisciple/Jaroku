@@ -38,7 +38,9 @@ import { ActionRow, type ActionState } from "./ActionRow.tsx";
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { Chip } from "./Chip.tsx";
 import { EmptyState, LoadingLine } from "./EmptyState.tsx";
-import { StatusDot, type BadgeState } from "./StatusBadge.tsx";
+import { StatusDot } from "./StatusBadge.tsx";
+import { StatusGlyph } from "./StatusGlyph.tsx";
+import { DEPLOY_PHASE } from "../lib/domainPhase.ts";
 import { Truncate } from "./Truncate.tsx";
 import {
   AlertTriangleIcon, CheckIcon, GlobeIcon, KeyIcon, RocketIcon, XIcon,
@@ -62,19 +64,32 @@ const STAGES: { id: string; active: string; done: string; detail: string }[] = [
   { id: "publishing", active: "Publishing", done: "Published", detail: "pointing a public URL at the service" },
 ];
 
-const STATUS_COPY: Record<DeployStatus, { state: BadgeState; label: string }> = {
-  queued: { state: "pending", label: "queued" },
-  packaging: { state: "pending", label: "packaging" },
-  uploading: { state: "pending", label: "uploading" },
-  building: { state: "pending", label: "building" },
-  deploying: { state: "pending", label: "deploying" },
-  live: { state: "ok", label: "live" },
-  failed: { state: "error", label: "failed" },
-  cancelled: { state: "error", label: "cancelled" },
-  interrupted: { state: "error", label: "interrupted" },
+/**
+ * The word beside the mark, and only the word.
+ *
+ * IT USED TO CARRY A `BadgeState` TOO — eleven statuses folded onto four `StatusDot` colours, which
+ * is how `cancelled`, `interrupted` and `removed` all rendered in the error red. `DEPLOY_PHASE` owns
+ * the shape and the colour now, and it disagrees with two of those on purpose: `removed` is the user
+ * detaching the record, which `deployStore.ts` says in as many words, and `superseded` is a deploy
+ * that worked and was replaced. Both are `halted` — stopped deliberately, not a failure — and only
+ * `interrupted` stays red, because a server restart mid-deploy is neither deliberate nor successful.
+ *
+ * The labels are unchanged, which is the half I8 needs: the border and the mark are the glance, the
+ * word is what says which of the three kinds of stopped this one was.
+ */
+const STATUS_LABEL: Record<DeployStatus, string> = {
+  queued: "queued",
+  packaging: "packaging",
+  uploading: "uploading",
+  building: "building",
+  deploying: "deploying",
+  live: "live",
+  failed: "failed",
+  cancelled: "cancelled",
+  interrupted: "interrupted",
   // Not an error: it worked, and then a later deploy of the same agent replaced it.
-  superseded: { state: "neutral", label: "replaced" },
-  removed: { state: "error", label: "removed" },
+  superseded: "replaced",
+  removed: "removed",
 };
 
 /** A stable empty array — a fresh `[]` per render would defeat every memo below it. */
@@ -203,15 +218,14 @@ export function DeployPanel() {
                 onClick={() => select(d.id)}
                 className="max-w-[220px] shrink-0"
                 icon={
-                  <StatusDot
-                    state={STATUS_COPY[d.status].state}
-                    size={7}
-                    pulse={isDeployInFlight(d.status)}
-                    title={STATUS_COPY[d.status].label}
+                  <StatusGlyph
+                    phase={DEPLOY_PHASE[d.status]}
+                    size={ICON.xs}
+                    title={STATUS_LABEL[d.status]}
                   />
                 }
               >
-                <Truncate title={`${agent?.name ?? d.agent_id} — ${STATUS_COPY[d.status].label}`}>
+                <Truncate title={`${agent?.name ?? d.agent_id} — ${STATUS_LABEL[d.status]}`}>
                   {agent?.name ?? d.agent_id}
                 </Truncate>
               </Chip>
@@ -508,11 +522,7 @@ function DeployDetail({ deployment }: { deployment: Deployment }) {
   return (
     <div className="p-4">
       <div className="flex items-center gap-2">
-        <StatusDot
-          state={STATUS_COPY[deployment.status].state}
-          pulse={running}
-          title={STATUS_COPY[deployment.status].label}
-        />
+        <StatusGlyph phase={DEPLOY_PHASE[deployment.status]} title={STATUS_LABEL[deployment.status]} />
         <span className="text-label text-ink">{deployment.agent_id}</span>
         <span className="text-tiny text-faint">
           {deployment.provider}/{deployment.model}
@@ -529,7 +539,7 @@ function DeployDetail({ deployment }: { deployment: Deployment }) {
           ) : isLive ? (
             `live for ${fmtDuration(elapsed)}`
           ) : (
-            `${STATUS_COPY[deployment.status].label} after ${fmtDuration(elapsed)}`
+            `${STATUS_LABEL[deployment.status]} after ${fmtDuration(elapsed)}`
           )}
         </span>
       </div>

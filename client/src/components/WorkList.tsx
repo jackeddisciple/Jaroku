@@ -393,7 +393,7 @@ function Filters() {
                 filters.status === status ? "bg-active text-ink" : "text-muted hover:text-ink"
               }`}
             >
-              <WorkGlyph status={status} />
+              <WorkGlyph status={status} size={ICON.xs} />
               <span className="tabular-nums">{counts[status]}</span>
             </button>
           ) : null

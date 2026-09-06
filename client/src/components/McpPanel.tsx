@@ -27,18 +27,29 @@ import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
-import { StatusBadge, StatusDot } from "./StatusBadge.tsx";
+import { StatusBadge } from "./StatusBadge.tsx";
+import { StatusGlyph } from "./StatusGlyph.tsx";
+import { MCP_PHASE } from "../lib/domainPhase.ts";
 import { AlertTriangleIcon, EyeIcon, KeyIcon, PlugIcon, RefreshIcon, ShieldAlertIcon, ChevronDownIcon, UserCircleIcon, XIcon } from "./panelIcons.tsx";
 import { useCanRun } from "../lib/useCapability.ts";
 import type { McpServer, McpTool } from "../types.ts";
 import { Icon } from "../lib/icons/registry.ts";
 
 /** What each status means, in the words a user would use to decide what to do next. */
-const STATUS_COPY: Record<McpServer["status"], { state: "ok" | "error" | "pending"; label: string }> = {
-  connected: { state: "ok", label: "connected" },
-  unreachable: { state: "error", label: "unreachable" },
-  auth_required: { state: "pending", label: "needs a credential" },
-  error: { state: "error", label: "error" },
+/**
+ * The word beside the mark, and only the word — `MCP_PHASE` owns the shape and the colour.
+ *
+ * D2: `unreachable` AND `error` SHARE A GLYPH, deliberately. They are genuinely different — one is
+ * usually transient and keeps its tool list, the other means the server answered with something
+ * unusable — but that difference needs a sentence and not a shape, and an eighth phase for it would
+ * break the rule that a shape means the same thing in every tab. This table is the sentence, and it
+ * is why the label stays beside the mark rather than being folded into it.
+ */
+const STATUS_LABEL: Record<McpServer["status"], string> = {
+  connected: "connected",
+  unreachable: "unreachable",
+  auth_required: "needs a credential",
+  error: "error",
 };
 
 // --- one discovered tool -----------------------------------------------------
@@ -161,14 +172,20 @@ function ServerDetail({ server }: { server: McpServer }) {
   const discovering = useMcpStore((s) => Boolean(s.discovering[server.id]));
   const [token, setToken] = useState("");
   const [showToken, setShowToken] = useState(false);
-  const status = STATUS_COPY[server.status];
   const highCount = server.tools.filter((t) => t.impact === "high").length;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="shrink-0 px-4 py-2">
         <div className="flex items-center gap-2 flex-wrap">
-          <StatusBadge state={status.state} label={status.label} />
+          {/* GLYPH THEN WORD, which is I8: a card whose only "this is unreachable" signal is a rose
+              mark is unreadable to a colour-blind user and invisible in a greyscale screenshot —
+              and here the word is doing more than reinforcing, because two of the four states draw
+              the same shape on purpose. */}
+          <span className="inline-flex items-center gap-1.5">
+            <StatusGlyph phase={MCP_PHASE[server.status]} size={ICON.xs} title={STATUS_LABEL[server.status]} />
+            <span className="text-tiny text-muted">{STATUS_LABEL[server.status]}</span>
+          </span>
           {server.configured && (
             <StatusBadge state="neutral" variant="outline" label="credential stored" icon={KeyIcon}
               title={`Read from ${server.auth_env_key} in runtime/.env. Jaroku never displays it.`} />
@@ -373,11 +390,7 @@ export function McpPanel() {
             className="max-w-[220px] shrink-0"
             figure={s.tools.length}
             icon={
-              <StatusDot
-                state={STATUS_COPY[s.status].state}
-                size={7}
-                color={s.status === "connected" ? ACCENT.mcp : undefined}
-              />
+              <StatusGlyph phase={MCP_PHASE[s.status]} size={ICON.xs} title={STATUS_LABEL[s.status]} />
             }
           >
             <Truncate title={s.label}>{s.label}</Truncate>

@@ -19,6 +19,7 @@
 //   npm run test:status-glyph
 
 import { createElement } from "react";
+import { readFileSync, readdirSync } from "node:fs";
 
 import { markup } from "../lib/testRender.ts";
 import { PHASES, PHASE_COLOUR, PHASE_WORD, type Phase } from "../lib/statusPhase.ts";
@@ -153,6 +154,69 @@ console.log("\nevery mark carries its word");
   // server that is unreachable and one that errored share a shape and must not share a sentence.
   const custom = markup(createElement(StatusGlyph, { phase: "failed", title: "unreachable" }));
   check("a caller's own sentence wins", custom.includes('title="unreachable"'));
+}
+
+// --- 6. where the glyph goes, and where it deliberately does not --------------------------------
+
+console.log("\nthe four surfaces that take no glyph");
+{
+  // ACCEPTANCE 4, AS AN ABSENCE. Each of these four was argued out individually and each argument
+  // is one somebody could reasonably reverse while being helpful, which is exactly why it is a check
+  // rather than a comment:
+  //
+  //   THE INBOX. Law 1 says every item has exactly one owner-action, so every item is in the same
+  //   phase — `waiting`. A glyph repeated identically on every card carries zero information and
+  //   costs a column of width. Severity is already card SIZE plus the single rose left edge.
+  //
+  //   TRACE STEP ROWS. Steps have their own `STEP_TYPE` vocabulary and the trace already narrates
+  //   itself. Two mark systems on one row is worse than either.
+  //
+  //   THE HEALTH SPARKLINE. Twenty outcomes at that size are bars, not glyphs, and each bar is
+  //   already keyboard-reachable.
+  //
+  //   THE ACTIVITY FEED. Activity is a record of things that HAPPENED — every row is terminal by
+  //   definition, and the action verb already says which way it went.
+  const FORBIDDEN = [
+    "Inbox", "StepRow", "StepDetail", "TraceTimeline", "AgentSparkline", "ActivityFeed",
+  ];
+  const files = readdirSync("src", { recursive: true })
+    .filter((f): f is string => typeof f === "string" && /\.tsx?$/.test(f) && !f.includes(".test."));
+  const intruders = files.filter(
+    (f) => FORBIDDEN.some((n) => f.includes(n)) && /from "[^"]*StatusGlyph/.test(readFileSync(`src/${f}`, "utf8")),
+  );
+  check("no glyph on the four surfaces §2.4 excludes", intruders.length === 0, intruders.join(", "));
+  // AND THE SCAN ACTUALLY READ SOMETHING. A `FORBIDDEN` list that matched no file would make the
+  // check above pass for the wrong reason for ever.
+  check("...and those surfaces exist to be excluded",
+    FORBIDDEN.every((n) => files.some((f) => f.includes(n))),
+    FORBIDDEN.filter((n) => !files.some((f) => f.includes(n))).join(", "));
+}
+
+console.log("\n...and the nine it does go on");
+{
+  // THE POSITIVE DIRECTION, which the absence check above cannot give: a glyph removed from a
+  // surface leaves no trace anywhere except a screenshot nobody takes. Every surface the applied
+  // commit names, held to its own vocabulary module.
+  const AT: [string, string][] = [
+    ["components/Sidebar.tsx", "RUN_PHASE"],
+    ["components/ThreadGlyph.tsx", "THREAD_PHASE"],
+    ["components/WorkGlyph.tsx", "WORK_PHASE"],
+    ["components/DeployPanel.tsx", "DEPLOY_PHASE"],
+    ["components/GitHubSync.tsx", "syncPhase"],
+    ["components/McpPanel.tsx", "MCP_PHASE"],
+    ["components/EvalsPanel.tsx", "EVAL_PHASE"],
+    ["components/AgentCard.tsx", "agentPhase"],
+  ];
+  for (const [path, mapping] of AT) {
+    const text = readFileSync(`src/${path}`, "utf8");
+    check(`${path} draws the shared glyph`,
+      /from "[^"]*StatusGlyph/.test(text) && text.includes(mapping), mapping);
+  }
+  // THE COCKPIT'S TWO CALL SITES GO THROUGH `WorkGlyph`, which is the tab's own word attached to the
+  // shared shape — so they are checked for that rather than for a direct import.
+  for (const path of ["components/WorkList.tsx", "components/WorkDetail.tsx"]) {
+    check(`${path} still shows a status`, readFileSync(`src/${path}`, "utf8").includes("WorkGlyph"));
+  }
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

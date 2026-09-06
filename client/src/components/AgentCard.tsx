@@ -22,7 +22,9 @@ import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { AgentTagRow } from "./AgentTagRow.tsx";
 import { AgentSparkline } from "./AgentSparkline.tsx";
-import { ThumbnailMark, ArchiveIcon, ArchiveRestoreIcon } from "./agentIcons.tsx";
+import { ArchiveIcon, ArchiveRestoreIcon } from "./agentIcons.tsx";
+import { StatusGlyph, GLYPH_SIZE } from "./StatusGlyph.tsx";
+import { agentPhase } from "../lib/domainPhase.ts";
 import { AlertTriangleIcon, GitForkIcon, PencilIcon } from "./panelIcons.tsx";
 import { agentContextMarkdown } from "../lib/agentContext.ts";
 import { absTime, fmtCost, relTime } from "../lib/format.ts";
@@ -137,6 +139,20 @@ export interface AgentCardProps {
   onRestore: () => void;
 }
 
+/**
+ * The card's own word for the runtime axis, which is not the phase's word.
+ *
+ * §5.2's vocabulary is what the tag row already prints — "generating" and "deploying" are both
+ * `active` and both amber, and a tooltip that said "running" over a card that says "generating"
+ * would be the panel disagreeing with itself. The two states the runtime union cannot express get
+ * theirs from the same place `agentPhase` reads them: an archived card, and one that has never run.
+ */
+const RUNTIME_WORD = (a: Pick<AgentCardView, "runtime" | "archived_at" | "last_run_at">): string => {
+  if (a.archived_at) return "archived";
+  if (a.runtime === "idle") return a.last_run_at === null ? "never run" : "idle";
+  return a.runtime;
+};
+
 export function AgentCard({
   agent, density, focused, creatorInitial,
   onOpen, onNewThread, onFork, onRename, onExport, onArchive, onRestore,
@@ -144,7 +160,6 @@ export function AgentCard({
   const liveSpend = useAgentGridStore((s) => s.liveSpend);
   const [copied, setCopied] = useState(false);
   const compact = density === "compact";
-  const working = agent.runtime === "running" || agent.runtime === "generating" || agent.runtime === "deploying";
   const spend = spendFor(agent, liveSpend);
 
   const copyContext = async (): Promise<void> => {
@@ -187,19 +202,26 @@ export function AgentCard({
       <div className={`flex min-w-0 flex-1 flex-col ${compact ? "gap-1.5 p-2.5" : "gap-2 p-3"}`}>
         {/* Title, slug, and the actions that belong to the card rather than to the grid. */}
         <div className="flex min-w-0 items-start gap-2">
-          {/* THE MARK, IN THE TITLE ROW. It used to sit centred on a 104px full-bleed generated
-              gradient at the head of every card — about forty percent of the card's height, in
-              full colour, carrying no information: three cards on screen meant three landscape
-              gradients and three copies of the same centred logo. A palette whose rule is that
-              colour means something cannot spend its largest area on art.
+          {/* THE PHASE GLYPH, IN THE TITLE ROW, WHERE THE THUMBNAIL MARK USED TO BE — §2.3's "left
+              of the row's primary text, 20px on cards".
 
-              The mark itself is worth keeping. It says "this is an agent" in one glyph, and at
-              16px in the title row it does that without being the thing you look at first. */}
-          <span
-            className={`mt-px shrink-0 text-faint ${working ? "animate-stream-pulse motion-reduce:animate-none" : ""}`}
-            aria-hidden
-          >
-            <ThumbnailMark size={ICON.md} />
+              WHAT WAS THERE AND WHY IT IS NOT. A `ThumbnailMark`: the Jaroku wordmark, identical on
+              every card, which by §2.4's own argument carries zero information — "a glyph repeated
+              identically on every card carries zero information and costs a column of width". The
+              one thing it DID vary was a `stream-pulse` when the agent was running, generating or
+              deploying, which is a hand-rolled status indicator wearing an identity mark: the app's
+              in-flight motion, applied to a logo, on a card whose tag row already says "running".
+
+              So the slot now holds the runtime axis as a real mark. D1: the glyph answers "what is
+              it doing right now" — Running, Idle, Never run, and Archived from the lifecycle rung
+              above it — and Failing and Unverified stay in the tag row, where tag precedence already
+              ranks them. The two axes are separate on purpose; "Idle · Failing" is a real state and
+              a card that collapsed it would be lying about the agent.
+
+              The mark itself is not deleted: `AgentOverview` still draws it at `BRAND.screen`, which
+              is a screen's own mark rather than a per-row decoration. */}
+          <span className="mt-px">
+            <StatusGlyph phase={agentPhase(agent)} size={GLYPH_SIZE.card} title={RUNTIME_WORD(agent)} />
           </span>
           <div className="min-w-0 flex-1">
             <Truncate className={TYPE.title} title={agent.name}>

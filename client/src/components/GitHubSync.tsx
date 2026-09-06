@@ -25,12 +25,14 @@ import { ICON, STATUS, TYPE } from "../lib/tokens.ts";
 import { fmtDuration } from "../lib/format.ts";
 import { useGithubStore, type GithubProgress } from "../store/githubStore.ts";
 import type { GithubRefusal, GithubScanRefusal, GithubView } from "../types.ts";
+import { syncPhase, type SyncComparison } from "../lib/domainPhase.ts";
+import { StatusGlyph } from "./StatusGlyph.tsx";
 import { ActionRow, type ActionState } from "./ActionRow.tsx";
 import { SplitButton, type SplitAction } from "./SplitButton.tsx";
 import { outlineBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { Truncate } from "./Truncate.tsx";
 import {
-  AlertTriangleIcon, ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, CheckIcon, ExternalLinkIcon,
+  AlertTriangleIcon, ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, ExternalLinkIcon,
   RefreshIcon,
 } from "./panelIcons.tsx";
 import { CheckboxField } from "./Checkbox.tsx";
@@ -99,13 +101,22 @@ export function GitHubSyncRegion({ view }: { view: GithubView }) {
 function VerdictLine({ view }: { view: GithubView }) {
   const [squash, setSquash] = useState(false);
   const [forcing, setForcing] = useState(false);
-  const glyph = GLYPH[view.state];
-  const tone = TONE[view.state];
+  const phase = syncPhase(view.state);
 
   return (
     <div>
       <div className="flex items-start gap-2">
-        <span className={`mt-[2px] shrink-0 ${tone}`} aria-hidden>{glyph}</span>
+        {/* A PHASE OR A POSITION, never both — §3's whole point, expressed as the one branch in this
+            file that decides which vocabulary a state belongs to. */}
+        {phase ? (
+          <span className="mt-[2px]">
+            <StatusGlyph phase={phase} size={ICON.xs} title={SYNC_WORD[view.state as Exclude<GithubView["state"], SyncComparison>]} />
+          </span>
+        ) : (
+          <span className={`mt-[2px] shrink-0 ${POSITION_TONE[view.state as SyncComparison]}`} aria-hidden>
+            {POSITION_GLYPH[view.state as SyncComparison]}
+          </span>
+        )}
         <span className="min-w-0 flex-1 text-caption text-ink">
           <Truncate title={view.verdict}>{view.verdict}</Truncate>
           {/* The one detail the sentence cannot carry: WHICH file moved upstream. §3.5's mock puts
@@ -341,31 +352,42 @@ function ForcePushConfirm({
   );
 }
 
-const GLYPH: Record<GithubView["state"], React.ReactNode> = {
-  unlinked: null,
-  in_sync: <CheckIcon size={ICON.xs} />,
-  ahead: <ArrowUpIcon size={ICON.xs} />,
-  behind: <ArrowDownIcon size={ICON.xs} />,
-  diverged: <ArrowUpDownIcon size={ICON.xs} />,
-  broken: <AlertTriangleIcon size={ICON.xs} />,
-  syncing: <RefreshIcon size={ICON.xs} />,
-};
-
 /**
- * The status vocabulary, applied.
+ * The three marks that are POSITIONS rather than phases, and the only ones this file still draws.
+ *
+ * §3: a repository can be `in_sync` and healthy, or `ahead` and healthy. These answer "how does this
+ * compare to the remote", which is a different question from "what phase is this in", and forcing
+ * them into the status ramp would make the ramp lie. They keep exactly the arrows and exactly the
+ * tones they had — including `behind` rendering as `↓` rather than `↓0`, because it is approximate
+ * until somebody fetches and a number would claim a precision it does not have.
  *
  * DIVERGED WEARS THE ERROR TONE AND NOT AMBER, which is the one entry here worth arguing for.
  * Amber means running or in flight everywhere else in this app; diverged is a STOPPED state
  * waiting on a person, and painting it amber would read as progress happening on its own.
+ *
+ * The other four — `unlinked`, `syncing`, `in_sync` and `broken` — are phases and are drawn by
+ * `StatusGlyph` through `syncPhase`. `unlinked` gains a mark it never had: it rendered nothing at
+ * all, so the one row whose whole job is to say "am I okay?" started twelve pixels left of every
+ * other state of itself.
  */
-const TONE: Record<GithubView["state"], string> = {
-  unlinked: "text-faint",
-  in_sync: "text-ok",
+const POSITION_GLYPH: Record<SyncComparison, React.ReactNode> = {
+  ahead: <ArrowUpIcon size={ICON.xs} />,
+  behind: <ArrowDownIcon size={ICON.xs} />,
+  diverged: <ArrowUpDownIcon size={ICON.xs} />,
+};
+
+const POSITION_TONE: Record<SyncComparison, string> = {
   ahead: "text-muted",
   behind: "text-muted",
   diverged: "text-err",
-  broken: "text-err",
-  syncing: "text-run",
+};
+
+/** This tab's own word for each phase state. "not connected" is what somebody unlinked is looking for. */
+const SYNC_WORD: Record<Exclude<GithubView["state"], SyncComparison>, string> = {
+  unlinked: "not connected",
+  syncing: "syncing",
+  in_sync: "in sync",
+  broken: "broken",
 };
 
 // --- §2.4 / §3.6 the rail ---------------------------------------------------

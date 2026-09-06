@@ -1,85 +1,59 @@
-// §9's six marks, in one place, because two surfaces rendering five of them is how two collapse.
+// The Cockpit's six statuses, in the product's one status vocabulary.
 //
-// SIX WORK STATUSES, SIX MARKS. §9 states the rule and names the file it comes from: "The rule is
-// written in `Sidebar.tsx` between `StatusGlyph` and `AgentDot`, and the failure it records — two
-// of four live states rendering identically, hoverable only — is exactly what you will reproduce if
-// you map six statuses onto three colours." That comment is the specification for this file. What
-// it records is that `deploying` and `running` were both a pulsing amber dot and `deployed` and
-// `ran` were both a static green one, so half the live states were distinguishable only by hovering
-// for a tooltip.
+// THIS FILE USED TO DRAW SIX MARKS OF ITS OWN — a clock, a spinning loader, a pulsing pause, a
+// tick, a cross and a dash, in four colours — and every one of them was correct for this tab and
+// unrelated to the six the Threads list drew, the four the deploy panel drew and the four the MCP
+// panel drew. Six vocabularies is what a person has to learn six times, and what nobody does learn:
+// they hover.
 //
-// §9's TABLE, WHICH THIS FILE IS:
+// SO THE MARKS ARE GONE AND THE MAPPING STAYS. `WORK_PHASE` says which phase each status is in and
+// `StatusGlyph` draws it, which leaves this file holding the one thing that IS local to the
+// Cockpit: its own word for each status. "Cancelled" is the Cockpit's word and "stopped" is the
+// phase's, and a tooltip on a job somebody cancelled should say the first.
 //
-//   queued      STATUS.neutral   a static mark distinct from succeeded's   none
-//   running     STATUS.pending   the loader                                spin
-//   waiting     STATUS.pending   a distinct mark — not the loader          pulse
-//   succeeded   STATUS.ok        the tick                                  none
-//   failed      STATUS.error     the cross                                 none
-//   cancelled   STATUS.neutral   a distinct mark                           none
+// WHAT CHANGED ON SCREEN, said out loud because it is a deliberate reversal of §9's own reasoning:
 //
-// AMBER MEANS IN FLIGHT, AND ONLY IN FLIGHT — and this is where this build changed its mind, so it
-// is worth writing down which way and why. `waiting` was `STATUS.warn`, the blue, on the argument
-// that amber means RUNNING and a waiting job has stopped. §9 answers that directly: "`running` and
-// `waiting` share amber because both are genuinely in flight — one on the machine, one on a person
-// — and they are separated by mark and by motion, never by inventing a seventh colour." The
-// distinction the old reading protected is real and is kept: the loader turns, the pause pulses,
-// and the two are a different shape before they are a different anything else.
+//   `succeeded` IS NO LONGER GREEN. §9 gave it `STATUS.ok`. Under the shared vocabulary a finished
+//   job is `done` and `done` is neutral — a run that completed is not an achievement, it is a row
+//   with nothing outstanding in it, and a column of green ticks is a column where the two rows that
+//   need somebody are the hardest things to find.
 //
-// `tokens.ts` SPENDS A PAGE DEFENDING THAT AMBER AND COUNTS FORTY-EIGHT CALL SITES, A NODE GLOW AND
-// A STREAM PULSE ON ONE SIDE OF THE ARGUMENT. A `warn` blue on a job that is genuinely mid-flight
-// would be the one place in the product where the in-flight colour is not the in-flight colour.
+//   `waiting` IS NO LONGER AMBER. §9's argument was that `running` and `waiting` "are both
+//   genuinely in flight — one on the machine, one on a person". That is true and it is a good
+//   argument for one tab; it is a bad one for a product, because the Cockpit is not the only place
+//   a person is being waited on, and amber that means two things means neither. `waiting` is its
+//   own phase with its own shape — ring plus centre dot — and the separation §9 wanted is now
+//   geometry rather than motion.
 //
-// MOTION MEANS "THIS IS CHANGING RIGHT NOW" AND NOTHING ELSE — §9. Two of six move. `stream-pulse`
-// rather than `animate-pulse`, which is what `StatusDot` already reaches for, and everything
-// honours `motion-reduce` because `StatusDot` puts `motion-reduce:animate-none` on both.
+//   `running` NO LONGER SPINS. A list of forty running jobs with forty spinners is a seizure risk
+//   and a paint-cost problem. The arc pulses instead, in `stream-pulse`, and drops under
+//   `prefers-reduced-motion`.
 //
-// COLOUR IS NEVER THE ONLY SIGNAL — §9 again, and `StatusDot`'s `title` is what satisfies it. Every
-// mark carries the status's own word from `cockpitCopy`, which is also what §12 requires: "Every
-// status mark has a `title`, as `StatusGlyph` already does."
+// WHAT DID NOT CHANGE is the property §24 asks this file to hold and `test:work-glyphs` still
+// asserts: six statuses, six distinct marks, and a suite that fails if two collapse onto one.
 //
 //   npm run test:work-glyphs
 
 import { STATUS_WORD } from "../lib/cockpitCopy.ts";
+import { WORK_PHASE } from "../lib/domainPhase.ts";
 import { ICON } from "../lib/tokens.ts";
 import type { WorkStatus } from "../types.ts";
-import { StatusDot } from "./StatusBadge.tsx";
-import { CheckIcon, ClockIcon, LoaderIcon, MinusIcon, PauseIcon, XIcon } from "./panelIcons.tsx";
+import { StatusGlyph } from "./StatusGlyph.tsx";
 
 /**
- * One status, as a mark.
+ * One work status, as the phase it is in.
  *
- * EXHAUSTIVE BY TYPE, so a seventh status is a compile error rather than a blank space where a
- * glyph should be. That is the same guard `WorkGlyph` had when it lived inside `WorkList`, and the
- * reason to keep it while moving the function out is that the move is what makes a seventh status
- * cheap to add and therefore likely.
- *
- * THE TWO THAT ARE EASY TO GET WRONG, and each is a decision:
- *
- *   `waiting` IS A PAUSE, NOT A SPINNER. The graph has STOPPED — a person has to answer something —
- *   and a turning arc would say the opposite of what is true. It pulses instead, which says "this
- *   is in flight" without claiming the machine is doing anything.
- *
- *   `cancelled` IS A DASH, NOT A CROSS. Nothing failed; somebody pressed stop. A cross would file
- *   an ordinary operational decision under "something went wrong", which is the same conflation
- *   `stopped_reporting` exists to avoid one field over.
+ * EXHAUSTIVE BY TYPE STILL, and now in `domainPhase.ts` rather than in a switch here: `WORK_PHASE`
+ * is a `Record<WorkStatus, Phase>`, so a seventh status is a compile error in the map rather than a
+ * blank space where a glyph should be. That is the same guard this file had, moved to where every
+ * other domain's is, which is what stops the Cockpit being the tab whose vocabulary drifts.
  */
-export function WorkGlyph({ status, size = ICON.xs }: { status: WorkStatus; size?: number }) {
-  const title = STATUS_WORD[status];
-  switch (status) {
-    case "queued":
-      // NOT AMBER. It is not in flight — nothing has picked it up — and a clock is the mark for a
-      // thing that is waiting for its turn. Distinct from `succeeded`'s tick, which is §9's own
-      // requirement for this row of the table and the pair most likely to be collapsed.
-      return <StatusDot state="neutral" icon={ClockIcon} size={size} title={title} />;
-    case "running":
-      return <StatusDot state="pending" icon={LoaderIcon} spin size={size} title={title} />;
-    case "waiting":
-      return <StatusDot state="pending" icon={PauseIcon} pulse size={size} title={title} />;
-    case "succeeded":
-      return <StatusDot state="ok" icon={CheckIcon} size={size} title={title} />;
-    case "failed":
-      return <StatusDot state="error" icon={XIcon} size={size} title={title} />;
-    case "cancelled":
-      return <StatusDot state="neutral" icon={MinusIcon} size={size} title={title} />;
-  }
+/**
+ * §2.3's dense-row size, and it is a step up from what this tab drew before. `ICON.xs` was right
+ * for a dot with an icon inside it; the phase ramp is seven geometries told apart by a dash, a
+ * quarter arc and a 2.6-unit centre dot, and at 12px the dashed ring and the hollow one are one
+ * mark. The filter strip passes `xs` explicitly, because a chip's glyph rides on a line of text.
+ */
+export function WorkGlyph({ status, size = ICON.md }: { status: WorkStatus; size?: number }) {
+  return <StatusGlyph phase={WORK_PHASE[status]} size={size} title={STATUS_WORD[status]} />;
 }

@@ -73,6 +73,22 @@ const CHECK = "M6.35 13.05L10.4 17.1L17.65 9.85L15.95 8.15L10.4 13.7L8.05 11.35Z
  * vertical pair would read as a pause button — which is a CONTROL, and this is a state. */
 const BAR = "M6.6 10.85H17.4V13.15H6.6Z";
 
+/**
+ * The two registers §2.3 gives this mark, and there is no third.
+ *
+ * A LADDER OF ITS OWN, off `ICON` where it can be, for the same reason `BRAND` is one: this glyph
+ * appears in exactly two places — a dense row and a card — and the card step is 20, which is not on
+ * the icon ladder because the icon ladder tops out at a standalone control. Naming the two is what
+ * stops a call site writing `size={20}` beside another writing `size={18}` because it looked right
+ * on the card it was being written against.
+ */
+export const GLYPH_SIZE = {
+  /** In a list. The whole value of the mark is scanning one column down forty of them. */
+  row: ICON.md,
+  /** On a card, where the row's 16 reads as an afterthought beside a title. */
+  card: 20,
+} as const;
+
 export function StatusGlyph({
   phase,
   size = ICON.md,
