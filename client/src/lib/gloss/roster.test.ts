@@ -101,6 +101,28 @@ console.log("\nevery entry is a complete, humanoid recipe");
   check("the array is sorted by id",
     JSON.stringify([...ids].sort()) === JSON.stringify(ids), ids.join(", "));
   check("the by-id map covers the array", ROSTER_BY_ID.size === GLOSS_ROSTER.length);
+
+  // §3'S SIZE BAND. Fewer than about twenty and a mid-size workspace runs out of distinct avatars;
+  // many more and the picker becomes a wall to scroll. Asserted rather than left to judgement,
+  // because the way this list goes wrong is one entry at a time.
+  check("the roster is in §3's 24–40 band", GLOSS_ROSTER.length >= 24 && GLOSS_ROSTER.length <= 40,
+    `${GLOSS_ROSTER.length}`);
+
+  // BIPED ONLY, which is a CURATION rule rather than a type rule and so has to live here. The union
+  // keeps both stances because both exist upstream; the roster uses one, and a head-only entry
+  // arriving later would be a mask in a grid of workers.
+  const headless = GLOSS_ROSTER.filter((r) => r.stance !== "biped").map((r) => r.id);
+  check("every entry has a body under the head", headless.length === 0, headless.join(", "));
+
+  // §3.4'S MATERIAL VARIETY, stated as coverage: material changes the read more than palette does at
+  // small sizes, so a roster that reached for three finishes would be a roster of one character in
+  // twenty-eight haircuts.
+  const finishes = new Set(GLOSS_ROSTER.map((r) => r.material));
+  check("every material appears at least once", finishes.size === MATERIAL_IDS.length,
+    `${finishes.size}/${MATERIAL_IDS.length}`);
+
+  // AND BOTH BODY FORMS, for the same reason one step up: silhouette separates better than colour.
+  check("both body forms appear", new Set(GLOSS_ROSTER.map((r) => r.body)).size === 2);
 }
 
 // --- 3. no agent comes out permanently orange --------------------------------------------------
@@ -118,7 +140,22 @@ console.log("\nnothing in the roster reads as running");
     if (isAmberish(body)) orange.push(`${r.id} → ${body}`);
   }
   check("no entry's resolved body colour reads amber", orange.length === 0, orange.join(", "));
+
+  // AND ONE EXCLUSION NO RULE REFUSED. `ginger` is #BC5A2C — hue 19, saturation 0.62, lightness
+  // 0.45 — and `isAmberish` says so, but hair is a minority area and applying the palette rule to
+  // it would also throw out `blonde` (#DFC072, light enough that nobody reads it as a warning) and
+  // with it a whole silhouette family. So this is a LOOKED-AT exclusion, written down rather than
+  // derived: on the 96px sheet a ginger-haired character read orange and a blonde one did not.
+  // The same kind of call as the five emoji withdrawn by hand, recorded the same way so that adding
+  // one back is a decision somebody makes on purpose.
+  const ginger = GLOSS_ROSTER.filter(
+    (r) => (ensureGParams(toGlossRecipe(r)).parts as HairParams).hair.params.color === "ginger",
+  ).map((r) => r.id);
+  check("no entry has ginger hair", ginger.length === 0, ginger.join(", "));
 }
+
+/** The one corner of `parts` this suite reads. The bag is otherwise nobody's business above the rig. */
+type HairParams = { hair: { params: { color: string } } };
 
 // --- 4. nothing generates a recipe at runtime --------------------------------------------------
 
