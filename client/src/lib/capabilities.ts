@@ -136,6 +136,8 @@ export const COMMAND_CAPABILITY: Record<string, string> = {
   archiveAgent: "agent:write",
   restoreAgent: "agent:write",
   renameAgent: "agent:write",
+  // §8.2: the EXISTING capability. Re-marking an agent is a smaller act than renaming one.
+  setAgentEmoji: "agent:write",
   setAgentTools: "agent:write",
   forkAgent: "agent:write",
   restoreAgentVersion: "agent:write",
@@ -518,6 +520,7 @@ export const COMMAND_AGENT_CAPABILITY: Record<string, AgentCapability> = {
   archiveAgent: "edit",
   restoreAgent: "edit",
   renameAgent: "edit",
+  setAgentEmoji: "edit",
   setAgentTools: "edit",
   restoreAgentVersion: "edit",
 

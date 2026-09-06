@@ -165,6 +165,18 @@ export type ListAgentsCommand = { cmd: "listAgents" };
 export type ArchiveAgentCommand = { cmd: "archiveAgent"; agentId: string };
 export type RestoreAgentCommand = { cmd: "restoreAgent"; agentId: string };
 export type RenameAgentCommand = { cmd: "renameAgent"; agentId: string; name: string };
+/**
+ * The agent's identity mark, changed by whoever may already rename it.
+ *
+ * ON THE EXISTING AGENT COMMAND CHANNEL, UNDER THE EXISTING CAPABILITY — §8.2 asks for exactly
+ * that and it is the right shape: this writes one column on `agents`, workspace-scoped like every
+ * other column on that table, and somebody who may rename an agent may certainly re-mark it. A new
+ * capability would be a seventh row in a matrix whose whole value is that a person can hold it in
+ * their head.
+ *
+ * `agentId` IS THE SLUG, like every other agent-addressed command on this socket.
+ */
+export type SetAgentEmojiCommand = { cmd: "setAgentEmoji"; agentId: string; emoji: string };
 
 /**
  * Duplicate an agent: its connectors and its current version, and none of its MCP grants (§7.5).
@@ -226,11 +238,12 @@ export type AgentCommand =
   | RenameAgentCommand
   | ForkAgentCommand
   | RestoreAgentVersionCommand
-  | SetAgentToolsCommand;
+  | SetAgentToolsCommand
+  | SetAgentEmojiCommand;
 
 const AGENT_COMMANDS = new Set([
   "archiveAgent", "restoreAgent", "renameAgent", "forkAgent", "restoreAgentVersion",
-  "setAgentTools",
+  "setAgentTools", "setAgentEmoji",
 ]);
 
 /**
@@ -2827,6 +2840,8 @@ export interface AgentCardView {
    * because nothing about the screen looks wrong.
    */
   forked_from: string | null;
+  /** The agent's identity mark. Null only for a row written before migration 067's backfill. */
+  emoji: string | null;
 
   current_version: number;
   /** What made the live version. Null when nothing has been published — see `agentHealth`. */
@@ -3141,6 +3156,7 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   // an answer that had already come and gone somewhere else. The channel has an error shape for
   // exactly this, the same reason the thread and github commands are classified here.
   archiveAgent: "agents", restoreAgent: "agents", renameAgent: "agents", setAgentTools: "agents",
+  setAgentEmoji: "agents",
   forkAgent: "agents", restoreAgentVersion: "agents",
   // §4 and §6's three reads. On `agents` beside `listAgents` rather than on a channel of their own
   // — see ListAgentGridCommand for why this is not a new channel.

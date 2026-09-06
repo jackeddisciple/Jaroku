@@ -394,6 +394,15 @@ jobs:
           # one: the manifest read costs one statement for the whole workspace, or the Agents grid
           # gains a per-agent query that is invisible in review.
           npm run test:agent-files
+          # §8'S ASSIGNMENT, WHICH LOOKS OBVIOUSLY RIGHT AND IS NOT. A hash into a sixty-four entry
+          # palette is deterministic, testable and stable — and with twenty agents the birthday
+          # paradox puts a duplicate at better than ninety-five percent. Two agents both showing the
+          # tractor defeats the only purpose the feature has, so the hash gives a starting index and
+          # the assignment probes forward, which is why the value is written at creation rather than
+          # derived at read. Beside it D7's palette rules, which are what makes the feature safe on a
+          # Linux box with no colour-emoji font, and the drift check between the two copies of the
+          # list — the client cannot import from the server, so it is written twice on purpose.
+          npm run test:agent-emoji
           # `test:edit-versions` IS DELIBERATELY NOT HERE, and it is the one suite in this file's
           # history whose absence is a reason rather than an oversight. It replays recorded model
           # output, which needs no network — but an apply VALIDATES the generated project, and

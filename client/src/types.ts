@@ -1140,6 +1140,14 @@ export interface AgentCardView {
   hand_written: boolean;
   /** The SLUG this one was copied from, or null. What §5.4's `Forked` tag renders. */
   forked_from: string | null;
+  /**
+   * The agent's identity mark — one emoji, assigned at creation and overwritable by the user.
+   *
+   * IDENTITY, NOT STATE. It never changes because of something the agent did, and it is the same
+   * mark on every surface. Null only for a row written before migration 067's backfill, which is
+   * why every render site treats it as optional rather than assuming.
+   */
+  emoji: string | null;
 
   current_version: number;
   version_source: "generation" | "edit" | "import" | "deploy" | null;
@@ -1935,6 +1943,8 @@ export type ClientCommand =
   | { cmd: "archiveAgent"; agentId: string }
   | { cmd: "restoreAgent"; agentId: string }
   | { cmd: "renameAgent"; agentId: string; name: string }
+  /** §8.5's picker. On the existing agent channel under the existing capability. */
+  | { cmd: "setAgentEmoji"; agentId: string; emoji: string }
   /** §7.5: the WHOLE grant set for an agent that already exists. See sendSetAgentTools. */
   | { cmd: "setAgentTools"; agentId: string; mcpTools: string[] }
   /**

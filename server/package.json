@@ -25,6 +25,7 @@
     "test:thread-binding": "tsx src/threadBinding.test.ts",
     "test:agent-lifecycle": "tsx src/agentLifecycle.test.ts",
     "test:agent-health": "tsx src/agentHealth.test.ts",
+    "test:agent-emoji": "tsx src/agents/emoji.test.ts",
     "test:agent-grid": "tsx src/agentGrid.test.ts",
     "test:agent-adversarial": "tsx src/agentAdversarial.test.ts",
     "test:thread-title": "tsx src/threadTitle.test.ts",

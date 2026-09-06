@@ -33,6 +33,7 @@ const card = (over: Partial<AgentCardView> & { slug: string }): AgentCardView =>
   archived_at: null,
   hand_written: false,
   forked_from: null,
+  emoji: "🐢",
   current_version: 3,
   version_source: "edit",
   creation_cost: null,
