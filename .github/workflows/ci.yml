@@ -1574,6 +1574,19 @@ jobs:
           # through the runtime's own dealer, because amber means running everywhere else in the
           # product and a permanently-orange agent is a colour lying about state.
           npm run test:gloss-roster
+          # I1, AND THE ONE INVARIANT THAT CANNOT BE CAUGHT BY LOOKING. Browsers cap live WebGL
+          # contexts at roughly eight to sixteen and silently kill the OLDEST past that — no
+          # exception, no console message, just a canvas that stops painting. A per-card build is
+          # therefore perfect on the four-agent workspace a developer has open and produces cards
+          # that go blank at random on a customer's twenty-agent one. Half this suite counts what
+          # the stage constructs; the other half SCANS THE CLIENT, because the counter proves the
+          # stage behaves and says nothing about the thumbnail renderer somebody adds next year.
+          #
+          # It also watches the animation reach the meshes. A stage that builds characters and never
+          # animates them renders a perfectly correct STILL grid, which reads as a design decision
+          # rather than as a bug — so gaze, the head following it, breath and sway are each asserted
+          # to move, over a window long enough that a stochastic gaze cannot make it flaky.
+          npm run test:gloss-stage
           npm run test:icon-generated
           # AND THE SAME PROPERTY THE OTHER WAY ROUND, which is not redundant: the suite above
           # catches a mark somebody edited by hand, and this catches a MANIFEST edit committed

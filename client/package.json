@@ -103,7 +103,8 @@
     "test:icon-registry": "tsx src/lib/icons/registry.test.ts",
     "test:icon-a11y": "tsx src/lib/icons/a11y.test.ts",
     "test:gloss-vendor": "tsx src/lib/gloss/vendor.test.ts",
-    "test:gloss-roster": "tsx src/lib/gloss/roster.test.ts"
+    "test:gloss-roster": "tsx src/lib/gloss/roster.test.ts",
+    "test:gloss-stage": "tsx src/lib/gloss/stage.test.ts"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",
