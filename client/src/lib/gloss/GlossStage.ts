@@ -157,6 +157,7 @@ export class GlossStage {
   private readonly slots = new Map<string, Slot>();
   /** Mounted but not yet built, in mount order — which is view order, because React mounts in it. */
   private queue: Slot[] = [];
+  private readonly builtListeners = new Set<(key: string) => void>();
   private width = 0;
   private height = 0;
   private disposed = false;
@@ -267,6 +268,7 @@ export class GlossStage {
     slot.built = null;
     slot.holder = null;
     slot.life = null;
+    for (const listener of this.builtListeners) listener(slot.key);
   }
 
   /**
@@ -349,6 +351,27 @@ export class GlossStage {
     } while (this.queue.length > 0 && now() < until);
   }
 
+  /** Does this slot have a character on screen right now? The card's placeholder asks. */
+  hasCharacter(key: string): boolean {
+    return this.slots.get(key)?.built != null;
+  }
+
+  /**
+   * Be told when a character lands.
+   *
+   * BECAUSE THE CARD DRAWS A PLACEHOLDER UNTIL IT DOES. §4.2 asks for "a neutral placeholder until
+   * its character lands", and the placeholder has to come OFF at exactly the right moment: left up,
+   * it shows through around a character that does not fill its box; taken down early, the card is
+   * empty for the few hundred milliseconds the queue takes to reach it.
+   *
+   * A callback rather than a promise per slot, because a slot can be rebuilt — a card whose agent
+   * changes avatar — and a promise resolves once.
+   */
+  onBuilt(listener: (key: string) => void): () => void {
+    this.builtListeners.add(listener);
+    return () => { this.builtListeners.delete(listener); };
+  }
+
   private build(slot: Slot): void {
     const entry = ROSTER_BY_ID.get(slot.avatarId);
     // AN UNKNOWN ID DRAWS NOTHING, rather than falling back to a default character. A wrong face is
@@ -373,6 +396,7 @@ export class GlossStage {
     slot.holder = holder;
     slot.scale = scale;
     slot.life = createGlossFace(built, { gaze: true });
+    for (const listener of this.builtListeners) listener(slot.key);
   }
 
   /**
@@ -469,6 +493,7 @@ export class GlossStage {
     for (const slot of this.slots.values()) this.release(slot);
     this.slots.clear();
     this.queue = [];
+    this.builtListeners.clear();
     this.renderer.dispose();
     this.disposed = true;
   }
