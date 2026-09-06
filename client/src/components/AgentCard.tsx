@@ -29,6 +29,7 @@ import { agentPhase } from "../lib/domainPhase.ts";
 import { stateBorder } from "../lib/stateBorder.ts";
 import { AlertTriangleIcon, GitForkIcon, PencilIcon } from "./panelIcons.tsx";
 import { agentContextMarkdown } from "../lib/agentContext.ts";
+import { showsCategory } from "../lib/agentCategories.ts";
 import { absTime, fmtCost } from "../lib/format.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { ICON, STATUS, TYPE } from "../lib/tokens.ts";
@@ -276,10 +277,30 @@ export function AgentCard({
                 that it is an identifier and the prose/code split tells a reader which of the two
                 lines they can type. typography.pdf §04 names "agent IDs/slugs" in its Sans list
                 explicitly, so what separates the two lines now is size and colour, which is what
-                §03 says hierarchy is supposed to come from anyway. */}
-            <Truncate className="mt-0.5 text-tiny text-faint" title={agent.slug}>
-              {agent.slug}
-            </Truncate>
+                §03 says hierarchy is supposed to come from anyway.
+
+                THE CATEGORY SHARES THE SLUG'S LINE, which is the sidebar's arrangement one surface
+                over: the name is the identity and never gives way, and what an agent is FOR sits
+                under it with the identifier. Two lines rather than three keeps the card's hierarchy
+                at avatar, name, then everything else — and the pair reads as one subtitle rather
+                than as two competing facts.
+
+                `Uncategorized` IS ABSENT rather than shown, on §7's rule: an agent nobody has
+                categorised should read as a name and a slug, not as a name, a slug and a
+                placeholder repeated down every card in the grid. */}
+            <div className="mt-0.5 flex min-w-0 items-baseline gap-1.5">
+              <Truncate className="min-w-0 text-tiny text-faint" title={agent.slug}>
+                {agent.slug}
+              </Truncate>
+              {showsCategory(agent.category) && (
+                <>
+                  <span className="shrink-0 text-tiny text-faint" aria-hidden>·</span>
+                  <Truncate className="min-w-0 shrink-0 text-tiny text-muted" title={agent.category}>
+                    {agent.category}
+                  </Truncate>
+                </>
+              )}
+            </div>
           </div>
           {/* THE ACTIONS, AS ONE CLUSTER IN THE TOP RIGHT, and deliberately the quietest thing in
               this row. They were three separately-spaced glyphs at full faint weight competing with

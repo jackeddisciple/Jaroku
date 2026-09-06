@@ -33,8 +33,15 @@ import { useUiStore } from "../store/uiStore.ts";
 export type FirstAgentChoice =
   /** §5.1's default: the two-tool agent that ships, and runs with no provider key at all. */
   | { kind: "sample" }
-  /** The normal generation flow, on its first turn. */
-  | { kind: "describe"; prompt: string };
+  /**
+   * The normal generation flow, on its first turn.
+   *
+   * `name` IS THE USER'S, TYPED HERE. Every agent has one and this is the first place somebody can
+   * give it — "Stacey", "John", "Claire". Optional, because generation already takes a name from
+   * the description when none is given and a required field on an onboarding screen is a wall in
+   * front of the one moment this flow exists for.
+   */
+  | { kind: "describe"; prompt: string; name?: string; category?: string };
 
 /**
  * The message a closed socket produces.
@@ -63,8 +70,14 @@ export interface FirstAgentDeps {
   /** The agents this workspace has, for the sample branch to choose from. */
   agents: () => { agent_id: string }[];
   select: (agentId: string) => void;
-  /** Ask for a plan. Returns whether the frame actually went — see the header. */
-  planAgent: (prompt: string) => boolean;
+  /**
+   * Ask for a plan. Returns whether the frame actually went — see the header.
+   *
+   * `name` AND `category` RIDE IT because §6's three inputs travel through the gate together: the
+   * agent this produces is the first one somebody sees, and it should already be called what they
+   * called it rather than whatever the model named it.
+   */
+  planAgent: (prompt: string, identity?: { name?: string; category?: string }) => boolean;
   /** Move the progressive reveal along. */
   reveal: () => void;
 }
@@ -73,7 +86,9 @@ const REAL: FirstAgentDeps = {
   connected: () => useTraceStore.getState().connection === "open",
   agents: () => useBuildStore.getState().agents,
   select: (agentId) => useBuildStore.getState().selectAgent(agentId),
-  planAgent: (prompt) => sendPlanAgent(prompt, []),
+  planAgent: (prompt, identity) =>
+    sendPlanAgent(prompt, [], identity?.name, undefined, undefined, undefined,
+      identity?.category ? { category: identity.category } : undefined),
   reveal: () => useUiStore.getState().setOnboardingStep("run"),
 };
 
@@ -121,7 +136,10 @@ export async function startFirstAgent(
   // NO CONNECTORS AND NO MCP TOOLS. A first agent is described in one sentence by somebody who has
   // not seen the connectors panel yet; offering none is the honest starting point, and everything
   // after this turn is the ordinary product where they can add some.
-  const sent = deps.planAgent(prompt);
+  // AND THE NAME THE USER TYPED, which is §6's first input arriving on the first turn. Generation
+  // takes the name from the APPROVED PLAN rather than from this command, so it has to be on the
+  // plan — sending it later would be sending it to something that no longer decides.
+  const sent = deps.planAgent(prompt, { name: choice.name?.trim() || undefined, category: choice.category });
   // See the header. This is the one `send` in the client whose false is acted on.
   if (!sent) throw new Error(NOT_CONNECTED);
   deps.reveal();

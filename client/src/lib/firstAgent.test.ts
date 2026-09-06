@@ -156,5 +156,40 @@ console.log("\nwhat a closed socket does, which is the failure worth having a su
   check("...though the attempt was made, unlike the guarded case", r.planned.length === 1);
 }
 
+console.log("\nthe name the user typed reaches the plan");
+{
+  // EVERY AGENT HAS A NAME AND THIS IS THE FIRST PLACE SOMEBODY GIVES IT ONE. It has to ride the
+  // PLAN rather than the generate command, because generation builds what was approved and takes
+  // the name off the record — a name sent later is a name sent to something that no longer decides.
+  type Sent = { prompt: string; identity?: { name?: string; category?: string } };
+  let seen: Sent | null = null;
+  const deps = {
+    connected: () => true,
+    agents: () => [],
+    select: () => undefined,
+    planAgent: (prompt: string, identity?: { name?: string; category?: string }) => {
+      seen = { prompt, identity };
+      return true;
+    },
+    reveal: () => undefined,
+  };
+  await startFirstAgent({ kind: "describe", prompt: "chase invoices", name: "  Stacey  " }, deps);
+  const first = seen as Sent | null;
+  check("the name is carried, trimmed", first?.identity?.name === "Stacey");
+  check("...on the plan, with the brief", first?.prompt === "chase invoices");
+
+  // AND IT IS OPTIONAL. Generation already takes a name from the description when none is given,
+  // and a required field on the one screen this flow exists for is a wall in front of the moment it
+  // is trying to produce. Empty means absent rather than an empty string.
+  seen = null;
+  await startFirstAgent({ kind: "describe", prompt: "chase invoices", name: "   " }, deps);
+  const blank = seen as Sent | null;
+  check("blank is absent rather than empty", blank?.identity?.name === undefined);
+  seen = null;
+  await startFirstAgent({ kind: "describe", prompt: "chase invoices" }, deps);
+  const none = seen as Sent | null;
+  check("...and so is a name nobody typed", none?.identity?.name === undefined);
+}
+
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
 (globalThis as { process?: { exit(code: number): void } }).process?.exit(failures === 0 ? 0 : 1);

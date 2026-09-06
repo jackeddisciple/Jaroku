@@ -62,6 +62,16 @@ export function AgentStep() {
   // that would fight somebody who had already chosen.
   const choice: Choice = hasSample ? picked : "describe";
   const [description, setDescription] = useState("");
+  /**
+   * §6'S FIRST INPUT, ON THE FIRST SCREEN AN AGENT IS MADE FROM. Every agent has a name and this is
+   * where somebody gives it one — "Stacey", "John", "Claire". Free text, no preset list, no
+   * uniqueness constraint beyond whatever exists today.
+   *
+   * OPTIONAL, and deliberately so. Generation already takes a name from the description when none is
+   * given, and a required field on the one screen this flow exists for is a wall in front of the
+   * moment it is trying to produce.
+   */
+  const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -72,7 +82,9 @@ export function AgentStep() {
     setError(null);
     try {
       await startFirstAgent(
-        choice === "sample" ? { kind: "sample" } : { kind: "describe", prompt: description.trim() },
+        choice === "sample"
+          ? { kind: "sample" }
+          : { kind: "describe", prompt: description.trim(), name: name.trim() || undefined },
       );
       markAgentStarted();
       advance();
@@ -120,8 +132,24 @@ export function AgentStep() {
           </fieldset>
         )}
 
-        {/* INLINE RATHER THAN A SECOND SCREEN, per §5.1's own drawing. The textarea appears under
-            the option it belongs to, so choosing it and filling it in is one movement. */}
+        {/* INLINE RATHER THAN A SECOND SCREEN, per §5.1's own drawing. The name and the textarea
+            appear under the option they belong to, so choosing it and filling it in is one movement.
+
+            THE NAME COMES FIRST, which is §6's order: a name is what you know before you have
+            finished describing the thing. It is one line above a four-line box, so it reads as a
+            label on what follows rather than as a second question. */}
+        {choice === "describe" && (
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Name it — Stacey, John, Claire…"
+            aria-label="Name your agent"
+            disabled={busy}
+            className="w-full rounded-control border border-edge bg-void px-3.5 py-2.5 text-label
+              text-ink outline-none transition-colors duration-fast placeholder:text-faint
+              focus-visible:shadow-focusring focus:border-chrome disabled:opacity-50"
+          />
+        )}
         {choice === "describe" && (
           <textarea
             value={description}
