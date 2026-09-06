@@ -24,6 +24,7 @@ import { useMemo, useState } from "react";
 import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { EmptyState } from "./EmptyState.tsx";
+import { SectionHeader } from "./SectionHeader.tsx";
 import { quietBtn, secondaryBtn } from "./buttons.ts";
 import { AlertTriangleIcon, UserPlusIcon } from "./panelIcons.tsx";
 import { avatarColor, avatarLetter } from "../lib/memberList.ts";
@@ -258,6 +259,10 @@ export function AccessPeople({
         />
       ) : (
         <div className="space-y-0.5">
+          {/* THE ROWS THE SEARCH LEFT, deliberately — this list is filtered in the browser out of a
+              membership payload that arrives whole, so the count agrees with what is under it
+              rather than with the workspace. §4.3's Agents rule, one panel over. */}
+          <SectionHeader name="People" count={rows.length} className="pb-1" />
           {rows.map((p) => (
             <PersonRow
               key={p.user_id}

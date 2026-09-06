@@ -52,6 +52,7 @@ import { useSessionStore } from "../store/sessionStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { InboxCard } from "./InboxCard.tsx";
+import { SectionHeader } from "./SectionHeader.tsx";
 import { CockpitPointer } from "./CockpitPointer.tsx";
 import { InboxTray } from "./InboxTray.tsx";
 import { useInboxDrag } from "./useInboxDrag.ts";
@@ -251,11 +252,16 @@ function Column({
         dimmed ? "opacity-40" : "opacity-100"
       }`}
     >
-      <div className="flex shrink-0 items-center gap-2 px-1 pb-2">
-        <span className="text-tiny uppercase tracking-wider text-faint">{COLUMN_LABEL[severity]}</span>
-        <span className="text-tiny tabular-nums text-faint">{items.length}</span>
-        <span className="h-px flex-1 bg-hair" />
-      </div>
+      {/* `items.length` IS THE TOTAL HERE, and that is a fact about this board rather than a
+          shortcut. The Inbox arrives as one snapshot — there is no cursor and no second page — and
+          `items` is what the active filter left, so the count agrees with the cards under it. The
+          board's `counts` payload field would be the WORKSPACE's figure and would disagree with the
+          column the moment somebody filters, which is the failure §4.3 names on the Agents grid.
+
+          AND `Blocking 0` READS AS AN ACHIEVEMENT, which is the reason this passes a number rather
+          than `null`: zero blocking items is the state this whole surface exists to reach, and a
+          dash there would report it as missing data. */}
+      <SectionHeader name={COLUMN_LABEL[severity]} count={items.length} rule className="px-1 pb-2" />
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
         {items.length === 0 ? (
           // §5.3: per-column empties get a quiet line of their own, and each says its own thing.

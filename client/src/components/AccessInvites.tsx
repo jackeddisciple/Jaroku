@@ -21,6 +21,7 @@
 
 import { Truncate } from "./Truncate.tsx";
 import { Chip } from "./Chip.tsx";
+import { SectionHeader } from "./SectionHeader.tsx";
 import { quietBtn, secondaryBtn } from "./buttons.ts";
 import { AlertTriangleIcon, TicketIcon, UserPlusIcon } from "./panelIcons.tsx";
 import { absTime, relTime, relUntil } from "../lib/format.ts";
@@ -79,6 +80,8 @@ export function AccessInvites({
         </div>
       )}
 
+      {/* Never paginated: an outstanding-invitation list is answered whole. */}
+      <SectionHeader name="Invites" count={invites.length} />
       {invites.map((invite) => (
         <div
           key={invite.id}

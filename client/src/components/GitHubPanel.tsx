@@ -39,7 +39,8 @@ import { ActionRow } from "./ActionRow.tsx";
 import { DiffStat } from "./DiffStat.tsx";
 import { CollapsibleRegion } from "./CollapsibleRegion.tsx";
 import { GitHubCommitBox } from "./GitHubCommitBox.tsx";
-import { GitHubSyncRegion, RegionLabel } from "./GitHubSync.tsx";
+import { GitHubSyncRegion } from "./GitHubSync.tsx";
+import { SectionHeader } from "./SectionHeader.tsx";
 import { BranchSwitcher, ChangesRegion, HistoryRegion, PullRequestCard } from "./GitHubHistory.tsx";
 import { RestackRegion, StagingRegion } from "./GitHubStaging.tsx";
 import { ShadowRunsRegion } from "./ShadowRuns.tsx";
@@ -774,12 +775,11 @@ function VersionLists({ view }: { view: GithubView }) {
     <div className="space-y-4">
       {view.unpushed.length > 0 && (
         <section>
-          <RegionLabel>
-            Unpushed
-            <span className="ml-2 font-normal normal-case tracking-normal text-faint">
-              {view.unpushed.length}
-            </span>
-          </RegionLabel>
+          {/* EXACT AND LOCAL, which is the one thing this count has that the badge beside it does
+              not: `unpushed` is computed here from versions this workspace holds, so it is a real
+              number rather than the approximate `behind` — which keeps rendering as `↓` precisely
+              because it is a guess until somebody fetches. */}
+          <SectionHeader name="Unpushed" count={view.unpushed.length} />
           <div className="mt-1.5">
             {view.unpushed.map((v) => <VersionRow key={v.id} row={v} />)}
           </div>
@@ -788,12 +788,9 @@ function VersionLists({ view }: { view: GithubView }) {
 
       {view.pushed.length > 0 && (
         <section>
-          <RegionLabel>
-            Pushed
-            <span className="ml-2 font-normal normal-case tracking-normal text-faint">
-              {view.pushed.length}
-            </span>
-          </RegionLabel>
+          {/* ONE HEADER GRAMMAR, so the two lists a reader compares are not two treatments of the
+              same sentence one above the other. */}
+          <SectionHeader name="Pushed" count={view.pushed.length} />
           <div className="mt-1.5">
             {view.pushed.map((v) => <VersionRow key={v.id} row={v} />)}
           </div>

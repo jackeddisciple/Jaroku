@@ -31,6 +31,7 @@ import { useCanReach, useCanRun } from "../lib/useCapability.ts";
 import { createSecret, revealSecret } from "../lib/secrets.ts";
 import { ICON, TEXT } from "../lib/tokens.ts";
 import { EmptyState } from "./EmptyState.tsx";
+import { SectionHeader } from "./SectionHeader.tsx";
 import { iconBtn, outlineBtn, quietBtn } from "./buttons.ts";
 import { StatusDot } from "./StatusBadge.tsx";
 import {
@@ -487,6 +488,9 @@ export function ConnectionsPanel() {
         />
       ) : (
         <div className="space-y-2">
+          {/* ARRAY LENGTH IS THE TOTAL. The connector deck is whatever this deployment offers —
+              a fixed set answered in one payload, never a page — so counting it is honest. */}
+          <SectionHeader name="Connectors" count={connections.length} />
           {connections.map((c) => (
             <ConnectionRow key={c.connectorId} connection={c} />
           ))}

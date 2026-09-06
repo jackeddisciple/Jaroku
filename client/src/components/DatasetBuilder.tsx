@@ -30,6 +30,7 @@ import { ICON } from "../lib/tokens.ts";
 import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { EmptyState } from "./EmptyState.tsx";
+import { SectionHeader } from "./SectionHeader.tsx";
 import { ChevronDownIcon, ChevronRightIcon, DatabaseIcon, XIcon } from "./panelIcons.tsx";
 import type { DatasetExample, RubricCriterion } from "../types.ts";
 import { Icon } from "../lib/icons/registry.ts";
@@ -347,6 +348,10 @@ export function DatasetBuilder() {
     <div className="flex h-full flex-col">
       {/* datasets */}
       <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-hair px-4 pb-2 pt-2">
+        {/* IN THE STRIP, for the reason the MCP panel's is: this is a wrapping row of chips rather
+            than a list with a heading over it. `listDatasets` answers with all of an agent's, so
+            the length is a total. */}
+        <SectionHeader name="Datasets" count={datasets.length} className="mr-1" />
         {datasets.map((d) => (
           <Chip
             key={d.id}
@@ -451,9 +456,14 @@ export function DatasetBuilder() {
             hint="Add an input below, import a CSV, or promote a test input from the composer."
           />
         ) : (
-          examples.map((e, i) => (
-            <ExampleRow key={e.id} example={e} index={i} datasetId={selected.id} />
-          ))
+          <>
+            {/* §4.2's case list. A dataset's examples arrive with the dataset — `examplesOf` reads
+                what the payload carried, and there is no cursor — so the length is a total. */}
+            <SectionHeader name="Cases" count={examples.length} className="pb-1" />
+            {examples.map((e, i) => (
+              <ExampleRow key={e.id} example={e} index={i} datasetId={selected.id} />
+            ))}
+          </>
         )}
       </div>
 

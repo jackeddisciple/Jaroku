@@ -23,6 +23,7 @@ import { ActionRow } from "./ActionRow.tsx";
 import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { EmptyState } from "./EmptyState.tsx";
+import { SectionHeader } from "./SectionHeader.tsx";
 import { KeyIcon, RefreshIcon, XIcon, PlugIcon, CheckIcon } from "./panelIcons.tsx";
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { ICON, STATUS } from "../lib/tokens.ts";
@@ -568,7 +569,10 @@ function Group({
 }) {
   return (
     <section className="space-y-1.5">
-      <h3 className="text-tiny uppercase tracking-wider text-faint">{title}</h3>
+      {/* ARRAY LENGTH IS THE TOTAL. Credentials are never paginated — the whole set is what the
+          vault answers with — so this is one of the three surfaces where a `.length` is the honest
+          number rather than a page. */}
+      <SectionHeader name={title} count={secrets.length} />
       {secrets.length === 0 ? (
         <p className="px-1 text-tiny text-faint">{empty}</p>
       ) : (

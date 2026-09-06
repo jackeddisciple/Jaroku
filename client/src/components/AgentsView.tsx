@@ -344,7 +344,11 @@ export function AgentsView() {
         <Truncate className="max-w-[320px] text-label text-ink" title={workspaceName ?? undefined}>
           {workspaceName ?? "Agents"}
         </Truncate>
-        <span className="text-tiny tabular-nums text-faint">{cards.filter((c) => !c.archived_at).length}</span>
+        {/* §4.3: THE COUNT REFLECTS THE FILTERS, NOT THE WORKSPACE. It read the workspace's own
+            total — every unarchived card — so nine agents filtered down to two said 9, over two
+            cards, beside an empty-filter notice offering to clear the filters that produced the
+            disagreement. `visible` is what the grid actually renders. */}
+        <span className="text-tiny tabular-nums text-faint">{visible.length}</span>
         {workspaceName && <span className="text-tiny text-faint">agents</span>}
         {!connected && (
           <span className="text-tiny text-muted" title="Changes here need a connection">

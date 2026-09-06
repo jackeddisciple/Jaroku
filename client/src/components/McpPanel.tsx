@@ -29,6 +29,7 @@ import { EmptyState } from "./EmptyState.tsx";
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { StatusBadge } from "./StatusBadge.tsx";
 import { StatusGlyph } from "./StatusGlyph.tsx";
+import { SectionHeader } from "./SectionHeader.tsx";
 import { MCP_PHASE } from "../lib/domainPhase.ts";
 import { AlertTriangleIcon, EyeIcon, KeyIcon, PlugIcon, RefreshIcon, ShieldAlertIcon, ChevronDownIcon, UserCircleIcon, XIcon } from "./panelIcons.tsx";
 import { useCanRun } from "../lib/useCapability.ts";
@@ -381,6 +382,11 @@ export function McpPanel() {
 
       {/* Server chips */}
       <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-hair px-4 py-2">
+        {/* IN THE STRIP RATHER THAN OVER IT, because the strip scrolls sideways and a header above
+            it would be a second row of chrome on a panel whose whole shape is one dense bar. The
+            list is never paginated — `listMcpServers` answers with all of them — so the length is
+            a total. */}
+        <SectionHeader name="Servers" count={servers.length} className="mr-1 shrink-0" />
         {servers.map((s) => (
           <Chip
             key={s.id}

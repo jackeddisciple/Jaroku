@@ -36,6 +36,7 @@ import { AgentSparkline } from "./AgentSparkline.tsx";
 import { Capable } from "./Capable.tsx";
 import { CockpitDialog } from "./CockpitDialog.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
+import { SectionHeader } from "./SectionHeader.tsx";
 import { GlobeIcon, KeyIcon, PlugIcon } from "./panelIcons.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { Icon } from "../lib/icons/registry.ts";
@@ -528,6 +529,11 @@ export function FleetStrip() {
           card keeps its width and the strip does not stretch it — "a lone stretched card reads as a
           layout bug". Forty agents: the row overflows and the fade says so. Neither case needs a
           branch, which is the point of choosing a width rather than a fraction. */}
+      {/* THE STRIP'S OWN NAME AND SIZE, which the track could only say to a screen reader before:
+          `aria-label="Live agents"` was the only place the word appeared, and a strip that scrolls
+          sideways gives no sense of how many cards are off the right edge. The fleet payload is the
+          whole fleet — one message, no cursor — so the length is a total. */}
+      <SectionHeader name="Live agents" count={fleet.length} className={`pt-2 ${SPINE_X}`} />
       <div
         ref={ref}
         role="list"

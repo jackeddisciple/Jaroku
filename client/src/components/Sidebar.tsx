@@ -28,6 +28,7 @@ import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
 import { StatusGlyph } from "./StatusGlyph.tsx";
+import { SectionHeader } from "./SectionHeader.tsx";
 import { RUN_PHASE } from "../lib/domainPhase.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { keyHint } from "../lib/modKey.ts";
@@ -632,13 +633,16 @@ function AdminModeToggle() {
  * transparent for the same reason: a sticky header that rows scroll through is worse than no
  * header at all.
  */
-function SectionHeader({ label, count, first = false }: { label: string; count: number; first?: boolean }) {
+function RailSection({ label, count, first = false }: { label: string; count: number | null; first?: boolean }) {
   return (
     <div
       className={`sticky top-0 z-10 flex items-center bg-sidebar px-4 py-1.5 ${first ? "" : "mt-1 border-t border-sidebar-border"}`}
     >
-      <span className={TYPE.panelLabel}>{label}</span>
-      <span className="ml-auto text-tiny tabular-nums text-faint">{count}</span>
+      {/* THE COUNT MOVES OFF THE ROW'S EDGE AND SITS AGAINST THE NAME. It was `ml-auto`, so a 280px
+          column had its numbers pinned to the right while the Threads list and the Inbox board put
+          theirs immediately after the label — the same header, two arrangements, one product. §4.1
+          is explicit about which of the two: name, then the count. */}
+      <SectionHeader name={label} count={count} />
     </div>
   );
 }
@@ -929,12 +933,12 @@ export function Sidebar() {
             person and not shared. */}
         {pinned.length > 0 && (
           <>
-            <SectionHeader label="Pinned" count={pinned.length} first />
+            <RailSection label="Pinned" count={pinned.length} first />
             {pinned.map((a) => <AgentRow key={`pinned-${a.agent_id}`} agent={a} />)}
           </>
         )}
 
-        {pinned.length > 0 && <SectionHeader label="All agents" count={visible.length} />}
+        {pinned.length > 0 && <RailSection label="All agents" count={visible.length} />}
         {visible.length === 0 ? (
           <EmptyState
             size="inline"
@@ -951,7 +955,12 @@ export function Sidebar() {
         )}
 
         {/* runs — how you re-open a past trace */}
-        <SectionHeader label="Runs" count={runList.length} />
+        {/* I5, ON THE ONE LIST IN THIS COLUMN THAT IS A WINDOW RATHER THAN A SET. `listRuns` takes a
+            cap and this list has a "load older" control under it, so `runList.length` is how many
+            have been fetched and not how many exist — and the search line below already says so in
+            words, "the N loaded runs". Until the history is complete the total is genuinely unknown,
+            which is what the dash says; once it is, the length IS the total. */}
+        <RailSection label="Runs" count={historyComplete ? runList.length : null} />
         {runList.length === 0 ? (
           <EmptyState size="inline" icon={ActivityIcon} title="No runs yet" />
         ) : (

@@ -27,6 +27,7 @@ import { useUiStore } from "../store/uiStore.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { ThreadFilterBar } from "./ThreadFilterBar.tsx";
 import { ThreadRow } from "./ThreadRow.tsx";
+import { SectionHeader } from "./SectionHeader.tsx";
 import { useThreadKeys } from "./useThreadKeys.ts";
 import { SearchIcon } from "./panelIcons.tsx";
 
@@ -286,11 +287,12 @@ export function ThreadsView() {
                 {/* ONE HEADER GRAMMAR: label, count, then the rule out to the edge. The rule used
                     to run BETWEEN the label and its count here and AFTER the count on the Inbox
                     board — the same header, two orders, two views apart. */}
-                <div className="flex items-center gap-2 px-5 pb-1 pt-3">
-                  <span className="text-tiny uppercase tracking-wider text-faint">{section.label}</span>
-                  <span className="text-tiny tabular-nums text-faint">{section.threads.length}</span>
-                  <span className="h-px flex-1 bg-hair" />
-                </div>
+                {/* THE VISIBLE COUNT, NOT THE WORKSPACE'S. `counts.needs_you` is on the payload and
+                    is the wrong number here: these sections are grouped over `visible`, which is what
+                    the filter chips and the search box left, and a header reading 12 over four rows
+                    is the §4.3 failure the Agents grid is warned about. The list is a full replace
+                    with no cursor, so this length IS a total. */}
+                <SectionHeader name={section.label} count={section.threads.length} rule className="px-5 pb-1 pt-3" />
                 {section.threads.map((t) => (
                   <ThreadRow
                     key={t.id}

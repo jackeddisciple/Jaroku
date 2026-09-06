@@ -1465,6 +1465,15 @@ jobs:
           # §3's three exclusions as ABSENCES, which is the direction they fail in — nobody maps
           # `ahead` to `done` on purpose.
           npm run test:status-map
+          # I5 AND I6, BOTH OF WHICH FAIL SILENTLY AND BOTH WHILE LOOKING CORRECT. `rows.length`
+          # over a virtualised list is the RENDER WINDOW — a header reading "Activity 40" over ten
+          # thousand events is a lie that looks like a feature and changes as you scroll, which is
+          # its only symptom. And a count that is not yet known, rendered as `0`, turns this
+          # product's strongest copy into its most confident wrong answer: `Blocking 0` is the state
+          # the Inbox exists to reach, so rendering it at somebody whose board has not arrived is
+          # worse than rendering nothing. The call sites are a TABLE in the suite rather than a
+          # glob, because a paginated `.length` looks exactly like a correct one.
+          npm run test:section-count
 
       # THE ICON SYSTEM, IN ITS OWN STEP, because the six suites guard six different invariants and
       # a reader looking at a red build should be able to tell which one broke without opening a
