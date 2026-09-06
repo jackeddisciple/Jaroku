@@ -1611,6 +1611,15 @@ jobs:
           # is a vocabulary in the interface and a string in the database, and a second list would be
           # a deploy ordering nobody wants.
           npm run test:agent-category
+          # §7'S ROW, AND ALL THREE OF ITS RULES ARE ABOUT WHAT IS MISSING — which is why none of
+          # them can be checked by looking at a comfortable sidebar. The name truncating is the
+          # DEFAULT behaviour of a flex row, because the name is the longest item and shrinks first;
+          # it renders `invoice_par…` beside `invoice_parser_v2`, two agents that read as one in the
+          # list whose whole job is telling them apart. `Uncategorized` showing is a column of
+          # identical noise down every list that predates the feature, which is every list on the
+          # day it ships. And a category cut to nothing leaves a dangling em dash, which is the
+          # artefact §7 warns about arriving through the layout instead of through the markup.
+          npm run test:sidebar-identity
           npm run test:icon-generated
           # AND THE SAME PROPERTY THE OTHER WAY ROUND, which is not redundant: the suite above
           # catches a mark somebody edited by hand, and this catches a MANIFEST edit committed

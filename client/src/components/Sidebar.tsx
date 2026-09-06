@@ -28,7 +28,7 @@ import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
 import { StatusGlyph } from "./StatusGlyph.tsx";
-import { AgentEmoji, EMOJI_SIZE } from "./AgentEmoji.tsx";
+import { AgentIdentityLine, identityTitle } from "./AgentIdentityLine.tsx";
 import { SectionHeader } from "./SectionHeader.tsx";
 import { RUN_PHASE } from "../lib/domainPhase.ts";
 import { EmptyState } from "./EmptyState.tsx";
@@ -296,7 +296,10 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
           // or more chips that could wrap to a third line, on the app's primary list, at two to
           // three times the height of the row it is a list of. The facts are not gone; they are
           // where a fact you consult belongs, rather than where a fact you scan belongs.
-          title={detail}
+          // §7: "The full name and category go in the row's title attribute for the hover case." On
+          // the first line, because that is what the truncation gave up; the facts that used to be a
+          // chip strip follow on the second.
+          title={detail ? `${identityTitle(agent.name, agent.category)}\n${detail}` : identityTitle(agent.name, agent.category)}
         >
           {agent.runnable ? (
             <AgentDot status={status} />
@@ -325,18 +328,27 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
             />
           ) : (
             <>
-              {/* §8.4'S EXPLICIT ASK, AND THE REASON THE FEATURE EXISTS. Twenty agents each carrying
-                  the same robot mark is a list nobody can scan, and the eye finds a shape far faster
-                  than it reads a truncated name. Bare, on the baseline, with normal inline spacing —
-                  no box, because at 16px the box would be larger and louder than the glyph in it. */}
-              <AgentEmoji emoji={agent.emoji} size={EMOJI_SIZE.sidebar} />
-              <Truncate className={active ? "text-accent" : "text-ink"} title={agent.name}>{agent.name}</Truncate>
+              {/* §7'S LINE. The emoji, the name, an em dash, the category — and only the CATEGORY may
+                  be cut. The name used to be the thing that truncated here, which is the rule
+                  inverted: a cut name is a different agent, in the list whose whole job is telling
+                  them apart. See `AgentIdentityLine`. */}
+              <AgentIdentityLine
+                emoji={agent.emoji}
+                name={agent.name}
+                category={agent.category}
+                nameClassName={active ? "text-accent" : "text-ink"}
+              />
             </>
           )}
           {archived && <Chip size="sm" tone="faint" variant="bare">archived</Chip>}
+          {/* NO `ml-auto` ON EITHER OF THESE ANY MORE, and its removal is what makes §7's line work.
+              An auto margin absorbs a flex line's free space BEFORE `flex-grow` gets any, so the
+              category's slot — which grows into whatever the name leaves — was allocated nothing at
+              all and every category vanished. The identity line's own `flex-1` does the pushing
+              now, which is the same visual result by the mechanism that leaves room behind it. */}
           {github?.badge && (
             <span
-              className={`ml-auto shrink-0 text-tiny tabular-nums ${
+              className={`shrink-0 text-tiny tabular-nums ${
                 github.badge === "↕" || github.badge === "⚠" ? "text-err" : "text-faint"
               }`}
               title={github.verdict}
@@ -346,7 +358,7 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
           )}
           {last && (
             <span
-              className={`shrink-0 text-tiny tabular-nums text-faint ${github?.badge ? "" : "ml-auto"}`}
+              className="shrink-0 text-tiny tabular-nums text-faint"
               title={absTime(last.started_at)}
             >
               {relTime(last.started_at)}

@@ -62,7 +62,11 @@ console.log("\nthe seven sites §8.4 names");
   // WRITTEN OUT, WITH THE REGISTER EACH ONE USES. A site that quietly went back to no mark leaves no
   // trace but a screenshot, and a site that wrote its own pixel count is off the ladder.
   const SITES: [string, string][] = [
-    ["components/Sidebar.tsx", "EMOJI_SIZE.sidebar"],       // 16 — the reason this exists
+    // THE SIDEBAR'S MARK MOVED INTO `AgentIdentityLine`, which is now the whole of §7's row: the
+    // emoji, the name that never truncates, and the category that does. The mark did not change
+    // register — it is still `EMOJI_SIZE.sidebar`, still bare, still 16px — it is drawn one
+    // component down, beside the two rules it shares a line with.
+    ["components/AgentIdentityLine.tsx", "EMOJI_SIZE.sidebar"], // 16 — the reason this exists
     // THE CARD'S MARK MOVED INTO `GlossAvatar`, which is where it now lives on that surface. §5.2
     // splits the SEVEN SITES by fidelity rather than by mark: small sizes wear the emoji, the card
     // and the detail header wear the 3D character — "not two systems, one identity at two
