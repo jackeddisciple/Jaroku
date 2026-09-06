@@ -165,18 +165,31 @@ export const REAL_BINDINGS: StageBindings = {
 const BUILD_BUDGET_MS = 8;
 
 /**
- * How a spring's state becomes a head offset.
- *
- * THESE ARE `gface.js`'s OWN FIVE NUMBERS, re-typed rather than re-derived, so a head driven by the
- * pointer moves through exactly the range a head driven by the vendored gaze does — the same
- * maximum turn, the same lean, the same slight roll. Anything else would give one character two
- * different vocabularies depending on whether somebody's mouse happened to be over it.
+ * How a pointer-driven spring becomes a head offset.
  *
  * `u` is the body radius (`built.L.s`), which is why the two translations are scaled by it and the
  * three rotations are not: the first pair is a distance in the character's own units and the second
- * trio is radians.
+ * trio is radians. `gface.js` maps its own idle gaze with the same five fields at
+ * `{ .16, .11, .34, -.22, -.07 }`, and these are deliberately larger.
+ *
+ * THEY WERE THAT IDLE RANGE EXACTLY, AND THAT WAS THE WRONG CALL. The first version reused it on the
+ * argument that one character should not have two vocabularies depending on where somebody's mouse
+ * is. That argument is wrong about what the two things ARE. An idle glance is ambient — it happens
+ * whether or not anybody is watching, and it should be small enough to notice only out of the corner
+ * of the eye. Following a cursor is a RESPONSE: its whole job is to be noticed, and at 0.34 radians
+ * on a 64px card it was not. Reported as "very slight".
+ *
+ * SO THE YAW ROUGHLY DOUBLES, to about thirty-five degrees, and the pitch and roll go with it. The
+ * TRANSLATIONS grow by much less — the head is inside a box the character is already fitted to with
+ * about a tenth of a margin, and a head that slides as far as it now turns would clip against the
+ * scissor rectangle at the corners of a card. Turning is what reads as looking; sliding is what
+ * reads as drifting.
+ *
+ * It is still a bound rather than a free ratio: the corners of a card are the furthest the head ever
+ * goes, and the centre is facing forward, so the resting state is continuous with the idle life it
+ * hands back to.
  */
-const HEAD = { x: 0.16, y: 0.11, yaw: 0.34, pitch: -0.22, rot: -0.07 } as const;
+const LOOK_AT = { x: 0.22, y: 0.15, yaw: 0.62, pitch: -0.40, rot: -0.13 } as const;
 
 /**
  * How fast the head follows the pointer, and how fast it lets go.
@@ -632,11 +645,11 @@ export class GlossStage {
 
     const u = slot.built!.L.s;
     return {
-      x: slot.lookX * u * HEAD.x,
-      y: slot.lookY * u * HEAD.y,
-      yaw: slot.lookX * HEAD.yaw,
-      pitch: slot.lookY * HEAD.pitch,
-      rot: slot.lookX * HEAD.rot,
+      x: slot.lookX * u * LOOK_AT.x,
+      y: slot.lookY * u * LOOK_AT.y,
+      yaw: slot.lookX * LOOK_AT.yaw,
+      pitch: slot.lookY * LOOK_AT.pitch,
+      rot: slot.lookX * LOOK_AT.rot,
     };
   }
 

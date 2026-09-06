@@ -201,18 +201,23 @@ console.log("\nthe head turns toward the pointer while it is on the card");
 
   check("it turns one way at one edge and the other way at the other", right * left < 0,
     `${right.toFixed(3)} vs ${left.toFixed(3)}`);
-  // THE RANGE IS `gface.js`'s OWN. A pointer-driven head must not turn further than a gaze-driven
-  // one, or one character has two vocabularies depending on where somebody's mouse is.
-  check("...and no further than the vendored gaze would",
-    Math.abs(right) <= 0.35 && Math.abs(left) <= 0.35, `${right.toFixed(3)} / ${left.toFixed(3)}`);
-  check("...far enough to see", Math.abs(right) > 0.15 && Math.abs(left) > 0.15,
+  // FAR ENOUGH TO BE NOTICED, WHICH IS THE WHOLE POINT OF IT. This assertion started at 0.15 and the
+  // movement was still reported as "very slight" on a 64px card, because the range it was bounded by
+  // was `gface.js`'s AMBIENT one — a glance that happens whether or not anybody is watching. A
+  // response to a cursor has the opposite job. The floor is now most of the way to the maximum,
+  // because what goes wrong here is a follow too small to see rather than one too large.
+  check("...far enough to be noticed", Math.abs(right) > 0.45 && Math.abs(left) > 0.45,
     `${right.toFixed(3)} / ${left.toFixed(3)}`);
+  // AND STILL BOUNDED. The corners of a card are the furthest it ever goes; past about forty degrees
+  // a chibi head turns off its own face and the follow stops reading as attention.
+  check("...and still bounded at the corners",
+    Math.abs(right) <= 0.65 && Math.abs(left) <= 0.65, `${right.toFixed(3)} / ${left.toFixed(3)}`);
 
   // A CARD THE POINTER IS NOT ON IS UNAFFECTED. Twenty-four heads turning together would be a
   // novelty; one turning is attention.
   const otherWhileHovering = stage.debugTransforms().find((s) => s.key === "elsewhere");
   check("a card the pointer is not on keeps its own gaze",
-    Math.abs(otherWhileHovering?.yaw ?? 0) < 0.35);
+    Math.abs(otherWhileHovering?.yaw ?? 0) <= 0.35, `${otherWhileHovering?.yaw.toFixed(3)}`);
 
   // AND IT LETS GO. Slower than it follows, so the character hands control back to its own life
   // rather than dropping it.
