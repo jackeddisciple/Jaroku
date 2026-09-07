@@ -199,13 +199,40 @@ export interface RateWindow {
  * process. See `db/repositories/signIn.ts`.
  */
 export interface SignInStore {
-  /** Record a minted magic link. Returns the RAW token; only its digest is stored. */
+  /**
+   * Record a minted magic link. Returns the RAW token and the RAW poll secret; only digests stored.
+   *
+   * TWO SECRETS FOR ONE LINK, AND THEY GO TO DIFFERENT PLACES. `token` is emailed and proves
+   * control of the mailbox. `poll` is returned to the DEVICE THAT ASKED and is never in the
+   * message — it is how a laptop finds out that the link it requested was opened on a phone. That
+   * split is the security of the whole feature: the mailbox completes a sign-in, and only the
+   * requesting device can collect the session it produces.
+   */
   issueMagicLink(input: {
     email: string;
     ip: string | null;
     userAgent: string | null;
     ttlS?: number;
-  }): Promise<{ token: string; expiresAt: number }>;
+  }): Promise<{ token: string; poll: string; expiresAt: number }>;
+
+  /**
+   * Record WHO a spent magic link signed in, so the waiting device can be told.
+   *
+   * Called after the user is resolved, keyed by the same token that was just consumed. Separate
+   * from `consumeMagicLink` because the user does not exist yet at the moment the token is spent —
+   * §3.3 provisions at consumption, and provisioning is the caller's job rather than the store's.
+   */
+  attachMagicLinkClaim(token: string, userId: string): Promise<void>;
+
+  /**
+   * The user a link was opened by, for the device that asked for it. Null until it is opened.
+   *
+   * SINGLE USE, like every other secret here: the first successful poll clears the claim, so a
+   * poll secret that leaks after the fact buys nothing. It answers null rather than throwing for
+   * every other case — not yet clicked, expired, never existed — because a waiting screen polls
+   * this on a timer and the three are the same instruction to it: keep waiting.
+   */
+  claimMagicLink(poll: string): Promise<{ userId: string } | null>;
 
   /**
    * Spend a magic link, exactly once.

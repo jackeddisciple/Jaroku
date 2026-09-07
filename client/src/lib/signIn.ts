@@ -187,6 +187,14 @@ export async function startGoogleSignIn(): Promise<void> {
 export interface MagicLinkSent {
   /** How long the link lasts, from the server, so the screen and the token cannot disagree. */
   expiresInMinutes: number;
+  /**
+   * The secret this DEVICE polls with, which is never in the email.
+   *
+   * It is what lets a link opened on a phone sign in the laptop that asked for it — see
+   * `pollMagicLink`. Kept in memory only, like the OAuth nonce and for the same reason: writing it
+   * anywhere is writing down the thing that collects somebody's session.
+   */
+  poll: string | null;
 }
 
 /**
@@ -203,12 +211,40 @@ export interface MagicLinkSent {
  * screen for a message nothing dispatched is the worst outcome available here.
  */
 export async function requestMagicLink(email: string): Promise<MagicLinkSent> {
-  const sent = await post<{ expiresInMinutes?: number }>("/v1/auth/magic-link", { email });
+  const sent = await post<{ expiresInMinutes?: number; poll?: unknown }>("/v1/auth/magic-link", { email });
   return {
     // Defaulted rather than trusted blindly: a server that answered without the field would
     // otherwise put "expires in undefined minutes" on a screen.
     expiresInMinutes: typeof sent.expiresInMinutes === "number" && sent.expiresInMinutes > 0 ? sent.expiresInMinutes : 15,
+    // NULL WHEN THE SERVER DID NOT SEND ONE, which is an older server rather than a broken one.
+    // The screen falls back to what it did before — waiting for a deep link — instead of throwing.
+    poll: typeof sent.poll === "string" && sent.poll.length > 0 ? sent.poll : null,
   };
+}
+
+/**
+ * Ask whether the link this device requested has been opened yet.
+ *
+ * WHY A POLL AT ALL, when there is a deep link. Because the deep link can only reach a device that
+ * has Jaroku on it, and mail is read on a phone. The link is requested on a laptop, opened on a
+ * handset, and the ticket is handed to a `jaroku://` nothing on that handset answers — while the
+ * laptop, which is the device that actually wants the session, sits on "check your email" with the
+ * sign-in already complete behind it.
+ *
+ * IT RETURNS A TICKET RATHER THAN A SESSION, so it joins the same last step both flows use:
+ * `exchangeTicket`. One place turns a proven identity into a token, and this is not a second one.
+ *
+ * EVERY FAILURE IS `null`, including a network one. This runs on a timer against a server that may
+ * be briefly unreachable, and a screen that gave up on the first refused fetch would be a screen
+ * that gives up when somebody's wifi blinks.
+ */
+export async function pollMagicLink(poll: string): Promise<string | null> {
+  try {
+    const answer = await post<{ ready?: unknown; ticket?: unknown }>("/v1/auth/magic-link/poll", { poll });
+    return answer.ready === true && typeof answer.ticket === "string" ? answer.ticket : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

@@ -22,7 +22,7 @@ import { openTestSqlite } from "../db/testDb.ts";
 import { DbSignInStore } from "../db/repositories/signIn.ts";
 import { MAGIC_LINK_LIMITS } from "../auth/signIn.ts";
 import { Router } from "./router.ts";
-import { magicLinkRoutes, MAGIC_LINK_PATH, MAGIC_PATH, EMAIL_WEBHOOK_PREFIX } from "./magicLink.ts";
+import { magicLinkRoutes, MAGIC_LINK_PATH, MAGIC_LINK_POLL_PATH, MAGIC_PATH, EMAIL_WEBHOOK_PREFIX } from "./magicLink.ts";
 import type { EmailMessage, EmailTransport } from "../email/transport.ts";
 import { EmailError } from "../email/transport.ts";
 import { createServer, type Server } from "node:http";
@@ -172,7 +172,23 @@ console.log("\nasking for a sign-in link");
   const known = await ask("ada@example.com");
   const unknown = await ask(`nobody-${randomUUID()}@example.com`);
   check(known.status === unknown.status, "a known and an unknown address get the same status");
-  check(known.body === unknown.body, "...and byte-for-byte the same body");
+  // NOT BYTE-FOR-BYTE ANY MORE, AND THE REASON IS NOT A WEAKENING. The response now carries a poll
+  // secret — the value the requesting device collects its session with, which is what makes a link
+  // opened on a phone finish the sign-in on the laptop. It is 256 bits of `randomBytes`, so two
+  // responses cannot be identical and must not be: a fixed one would be a shared secret.
+  //
+  // What the criterion actually asks is that nothing DISTINGUISHES the two, so that is what is
+  // compared: identical once the random value is normalised out, and the value itself the same
+  // shape in both. A blocked or unknown address gets a decoy of the same width — see `sent()` in
+  // magicLink.ts — so there is nothing to measure, not even a length.
+  const shapeOf = (body: string): string =>
+    JSON.stringify({ ...(JSON.parse(body) as Record<string, unknown>), poll: "<random>" });
+  check(shapeOf(known.body) === shapeOf(unknown.body), "...and the same body once the random secret is normalised out");
+  const pollOf = (body: string): string => (JSON.parse(body) as { poll: string }).poll;
+  check(
+    pollOf(known.body).length === pollOf(unknown.body).length && pollOf(known.body) !== pollOf(unknown.body),
+    "...with a poll secret of the same width in both, and never the same value",
+  );
   check(
     (known.headers["content-type"] ?? "") === (unknown.headers["content-type"] ?? ""),
     "...and the same content type, so nothing distinguishes them at all",
@@ -353,6 +369,67 @@ console.log("\nwhen a message does not arrive");
 }
 
 console.log(`\nthe limits this suite exercised: ${MAGIC_LINK_LIMITS.perEmail} per address, ${MAGIC_LINK_LIMITS.perIp} per IP`);
+
+console.log("\na link opened on a DIFFERENT device still signs in the one that asked");
+{
+  // THE BUG THIS PINS, WHICH IS THE ORDINARY CASE RATHER THAN AN EDGE ONE. A sign-in link is
+  // requested on a laptop and opened on a phone, because that is where mail is read. `/magic` then
+  // mints a ticket and redirects to `jaroku://auth/complete`, a scheme only a device with Jaroku
+  // installed can answer — so the phone does nothing visible, and the laptop sat on "check your
+  // email" until the link expired, with the sign-in ALREADY COMPLETE and the token already spent.
+  //
+  // The poll secret is what closes it, and the reason it is safe is WHERE IT IS NOT: never in the
+  // message. The mailbox completes a sign-in; only the device that started one can collect it.
+  const email = "crossdevice@example.com";
+  const asked = await ask(email);
+  const poll = JSON.parse(asked.body).poll as string;
+  check(typeof poll === "string" && poll.length > 20, "the request hands back a poll secret");
+  check(!sent.at(-1)!.text.includes(poll), "...which is NOT in the email — that is the whole security of it");
+  check(!sent.at(-1)!.html.includes(poll), "...in either part of it");
+
+  const poll1 = await request(MAGIC_LINK_POLL_PATH, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ poll }),
+  });
+  check(JSON.parse(poll1.body).ready === false, "before the link is opened, there is nothing to collect");
+
+  // THE PHONE. A plain GET, sharing no state with the request above — which is the whole point.
+  const opened = await request(new URL(lastLink()).pathname + new URL(lastLink()).search);
+  check(opened.status === 200, "the link opens on the other device");
+
+  const poll2 = await request(MAGIC_LINK_POLL_PATH, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ poll }),
+  });
+  const collected = JSON.parse(poll2.body) as { ready?: boolean; ticket?: string };
+  check(collected.ready === true, "after it is opened, the device that ASKED can collect");
+  check(typeof collected.ticket === "string" && collected.ticket.length > 20, "...and gets a session ticket");
+
+  // SINGLE USE, like every other secret here. A poll secret that leaked after the fact buys nothing.
+  const poll3 = await request(MAGIC_LINK_POLL_PATH, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ poll }),
+  });
+  check(JSON.parse(poll3.body).ready === false, "collecting twice is refused");
+}
+
+console.log("\nand a poll secret that names nothing is refused the same way as one that is not ready");
+{
+  // ONE ANSWER FOR EVERY NEGATIVE. Not yet clicked, expired, never existed, already collected — all
+  // `ready: false`. Telling them apart would let somebody with a secret learn whether a link was
+  // ever issued against it, which is the same reasoning §12 applies to the request route.
+  for (const bogus of ["a".repeat(43), "not-a-secret", ""]) {
+    const answer = await request(MAGIC_LINK_POLL_PATH, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ poll: bogus }),
+    });
+    check(answer.status === 200 && JSON.parse(answer.body).ready === false, `a made-up secret is not ready (${bogus.slice(0, 8) || "empty"})`);
+  }
+}
 
 server.close();
 await db.close();

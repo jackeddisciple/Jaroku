@@ -57,14 +57,18 @@ export class DbSignInStore implements SignInStore {
     ip: string | null;
     userAgent: string | null;
     ttlS?: number;
-  }): Promise<{ token: string; expiresAt: number }> {
+  }): Promise<{ token: string; poll: string; expiresAt: number }> {
     const token = mintSecret();
+    // THE SECOND SECRET, AND IT NEVER LEAVES THIS RESPONSE. It goes to the device that asked and
+    // not into the message — see the interface for why that split is the whole security model.
+    const poll = mintSecret();
     const expiresAt = this.now() + (input.ttlS ?? MAGIC_LINK_TTL_S) * 1000;
     await this.db.run(
-      `INSERT INTO magic_link_tokens (token_hash, email, ip_address, user_agent, created_at, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO magic_link_tokens (token_hash, poll_hash, email, ip_address, user_agent, created_at, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         hashSecret(token),
+        hashSecret(poll),
         normaliseEmail(input.email),
         input.ip,
         // BOUNDED, because it is a header a client chooses and it is going into a database. Two
@@ -78,7 +82,47 @@ export class DbSignInStore implements SignInStore {
     // Opportunistic rather than scheduled, exactly as `DbTicketStore.issue` does it: these rows
     // are tiny and short-lived, and a failure here must never fail a sign-in.
     void this.sweep().catch(() => {});
-    return { token, expiresAt };
+    return { token, poll, expiresAt };
+  }
+
+  /**
+   * Record who a spent link signed in. Keyed by the token, which was just consumed.
+   *
+   * NOT SCOPED BY `consumed_at IS NULL` — the row is already consumed by the time this runs, which
+   * is the point. It is scoped by expiry instead, so a claim cannot be attached to a link that has
+   * outlived the window the waiting device is allowed to poll for.
+   */
+  async attachMagicLinkClaim(token: string, userId: string): Promise<void> {
+    await this.db.run(
+      `UPDATE magic_link_tokens SET claimed_user_id = ? WHERE token_hash = ? AND expires_at > ?`,
+      [userId, hashSecret(token), this.iso(this.now())],
+    );
+  }
+
+  /**
+   * Hand the waiting device its claim, exactly once.
+   *
+   * ONE STATEMENT, for `consumeMagicLink`'s reason: two tabs polling one secret must not both be
+   * told yes, and a read followed by a write is two statements with a gap in the middle.
+   *
+   * IT MARKS `collected_at` AND RETURNS THE CLAIM UNTOUCHED, which is the shape this needs and is
+   * not the shape it was first written in. The obvious version cleared the claim and returned it —
+   * and RETURNING gives the row AFTER the update, so it returned the NULL it had just written,
+   * every time. The claim was collected and the caller was told there was nothing there. Nothing
+   * about that is visible in a type or a test that stubs the store; it took driving the whole flow
+   * against a real database to see it.
+   */
+  async claimMagicLink(poll: string): Promise<{ userId: string } | null> {
+    const row = await this.db.get<{ claimed_user_id: string | null }>(
+      `UPDATE magic_link_tokens SET collected_at = ?
+        WHERE poll_hash = ?
+          AND claimed_user_id IS NOT NULL
+          AND collected_at IS NULL
+          AND expires_at > ?
+        RETURNING claimed_user_id`,
+      [this.iso(this.now()), hashSecret(poll), this.iso(this.now())],
+    );
+    return row?.claimed_user_id ? { userId: row.claimed_user_id } : null;
   }
 
   async consumeMagicLink(token: string, email: string): Promise<MagicLinkRecord | null> {
@@ -337,12 +381,26 @@ export class DbSignInStore implements SignInStore {
   async sweep(): Promise<number> {
     const at = this.iso(this.now());
     let removed = 0;
-    for (const table of ["magic_link_tokens", "oauth_state_tokens", "session_tickets"]) {
-      const res = await this.db.run(
+    // A CONSUMED MAGIC LINK OUTLIVES ITS USE, and the other two do not. That asymmetry is the
+    // whole of this loop's shape and it is worth stating, because deleting on consumption is the
+    // obvious hygiene and it silently breaks the cross-device flow: the row is where
+    // `claimed_user_id` lives, and the device that ASKED for the link collects it by polling. Wipe
+    // the row the moment the phone opens the link and the laptop polls a row that no longer exists,
+    // forever, with the sign-in already complete. That is exactly what happened the first time this
+    // was tested end to end.
+    //
+    // NOTHING LIVES LONGER FOR IT. `expires_at` is fifteen minutes out and still deletes the row,
+    // so the bound the sweep exists to keep is unchanged — a consumed link is retained for the
+    // remainder of a window it was already occupying.
+    const res = await this.db.run(`DELETE FROM magic_link_tokens WHERE expires_at <= ?`, [at]);
+    removed += res.changes;
+
+    for (const table of ["oauth_state_tokens", "session_tickets"]) {
+      const spent = await this.db.run(
         `DELETE FROM ${table} WHERE expires_at <= ? OR consumed_at IS NOT NULL`,
         [at],
       );
-      removed += res.changes;
+      removed += spent.changes;
     }
     // The counters, once their window is long dead. A day rather than the window itself, so a
     // sweep that runs mid-window cannot reset somebody's limit for them.
@@ -363,7 +421,13 @@ export class DbSignInStore implements SignInStore {
  * it is actually implemented differently.
  */
 export function memorySignInStore(now: () => number = () => Date.now()): SignInStore {
-  const magic = new Map<string, { email: string; expiresAt: number; consumed: boolean }>();
+  // `poll` and `claimedUserId` mirror the two columns 069 adds, because this store exists so a
+  // suite can exercise the same rules without a database — one that diverged would be a suite
+  // asserting behaviour the real store does not have.
+  const magic = new Map<
+    string,
+    { email: string; expiresAt: number; consumed: boolean; poll: string; claimedUserId: string | null; collected: boolean }
+  >();
   const states = new Map<string, OAuthStateRecord & { consumed: boolean }>();
   const tickets = new Map<string, SessionTicketRecord & { consumed: boolean }>();
   const limits = new Map<string, RateWindow>();
@@ -373,8 +437,31 @@ export function memorySignInStore(now: () => number = () => Date.now()): SignInS
     async issueMagicLink(input) {
       const token = mintSecret();
       const expiresAt = now() + (input.ttlS ?? MAGIC_LINK_TTL_S) * 1000;
-      magic.set(hashSecret(token), { email: normaliseEmail(input.email), expiresAt, consumed: false });
-      return { token, expiresAt };
+      const poll = mintSecret();
+      magic.set(hashSecret(token), {
+        email: normaliseEmail(input.email),
+        expiresAt,
+        consumed: false,
+        poll: hashSecret(poll),
+        claimedUserId: null,
+        collected: false,
+      });
+      return { token, poll, expiresAt };
+    },
+    async attachMagicLinkClaim(token, userId) {
+      const row = magic.get(hashSecret(token));
+      if (row && row.expiresAt > now()) row.claimedUserId = userId;
+    },
+    async claimMagicLink(poll) {
+      const wanted = hashSecret(poll);
+      for (const row of magic.values()) {
+        if (row.poll !== wanted || row.claimedUserId === null || row.collected || row.expiresAt <= now()) continue;
+        // Marked rather than cleared, mirroring the real store: the claim is what gets returned, so
+        // a statement that wiped it would return the wipe. See the note there.
+        row.collected = true;
+        return { userId: row.claimedUserId };
+      }
+      return null;
     },
     async consumeMagicLink(token, email) {
       if (!looksLikeSecret(token)) return null;
@@ -455,7 +542,9 @@ export function memorySignInStore(now: () => number = () => Date.now()): SignInS
       const at = now();
       let removed = 0;
       for (const [key, value] of magic) {
-        if (value.expiresAt <= at || value.consumed) {
+        // Expiry only, mirroring the real store: a consumed link still carries the claim the
+        // device that asked for it collects by polling. See the note there.
+        if (value.expiresAt <= at) {
           magic.delete(key);
           removed++;
         }

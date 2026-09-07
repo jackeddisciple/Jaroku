@@ -28,6 +28,7 @@ import { badRequest, tooMany, type Handler } from "./router.ts";
 import {
   MAGIC_LINK_LIMITS,
   MAGIC_LINK_TTL_S,
+  mintSecret,
   isEmailAddress,
   looksLikeSecret,
   normaliseEmail,
@@ -40,6 +41,13 @@ import { SIGN_IN_SUBJECT, signInEmail } from "../email/signInEmail.ts";
 import { EmailError, readDeliveryEvent, webhookSecretMatches, type EmailTransport } from "../email/transport.ts";
 
 export const MAGIC_LINK_PATH = "/v1/auth/magic-link";
+/**
+ * Where the device that ASKED for a link finds out it was opened.
+ *
+ * Under `/v1/`, unlike the callback: this one is called by the Jaroku client and by nothing else,
+ * so it is part of the versioned client API rather than a URL a human pastes into a console.
+ */
+export const MAGIC_LINK_POLL_PATH = "/v1/auth/magic-link/poll";
 /** Where the link in the email points. Not under `/v1`, for `GOOGLE_CALLBACK_PATH`'s reason: this
  *  URL is inside messages already sitting in people's inboxes and can never move. */
 export const MAGIC_PATH = "/magic";
@@ -74,13 +82,79 @@ export function magicLinkRoutes(
 ): { path: string; method: "GET" | "POST"; prefix?: boolean; handler: Handler }[] {
   return [
     { path: MAGIC_LINK_PATH, method: "POST", handler: requestHandler(deps) },
+    { path: MAGIC_LINK_POLL_PATH, method: "POST", handler: pollHandler(deps) },
     { path: MAGIC_PATH, method: "GET", handler: consumeHandler(deps) },
     { path: EMAIL_WEBHOOK_PREFIX, method: "POST", prefix: true, handler: webhookHandler(deps) },
   ];
 }
 
 /** The body every non-revealing outcome answers with. One object, so they cannot drift apart. */
-const SENT = { sent: true, expiresInMinutes: Math.round(MAGIC_LINK_TTL_S / 60) } as const;
+/**
+ * The one answer this route gives, whatever happened.
+ *
+ * A FUNCTION NOW, BECAUSE IT CARRIES A SECRET — and the secret is why the shape matters more than
+ * it did. §12's criterion 10 requires a known and an unknown address to be indistinguishable here,
+ * and that has to survive the addition: a response that carried `poll` only when a link was really
+ * sent would answer the exact question the criterion exists to refuse. So the suppressed branch
+ * returns a DECOY — a real 256-bit secret that names no row and can never be claimed — and the two
+ * responses stay byte-identical in shape.
+ */
+const sent = (poll: string) => ({ sent: true, expiresInMinutes: Math.round(MAGIC_LINK_TTL_S / 60), poll });
+
+/**
+ * Has the link this device asked for been opened yet?
+ *
+ * WHY THIS EXISTS. The magic-link flow completes on whatever device opens the mail, and that is
+ * routinely not the device that asked: a link requested on a laptop is read on a phone, because
+ * that is where mail is read. Everything after the click assumed one machine — `/magic` mints a
+ * ticket and redirects to `jaroku://auth/complete?ticket=…`, a scheme only a device with Jaroku
+ * installed can answer. On the phone nothing happens. On the laptop the screen says "check your
+ * email" forever, while the sign-in has ALREADY SUCCEEDED and the token is spent.
+ *
+ * `auth/session.ts` shows the server was designed for this and only the delivery was not: "A
+ * magic-link ticket carries no digest at all — §10 wants a link clicked on a second device to
+ * work — and that branch requires nothing."
+ *
+ * WHAT MAKES IT SAFE IS WHICH SECRET IT TAKES. Not the emailed token — the poll secret, which was
+ * returned once to the requesting device and never put in the message. So the mailbox completes a
+ * sign-in, and only the device that started it can collect the session. Somebody who intercepts
+ * the email still cannot pull the session onto a machine that never asked.
+ *
+ * IT MINTS A TICKET RATHER THAN A SESSION, so there is exactly one place that turns a proven
+ * identity into a token: `POST /v1/auth/session`, the same route the deep link's ticket goes to.
+ * A second one would be a second thing to keep in step with every rule about sessions.
+ *
+ * AND EVERY NEGATIVE ANSWER IS THE SAME ANSWER. Not yet clicked, expired, never existed, already
+ * collected — all `{ ready: false }`. They are one instruction to a screen that is polling on a
+ * timer, and telling them apart would let somebody with a poll secret learn whether a link was
+ * ever issued for it.
+ */
+function pollHandler(deps: MagicLinkDeps): Handler {
+  return async (req) => {
+    const body = await req.json<{ poll?: unknown }>();
+    // Shape-checked before the query, like every other secret on an unauthenticated route: a value
+    // that could not possibly be ours is refused in-process rather than spending an index probe.
+    if (!looksLikeSecret(body.poll)) return { body: { ready: false } };
+
+    const claim = await deps.store.claimMagicLink(body.poll);
+    if (!claim) return { body: { ready: false } };
+
+    const ticket = await deps.store.issueSessionTicket({
+      userId: claim.userId,
+      provider: "magic_link",
+      // NULL, exactly as the deep-link path does for a magic link. §10 wants a link clicked on a
+      // second device to work, so there is no app-instance nonce to bind this to — the poll secret
+      // is what proved the device, and it has already been spent to get here.
+      nonceHash: null,
+    });
+    await deps.audit("auth.magic_link_collected", {
+      requestId: req.requestId,
+      ip: req.ip,
+      userId: claim.userId,
+    });
+    return { body: { ready: true, ticket: ticket.ticket } };
+  };
+}
 
 /**
  * §3.3 steps 2 and 3. Rate-limit, mint, send, and answer 200 whatever happened.
@@ -131,7 +205,10 @@ function requestHandler(deps: MagicLinkDeps): Handler {
         metadata: { reason: "blocked" },
       });
       log(`[auth] a sign-in link was requested for a blocked address (${req.requestId})`);
-      return { body: SENT };
+      // A decoy, for the reason on `sent`: this branch must not be distinguishable from the one
+      // below. Nothing stores it, so the waiting screen polls it until the link would have expired
+      // and then says so — which is exactly what a blocked address should look like from outside.
+      return { body: sent(mintSecret()) };
     }
 
     const issued = await deps.store.issueMagicLink({
@@ -173,7 +250,7 @@ function requestHandler(deps: MagicLinkDeps): Handler {
       metadata: { provider: deps.transport.provider },
     });
     log(`[auth] a sign-in link was sent (${req.requestId})`);
-    return { body: SENT };
+    return { body: sent(issued.poll) };
   };
 }
 
@@ -232,6 +309,10 @@ function consumeHandler(deps: MagicLinkDeps): Handler {
 
     // NOW the account is created, if there was not one. See `resolveUser` on why not earlier.
     const { userId } = await deps.resolveUser(claimed.email, { requestId: req.requestId, ip: req.ip });
+    // AND TELL THE DEVICE THAT ASKED. The link may well have been opened somewhere else entirely —
+    // mail is read on a phone — and the deep link below can only reach a machine with Jaroku on it.
+    // This is what lets the laptop that is still showing "check your email" find out.
+    await deps.store.attachMagicLinkClaim(token, userId);
     const ticket = await deps.store.issueSessionTicket({
       userId,
       provider: "magic_link",

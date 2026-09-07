@@ -18,18 +18,28 @@
 
 import { useEffect, useState } from "react";
 import { RESEND_COOLDOWN_S } from "../../lib/signInTiming.ts";
-import { SignInFailure, requestMagicLink } from "../../lib/signIn.ts";
+import { SignInFailure, pollMagicLink, requestMagicLink } from "../../lib/signIn.ts";
 import { AuthShell, LegalLine, TextLink } from "./AuthShell.tsx";
 import { FormError } from "./controls.tsx";
 
 export function CheckEmailScreen({
   email,
   expiresInMinutes,
+  poll,
+  onTicket,
   onStartOver,
 }: {
   email: string;
   /** From the server, so this sentence and the token's own lifetime cannot drift apart. */
   expiresInMinutes: number;
+  /**
+   * The secret that asks whether the link has been opened, or null on a server too old to give one.
+   *
+   * NEVER IN THE EMAIL, which is what makes polling with it safe — see `pollMagicLink`.
+   */
+  poll: string | null;
+  /** A ticket collected by the poll, to be spent exactly as a deep link's would be. */
+  onTicket: (ticket: string) => void;
   onStartOver: () => void;
 }) {
   // SECONDS REMAINING, NOT A TIMESTAMP TO COMPARE AGAINST. This is the only clock on the screen and
@@ -39,6 +49,52 @@ export function CheckEmailScreen({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resent, setResent] = useState(false);
+  // THE SECRET THAT IS CURRENTLY WORTH POLLING, which is not always the one this screen opened
+  // with. "Send another link" issues a NEW link with a NEW poll secret and invalidates nothing —
+  // so a person who resends and then opens the SECOND mail would have been polling a secret that
+  // link never claims against, and the screen would wait out the full expiry with the sign-in
+  // already done. Seeded from the prop, replaced on every successful resend.
+  const [livePoll, setLivePoll] = useState(poll);
+
+  // WHETHER THE LINK HAS BEEN OPENED YET, ASKED FROM HERE RATHER THAN WAITED FOR.
+  //
+  // THE BUG THIS FIXES IS THE ORDINARY CASE. A sign-in link is requested on a laptop and opened on
+  // a phone, because that is where mail is read. `/magic` then mints a ticket and hands it to
+  // `jaroku://auth/complete`, a scheme only a device with Jaroku on it can answer — so the phone
+  // does nothing visible and this screen waited forever, with the sign-in already complete and the
+  // token already spent. The deep link still works and is still the fast path when the link is
+  // opened on this machine; this is what makes the other case finish at all.
+  //
+  // EVERY THREE SECONDS, which is the whole of the tuning. Faster buys nothing a person can
+  // perceive — they are switching devices, reading mail, tapping a link — and it is a request per
+  // tick against an unauthenticated route for as long as somebody leaves the screen open.
+  //
+  // IT STOPS WHEN THE LINK WOULD HAVE EXPIRED. Past that there is nothing left to collect: the
+  // token is dead and the claim with it, so continuing would be a timer nobody ever clears.
+  useEffect(() => {
+    if (!livePoll) return;
+    let live = true;
+    const deadline = Date.now() + expiresInMinutes * 60_000;
+    const timer = setInterval(() => {
+      if (!live) return;
+      if (Date.now() > deadline) {
+        clearInterval(timer);
+        return;
+      }
+      void pollMagicLink(livePoll).then((ticket) => {
+        // `live` again after the await: the screen can be unmounted while a request is in flight,
+        // and spending a ticket into a component that no longer exists would sign somebody in
+        // behind a screen they had already left.
+        if (!live || !ticket) return;
+        clearInterval(timer);
+        onTicket(ticket);
+      });
+    }, 3_000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [livePoll, expiresInMinutes, onTicket]);
 
   useEffect(() => {
     if (remaining <= 0) return;
@@ -54,7 +110,10 @@ export function CheckEmailScreen({
     setBusy(true);
     setError(null);
     try {
-      await requestMagicLink(email);
+      const again = await requestMagicLink(email);
+      // Kept only when the server gave one: an older server answers without it, and overwriting a
+      // working secret with null would turn a resend into the bug this screen exists to avoid.
+      if (again.poll) setLivePoll(again.poll);
       setResent(true);
       setRemaining(RESEND_COOLDOWN_S);
     } catch (err) {

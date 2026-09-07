@@ -66,7 +66,7 @@ export function SignInScreen({
    * down — which is a confirmation for a message nothing dispatched, the one failure mode §8 spends
    * a whole section preventing.
    */
-  onSent: (email: string, expiresInMinutes: number) => void;
+  onSent: (email: string, expiresInMinutes: number, poll: string | null) => void;
 }) {
   const message = useSessionStore((s) => s.message);
   const [methods, setMethods] = useState<SignInMethods | null>(null);
@@ -162,7 +162,7 @@ export function SignInScreen({
       const sent = await requestMagicLink(address);
       // ONLY NOW. The next screen is a claim that a message is on its way, and it is only made once
       // the server has said one is. §10: "Do not silently fail."
-      onSent(address, sent.expiresInMinutes);
+      onSent(address, sent.expiresInMinutes, sent.poll);
     } catch (err) {
       // WHAT COMES BACK IS NEVER ABOUT AN ACCOUNT. The server answers 200 whether or not the address
       // belongs to anybody — that is what makes this route non-enumerable — so every message that

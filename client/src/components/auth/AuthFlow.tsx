@@ -40,7 +40,7 @@ import { Reveal } from "../onboarding/Reveal.tsx";
 type Screen =
   | { at: "signin" }
   /** §3.3 step 4. Owns the address, because the resend and the "wrong email" both need it. */
-  | { at: "sent"; email: string; expiresInMinutes: number }
+  | { at: "sent"; email: string; expiresInMinutes: number; poll: string | null }
   | { at: "exchanging" }
   /** §4.5's first three rows, which all say the same sentence for the same reason. */
   | { at: "expired" };
@@ -125,6 +125,8 @@ export function AuthFlow() {
       <CheckEmailScreen
         email={screen.email}
         expiresInMinutes={screen.expiresInMinutes}
+        poll={screen.poll}
+        onTicket={(ticket) => void spend(ticket)}
         // §3.3: "No 'resend to a different email' option. If the user typed the wrong address, they
         // use 'Start over' — resending to a different address on the same session is a phishing
         // surface." So the way back is the whole way back, to a screen with an empty field on it.
@@ -139,7 +141,7 @@ export function AuthFlow() {
       // up the answer, so this screen is never shown for a message nothing dispatched — which is
       // the one failure mode §8 spends a whole section preventing, and the reason `onSent` carries
       // the expiry rather than this component assuming fifteen minutes.
-      onSent={(email, expiresInMinutes) => setScreen({ at: "sent", email, expiresInMinutes })}
+      onSent={(email, expiresInMinutes, poll) => setScreen({ at: "sent", email, expiresInMinutes, poll })}
     />
   );
 }
