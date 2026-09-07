@@ -23,7 +23,7 @@
 // this file exists so they *can* be, in a later pass". This is that pass; both are on it.
 
 import { BORDER, CANVAS, DEEP_HARBOR, SEMANTIC, TEXT as INK, alpha } from "./palette.ts";
-import { RADIUS_SCALE } from "./surfaces.ts";
+import { ELEVATION_SPEC, RADIUS_SCALE } from "./surfaces.ts";
 
 /**
  * Category accents. Each answers "what kind of thing is this", never "how is it doing".
@@ -404,36 +404,47 @@ export const RADIUS = RADIUS_SCALE;
 export type RadiusName = keyof typeof RADIUS;
 
 // ── Elevation ───────────────────────────────────────────────────────────────
-// Depth, in four steps, so the eye can tell what is active from what is merely present.
+// UI-4 §06's four levels, under this app's names for them. `surfaces.ts` holds the geometry; this
+// is the layer above, and E0/E1/E2/E3 map onto `flat`/`raised`/`floating`/`overlay` one for one —
+// the names stayed because sixty call sites say them and every one was already on the right level.
 //
 // Each level is a hairline plus a shadow, never a shadow alone, and the reason has flipped without
 // the rule changing. On a near-black background a soft shadow was nearly invisible and the 1px edge
 // catching light at the top of the box did the separating. On `#F7F7F5` the shadow is the half that
-// works and the hairline is the half that would otherwise read as a drawn rectangle. Either alone
-// still reads as a mistake; it is simply the other one carrying the weight now.
+// works and the hairline is the half that would otherwise read as a drawn rectangle. §12 says the
+// same thing as an instruction — "use surfaces and borders before shadows" — and adds the sentence
+// that decides what these values are: "avoid dark, wide or decorative shadows."
 //
-// THE ALPHAS DROPPED BY ROUGHLY A FACTOR OF FIVE, which is the whole difference between a light
-// system's depth and a dark one's. `rgba(0,0,0,0.4)` under a card is invisible on near-black and a
-// bruise on off-white. And the shadow is struck from INK rather than from black: a neutral-warm
-// page casts a neutral-warm shadow, and pure black under `#FBFBFA` goes grey-blue.
+// THE LADDER GOT MUCH SHALLOWER, AND THAT IS THE CHANGE. Every level here was already struck from
+// ink at a light system's alphas; what §06 revalues is the GEOMETRY. `overlay` was two layers
+// ending in `0 28px 64px -16px` at sixteen percent, and `floating` was a 12/28px pair — depth that
+// announces itself, which is precisely what §07's "shadows are intentionally soft and rare"
+// forbids. Each level is one layer now, and the widest shadow in the system is narrower than the
+// narrower half of what the old overlay stacked.
 //
-// The values are deliberately low-alpha and large-blur. §09's neutral-first restraint means depth
-// should be something you notice only when it is missing: enough to say "this is on top", never
-// enough to say "look at this shadow".
+// THE TINT IS INK AND THE SPECIFICATION WRITES BLACK. §06 spells `rgba(0,0,0,0.03)`; these are its
+// offsets, blurs and alphas exactly, struck from `#1D1D1B` — a neutral-warm page casts a
+// neutral-warm shadow, and pure black under `#FBFBFA` goes grey-blue. At three to ten percent the
+// two are indistinguishable except in the one way that matters.
 //
 // Exported as ready-to-use CSS strings rather than as parts, because half of the consumers are
 // React Flow nodes and popovers that need an inline style, and a token that only exists as a
 // Tailwind class can't be handed to those.
 
+const level = (E: keyof typeof ELEVATION_SPEC): string => {
+  const s = ELEVATION_SPEC[E].shadow;
+  return s === null ? "none" : `0 ${s.y}px ${s.blur}px ${alpha(INK.primary, s.alpha)}`;
+};
+
 export const ELEVATION = {
-  /** In the page. A section boundary, not a raised object. */
-  flat: "none",
-  /** One step up: cards, rows that own their content. */
-  raised: `0 1px 2px ${alpha(INK.primary, 0.06)}`,
-  /** Off the page: popovers, the step-detail panel, the code overlay. */
-  floating: `0 2px 6px ${alpha(INK.primary, 0.06)}, 0 12px 28px -8px ${alpha(INK.primary, 0.1)}`,
-  /** Above everything: modals, and the app shell against the desktop. */
-  overlay: `0 4px 12px ${alpha(INK.primary, 0.08)}, 0 28px 64px -16px ${alpha(INK.primary, 0.16)}`,
+  /** E0. In the page. A section boundary, not a raised object — and every card at rest. */
+  flat: level("E0"),
+  /** E1. One step up, and §07 allows it in exactly two places: a card, and a card under the pointer. */
+  raised: level("E1"),
+  /** E2. Genuinely off the page: dropdowns, popovers, menus, the command palette. */
+  floating: level("E2"),
+  /** E3. Above everything: dialogs, modal overlays, and the app shell against the desktop. */
+  overlay: level("E3"),
 } as const;
 
 export type ElevationName = keyof typeof ELEVATION;
@@ -507,8 +518,18 @@ export const FOCUS_RING = `0 0 0 1px ${INTERACTION.accent}, 0 0 0 4px ${INTERACT
  * colour.
  */
 export const GLOW = {
-  /** An interactive card under the pointer, or reached by Tab. Border deepens, edge settles. */
-  hover: `0 0 0 1px ${BORDER.strong}, 0 0 32px -10px ${alpha(INK.primary, 0.12)}`,
+  /**
+   * An interactive card under the pointer, or reached by Tab. The border deepens to §06's
+   * strongest and the card lifts to E1.
+   *
+   * IT WAS A BORDER PLUS A 32px BLOOM, and §12 rules the bloom out in five words: "avoid dark, wide
+   * or decorative shadows." A 32px spread at twelve percent is all three — wider than anything on
+   * the elevation ladder, and spent on a state rather than on a level. What replaces it is the
+   * level §07 names for exactly this: "E1 may appear on interaction." So a hovered card is a
+   * resting card plus one step, which is a sentence the ladder can say, and the border is doing
+   * what §12 asks for anyway — surfaces and borders before shadows.
+   */
+  hover: `0 0 0 1px ${BORDER.strong}, ${ELEVATION.raised}`,
   /** The one action a screen is asking for. Sits on the filled control, not around it. */
   cta: `0 0 0 4px ${alpha(INK.primary, 0.07)}`,
 } as const;

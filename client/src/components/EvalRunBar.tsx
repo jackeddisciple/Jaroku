@@ -127,7 +127,7 @@ export function EvalRunBar() {
 
       {/* the estimate — shown only when money is involved, and always as a range */}
       {confirming && (
-        <div className="rounded-card border border-edge bg-panel px-3 py-2 space-y-1.5 shadow-raised">
+        <div className="rounded-card border border-edge bg-panel px-3 py-2 space-y-1.5">
           {!estimate ? (
             <div className="text-tiny text-muted">estimating…</div>
           ) : (

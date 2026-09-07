@@ -99,3 +99,57 @@ export const SHAPE = {
   /** Agent avatar containers. A range, because §04 gives the artwork its own silhouette inside. */
   avatarRadius: { min: RADIUS_SCALE.xl, max: RADIUS_SCALE.hero },
 } as const;
+
+/**
+ * §06. Elevation, in four levels — and §07, which is the half that says where each may appear.
+ *
+ * THE SHADOWS ARE THE SPECIFICATION'S GEOMETRY AND THIS SYSTEM'S TINT. §06 spells them
+ * `rgba(0,0,0,0.03)`, `rgba(0,0,0,0.06)` and `rgba(0,0,0,0.10)`; the offsets, blurs and alphas below
+ * are those exactly, and the colour is `#1D1D1B` rather than black. That is not a departure from
+ * UI-4 so much as an application of the palette it sits on: a neutral-warm page casts a
+ * neutral-warm shadow, and pure black under `#FBFBFA` goes grey-blue. `colourSystem.test.ts` has
+ * asserted "struck from ink" since the light palette landed, and at three to ten percent the two
+ * are indistinguishable except in the one way that matters.
+ *
+ * THE LADDER GOT SHALLOWER, WHICH IS THE WHOLE POINT OF §07. This client's own four levels ran to
+ * `0 28px 64px -16px` at sixteen percent under a modal and a two-layer 12/28px pair under a
+ * popover — depth that announces itself. §07 answers that in two sentences: "Shadows are
+ * intentionally soft and rare. Do not use large, dark shadows on normal cards." So E3 is a single
+ * layer at 12/32 and ten percent, E2 is 4/12 at six, and the widest shadow in the system is now
+ * narrower than the *narrowest* of the two the old overlay stacked.
+ *
+ * AND THE PLACEMENT RULE IS THE PART A VALUE CANNOT CARRY. "E1 may appear on interaction; E2/E3 are
+ * reserved for genuinely floating content." A card sitting in a column is not floating, however
+ * urgent it is — which is the rule the Inbox's severity ladder broke, spending E3 on the most
+ * blocking card and E2 on the next, because depth was the easiest axis to reach for. §11 gives
+ * every card in the product the same answer instead: E0, rising to E1 under the pointer.
+ */
+export const ELEVATION_SPEC = {
+  /** E0 — Flat. Canvas, sidebar, thread rows, structural surfaces. */
+  E0: { shadow: null, use: "canvas, sidebar, thread rows, structural surfaces" },
+  /** E1 — Surface. Agent / Inbox cards; subtle interactive lift. */
+  E1: { shadow: { y: 1, blur: 2, alpha: 0.03 }, use: "agent and inbox cards; subtle interactive lift" },
+  /** E2 — Floating. Dropdowns, popovers, menus, command palette. */
+  E2: { shadow: { y: 4, blur: 12, alpha: 0.06 }, use: "dropdowns, popovers, menus, command palette" },
+  /** E3 — Overlay. Dialogs and modal overlays. */
+  E3: { shadow: { y: 12, blur: 32, alpha: 0.1 }, use: "dialogs and modal overlays" },
+} as const;
+
+export type ElevationLevel = keyof typeof ELEVATION_SPEC;
+
+/**
+ * §07's rules, as the two things about elevation that are not a shadow.
+ *
+ * "Most cards should use subtle border and surface contrast" — which is §12's "normal cards should
+ * usually be border-led, not shadow-led" said once more, and the reason both are in the
+ * specification twice is that a card is the object somebody reaches for depth on first. A border
+ * costs one pixel and separates two surfaces unambiguously at any size; a shadow does the same job
+ * worse and gets darker every time somebody wants a little more separation.
+ */
+export const SHADOW_RULES = {
+  /** A card rests flat and lifts one level when the pointer or the keyboard reaches it. */
+  cardAtRest: "E0",
+  cardOnInteraction: "E1",
+  /** The two levels a surface has to genuinely float to earn. */
+  floatingOnly: ["E2", "E3"],
+} as const;

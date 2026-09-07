@@ -16,13 +16,19 @@
 //   The four signals that are not severity each have their own carrier: urgency is the age bar,
 //   type is the icon, count is the `×40` badge, and resolution is the card physically collapsing.
 //
-// THREE ELEVATIONS, ONE PER SIZE, from the four-level scale v0.2.2 established — each of them a
-// border PLUS a shadow, because either half alone reads as a mistake. Which half carries the weight
-// depends on the page: on the near-black one this was written for, a shadow alone was invisible and
-// the hairline did the separating; on §01's light ladder the shadow works and the hairline is what
-// stops a card reading as a drawn rectangle. The pairing is the rule, not the reason for it.
+// ONE ELEVATION FOR ALL THREE, WHICH USED TO BE THREE. Each size took its own rung of the
+// four-level scale v0.2.2 established, running E3 / E2 / E1 down the severities — and UI-4 §07
+// answers that in one sentence: "E2/E3 are reserved for genuinely floating content." A card in a
+// column does not float, whatever it is asking for, so §11's `E0 → E1` applies to all three and the
+// severity is carried by the three axes that were always doing the work anyway.
+//
+// THE BORDER IS STILL PAIRED WITH IT, because either half alone reads as a mistake. Which half
+// carries the weight depends on the page: on the near-black one this was written for, a shadow alone
+// was invisible and the hairline did the separating; on §01's light ladder the shadow works and the
+// hairline is what stops a card reading as a drawn rectangle. At E0 the hairline is the whole of it,
+// which is exactly what §12 means by a normal card being border-led rather than shadow-led.
 
-import { ACCENT, ELEVATION, ICON, MOTION, RADIUS, SURFACE, TEXT } from "../lib/tokens.ts";
+import { ACCENT, ICON, MOTION, RADIUS, SURFACE, TEXT } from "../lib/tokens.ts";
 import { ageFraction } from "../lib/inboxBoard.ts";
 import { absTime } from "../lib/format.ts";
 import { DateChip } from "./Chip.tsx";
@@ -44,13 +50,27 @@ import type { InboxItemView, InboxSeverity } from "../types.ts";
  */
 const ROSE = ACCENT.mcp;
 
-/** §4.3's three sizes, as the geometry each one actually gets. */
-const SIZE: Record<InboxSeverity, { pad: string; title: string; elevation: string; border: string }> = {
+/**
+ * §4.3's three sizes, as the geometry each one actually gets.
+ *
+ * DEPTH IS NOT ONE OF THE AXES ANY MORE, and it was the wrong one to have reached for. The three
+ * severities ran down the elevation ladder — E3 under a blocking card, E2 under an attention one,
+ * E1 under a proposal — which UI-4 §07 forbids in one sentence: "E2/E3 are reserved for genuinely
+ * floating content." A card sitting in a column is not floating however urgent it is, and §11 gives
+ * every Inbox card the same answer regardless of severity: E0, rising to E1 under the pointer.
+ *
+ * WHICH COSTS NOTHING, BECAUSE DEPTH WAS NEVER WHAT SAID "URGENT". A shadow under a card in a
+ * scrolling column is very nearly invisible at any alpha this system permits; what actually
+ * separated these three was the padding, the title's rung and the border's weight, and all three
+ * are still here. §02's own instruction is the argument — typography, spacing and contrast before
+ * decoration — and a blocking card that was distinguishable ONLY by being 20px deeper would have
+ * been the failure §12 describes as everything being emphasized.
+ */
+const SIZE: Record<InboxSeverity, { pad: string; title: string; border: string }> = {
   // Large. The inline resolve form is visible without expanding, and evidence has room.
   blocking: {
     pad: "px-3 py-2.5",
     title: "text-label",
-    elevation: ELEVATION.overlay,
     border: SURFACE.edge,
   },
   // Medium: subject, context line, primary action. NEUTRAL-STRONG rather than coloured — the weight
@@ -58,14 +78,12 @@ const SIZE: Record<InboxSeverity, { pad: string; title: string; elevation: strin
   attention: {
     pad: "px-3 py-2",
     title: "text-caption font-medium",
-    elevation: ELEVATION.floating,
     border: SURFACE.edge,
   },
   // Compact. A proposal is a question, not a problem, and it should not out-weigh one.
   proposal: {
     pad: "px-2.5 py-1.5",
     title: "text-caption",
-    elevation: ELEVATION.raised,
     border: SURFACE.hair,
   },
 };
@@ -162,16 +180,19 @@ export function InboxCard({
   const Icon = INBOX_ICON[item.icon];
 
   return (
+    // §11: an Inbox card is `E0 → E1`, which is a class rather than an inline value because the
+    // arrow is a HOVER and only half of it can be written as a style. The rest of the geometry
+    // stays inline — the border is computed from two pieces of state and the collapse animates a
+    // max-height — so this is the one property that moves out.
     <div
       data-inbox-item={item.id}
       onClick={onClick}
-      className={`relative overflow-hidden text-left transition-[max-height,opacity,margin] motion-reduce:transition-none ${size.pad} ${
+      className={`relative overflow-hidden text-left transition-[max-height,opacity,margin,box-shadow] hover:shadow-raised motion-reduce:transition-none ${size.pad} ${
         leaving ? "pointer-events-none opacity-0" : "opacity-100"
       }`}
       style={{
         borderRadius: RADIUS.card,
         border: `1px solid ${selected ? SURFACE.grip : size.border}`,
-        boxShadow: size.elevation,
         background: SURFACE.panel,
         // Collapsing rather than merely fading: the column closes up behind it, which is what makes a
         // board visibly shrink as somebody works.

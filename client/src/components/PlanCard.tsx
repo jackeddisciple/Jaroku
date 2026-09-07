@@ -321,13 +321,18 @@ function Note({ text, vocabulary }: { text: string; vocabulary: readonly string[
  * This bounds the proposal so the eye can tell where the opinion ends and the thing that actually
  * happened begins.
  *
- * A hairline and one step of elevation, per doc §4.2 — enough to bound the block, not enough to
- * read as a box. Every branch shares it so the card settles in place as it streams rather than
- * changing shape underneath the text (doc §4.3).
+ * A hairline and a surface, per doc §4.2 — enough to bound the block, not enough to read as a box.
+ * Every branch shares it so the card settles in place as it streams rather than changing shape
+ * underneath the text (doc §4.3).
+ *
+ * IT WAS A HAIRLINE AND ONE STEP OF ELEVATION, and UI-4 §12 takes the step away: "normal cards
+ * should usually be border-led, not shadow-led", and E1 is for interaction rather than for resting.
+ * Which loses nothing this card was using it for — "enough to bound the block, not enough to read as
+ * a box" is a description of a border, and the shadow beside it was the half doing no work.
  */
 function Card({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-card border border-edge bg-panel/40 px-3.5 py-3 text-caption shadow-raised">
+    <div className="rounded-card border border-edge bg-panel/40 px-3.5 py-3 text-caption">
       {children}
     </div>
   );

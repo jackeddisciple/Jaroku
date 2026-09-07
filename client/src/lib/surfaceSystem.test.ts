@@ -23,8 +23,8 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { RADIUS_SCALE, RADIUS_TOKENS, SHAPE } from "./surfaces.ts";
-import { RADIUS } from "./tokens.ts";
+import { ELEVATION_SPEC, RADIUS_SCALE, RADIUS_TOKENS, SHADOW_RULES, SHAPE } from "./surfaces.ts";
+import { ELEVATION, GLOW, RADIUS } from "./tokens.ts";
 
 let failures = 0;
 const check = (name: string, ok: boolean, detail = ""): void => {
@@ -156,6 +156,124 @@ console.log("\n§05's two rules that are not a number");
   check("the avatar range is §04's two expressive rungs",
     SHAPE.avatarRadius.min === RADIUS_SCALE.xl && SHAPE.avatarRadius.max === RADIUS_SCALE.hero,
     `${SHAPE.avatarRadius.min}–${SHAPE.avatarRadius.max}`);
+}
+
+console.log("\n§06's four levels, transcribed from the PDF");
+{
+  // The specification's table. §06 writes its alphas against black; the values below are its
+  // GEOMETRY, which is the half a tint cannot change — see `surfaces.ts` for why the colour is ink.
+  const SPEC: Record<string, string | null> = {
+    E0: null,
+    E1: "0 1px 2px",
+    E2: "0 4px 12px",
+    E3: "0 12px 32px",
+  };
+  const ALPHA: Record<string, number> = { E1: 0.03, E2: 0.06, E3: 0.1 };
+  const LEVEL: Record<string, string> = { E0: "flat", E1: "raised", E2: "floating", E3: "overlay" };
+
+  for (const [E, geometry] of Object.entries(SPEC)) {
+    const value = ELEVATION[LEVEL[E] as keyof typeof ELEVATION];
+    if (geometry === null) {
+      check(`${E} is flat`, value === "none", value);
+      continue;
+    }
+    check(`${E} is ${geometry} at ${ALPHA[E]}`,
+      value.startsWith(`${geometry} `) && value.endsWith(`, ${ALPHA[E]})`), value);
+    // ONE LAYER, WHICH IS THE ASSERTION §07 IS ACTUALLY ABOUT. The two levels this replaced stacked
+    // a pair each, ending in `0 28px 64px -16px`; "shadows are intentionally soft and rare" is a
+    // rule against a second layer as much as against a dark one, and a comma is what a second layer
+    // costs.
+    check(`...and it is a single layer`, !value.includes("),"), value);
+  }
+  check("the ladder has four levels and no fifth",
+    Object.keys(ELEVATION).length === 4 && Object.keys(ELEVATION_SPEC).length === 4);
+
+  // Tailwind carries E1–E3; E0 is the absence of a class rather than a class of its own.
+  const block = read("tailwind.config.js").match(/boxShadow: \{[\s\S]*?\n {6}\}/)?.[0] ?? "";
+  for (const [E, name] of Object.entries(LEVEL)) {
+    if (E === "E0") continue;
+    check(`tailwind emits shadow-${name} at ${E}`,
+      block.includes(`${name}: "${ELEVATION[name as keyof typeof ELEVATION]}"`), block ? "not in the block" : "block not found");
+  }
+}
+
+console.log("\n§07: where each level is allowed to appear");
+{
+  // "E1 may appear on interaction; E2/E3 are reserved for genuinely floating content." Which is a
+  // rule about CALL SITES rather than about values, and the only kind of elevation bug that ever
+  // actually happens — every level renders, every card looks fine on its own, and what goes wrong is
+  // that a card in a column reached for the dialog's shadow because depth was the nearest axis.
+  //
+  // A FLOATING SURFACE IS ONE THAT LEAVES THE FLOW, which in this client is exactly what `absolute`,
+  // `fixed` and `inset-` say. So the test is structural: an element carrying E2 or E3 must either be
+  // positioned out of the flow itself, or be the surface of something a Dialog/Popover/Overlay
+  // component owns. Anything else is a card that was handed a dropdown's depth.
+  // AND `backdrop-blur` COUNTS AS LEAVING THE FLOW, which is not a position but is better evidence
+  // than one: a surface that blurs what is behind it demonstrably has something behind it. It is
+  // what the sign-in card and React Flow's own controls are, and both are floating in every sense
+  // §07 means except the one a `position` property can state.
+  const FLOATS = /\b!?(?:absolute|fixed|inset-0|backdrop-blur)\b|role="dialog"/;
+  /**
+   * THE TWO SURFACES THAT FLOAT BY SOMETHING OTHER THAN A CLASS, named rather than pattern-matched
+   * because a pattern wide enough to cover them would cover every card in the app as well.
+   *
+   * THE TWO SHELLS ARE THE APP ITSELF, lifted off `bg-void` by the 8px inset around them — the one
+   * surface in the product that floats over the desktop rather than over the page, which is what
+   * `tokens.ts` has always said E3's fourth use is. Neither can say so in a class, because what
+   * makes them float is the padding on their parent.
+   */
+  const FLOATS_WITHOUT_SAYING_SO = new Set([
+    "App.tsx",
+    "components/onboarding/OnboardingSurface.tsx",
+  ]);
+  const misplaced: string[] = [];
+  for (const { path, text } of CODE) {
+    if (FLOATS_WITHOUT_SAYING_SO.has(path)) continue;
+    const lines = text.split("\n");
+    lines.forEach((line, i) => {
+      if (!/shadow-(?:floating|overlay)/.test(line)) return;
+      // THE ELEMENT'S OWN LINE IS NOT ALWAYS WHERE ITS POSITION IS. A dialog's surface is a plain
+      // box centred by the scrim that owns it, so the window is the enclosing markup rather than
+      // the one attribute — twelve lines, which is the longest opening tag in this client.
+      const window = lines.slice(Math.max(0, i - 12), i + 1).join("\n");
+      if (FLOATS.test(window)) return;
+      misplaced.push(`${path}: ${line.trim().slice(0, 90)}`);
+    });
+  }
+  check("E2 and E3 are only on surfaces that leave the flow", misplaced.length === 0, misplaced.join("; "));
+
+  // AND THE OTHER HALF: a card rests flat. `shadow-raised` on an element with no hover/focus prefix
+  // is a card that is permanently lifted, which §11's `E0 → E1` and §12's "agent cards are E0 by
+  // default" both rule out. The Inbox spent E3, E2 and E1 on its three severities before this pass.
+  const lifted = CODE.flatMap(({ path, text }) =>
+    text.split("\n")
+      .filter((l) => /(?:^|[^:])\bshadow-raised\b/.test(l) && !/(?:hover|focus|focus-within|group-hover|active):shadow-raised/.test(l))
+      .map((l) => `${path}: ${l.trim().slice(0, 90)}`),
+  );
+  check("nothing rests at E1 that is not answering a pointer", lifted.length === 0, lifted.join("; "));
+
+  check("the rules say a card rests flat and lifts one level",
+    SHADOW_RULES.cardAtRest === "E0" && SHADOW_RULES.cardOnInteraction === "E1");
+  check("...and that only two levels are for floating content",
+    SHADOW_RULES.floatingOnly.join() === "E2,E3");
+}
+
+console.log("\n§12: no dark, wide or decorative shadow anywhere");
+{
+  // The rule is a maximum on both axes at once, and a blur without an alpha beside it says nothing:
+  // a 64px spread at two percent is atmosphere, a 12px one at forty is a bruise. §06's own widest is
+  // 32px at ten percent, so that is the ceiling — anything past it on EITHER axis is a shadow this
+  // system does not have a level for.
+  const shadows = [...Object.values(ELEVATION), GLOW.hover, GLOW.cta, read("tailwind.config.js")]
+    .join("\n")
+    .matchAll(/(\d+)px\s+(-?\d+px\s+)?rgba\(29, 29, 27,\s*([\d.]+)\)/g);
+  const wide = [...shadows].filter((m) => Number(m[1]) > 32 || Number(m[3]) > 0.1).map((m) => m[0]);
+  check("no ink shadow is wider than E3 or darker than it", wide.length === 0, wide.join("; "));
+
+  // And the hover state, which is where a wide shadow hides: it is a STATE rather than a level, so
+  // nothing on the elevation ladder would have caught the 32px bloom this used to carry.
+  check("GLOW.hover is a border plus E1, not a bloom",
+    GLOW.hover === `0 0 0 1px #C9C9C4, ${ELEVATION.raised}`, GLOW.hover);
 }
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);

@@ -129,28 +129,41 @@ export default {
         hero: "24px", // special hero / expressive agent surfaces
         pill: "999px", // status tags, badges and semantic pills only
       },
-      // Depth — mirrors ELEVATION in src/lib/tokens.ts. Every level still pairs with a hairline
-      // border, and which half does the work has swapped: on near-black the 1px edge separated two
-      // surfaces and the shadow only said which way was up, and on #F7F7F5 it is the shadow that
-      // separates while the hairline stops a card reading as a drawn rectangle.
+      // Depth — UI-4 §06's four levels, mirroring ELEVATION in src/lib/tokens.ts. E0 is the absence
+      // of a class; `raised`, `floating` and `overlay` are E1, E2 and E3.
       //
-      // THE ALPHAS ARE ROUGHLY A FIFTH OF WHAT THEY WERE, which is the whole difference between a
-      // light system's depth and a dark one's — 40% black under a card is invisible on near-black
-      // and a bruise on off-white. Struck from ink (#1D1D1B) rather than from black, because a
-      // neutral-warm page casts a neutral-warm shadow and pure black under #FBFBFA goes grey-blue.
+      // Every level still pairs with a hairline border, and which half does the work has swapped: on
+      // near-black the 1px edge separated two surfaces and the shadow only said which way was up,
+      // and on #F7F7F5 it is the shadow that separates while the hairline stops a card reading as a
+      // drawn rectangle. §12 says the same as an instruction — "use surfaces and borders before
+      // shadows" — and then names what these values may not be: "avoid dark, wide or decorative
+      // shadows."
+      //
+      // THE ALPHAS WERE ALREADY A LIGHT SYSTEM'S AND THE GEOMETRY WAS NOT. `overlay` stacked two
+      // layers ending in 0 28px 64px -16px, and `floating` was a 12/28px pair; §07's "shadows are
+      // intentionally soft and rare" is a rule against exactly that, so each level is one layer now
+      // and the widest of them is narrower than the narrower half of what overlay used to stack.
+      //
+      // Struck from ink (#1D1D1B) rather than from the black §06 spells, because a neutral-warm page
+      // casts a neutral-warm shadow and pure black under #FBFBFA goes grey-blue. The offsets, blurs
+      // and alphas are the specification's own.
       boxShadow: {
-        raised: "0 1px 2px rgba(29, 29, 27, 0.06)",
-        floating: "0 2px 6px rgba(29, 29, 27, 0.06), 0 12px 28px -8px rgba(29, 29, 27, 0.1)",
-        overlay: "0 4px 12px rgba(29, 29, 27, 0.08), 0 28px 64px -16px rgba(29, 29, 27, 0.16)",
+        raised: "0 1px 2px rgba(29, 29, 27, 0.03)",
+        floating: "0 4px 12px rgba(29, 29, 27, 0.06)",
+        overlay: "0 12px 32px rgba(29, 29, 27, 0.1)",
         // Mirrors FOCUS_RING in src/lib/tokens.ts. Deep Harbor, not a grey — a grey ring on a grey
         // control is very nearly nothing whichever way up the greys are, and "where am I" is the
         // question a keyboard user asks most.
         focusring: "0 0 0 1px #2B4851, 0 0 0 4px rgba(43, 72, 81, 0.16)",
         // Weight by shade — mirrors GLOW in src/lib/tokens.ts. A shadow says "this is above the
-        // page"; this says "this is the one you are on", which is what a hovered or
-        // keyboard-reached control needs to say. It lifted by LIGHT under the dark palette,
-        // because a card on #0d0d0f can only get brighter; on #FBFBFA it can only get darker.
-        glow: "0 0 0 1px #C9C9C4, 0 0 32px -10px rgba(29, 29, 27, 0.12)",
+        // page"; this says "this is the one you are on", which is what a hovered or keyboard-reached
+        // control needs to say. It lifted by LIGHT under the dark palette, because a card on #0d0d0f
+        // can only get brighter; on #FBFBFA it can only get darker.
+        //
+        // AND THE 32px BLOOM IT USED TO CARRY IS GONE, because §12 rules it out in five words:
+        // "avoid dark, wide or decorative shadows." A hovered card is a resting card plus §07's one
+        // sanctioned interaction step — E1 — under a border deepened to §06's strongest.
+        glow: "0 0 0 1px #C9C9C4, 0 1px 2px rgba(29, 29, 27, 0.03)",
         "glow-cta": "0 0 0 4px rgba(29, 29, 27, 0.07)",
       },
       transitionDuration: {
@@ -251,7 +264,9 @@ export default {
         // The executing graph node glows — a real, layered amber glow (tight ring + soft spread)
         // that swells and settles, over the persistent depth shadow. Not a flash (doc §4.6).
         //
-        // THE AMBER IS §07's (#B77A1B) AND THE DEPTH UNDER IT IS INK AT A LIGHT SYSTEM'S ALPHA. The
+        // THE AMBER IS §07's (#B77A1B) AND THE DEPTH UNDER IT IS THE ELEVATION LADDER'S OWN E2 —
+        // one layer, not the 12/30px pair it used to stack, because UI-4 §12 forbids a wide shadow
+        // wherever it appears and a node is not exempt for being animated. The
         // ring alphas are barely reduced and the SPREAD alphas are, which is the part a light page
         // changes: a wide soft halo of colour on near-black reads as light coming off the node, and
         // the same halo on #F1F1EF reads as a smudge. The ring is what says "this one is running";
@@ -259,12 +274,12 @@ export default {
         "pulse-node": {
           "0%, 100%": {
             boxShadow:
-              "0 1px 2px rgba(29, 29, 27, 0.08), 0 12px 30px -8px rgba(29, 29, 27, 0.14), " +
+              "0 4px 12px rgba(29, 29, 27, 0.06), " +
               "0 0 0 1px rgba(183, 122, 27, 0.55), 0 0 16px 1px rgba(183, 122, 27, 0.3), 0 0 44px 6px rgba(183, 122, 27, 0.1)",
           },
           "50%": {
             boxShadow:
-              "0 1px 2px rgba(29, 29, 27, 0.08), 0 12px 30px -8px rgba(29, 29, 27, 0.14), " +
+              "0 4px 12px rgba(29, 29, 27, 0.06), " +
               "0 0 0 1px rgba(183, 122, 27, 0.85), 0 0 24px 3px rgba(183, 122, 27, 0.42), 0 0 64px 13px rgba(183, 122, 27, 0.18)",
           },
         },
