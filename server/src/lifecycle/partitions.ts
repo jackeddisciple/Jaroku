@@ -131,6 +131,9 @@ export interface PartitionSummary {
  * the partition exists granted and unpoliced. Separate calls would leave one, and it would be
  * during boot, which is exactly when something else is scanning.
  */
+/** 029 named it; nothing generates this one, so it is spelled once here. */
+const DEFAULT_PARTITION = "steps_default";
+
 const tenancyFor = (name: string): string =>
   `REVOKE ALL ON TABLE ${name} FROM jaroku_app;` +
   `ALTER TABLE ${name} ENABLE ROW LEVEL SECURITY;` +
@@ -176,6 +179,15 @@ export async function ensurePartitions(db: Db, now = new Date(), aheadMonths = M
     );
     created.push(name);
   }
+
+  // AND THE DEFAULT PARTITION, which no month ever names and which 029 created before any of this
+  // ran. It is the one that catches a step whose month is missing — so it holds real rows from real
+  // workspaces — and it was ENABLE-only, exempting the table's owner from its own policy while
+  // every monthly partition beside it is FORCEd. Re-applied here rather than in a new migration
+  // because this function is already the thing that keeps partition tenancy true, and every
+  // statement in it is idempotent by construction.
+  await db.exec(tenancyFor(DEFAULT_PARTITION));
+
   return created;
 }
 
