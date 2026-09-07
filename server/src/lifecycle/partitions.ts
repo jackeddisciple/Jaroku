@@ -134,6 +134,14 @@ export interface PartitionSummary {
 const tenancyFor = (name: string): string =>
   `REVOKE ALL ON TABLE ${name} FROM jaroku_app;` +
   `ALTER TABLE ${name} ENABLE ROW LEVEL SECURITY;` +
+  // FORCED, LIKE EVERY OTHER TENANT TABLE. ENABLE alone exempts the table's OWNER, and 043/044
+  // are explicit that FORCE is the posture here — 044 lifts it for one cross-tenant backfill and
+  // puts it straight back rather than leaving it off. Every partition created before this line
+  // existed was ENABLE-only, so a policy was present and the owner walked past it; that is not
+  // exploitable while the application connects as a role that is neither owner nor BYPASSRLS
+  // (db/rlsGuard.ts now refuses anything else in production), and it is one word away from being
+  // the gap it looks like the day some maintenance job reads `steps` on the owner's connection.
+  `ALTER TABLE ${name} FORCE ROW LEVEL SECURITY;` +
   `DROP POLICY IF EXISTS tenant_isolation ON ${name};` +
   `CREATE POLICY tenant_isolation ON ${name} ` +
   `USING      (workspace_id = NULLIF(current_setting('app.workspace_id', true), '')::uuid) ` +

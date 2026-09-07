@@ -102,6 +102,15 @@ jobs:
           npm run test:adversarial
           npm run test:identity
           npm run test:rls
+          # AND WHETHER THE POLICIES APPLY TO THE CONNECTION AT ALL, which is a different question
+          # from whether they exist and is the one that was wrong in production. The first hosted
+          # deploy connected to Neon as `neondb_owner`, which carries `rolbypassrls` — so an
+          # unscoped `SELECT count(*) FROM threads` returned every workspace's rows with the policy
+          # present, correct, and FORCEd on the table. `test:rls` could not catch it there: it needs
+          # SET ROLE and the owner was not a member of the app role. So the rule moved to boot,
+          # against the connection the server actually opened, and this is that rule as a pure
+          # function of three facts.
+          npm run test:rls-guard
           npm run test:db-boundary
           npm run test:tenancy
           npm run test:migration-gate
@@ -184,6 +193,15 @@ jobs:
           # signing are all refused here rather than in somebody's console. A suite that needed a
           # real Google project is a suite that runs when somebody remembers.
           npm run test:sign-in
+          # ONE VERIFIED ADDRESS, ONE ACCOUNT — IN BOTH DIRECTIONS. The rule was written twice, in
+          # two callbacks a hundred lines apart, and the copies disagreed: the magic-link one
+          # matched an existing account by address and the Google one went straight to
+          # `provisionUser`, which refuses an address already held by another subject. So signing up
+          # with a link and later pressing "Continue with Google" for the SAME address was told it
+          # "already belongs to a different sign-in on this server", while the reverse order worked
+          # — two buttons the screen presents as equals, one of which failed depending on which you
+          # pressed months ago. The rule now lives in one module and this asserts both orders.
+          npm run test:link-identity
           # §3.4'S ONE SCREEN, and most of the suite is about what it must NOT reject. "Emoji
           # allowed (people put them in their display names)" is the specification's own line, and
           # the instinct to sanitise a display name is the instinct that rejects أحمد, 李伟 and

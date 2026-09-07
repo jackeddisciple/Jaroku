@@ -515,7 +515,15 @@ export class IdentityRepository {
       const inserted = await tx.run(
         `INSERT INTO users (id, external_id, email, display_name, created_at, email_verified, auth_provider)
          VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (external_id) DO NOTHING`,
+         -- NO CONFLICT TARGET, so BOTH unique constraints on this table are covered. It used to
+         -- name external_id, which handles the ordinary race — two requests for one subject — and
+         -- not the other one: users.email is unique too, so two sign-ins for the same BRAND-NEW
+         -- address through different providers (a magic link and a Google callback landing at once)
+         -- both pass the emailTaken check above, because neither has committed, and then the loser
+         -- hits the email constraint as a raw driver error rather than as anything this code says.
+         -- The person sees a failed sign-in that works on retry, which is the least debuggable
+         -- shape a race has.
+         ON CONFLICT DO NOTHING`,
         [
           user.id,
           user.external_id,
@@ -529,12 +537,24 @@ export class IdentityRepository {
         ],
       );
       if (inserted.changes === 0) {
-        // Somebody else provisioned this `sub` between the SELECT and here. Their row is the
-        // real one; ours was never written.
-        const winnerRow = await tx.get<UserRow>(
-          `SELECT ${USER_COLUMNS} FROM users WHERE external_id = ? AND deleted_at IS NULL`,
-          [input.externalId],
-        );
+        // Somebody else provisioned this person between the SELECT and here. Their row is the real
+        // one; ours was never written. WHICH constraint stopped us decides where to look:
+        //
+        //   external_id — the ordinary race, two requests for one subject.
+        //   email       — the same person arriving through two providers at once, whose winning row
+        //                 carries a DIFFERENT external_id and so cannot be found by subject at all.
+        //
+        // Looking only by subject is what made the second case throw "could not provision", which
+        // is a sentence about our own bookkeeping rather than about anything that went wrong.
+        const winnerRow =
+          (await tx.get<UserRow>(
+            `SELECT ${USER_COLUMNS} FROM users WHERE external_id = ? AND deleted_at IS NULL`,
+            [input.externalId],
+          )) ??
+          (await tx.get<UserRow>(
+            `SELECT ${USER_COLUMNS} FROM users WHERE LOWER(email) = ? AND deleted_at IS NULL`,
+            [input.email.trim().toLowerCase()],
+          ));
         if (!winnerRow) throw new Error(`could not provision ${input.externalId}`);
         return this.withPersonalWorkspace(tx, readUser(winnerRow), input);
       }

@@ -32,6 +32,7 @@ import { comparable, isActivityRange, resolveWindow, type Window } from "./activ
 import { describePartitions, ensurePartitions } from "./lifecycle/partitions.ts";
 import { RetentionSweeper, describeSweep, deleted as sweptRows } from "./lifecycle/retention.ts";
 import { openDb } from "./db/open.ts";
+import { readRoleFacts, rlsRefusal } from "./db/rlsGuard.ts";
 import { newRequestId, systemContext, systemContextFor, type TenantContext } from "./db/tenant.ts";
 import { EvalStore, type Rubric, type RubricCriterion } from "./evalStore.ts";
 import { EvalRunner } from "./evalRunner.ts";
@@ -100,6 +101,7 @@ import { resolveSocketAuth } from "./auth/socketAuth.ts";
 import { DbTicketStore } from "./db/repositories/tickets.ts";
 import { DbSignInStore } from "./db/repositories/signIn.ts";
 import { GOOGLE_ENV, googleConfigFrom, googleJwks } from "./auth/googleSignIn.ts";
+import { linkIdentity } from "./auth/linkIdentity.ts";
 import { EMAIL_ENV, emailConfigFrom, emailTransport } from "./email/transport.ts";
 import { magicLinkRoutes } from "./http/magicLink.ts";
 import { signInRoutes } from "./http/signIn.ts";
@@ -341,6 +343,25 @@ rmSync(join(RUNTIME_DIR, "agents", ".staging"), { recursive: true, force: true }
 const db = openDb({ sqlitePath: DB_PATH });
 console.log(`[server] database: ${db.dialect}${db.dialect === "sqlite" ? ` (${DB_PATH})` : ""}`);
 
+// AND WHETHER THE POLICIES APPLY TO THIS CONNECTION AT ALL, which is a different question from
+// whether they exist. A role with BYPASSRLS ignores every one of them unconditionally, so the
+// second wall this system is built on can be absent while every migration, every policy and every
+// query result looks exactly right. It happened on the first hosted deploy — Neon's `neondb_owner`
+// carries `rolbypassrls`, and an unscoped read returned every tenant's rows. See db/rlsGuard.ts.
+if (db.dialect === "postgres") {
+  const facts = await readRoleFacts(db);
+  if (facts) {
+    const refusal = rlsRefusal(facts, process.env["NODE_ENV"] === "production");
+    if (refusal) throw new Error(refusal);
+    console.log(
+      `[server] database role: ${facts.role}` +
+        (facts.superuser || facts.bypassRls
+          ? ` — WARNING: row-level security is bypassed for this connection`
+          : ` (row-level security applies)`),
+    );
+  }
+}
+
 // AND ONE OBJECT STORE, chosen here and nowhere else, exactly like the driver above.
 //
 // An agent's files stop being a directory this process owns and become objects keyed by
@@ -405,7 +426,27 @@ const serverContext = (): TenantContext => devTenancy.context();
 // have run. Boot-time apply is deliberate: a server whose code expects a column the database
 // does not have should fail at startup, where somebody is watching, rather than at the first
 // request that happens to touch it.
-await migrate(db.migrationTarget(), join(SERVER_DIR, "migrations", db.dialect));
+// SCHEMA WORK RUNS AS THE OWNER, EVERYTHING ELSE AS THE APPLICATION — 009_rls.sql's own split, and
+// it needs a second connection to honour it. The application's role must not be able to ignore
+// row-level security (see db/rlsGuard.ts), and a role that cannot ignore it also cannot CREATE
+// TABLE, cannot CREATE POLICY, and — the one that actually bit — cannot add next month's `steps`
+// partition. That failed quietly on the first deploy that used a restricted role:
+//
+//   [lifecycle] could not ensure step partitions: permission denied for schema public
+//
+// which is a trace ingest that stops working at a month boundary, months from now, for a reason
+// nothing in the schema records.
+//
+// ABSENT, IT IS THE SAME CONNECTION AS EVERYTHING ELSE, so a development machine and any
+// single-role deployment behave exactly as they did and never meet this.
+const maintenanceDb = process.env.JAROKU_PG_MIGRATION_URL?.trim()
+  ? openDb({ sqlitePath: DB_PATH, pgUrl: process.env.JAROKU_PG_MIGRATION_URL.trim() })
+  : db;
+if (maintenanceDb !== db) {
+  console.log("[server] schema maintenance uses JAROKU_PG_MIGRATION_URL (the owner)");
+}
+
+await migrate(maintenanceDb.migrationTarget(), join(SERVER_DIR, "migrations", maintenanceDb.dialect));
 devTenancy = await resolveDevTenancy(db);
 
 // AND THE MONTHS AHEAD OF THE TRACE.
@@ -417,9 +458,16 @@ devTenancy = await resolveDevTenancy(db);
 // partition catches anything that still falls through. A no-op on SQLite. Unref'd: maintenance
 // must never be the reason a process will not exit.
 const ensureStepPartitions = async (): Promise<void> => {
-  const created = await ensurePartitions(db);
+  // THE OWNER'S CONNECTION, because this is DDL: it creates a table and a policy on it. The policy
+  // is the part that cannot be delegated — CREATE POLICY requires ownership of the parent — so a
+  // partition made by the application role would either fail or, worse, arrive with no
+  // tenant_isolation on it at all, which is a partition of the traces table that every workspace
+  // can read.
+  const created = await ensurePartitions(maintenanceDb);
   if (created.length) console.log(`[lifecycle] ${created.length} step partition(s) ensured through ${created.at(-1)}`);
-  const { defaultRows } = await describePartitions(db);
+  // Also the owner's: `steps` is under row-level security, so the application's role counts the
+  // DEFAULT partition as empty however full it is, and this metric exists to notice it filling.
+  const { defaultRows } = await describePartitions(maintenanceDb);
   metrics.set("steps_default_partition_rows", defaultRows);
   if (defaultRows > 0) {
     // Not fatal, and not silent. Rows here cannot be dropped by month, so a filling default is a
@@ -3094,21 +3142,22 @@ if (googleConfig) {
     // for one email." `provisionUser` already keys on `external_id` and refuses an address held by
     // a different one, so the account this resolves to is the account that address already has.
     resolveUser: async (identity, context) => {
-      const sys = systemContext(context.requestId);
-      const provisioned = await identityRepo.provisionUser(sys, {
-        // PREFIXED, so a Google `sub` can never collide with the local issuer's `local|<email>`
-        // or with a configured provider's own subject space. Two identity systems writing into one
+      // ONE VERIFIED ADDRESS, ONE ACCOUNT — and the rule lives in `auth/linkIdentity.ts` rather than
+      // here, because it used to live here AND in the magic-link callback below, and the two copies
+      // disagreed: this one went straight to `provisionUser`, which refuses an address already held
+      // by another subject. Somebody who signed up with a link and later pressed "Continue with
+      // Google" for the same address was told it "already belongs to a different sign-in on this
+      // server", about two buttons the screen presents as equals.
+      const { userId } = await linkIdentity(identityRepo, systemContext(context.requestId), {
+        email: identity.email,
+        // PREFIXED, so a Google `sub` can never collide with the local issuer's `local|<email>` or
+        // with a configured provider's own subject space. Two identity systems writing into one
         // UNIQUE column with no namespace between them is how one person's `sub` becomes another's.
         externalId: `google|${identity.subject}`,
-        email: identity.email,
         displayName: identity.displayName,
-        authProvider: "google",
+        provider: "google",
       });
-      // A SECOND SIGN-IN PROVISIONS NOTHING AND STILL MOVES THE COLUMN. §10 says `auth_provider`
-      // "reflects most recent", so recording it only at creation would mean the fact went stale
-      // for the life of every account.
-      await identityRepo.recordSignIn(sys, provisioned.user.id, { provider: "google", emailVerified: true });
-      return { userId: provisioned.user.id };
+      return { userId };
     },
     audit: async (action, detail) => {
       await identityRepo.appendAudit(systemContext(detail.requestId), {
@@ -3170,30 +3219,20 @@ if (emailConfig && authOrigin) {
     // http/magicLink.ts. A link is sent to any address anybody types, so creating the account then
     // would create one for every address somebody probing had typed.
     resolveUser: async (email, context) => {
-      const sys = systemContext(context.requestId);
-      // §10's first row: "same account, matched by verified email. Never two accounts for one
-      // email." Somebody who signed up with Google and now uses a link must land on the row they
-      // already have, so the existing account is looked up by ADDRESS before a new external id is
-      // invented for them.
-      const existing = await identityRepo.userByEmail(sys, email);
-      if (existing) {
-        await identityRepo.recordSignIn(sys, existing.id, { provider: "magic_link", emailVerified: true });
-        return { userId: existing.id };
-      }
-      const provisioned = await identityRepo.provisionUser(sys, {
-        // Namespaced like the Google one, for the same reason: two identity systems writing into
-        // one UNIQUE column with no namespace between them is how one person's subject becomes
-        // another's. `email` rather than a random value, so a person who somehow loses and regains
-        // their row resolves to the same subject rather than to a second account.
-        externalId: `email|${email}`,
+      const { userId } = await linkIdentity(identityRepo, systemContext(context.requestId), {
         email,
+        // Namespaced like the Google one and for the same reason. `email` rather than a random
+        // value, so a person who somehow loses and regains their row resolves to the same subject
+        // rather than to a second account.
+        externalId: `email|${email.trim().toLowerCase()}`,
         // NULL, AND THAT IS §3.4'S TRIGGER. A magic-link account has no name until the person types
         // one on the screen after this — `users.name IS NULL` is exactly the condition the client
-        // reads to decide whether to show it.
+        // reads to decide whether to show it. A Google sign-in that ADOPTS this row later does not
+        // backfill it, deliberately: the name on the account is the one its owner chose.
         displayName: null,
-        authProvider: "magic_link",
+        provider: "magic_link",
       });
-      return { userId: provisioned.user.id };
+      return { userId };
     },
     audit: async (action, detail) => {
       await identityRepo.appendAudit(systemContext(detail.requestId), {
