@@ -86,6 +86,45 @@ function nodeBinary() {
   return process.execPath;
 }
 
+
+/**
+ * Refuse a Node that cannot run once it has been copied somewhere else.
+ *
+ * HOMEBREW'S NODE IS A 50KB STUB. It links `@rpath/libnode.<abi>.dylib`, which lives in the Cellar
+ * and is not copied by anything here — so the bundle gets the launcher without the interpreter, and
+ * the backend dies at startup with `Library not loaded: @rpath/libnode.147.dylib` before it has
+ * printed a single line. The build succeeds completely. The application is simply broken, and the
+ * only evidence is a dyld message in `~/.jaroku/logs/desktop.log`.
+ *
+ * That is exactly what happened: a build run with `/opt/homebrew/bin` ahead of `/usr/local/bin` on
+ * PATH picked the stub, and the packaged app retried its backend three times and gave up. The
+ * official distribution from nodejs.org is one self-contained 240MB executable and is what this has
+ * always shipped — the difference is invisible until the copy is on a machine without the Cellar.
+ *
+ * REFUSED RATHER THAN REPAIRED. Copying the dylib in and rewriting the install names is possible
+ * and is a rabbit hole with a code-signing problem at the end of it; the honest answer is that this
+ * script needs a self-contained interpreter and should say so while somebody is at a terminal.
+ */
+function assertSelfContained(binary) {
+  if (process.platform !== "darwin") return;
+  let linkage = "";
+  try {
+    linkage = execFileSync("otool", ["-L", binary], { encoding: "utf8" });
+  } catch {
+    // No `otool` — Xcode's command line tools are absent. Not a reason to refuse a build.
+    return;
+  }
+  if (!/libnode\.[0-9]+\.dylib/.test(linkage)) return;
+  throw new Error(
+    `${binary} is dynamically linked against libnode and cannot be copied into a bundle on its own.\n` +
+      `  It is almost certainly Homebrew's node, which is a small launcher beside a dylib in the Cellar.\n` +
+      `  The copy would start, fail to find @rpath/libnode, and the packaged app's backend would never\n` +
+      `  come up — with a successful build and nothing on screen to say why.\n` +
+      `  Use the self-contained build from nodejs.org (a ~240MB single executable), either by putting\n` +
+      `  it first on PATH or by setting JAROKU_NODE_BINARY to it.`,
+  );
+}
+
 function tracked(prefix) {
   // `-z` and a NUL split, because a path with a newline in it is legal on every platform this
   // ships to and `git ls-files` would otherwise quote it into something this script mis-parses.
@@ -116,7 +155,12 @@ mkdirSync(STAGE, { recursive: true });
 mkdirSync(BINARIES, { recursive: true });
 
 const source = nodeBinary();
+assertSelfContained(source);
 const sidecar = join(BINARIES, `jaroku-node-${triple}${exe}`);
+// `rm` FIRST, because the previous copy is mode 0555 and `copyFileSync` onto a read-only file is
+// EACCES. Overwriting the sidecar is the ordinary case — every build does it — so failing on the
+// second run of a script that worked once is not a state worth preserving.
+rmSync(sidecar, { force: true });
 copyFileSync(source, sidecar);
 console.log(`sidecar   ${relative(ROOT, sidecar)}  <- ${source}`);
 

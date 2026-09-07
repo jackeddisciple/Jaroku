@@ -84,6 +84,33 @@ pub fn init(app: &AppHandle) {
         }
     }
 
+    // THE URL THIS APPLICATION WAS LAUNCHED WITH, WHICH `on_open_url` NEVER SEES.
+    //
+    // On macOS the operating system delivers a `jaroku://` that STARTED the app as an Apple Event
+    // during launch — before `setup` runs, and therefore before the handler below exists. The
+    // plugin holds it and hands it over on request; nothing re-delivers it. So a cold-start deep
+    // link was dropped in total silence: `open jaroku://auth/complete?ticket=…` launched Jaroku,
+    // Jaroku came to the front, and the ticket went nowhere.
+    //
+    // THAT IS THE COMMON CASE RATHER THAN THE EDGE ONE. Signing in with Google means leaving the
+    // application for a browser; by the time the callback fires, the person has been in Safari or
+    // Chrome for a minute and the app behind it may well have been quit — or may never have been
+    // running, because the link was opened on a machine where Jaroku was closed.
+    //
+    // Read BEFORE the subscription is installed, so a URL that arrives between the two is not
+    // handled twice: `deliver` is idempotent about queueing but a ticket is single-use, and
+    // spending one twice is a "that link expired" for a sign-in that worked.
+    match app.deep_link().get_current() {
+        Ok(Some(urls)) => {
+            for url in urls {
+                logs::say("a jaroku:// url started this launch");
+                deliver(app, url.as_str());
+            }
+        }
+        Ok(None) => {}
+        Err(err) => logs::say(format!("could not read the launch url: {err}")),
+    }
+
     let handle = app.clone();
     app.deep_link().on_open_url(move |event| {
         for url in event.urls() {
@@ -99,6 +126,22 @@ pub fn init(app: &AppHandle) {
 /// all, which is the difference that actually matters here — the not-running case is precisely
 /// the one where it does not.
 pub fn deliver(app: &AppHandle, url: &str) {
+    // ONCE PER URL, because there are now three ways one can arrive — the launch value the OS held
+    // (`get_current` above), the plugin's subscription, and a second instance's argv — and on some
+    // platforms two of them fire for one link. A `jaroku://auth/complete` carries a SINGLE-USE
+    // ticket: delivering it twice makes the page spend it twice, and the second attempt answers
+    // "that sign-in link expired or was already used" for a sign-in that worked perfectly.
+    {
+        static SEEN: Mutex<Option<String>> = Mutex::new(None);
+        if let Ok(mut last) = SEEN.lock() {
+            if last.as_deref() == Some(url) {
+                logs::say(format!("ignoring a repeat of {url}"));
+                return;
+            }
+            *last = Some(url.to_owned());
+        }
+    }
+
     logs::say(format!("received {url}"));
 
     if app.get_webview_window(window::MAIN).is_none() {

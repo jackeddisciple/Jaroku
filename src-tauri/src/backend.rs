@@ -45,6 +45,20 @@ impl Backend {
     }
 }
 
+/// The URL baked in at COMPILE time, when the build was given one.
+///
+/// AN ENVIRONMENT VARIABLE CANNOT CONFIGURE A PACKAGED MAC APP, which is the whole reason this
+/// exists and it took building one to notice. A `.app` launched from Finder, from Spotlight, or by
+/// LaunchServices answering a `jaroku://` URL inherits no shell environment at all — so
+/// `JAROKU_BACKEND_URL=… open -a Jaroku.app` configures nothing, and the mode I could set freely
+/// from a terminal was unreachable in the only way the application actually ships.
+///
+/// So the distribution build bakes it: `JAROKU_BACKEND_URL=wss://… npm run tauri:build` puts the
+/// address in the binary, and the runtime variable still overrides it for a developer with a
+/// terminal. Compile-time first as the DEFAULT, runtime second as the OVERRIDE — that ordering is
+/// what keeps one binary usable against staging without rebuilding it.
+const BAKED_IN: Option<&str> = option_env!("JAROKU_BACKEND_URL");
+
 /// Read the mode, or fall back to supervising one here.
 ///
 /// IT VALIDATES RATHER THAN TRUSTING, for `hostConfig.ts`'s reason one layer down: the value ends
@@ -52,7 +66,12 @@ impl Backend {
 /// is a socket that never opens — which reads as "the backend is down" rather than as "this string
 /// is not a URL". Refusing it here means the shell falls back to a mode that works.
 pub fn resolve(env_value: Option<&str>) -> Backend {
-    let raw = env_value.unwrap_or("").trim();
+    // The runtime value wins when there is one; otherwise whatever the build was given.
+    let raw = match env_value.map(str::trim).filter(|v| !v.is_empty()) {
+        Some(v) => v,
+        None => BAKED_IN.unwrap_or("").trim(),
+    };
+    let raw = raw.trim();
     if raw.is_empty() {
         return Backend::Local;
     }
@@ -88,9 +107,24 @@ mod tests {
 
     #[test]
     fn absent_is_local_so_a_machine_with_no_network_still_works() {
-        assert_eq!(resolve(None), Backend::Local);
-        assert_eq!(resolve(Some("")), Backend::Local);
-        assert_eq!(resolve(Some("   ")), Backend::Local);
+        // Only true when nothing was baked in — which is the case for `cargo test`, and is stated
+        // rather than assumed so this does not quietly invert for a distribution build.
+        if BAKED_IN.is_none() {
+            assert_eq!(resolve(None), Backend::Local);
+            assert_eq!(resolve(Some("")), Backend::Local);
+            assert_eq!(resolve(Some("   ")), Backend::Local);
+        }
+    }
+
+    #[test]
+    fn a_runtime_value_overrides_whatever_the_build_was_given() {
+        // THE ORDERING THAT MAKES ONE BINARY USABLE AGAINST STAGING. A packaged app carries its
+        // address because a `.app` launched from Finder has no environment to read one from; a
+        // developer with a terminal still needs to point that same binary somewhere else.
+        assert_eq!(
+            resolve(Some("wss://staging.example")),
+            Backend::Remote("wss://staging.example".into())
+        );
     }
 
     #[test]

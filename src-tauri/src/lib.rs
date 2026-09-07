@@ -44,12 +44,30 @@ pub fn run() {
         // instances would mean two supervisors racing for port 4317, the loser walking up the
         // scan to 4318, and two servers writing to one SQLite database from two processes.
         //
-        // The callback runs in the ORIGINAL process, with the second one's argv. All it does is
-        // bring the window forward: a `jaroku://` URL in that argv — which is how Windows and
-        // Linux deliver a link to an application that was not running — is handed to the
-        // deep-link plugin by this plugin's own `deep-link` feature, so there is nothing to parse
-        // here and nothing to keep in step with deeplink.rs.
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        // The callback runs in the ORIGINAL process, with the second one's argv, and it does two
+        // things: bring the window forward, and SPEND THE URL THAT CAME WITH IT.
+        //
+        // IT USED TO DISCARD argv, on the belief that this plugin's own `deep-link` feature handed
+        // it to the deep-link plugin. That is not what was observed. Firing
+        // `open jaroku://auth/complete?ticket=…` at a RUNNING application brought Jaroku to the
+        // front — which is this callback, so it plainly ran — and delivered no URL to anything:
+        // `deliver` logs its first line unconditionally and never printed. The window activating
+        // while the ticket vanished is the whole of the bug that left the sign-in screen saying
+        // "Waiting for your browser…" forever.
+        //
+        // AND IT IS THE COMMON CASE, not the rare one. Signing in with Google means leaving the
+        // app for a browser and coming back to an app that never quit — so the warm path is the
+        // path, and the cold one (`get_current` in deeplink.rs) is the exception.
+        //
+        // Parsing here rather than trusting the feature also costs nothing when the feature does
+        // work: `deliver` ignores a URL it has already seen, so the two paths cannot spend one
+        // ticket twice.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            for arg in &argv {
+                if arg.starts_with("jaroku://") {
+                    deeplink::deliver(app, arg);
+                }
+            }
             window::focus_existing(app);
         }))
         .plugin(tauri_plugin_shell::init())
