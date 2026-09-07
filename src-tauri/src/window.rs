@@ -14,7 +14,9 @@
 // three columns; going under it is a state the product supports and is not a state a desktop
 // window should open in.
 
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use std::sync::Mutex;
+
+use tauri::{AppHandle, LogicalSize, Manager, WebviewUrl, WebviewWindowBuilder};
 
 /// The label everything else refers to this window by — the capability file, the tray's
 /// show-and-focus, the single-instance handler, and the window-state plugin's stored geometry.
@@ -22,16 +24,170 @@ use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 /// that silently does nothing.
 pub const MAIN: &str = "main";
 
+/// The window the welcome screen gets, and the window the application gets.
+///
+/// TWO WINDOW SIZES RATHER THAN ONE WINDOW WITH TWO LAYOUTS. The welcome screen asks exactly one
+/// question — a mark, a name, a line, a button — and a 1440×900 window around a 340px column of
+/// that reads as an application that has not finished loading yet. Every desktop application's
+/// first screen is a small window that grows into the product once you are through it, and this
+/// one is no exception.
+///
+/// THE FLOOR MOVES WITH THE STAGE, and that is the load-bearing half. `APP_MIN` is 1024 because
+/// that is where the three-column layout stops being three columns (see the note below), and a
+/// window that cannot go under 1024 cannot be 560 wide either — so the minimum is lowered for the
+/// welcome screen and put back on the way out. Lowering it permanently would let somebody drag the
+/// application itself down to a width the layout does not support.
+const SPLASH: (f64, f64) = (560.0, 620.0);
+const APP: (f64, f64) = (1440.0, 900.0);
+const APP_MIN: (f64, f64) = (1024.0, 680.0);
+
+/// The size the application was going to open at, held across the welcome screen.
+///
+/// WHY REMEMBER IT AT ALL, when `APP` is right there. The window-state plugin restores the width
+/// somebody chose for their three columns, and shrinking to the welcome screen throws that away —
+/// so "Get started" would return every user to 1440×900 on every launch, quietly undoing a
+/// preference the plugin exists to keep. This holds it for the two seconds the welcome screen is up.
+#[derive(Default)]
+pub struct AppSize(Mutex<Option<LogicalSize<f64>>>);
+
 pub fn open(app: &AppHandle, port: u16) -> Result<(), Box<dyn std::error::Error>> {
     WebviewWindowBuilder::new(app, MAIN, WebviewUrl::default())
         .title("Jaroku")
-        .inner_size(1440.0, 900.0)
-        .min_inner_size(1024.0, 680.0)
+        .inner_size(APP.0, APP.1)
+        .min_inner_size(APP_MIN.0, APP_MIN.1)
         .center()
         .resizable(true)
+        // HIDDEN UNTIL THE PAGE SAYS WHICH SIZE IT NEEDS, which is the only way the welcome screen
+        // does not open as a flash of the full application. The bundle decides between the two
+        // stages on its first render — it depends on whether there is a session, which is a
+        // question only the page can answer — and a window shown before that answer arrives is a
+        // 1440×900 frame that snaps to 560 a moment later. `set_window_stage` shows it.
+        //
+        // NOTHING IS LOST IF THE PAGE NEVER CALLS: `reveal_eventually` shows the window anyway
+        // after four seconds. A shell whose only path to a visible window runs through the bundle
+        // is a shell that has no way to report that the bundle is what failed.
+        .visible(false)
         .initialization_script(&host_config(port))
         .build()?;
     Ok(())
+}
+
+/// Show the window even if the page never asked for a stage.
+///
+/// The failure this is for is not hypothetical: a bundle that throws before its first effect, a
+/// dev server that is not up yet, a webview that fails to load at all. Every one of those ends
+/// with `set_window_stage` uncalled, and without this the symptom would be an application that
+/// starts, logs nothing wrong, and never appears.
+///
+/// EIGHT SECONDS, AND THE NUMBER IS SIZED FOR THE SLOWEST HONEST CASE RATHER THAN THE COMMON ONE.
+/// A packaged build loads its bundle off local disk and answers in well under a second; `tauri dev`
+/// points the webview at a Vite server that may still be compiling, and four seconds fired in front
+/// of a page that was loading perfectly well — which is the failure this is supposed to prevent,
+/// arriving as a full-size flash before the welcome screen. This is a safety net for a bundle that
+/// is never going to answer, so it should lose every race against one that is.
+pub fn reveal_eventually(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(8000));
+        let handle = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            let Some(main) = handle.get_webview_window(MAIN) else { return };
+            if matches!(main.is_visible(), Ok(true)) {
+                return;
+            }
+            crate::logs::say("the page never asked for a window stage; showing it anyway");
+            let _ = main.set_min_size(Some(LogicalSize::new(APP_MIN.0, APP_MIN.1)));
+            let _ = main.show();
+        });
+    });
+}
+
+/// Which of the two windows this is, decided by the page and applied here.
+///
+/// THE PAGE DECIDES AND THE SHELL ACTS, rather than the shell inspecting a session it has no
+/// business reading. Whether the welcome screen shows depends on whether there is a token in the
+/// credential store, whether first-run is done and whether this launch already dismissed it — all
+/// of which live in the bundle. The shell's half is the part the bundle cannot do: a webview
+/// cannot resize the native window it is inside.
+///
+/// ANY UNKNOWN STAGE IS THE APPLICATION, deliberately. This is a string from the page, and the
+/// failure of a typo should be a window somebody can use rather than a 560px one they cannot.
+#[tauri::command]
+pub fn set_window_stage(app: AppHandle, stage: String) {
+    let Some(main) = app.get_webview_window(MAIN) else { return };
+    let remembered = app.state::<AppSize>();
+
+    // The size this call is moving the window TO, named once because `place_centred` below needs
+    // the number we asked for rather than the one the window is mid-way through becoming.
+    let target: LogicalSize<f64>;
+
+    if stage == "splash" {
+        // READ HERE RATHER THAN IN `open`, because the window-state plugin restores geometry after
+        // the builder returns — so a size captured at creation is the builder's constant and not
+        // the one somebody actually chose.
+        //
+        // AND IT IS ONLY REMEMBERED IF IT IS BIG ENOUGH TO BE AN APPLICATION WINDOW. Quitting while
+        // the welcome screen is up saves 560×620 as the window's geometry, and the next launch
+        // restores it; without this floor, that small size would be remembered as the "app" size
+        // and Get started would open the product into it. Failing the check falls through to `APP`
+        // below, so the state self-heals on the next launch rather than persisting.
+        if let (Ok(size), Ok(scale)) = (main.inner_size(), main.scale_factor()) {
+            let logical = size.to_logical::<f64>(scale);
+            if logical.width >= APP_MIN.0 && logical.height >= APP_MIN.1 {
+                if let Ok(mut slot) = remembered.0.lock() {
+                    *slot = Some(logical);
+                }
+            }
+        }
+        target = LogicalSize::new(SPLASH.0, SPLASH.1);
+        // The minimum comes down BEFORE the size does. Setting a size under the current minimum is
+        // a request the window manager is entitled to ignore, and on macOS it does.
+        let _ = main.set_min_size(Some(target));
+        let _ = main.set_size(target);
+        // Nothing on this screen reflows, so a resize handle offers a worse version of one layout.
+        let _ = main.set_resizable(false);
+    } else {
+        target = remembered
+            .0
+            .lock()
+            .ok()
+            .and_then(|mut slot| slot.take())
+            .unwrap_or_else(|| LogicalSize::new(APP.0, APP.1));
+        let _ = main.set_resizable(true);
+        let _ = main.set_min_size(Some(LogicalSize::new(APP_MIN.0, APP_MIN.1)));
+        let _ = main.set_size(target);
+    }
+
+    let _ = main.show();
+    place_centred(&main, target);
+    let _ = main.set_focus();
+}
+
+/// Centre the window for a size it is BECOMING, rather than the one it currently reports.
+///
+/// WHY NOT `WebviewWindow::center()`, which is one call and exists for this. Because it centres the
+/// window's CURRENT size, and the resize a line above has not necessarily landed: the size change
+/// goes through the platform's event loop, `center()` reads the old box, computes the right
+/// position for it, and the window ends up wherever it already was. That is not a theory — it was
+/// the observed behaviour, before and after the show, and its symptom was a 560px welcome screen
+/// left in the top-left corner at whatever position the window-state plugin had restored.
+///
+/// Passing the target size removes the race entirely: the arithmetic uses the number we just asked
+/// for rather than the number the window happens to be mid-way through becoming.
+///
+/// `work_area` RATHER THAN `size`, so the menu bar and a dock are excluded and the window is
+/// centred in the space it can actually occupy rather than in the glass.
+fn place_centred(win: &tauri::WebviewWindow, target: LogicalSize<f64>) {
+    let Ok(Some(monitor)) = win.current_monitor() else { return };
+    let scale = monitor.scale_factor();
+    let area = monitor.work_area();
+    let origin = area.position.to_logical::<f64>(scale);
+    let size = area.size.to_logical::<f64>(scale);
+    // Clamped at the origin: a window taller than the work area would otherwise be placed at a
+    // negative offset, which puts its title bar — and therefore its close button — off-screen.
+    let x = origin.x + ((size.width - target.width) / 2.0).max(0.0);
+    let y = origin.y + ((size.height - target.height) / 2.0).max(0.0);
+    let _ = win.set_position(tauri::LogicalPosition::new(x, y));
 }
 
 /// Bring the existing window to the front.

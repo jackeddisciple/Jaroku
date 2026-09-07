@@ -180,17 +180,13 @@ export function SignInScreen({
   const devOnly = methods !== null && !realMethods && methods.localIssuer;
 
   return (
-    <AuthShell
-      title="Welcome to Jaroku"
-      subtitle={
-        <>
-          Your native workbench for
-          <br />
-          building trustworthy AI agents.
-        </>
-      }
-      footnote={<LegalLine />}
-    >
+    // THE INTRODUCTION MOVED OFF THIS SCREEN, deliberately. "Welcome to Jaroku" and a sentence
+    // about trustworthy agents sat directly above the email field, which meant a returning user
+    // read a product pitch every time they signed in — and a new user read it twice, because
+    // `SplashScreen` says the same thing one screen earlier and says it better, at a size and in a
+    // window that is about the product rather than about a form. What is left is the name of the
+    // question being asked, which is what a title on a form is for.
+    <AuthShell title="Sign in" footnote={<LegalLine />}>
       {/* WHY THEY ARE HERE, when they did not arrive by choice: a revoked membership, an expired
           token, a server that stopped trusting this session. Above the controls, because it is the
           answer to the question somebody is asking as the screen appears. */}

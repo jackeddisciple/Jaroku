@@ -37,6 +37,29 @@ export function detectApple(nav: unknown = typeof navigator === "undefined" ? un
   return /mac|iphone|ipad|ipod/i.test(platform);
 }
 
+/**
+ * What to call the machine this is running on, for the one screen that says it out loud.
+ *
+ * HERE RATHER THAN AT ITS CALL SITE, because the header of this file is the claim that a platform
+ * check lives in exactly one module — a search for `navigator.platform` or `userAgentData` across
+ * `client/src` should keep returning this file and nothing else. The welcome screen needs a
+ * three-way answer where `detectApple` gives a two-way one, which is a reason to widen the question
+ * asked here rather than to ask a second one somewhere else.
+ *
+ * THE FALLBACK IS THE PRODUCT'S OWN WORD FOR ITSELF. `release.yml` builds this application for four
+ * targets and a webview that reports a platform none of the three patterns match would otherwise
+ * name the wrong one — so an unrecognised platform says "Desktop", which is true everywhere this
+ * screen can render and wrong nowhere.
+ */
+export function platformName(nav: unknown = typeof navigator === "undefined" ? undefined : navigator): string {
+  const n = nav as { userAgentData?: { platform?: string }; platform?: string } | undefined;
+  const platform = n?.userAgentData?.platform ?? n?.platform ?? "";
+  if (/mac|iphone|ipad|ipod/i.test(platform)) return "Mac";
+  if (/win/i.test(platform)) return "Windows";
+  if (/linux|x11|cros/i.test(platform)) return "Linux";
+  return "Desktop";
+}
+
 /** What each Mac engraving is called on a keyboard that does not carry it. */
 const SPELLED: Record<string, string> = {
   "⌘": "Ctrl",

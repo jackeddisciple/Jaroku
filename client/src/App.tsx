@@ -10,6 +10,9 @@ import { AuthFlow, SignInSwapPrompt } from "./components/auth/AuthFlow.tsx";
 import { SetUpAccountScreen } from "./components/auth/SetUpAccountScreen.tsx";
 import { FirstRun } from "./components/firstrun/FirstRun.tsx";
 import { firstRunOnScreen, useFirstRunStore } from "./store/firstRunStore.ts";
+import { SplashScreen } from "./components/auth/SplashScreen.tsx";
+import { splashOnScreen, useSplashStore } from "./store/splashStore.ts";
+import { hasHostWindow, setWindowStage } from "./lib/windowStage.ts";
 import { McpConfirmModal } from "./components/McpConfirmModal.tsx";
 import { FullScreenView } from "./components/FullScreenView.tsx";
 import { AdminModeBanner } from "./components/AdminModeBanner.tsx";
@@ -134,6 +137,35 @@ export function App() {
   const firstRunProgress = useFirstRunStore((s) => s.progress);
   const firstRunNeeded = useFirstRunStore(firstRunOnScreen);
 
+  // Whether this LAUNCH has been past the welcome screen. Per process rather than per device or
+  // per person, which is what makes it a different question from either of the two around it —
+  // see the header of splashStore.ts.
+  const splashPending = useSplashStore((s) => s.pending);
+
+  // WHAT THE WELCOME SCREEN DECIDES, SPELLED ONCE, because it has two readers that must not be
+  // able to disagree: the gate further down that renders it, and the effect below that tells the
+  // shell which of the two window sizes this is. Two spellings of one rule is how the screen ends
+  // up correct in a window sized for the other one.
+  //
+  // `!firstRunNeeded` is redundant at the gate — that branch returns above it — and load-bearing
+  // here, because the effect runs on every render regardless of which branch took the screen.
+  const splashNeeded =
+    sessionStatus === "signed_out" && !firstRunNeeded && splashOnScreen(splashPending, hasHostWindow());
+
+  // THE NATIVE WINDOW IS A DIFFERENT SIZE FOR THE WELCOME SCREEN, and this is the whole of the
+  // page's half of that: say which stage this is, and the shell resizes the frame and shows it.
+  //
+  // `unknown` IS HELD RATHER THAN GUESSED, which is the entire reason this is not a one-liner.
+  // The shell keeps the window HIDDEN until it is told a stage, so a stage sent on the first paint
+  // — before `hydrateSession` has been read into the store — would show the window at whichever
+  // size the guess happened to pick and resize it a frame later. Every other status is a real
+  // answer: `connecting` means a token exists and the application is what comes next, which is why
+  // it maps to `app` rather than waiting for `ready`.
+  useEffect(() => {
+    if (sessionStatus === "unknown") return;
+    setWindowStage(splashNeeded ? "splash" : "app");
+  }, [sessionStatus, splashNeeded]);
+
   // Whether this account still has to say what to call it. Null rather than empty: the server
   // stores a trimmed non-empty string or nothing at all, so there is no third state to consider.
   const needsName = useSessionStore((s) => s.user !== null && s.user.displayName === null);
@@ -241,6 +273,20 @@ export function App() {
   // FALSE IN A BROWSER FOREVER, so `npm run dev` in a tab renders exactly what it always did.
   if (firstRunNeeded) {
     return <FirstRun progress={firstRunProgress!} onDone={() => useFirstRunStore.getState().dismiss()} />;
+  }
+
+  // THE FRONT DOOR, between the machine's setup and the sign-in form. It outranks sign-in for the
+  // reason first-run outranks it one gate up — it is what somebody is looking at, and the screen
+  // behind it is the next step rather than a competing one — and it ranks BELOW first-run because
+  // an introduction to an application that is still unpacking itself is an introduction to a
+  // window that cannot do anything yet.
+  //
+  // IT IS ONLY EVER SEEN SIGNED OUT, which is why it sits inside this branch rather than above it.
+  // A session that is merely reconnecting must not be shown the front door — that is the same
+  // "retry vs stop" distinction the gate below turns on, and getting it wrong here would put a
+  // Get started button over a working session every time the network hiccupped.
+  if (splashNeeded) {
+    return <SplashScreen onStart={() => useSplashStore.getState().dismiss()} />;
   }
 
   // Then the session. There is no workspace without one, and every screen below this line — the

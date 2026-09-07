@@ -205,6 +205,12 @@ export const WORKSPACE_STORES: Record<string, Resettable> = {
  * "your device is ready" screen. Clearing that on a workspace switch would put a first-run flow
  * over a signed-in application, which is the exact conflation §1 spends its first section warning
  * about — first-run is per DEVICE, account onboarding is per PERSON, and neither is per workspace.
+ *
+ * `splashStore` is the sixth, and it is the shortest argument of the six: it holds whether this
+ * LAUNCH has been past the welcome screen. Not a workspace, not a person, not a disk — a process.
+ * Resetting it would be actively harmful for `firstRunStore`'s reason taken one step further: the
+ * welcome screen is a smaller native window, so putting it back on a workspace switch would resize
+ * a signed-in application down to 560 pixels around a screen nobody asked to see again.
  */
 export const NOT_WORKSPACE_SCOPED = [
   "sessionStore",
@@ -212,6 +218,7 @@ export const NOT_WORKSPACE_SCOPED = [
   "hostStore",
   "firstRunStore",
   "accountOnboardingStore",
+  "splashStore",
 ] as const;
 
 /**

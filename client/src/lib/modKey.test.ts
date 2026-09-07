@@ -18,7 +18,7 @@
 
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { detectApple, formatChord, keyHint, modKey } from "./modKey.ts";
+import { detectApple, formatChord, keyHint, modKey, platformName } from "./modKey.ts";
 
 let fail = 0;
 const check = (name: string, ok: boolean, detail = ""): void => {
@@ -84,6 +84,28 @@ console.log("\nwhich platform, from what the browser will say");
   check("an empty platform is not Apple", detectApple({ platform: "" }) === false);
   check("the modern name wins over the deprecated one",
     detectApple({ userAgentData: { platform: "Windows" }, platform: "MacIntel" }) === false);
+}
+
+console.log("\nand what to call the machine, for the one screen that says it out loud");
+{
+  // THREE ANSWERS WHERE `detectApple` GIVES TWO, which is the reason this function exists rather
+  // than a second platform check somewhere else. The welcome screen names the platform in its
+  // title, and "Jaroku for Desktop" on a Windows machine is a build that looks like it was shipped
+  // by mistake.
+  check("macOS", platformName({ platform: "MacIntel" }) === "Mac");
+  check("...by its modern name too", platformName({ userAgentData: { platform: "macOS" } }) === "Mac");
+  check("an iPad is still a Mac to this screen", platformName({ platform: "iPad" }) === "Mac");
+  check("Windows", platformName({ platform: "Win32" }) === "Windows");
+  check("...including the Tauri WebView2 host", platformName({ userAgentData: { platform: "Windows" } }) === "Windows");
+  check("Linux", platformName({ platform: "Linux x86_64" }) === "Linux");
+  check("a ChromeOS webview counts as Linux", platformName({ platform: "CrOS x86_64" }) === "Linux");
+  // The fallback is the product's own word for itself: true on every platform this screen can
+  // render on, and wrong on none. `release.yml` builds four targets and a fifth is a matter of
+  // time, so an unrecognised platform must not be given one of the three names by accident.
+  check("an empty platform falls back", platformName({ platform: "" }) === "Desktop");
+  check("...and so does a platform nobody has heard of", platformName({ platform: "Haiku" }) === "Desktop");
+  check("the modern name wins over the deprecated one",
+    platformName({ userAgentData: { platform: "Windows" }, platform: "MacIntel" }) === "Windows");
 }
 
 console.log("\nthe live helpers agree with the resolver on this machine");

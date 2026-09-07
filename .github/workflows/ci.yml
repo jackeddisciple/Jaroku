@@ -1167,6 +1167,16 @@ jobs:
           # React mounts, so on exactly the launches this exists for an event alone reaches
           # nobody, while a snapshot alone can arrive after and overwrite a recovery.
           npm run test:host-backend
+          # WHICH OF THE TWO WINDOWS THE PAGE ASKS FOR, and the two ways that goes wrong. The
+          # welcome screen is a 560px window and the application is 1440, only the bundle knows
+          # which of them a launch needs, and a webview cannot resize the frame it is inside — so
+          # the page decides and the shell acts. The memo is what the suite is for: the shell
+          # re-centres on every stage, so sending one twice yanks a window somebody just moved,
+          # and React re-runs the effect on any dependency change and twice under StrictMode. Its
+          # opposite is the bug hiding behind it — a call that FAILED must not be remembered as
+          # delivered, or a shell that missed one stage is never told again and the window stays
+          # the wrong size for the rest of the session with nothing on screen to say why.
+          npm run test:window-stage
           # `jaroku://`, parsed in the client rather than in the desktop shell — a rule that can
           # only be exercised by building and launching a desktop app is a rule nobody exercises.
           # Every URL it sees came from OUTSIDE the application, since any program on the machine

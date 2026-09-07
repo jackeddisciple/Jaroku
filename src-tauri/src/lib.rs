@@ -100,6 +100,7 @@ pub fn run() {
             secrets::secret_set,
             secrets::secret_delete,
             window::set_window_title,
+            window::set_window_stage,
         ]);
 
     // OFF BY DEFAULT AND BUILT ON PURPOSE. The updater needs a signing key pair to build at all —
@@ -173,8 +174,16 @@ pub fn run() {
             // runs, and an initialisation script can only be attached at creation. That script is
             // how the resolved port reaches the bundle BEFORE its first module evaluates — see
             // window.rs, and client/src/lib/hostConfig.ts for the side that reads it.
+            //
+            // It is created HIDDEN, and `set_window_stage` is what shows it — the welcome screen
+            // and the application are two different window sizes, only the bundle knows which of
+            // them this launch needs, and a window shown before that answer arrives is the wrong
+            // one of the two for as long as the bundle takes to load. `reveal_eventually` is the
+            // guarantee that a bundle which never answers cannot leave the application invisible.
+            app.manage(window::AppSize::default());
             window::open(app.handle(), port)?;
-            logs::detail("the window is open and has been told the port");
+            window::reveal_eventually(app.handle());
+            logs::detail("the window is built and has been told the port; it shows on the first stage");
 
             // 2a — THE TRAY, immediately after the window it controls. Whether the close button
             // hides or quits is decided by whether this succeeded: a window hidden with nothing
@@ -359,6 +368,7 @@ fn with_updater(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         secrets::secret_set,
         secrets::secret_delete,
         window::set_window_title,
+        window::set_window_stage,
         updater::check_for_update,
         updater::install_update,
     ])
