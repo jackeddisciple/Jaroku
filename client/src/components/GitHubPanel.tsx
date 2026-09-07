@@ -350,7 +350,7 @@ function RepoPicker({ agentId }: { agentId: string }) {
           <div className="mt-1.5 pl-5">
             <div className="flex items-center gap-2">
               <input
-                className="min-w-0 flex-1 rounded-control bg-panel px-2 py-1.5 text-caption text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
+                className="min-w-0 flex-1 rounded-input border border-edge bg-elevated px-2 py-1.5 text-caption text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="weather-agent"
@@ -517,7 +517,7 @@ function Field({
     <label className="flex items-center gap-2 text-tiny text-muted">
       <span className="w-[86px] shrink-0">{label}</span>
       <input
-        className={`min-w-0 flex-1 rounded-control bg-panel px-2 py-1 text-tiny text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint ${mono ? "" : ""}`}
+        className={`min-w-0 flex-1 rounded-input border border-edge bg-elevated px-2 py-1 text-tiny text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint ${mono ? "" : ""}`}
         value={value}
         placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}

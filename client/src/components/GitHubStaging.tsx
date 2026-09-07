@@ -188,7 +188,7 @@ export function StagingRegion({ view }: { view: GithubView }) {
         // plus a parenthetical, inside a field that erases itself on the first keystroke, which is
         // exactly when the instruction is needed.
         <textarea
-          className="mt-2 h-16 w-full resize-none rounded-control bg-panel px-2 py-1.5 font-mono text-tiny leading-[1.5] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
+          className="mt-2 h-16 w-full resize-none rounded-input border border-edge bg-elevated px-2 py-1.5 font-mono text-tiny leading-[1.5] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
           placeholder="what does this subset do?"
           value={message}
           onChange={(e) => setMessage(e.target.value)}

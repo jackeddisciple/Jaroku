@@ -124,7 +124,7 @@ export function EnforcementStrip() {
                 maxLength={4000}
                 onChange={(e) => setNote(e.target.value)}
                 placeholder="what happened, from your side"
-                className="w-full rounded-control border border-hair bg-void px-2 py-1.5 text-caption text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
+                className="w-full rounded-input border border-edge bg-elevated px-2 py-1.5 text-caption text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
               />
               {/* ONE ACTION AND A DISMISS. Two text buttons inside a strip that is already a
                   full-width interruption is the interruption interrupting itself; `Appeal` is the

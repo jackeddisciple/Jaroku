@@ -54,7 +54,7 @@ function PasscodeField(props: {
         // surface is the same colour, and the only thing that drew the box was the focus ring —
         // so the Confirm label on the passcode gate appeared with nothing beneath it, on the one
         // screen that stands between somebody and their credentials.
-        className="w-full rounded-control border border-hair bg-bg px-2.5 py-1.5 font-mono text-caption text-ink outline-none placeholder:text-faint focus:border-transparent focus:shadow-focusring disabled:opacity-40"
+        className="w-full rounded-input border border-edge bg-elevated px-2.5 py-1.5 font-mono text-caption text-ink outline-none placeholder:text-faint focus:border-transparent focus:shadow-focusring disabled:opacity-40"
       />
     </div>
   );

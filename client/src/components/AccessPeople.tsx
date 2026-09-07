@@ -237,7 +237,7 @@ export function AccessPeople({
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Find a person, or a capability"
           aria-label="Filter by name or capability"
-          className="min-w-0 flex-1 rounded-control border border-hair bg-transparent px-2 py-1 text-tiny text-ink placeholder:text-faint focus-visible:outline-none focus-visible:shadow-focusring"
+          className="min-w-0 flex-1 rounded-input border border-edge bg-transparent px-2 py-1 text-tiny text-ink placeholder:text-faint focus-visible:outline-none focus-visible:shadow-focusring"
         />
         {/* §10.4 — ABSENT for a non-admin, not disabled. */}
         {canAdmin && (

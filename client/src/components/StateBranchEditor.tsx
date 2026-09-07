@@ -86,8 +86,8 @@ export function StateBranchEditor({ step }: { step: Step }) {
                 }}
                 spellCheck={false}
                 rows={Math.min(6, (draft[k]?.split("\n").length ?? 1) + 1)}
-                className="w-full mt-1 bg-bg text-ink text-tiny font-mono rounded-control p-2 resize-y
-                  outline-none focus-visible:shadow-focusring border border-hair focus:border-faint leading-relaxed"
+                className="w-full mt-1 bg-elevated text-ink text-tiny font-mono rounded-input p-2 resize-y
+                  outline-none focus-visible:shadow-focusring border border-edge focus:border-faint leading-relaxed"
               />
             </label>
           ))}

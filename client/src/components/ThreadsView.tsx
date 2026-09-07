@@ -299,6 +299,17 @@ export function ThreadsView() {
                     is the §4.3 failure the Agents grid is warned about. The list is a full replace
                     with no cursor, so this length IS a total. */}
                 <SectionHeader name={section.label} count={section.threads.length} rule className="px-5 pb-1 pt-3" />
+                {/* §11's thread row: 0px radius, E0, and a #E6E6E2 divider — which is `hair`, the
+                    quietest boundary §06 has. It is on the GROUP rather than on the row, so the last
+                    row of a section does not draw a line into the header of the next one, and so a
+                    row still owns no border of its own: §6.2's rule that a full border would make a
+                    row a card is exactly why the line belongs to the list.
+
+                    THE ROWS TOUCHED BEFORE THIS. Nothing separated one from the next but the hover
+                    fill, so a two-line row with a wrapped title read as one block with the row under
+                    it — which is the case a divider is for and the case whitespace cannot answer
+                    without making the list half as dense. */}
+                <div className="divide-y divide-hair">
                 {section.threads.map((t) => (
                   <ThreadRow
                     key={t.id}
@@ -322,6 +333,7 @@ export function ThreadsView() {
                     onRestore={() => sendRestoreThread(t.id)}
                   />
                 ))}
+                </div>
               </section>
             ))}
           </div>

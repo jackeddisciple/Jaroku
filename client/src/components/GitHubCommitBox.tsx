@@ -91,7 +91,7 @@ export function GitHubCommitBox({ view }: { view: GithubView }) {
     <div>
       <textarea
         rows={4}
-        className="w-full resize-y rounded-control bg-panel px-2.5 py-2 text-caption leading-[1.55] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
+        className="w-full resize-y rounded-input border border-edge bg-elevated px-2.5 py-2 text-caption leading-[1.55] text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
         placeholder="what changed, and why"
         value={message}
         onChange={(e) => {

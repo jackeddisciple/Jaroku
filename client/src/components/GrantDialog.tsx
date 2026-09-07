@@ -275,7 +275,7 @@ export function GrantDialog({
               value={customDate}
               onChange={(e) => setCustomDate(e.target.value)}
               aria-label="Expiry date"
-              className="rounded-control border border-hair bg-void px-2 py-1.5 text-caption text-ink outline-none focus-visible:shadow-focusring"
+              className="rounded-input border border-edge bg-elevated px-2 py-1.5 text-caption text-ink outline-none focus-visible:shadow-focusring"
             />
           )}
         </div>
@@ -289,7 +289,7 @@ export function GrantDialog({
             onChange={(e) => setNote(e.target.value)}
             placeholder="why they need this"
             aria-label="Why this grant exists"
-            className="mt-1 w-full rounded-control border border-hair bg-void px-2.5 py-1.5 text-caption text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
+            className="mt-1 w-full rounded-input border border-edge bg-elevated px-2.5 py-1.5 text-caption text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
           />
         </label>
 

@@ -743,7 +743,7 @@ function RailwayTokenRow({ configured }: { configured: boolean }) {
               autoFocus
               type="password"
               autoComplete="off"
-              className="min-w-0 flex-1 rounded-control bg-bg px-2 py-1 font-mono text-tiny text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
+              className="min-w-0 flex-1 rounded-input border border-edge bg-elevated px-2 py-1 font-mono text-tiny text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
               placeholder="railway account token"
               value={token}
               onChange={(e) => setToken(e.target.value)}

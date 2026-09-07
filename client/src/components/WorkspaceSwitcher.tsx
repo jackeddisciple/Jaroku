@@ -136,7 +136,7 @@ function NewWorkspaceForm({ onDone }: { onDone: () => void }) {
         maxLength={NAME_MAX}
         placeholder="My team"
         aria-label="Workspace name"
-        className="w-full rounded-control border border-hair bg-void px-2 py-1.5 text-caption text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
+        className="w-full rounded-input border border-edge bg-elevated px-2 py-1.5 text-caption text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
       />
       {/* THE KIND IS ASKED, NEVER DEFAULTED SILENTLY. It decides whether the workspace has a
           members list, roles and an author column at all, and it is not changeable afterwards —
@@ -262,7 +262,7 @@ function JoinWorkspaceForm({ onDone }: { onDone: () => void }) {
         spellCheck={false}
         autoCapitalize="off"
         autoCorrect="off"
-        className="w-full rounded-control border border-hair bg-void px-2 py-1.5 text-tiny text-ink placeholder:font-sans placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
+        className="w-full rounded-input border border-edge bg-elevated px-2 py-1.5 text-tiny text-ink placeholder:font-sans placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
       />
       <p className="mt-1.5 text-tiny leading-[1.5] text-faint">
         The whole link or just the code after it — either works.

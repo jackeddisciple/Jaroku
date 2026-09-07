@@ -110,7 +110,7 @@ export function NewAgentDialog({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Stacey"
-              className="mt-1 w-full rounded-control border border-edge bg-panel px-2.5 py-1.5 text-caption text-ink outline-none placeholder:text-faint focus:shadow-focusring"
+              className="mt-1 w-full rounded-input border border-edge bg-elevated px-2.5 py-1.5 text-caption text-ink outline-none placeholder:text-faint focus:shadow-focusring"
             />
             <span className="mt-1 block text-tiny text-faint">
               Optional — otherwise it is taken from what you describe below.
@@ -157,7 +157,7 @@ export function NewAgentDialog({
                 value={custom}
                 onChange={(e) => setCustom(e.target.value)}
                 placeholder="Vendor chasing"
-                className="mt-1.5 w-full rounded-control border border-edge bg-panel px-2.5 py-1.5 text-caption text-ink outline-none placeholder:text-faint focus:shadow-focusring"
+                className="mt-1.5 w-full rounded-input border border-edge bg-elevated px-2.5 py-1.5 text-caption text-ink outline-none placeholder:text-faint focus:shadow-focusring"
               />
             )}
           </div>
@@ -181,7 +181,7 @@ export function NewAgentDialog({
               onChange={(e) => setBrief(e.target.value)}
               rows={3}
               placeholder="Chase unpaid invoices over email and summarise what came back."
-              className="mt-1 w-full resize-y rounded-control border border-edge bg-panel px-2.5 py-1.5 text-caption text-ink outline-none placeholder:text-faint focus:shadow-focusring"
+              className="mt-1 w-full resize-y rounded-input border border-edge bg-elevated px-2.5 py-1.5 text-caption text-ink outline-none placeholder:text-faint focus:shadow-focusring"
             />
           </label>
         </div>

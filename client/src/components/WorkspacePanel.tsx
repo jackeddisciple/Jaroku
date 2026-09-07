@@ -174,7 +174,7 @@ function GeneralSection() {
               onChange={(e) => { setName(e.target.value); setSaved(false); }}
               onKeyDown={(e) => { if (e.key === "Enter") void save(); }}
               aria-label="Workspace name"
-              className="min-w-0 flex-1 rounded-control border border-hair bg-void px-2.5 py-1.5 text-caption text-ink outline-none focus-visible:shadow-focusring focus:border-edge"
+              className="min-w-0 flex-1 rounded-input border border-edge bg-elevated px-2.5 py-1.5 text-caption text-ink outline-none focus-visible:shadow-focusring focus:border-edge"
             />
             <button className={secondaryBtn} onClick={() => void save()} disabled={busy || !dirty}>
               {busy ? "Saving…" : "Save"}
@@ -425,7 +425,7 @@ function TransferConfirm({ member, onDone }: { member: Member; onDone: () => voi
           onChange={(e) => setTyped(e.target.value)}
           placeholder="type the workspace name above to confirm"
           aria-label="Workspace name"
-          className="mt-1.5 w-full rounded-control border border-hair bg-void px-2.5 py-1.5 text-caption text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
+          className="mt-1.5 w-full rounded-input border border-edge bg-elevated px-2.5 py-1.5 text-caption text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
         />
         <div className="mt-3 flex items-center gap-2">
           <button
@@ -818,7 +818,7 @@ function MembersSection() {
               type="email"
               placeholder="colleague@example.com — or leave blank for a link"
               aria-label="Email address for the invitation, optional"
-              className="min-w-0 flex-1 rounded-control border border-hair bg-void px-2.5 py-1.5 text-caption text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
+              className="min-w-0 flex-1 rounded-input border border-edge bg-elevated px-2.5 py-1.5 text-caption text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
             />
             <Select
               value={role}
@@ -1172,7 +1172,7 @@ function DataSection() {
                     value={confirm}
                     onChange={(e) => setConfirm(e.target.value)}
                     placeholder="type the id above to confirm"
-                    className="min-w-0 flex-1 rounded-control border border-hair bg-void px-2.5 py-1.5 text-tiny text-ink placeholder:font-sans placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
+                    className="min-w-0 flex-1 rounded-input border border-edge bg-elevated px-2.5 py-1.5 text-tiny text-ink placeholder:font-sans placeholder:text-faint outline-none focus-visible:shadow-focusring focus:border-edge"
                   />
                   {/* ICON-ONLY AND DESTRUCTIVE, WITH THE TYPED CONFIRMATION STILL IN FRONT OF
                       IT. Shortening the control does not shorten the gate: the box beside it still

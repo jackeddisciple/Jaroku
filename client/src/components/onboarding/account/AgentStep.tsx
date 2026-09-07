@@ -93,7 +93,7 @@ export function AgentStep() {
           placeholder="Name it — Stacey, John, Claire…"
           aria-label="Name your agent"
           autoFocus
-          className="w-full rounded-control border border-edge bg-void px-3.5 py-2.5 text-label
+          className="w-full rounded-input border border-edge bg-elevated px-3.5 py-2.5 text-label
             text-ink outline-none transition-colors duration-fast placeholder:text-faint
             focus-visible:shadow-focusring focus:border-chrome"
         />
@@ -165,7 +165,7 @@ export function AgentStep() {
             }}
             placeholder="…or type your own"
             aria-label="Type your own category"
-            className="w-full rounded-control border border-edge bg-void px-3.5 py-2 text-caption
+            className="w-full rounded-input border border-edge bg-elevated px-3.5 py-2 text-caption
               text-ink outline-none transition-colors duration-fast placeholder:text-faint
               focus-visible:shadow-focusring focus:border-chrome"
           />

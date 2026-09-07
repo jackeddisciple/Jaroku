@@ -73,7 +73,7 @@ export function NoteControl({ turnId, disabled = false }: { turnId: string; disa
             }}
             rows={3}
             placeholder="This plan looks right but it drops the retry on 429."
-            className="w-full resize-none rounded-control bg-bg px-2 py-1.5 text-caption text-ink outline-none placeholder:text-faint focus-visible:shadow-focusring"
+            className="w-full resize-none rounded-input border border-edge bg-elevated px-2 py-1.5 text-caption text-ink outline-none placeholder:text-faint focus-visible:shadow-focusring"
           />
           <div className="mt-1.5 flex items-center justify-end gap-1.5">
             <button
@@ -205,7 +205,7 @@ export function FeedbackControls({
               value={comment}
               onChange={(e) => setComment(e.target.value)}
               placeholder="Anything else? (optional)"
-              className="mt-1 w-full rounded-control bg-bg px-2 py-1 text-tiny text-ink outline-none placeholder:text-faint focus-visible:shadow-focusring"
+              className="mt-1 w-full rounded-input border border-edge bg-elevated px-2 py-1 text-tiny text-ink outline-none placeholder:text-faint focus-visible:shadow-focusring"
             />
             <div className="mt-1.5 flex items-center justify-end gap-1.5 pb-1">
               <button

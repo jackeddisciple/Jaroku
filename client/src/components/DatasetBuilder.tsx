@@ -87,7 +87,7 @@ function ExampleRow({
           if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commit(); }
         }}
         rows={Math.min(draft.split("\n").length + 1, 6)}
-        className="w-full resize-none bg-active text-ink rounded-control px-2 py-1 text-caption outline-none focus:shadow-focusring"
+        className="w-full resize-none bg-elevated text-ink rounded-input border border-edge px-2 py-1 text-caption outline-none focus:shadow-focusring"
       />
     ) : (
       <button
@@ -207,7 +207,7 @@ function RubricEditor({ datasetId }: { datasetId: string }) {
                   value={c.label}
                   onChange={(e) => edit(i, { label: e.target.value })}
                   placeholder="name"
-                  className="min-w-0 flex-1 rounded-control bg-active px-2 py-1 text-caption text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring"
+                  className="min-w-0 flex-1 rounded-input border border-edge bg-elevated px-2 py-1 text-caption text-ink placeholder:text-faint outline-none focus-visible:shadow-focusring"
                 />
                 {/* THE ID IS NOT EDITABLE ONCE IT EXISTS. It is what a stored verdict's
                     per-criterion score is keyed by, so renaming it would orphan every score
@@ -222,7 +222,7 @@ function RubricEditor({ datasetId }: { datasetId: string }) {
                   onChange={(e) => edit(i, { weight: Number(e.target.value) })}
                   inputMode="decimal"
                   title="Relative weight"
-                  className="w-14 shrink-0 rounded-control bg-active px-1.5 py-1 text-tiny text-ink outline-none focus-visible:shadow-focusring"
+                  className="w-14 shrink-0 rounded-input border border-edge bg-elevated px-1.5 py-1 text-tiny text-ink outline-none focus-visible:shadow-focusring"
                 />
                 <button
                   onClick={() => setDraft(criteria.filter((_, j) => j !== i))}
@@ -237,7 +237,7 @@ function RubricEditor({ datasetId }: { datasetId: string }) {
                 onChange={(e) => edit(i, { description: e.target.value })}
                 rows={2}
                 placeholder="what the judge should look for, phrased so a higher score is better"
-                className="mt-1 w-full resize-none rounded-control bg-active px-2 py-1 text-tiny leading-[1.5] text-muted placeholder:text-faint outline-none focus-visible:shadow-focusring"
+                className="mt-1 w-full resize-none rounded-input border border-edge bg-elevated px-2 py-1 text-tiny leading-[1.5] text-muted placeholder:text-faint outline-none focus-visible:shadow-focusring"
               />
             </div>
           ))}
@@ -476,7 +476,7 @@ export function DatasetBuilder() {
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addExample(); } }}
             disabled={!connected}
             placeholder="an input the agent should handle"
-            className="flex-1 bg-panel text-ink placeholder:text-faint rounded-control px-2.5 py-1.5 text-caption outline-none focus:shadow-focusring disabled:opacity-50"
+            className="flex-1 bg-elevated text-ink placeholder:text-faint rounded-input border border-edge px-2.5 py-1.5 text-caption outline-none focus:shadow-focusring disabled:opacity-50"
           />
           <button
             onClick={addExample}

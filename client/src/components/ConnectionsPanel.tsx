@@ -178,7 +178,7 @@ function ConnectorField({ field, onDone }: { field: ConnectionFieldView; onDone:
       ) : (
         <div className="mt-1 flex items-center gap-1.5">
           <input
-            className="min-w-0 flex-1 rounded-control bg-panel px-2.5 py-1 text-tiny text-ink outline-none placeholder:text-faint focus:shadow-focusring"
+            className="min-w-0 flex-1 rounded-input border border-edge bg-elevated px-2.5 py-1 text-tiny text-ink outline-none placeholder:text-faint focus:shadow-focusring"
             type={field.secret ? "password" : "text"}
             value={value}
             autoComplete="off"

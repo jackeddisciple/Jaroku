@@ -149,7 +149,7 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
                   if (e.key === "Escape") cancel();
                 }}
                 aria-label={`Rename ${a.name}`}
-                className="w-full rounded-control border border-edge bg-panel px-2 py-1 text-label text-ink outline-none focus-visible:shadow-focusring"
+                className="w-full rounded-input border border-edge bg-elevated px-2 py-1 text-label text-ink outline-none focus-visible:shadow-focusring"
               />
             ) : (
               <div className="flex min-w-0 items-center gap-1.5">
@@ -256,7 +256,7 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
                 }}
                 placeholder="…or name your own, then Enter"
                 aria-label="Name your own category"
-                className="mt-1.5 w-full rounded-control border border-edge bg-panel px-2.5 py-1 text-caption text-ink outline-none placeholder:text-faint focus:shadow-focusring"
+                className="mt-1.5 w-full rounded-input border border-edge bg-elevated px-2.5 py-1 text-caption text-ink outline-none placeholder:text-faint focus:shadow-focusring"
               />
             </div>
 

@@ -324,7 +324,7 @@ function AgentRow({ agent }: { agent: AgentSummary }) {
               }}
               // The click that lands in the field must not also select the agent underneath it.
               onClick={(e) => e.stopPropagation()}
-              className="min-w-0 flex-1 rounded-control bg-mist-50 px-1.5 py-0.5 text-label text-ink outline-none focus-visible:shadow-focusring"
+              className="min-w-0 flex-1 rounded-input border border-edge bg-elevated px-1.5 py-0.5 text-label text-ink outline-none focus-visible:shadow-focusring"
             />
           ) : (
             <>

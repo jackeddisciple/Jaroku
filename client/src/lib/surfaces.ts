@@ -153,3 +153,30 @@ export const SHADOW_RULES = {
   /** The two levels a surface has to genuinely float to earn. */
   floatingOnly: ["E2", "E3"],
 } as const;
+
+/**
+ * §11. The component defaults — the table that says which rung and which level each kind of thing
+ * gets, and the only part of UI-4 that names components rather than values.
+ *
+ * IT IS WHERE THE TWO SCALES STOP BEING INDEPENDENT. §04 says a button is 8px and §06 says E0 is
+ * flat, and neither of them says a button is flat; this does. Every row is a pair a reader can
+ * check against a screen, which is what makes it the useful half of the specification and the half
+ * that drifts — a scale is edited once and a component is edited every week.
+ *
+ * THE TWO ROWS THAT MOVED A RUNG HERE ARE THE INPUT AND THE AGENT CARD, and both moved because this
+ * table distinguishes things §04 alone could not. An input was a button's 8px because both are
+ * ~28px tall; an agent card was a standard card's 12px because both are cards. §05's "radius
+ * follows hierarchy" is the rule that separates them, and this is where it is applied.
+ */
+export const COMPONENT = {
+  button: { radius: RADIUS_SCALE.control, elevation: "E0" },
+  input: { radius: RADIUS_SCALE.input, elevation: "E0" },
+  /** 0px, or whatever the parent list is. A row is not a card — see §06's E0 row for why. */
+  threadRow: { radius: 0, elevation: "E0" },
+  inboxCard: { radius: RADIUS_SCALE.card, elevation: "E0", hover: "E1" },
+  agentCard: { radius: RADIUS_SCALE.lg, elevation: "E0", hover: "E1" },
+  dropdown: { radius: RADIUS_SCALE.card, elevation: "E2" },
+  dialog: { radius: RADIUS_SCALE.lg, elevation: "E3" },
+  /** The one row given as a range; see `SHAPE.avatarRadius`. */
+  agentAvatar: { radius: SHAPE.avatarRadius, elevation: "E0" },
+} as const;

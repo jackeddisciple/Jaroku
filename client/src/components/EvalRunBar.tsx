@@ -160,7 +160,7 @@ export function EvalRunBar() {
                   value={ceiling}
                   onChange={(e) => setCeiling(e.target.value)}
                   inputMode="decimal"
-                  className="w-20 bg-active text-ink rounded-control px-2 py-1 text-tiny tabular-nums outline-none focus:shadow-focusring"
+                  className="w-20 bg-elevated text-ink rounded-input border border-edge px-2 py-1 text-tiny tabular-nums outline-none focus:shadow-focusring"
                 />
                 {/* Says what the ceiling actually does. It is checked against real spend
                     before anything is DISPATCHED, so runs already in flight finish and pay

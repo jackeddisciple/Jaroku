@@ -365,7 +365,7 @@ export function BillingSection() {
                           max={20}
                           value={seats}
                           onChange={(e) => setSeats(Number(e.target.value))}
-                          className="w-16 rounded-control border border-edge bg-bg px-2 py-1 text-right text-caption tabular-nums text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+                          className="w-16 rounded-input border border-edge bg-elevated px-2 py-1 text-right text-caption tabular-nums text-ink focus-visible:outline-none focus-visible:shadow-focusring"
                         />
                       </label>
                     )}

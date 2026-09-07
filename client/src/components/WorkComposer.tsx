@@ -235,7 +235,7 @@ export function WorkComposer() {
           placeholder={moment.placeholder}
           // ONE LINE THAT GROWS TO A SMALL MAXIMUM — §8. `max-h` rather than an auto-resize script,
           // because the growth is bounded and a scrollbar past the bound is the honest end of it.
-          className="max-h-[96px] min-h-[36px] flex-1 resize-none rounded-control border border-hair bg-elevated px-2.5 py-2 text-caption leading-[1.5] text-ink placeholder:text-faint focus-visible:outline-none focus-visible:shadow-focusring"
+          className="max-h-[96px] min-h-[36px] flex-1 resize-none rounded-input border border-edge bg-elevated px-2.5 py-2 text-caption leading-[1.5] text-ink placeholder:text-faint focus-visible:outline-none focus-visible:shadow-focusring"
         />
 
         <DisabledReason state={blocked} className="shrink-0">

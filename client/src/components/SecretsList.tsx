@@ -143,7 +143,7 @@ function ValueForm({
         placeholder={label}
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        className="min-w-0 flex-1 rounded-control bg-bg px-2.5 py-1.5 font-mono text-caption text-ink outline-none placeholder:text-faint focus:shadow-focusring"
+        className="min-w-0 flex-1 rounded-input border border-edge bg-elevated px-2.5 py-1.5 font-mono text-caption text-ink outline-none placeholder:text-faint focus:shadow-focusring"
       />
       <button type="submit" className={primaryBtn} disabled={busy || !value}>
         {busy ? "Saving…" : "Save"}
@@ -207,7 +207,7 @@ function RevokeForm({
           value={typed}
           onChange={(e) => setTyped(e.target.value)}
           placeholder={name}
-          className="min-w-0 flex-1 rounded-control bg-bg px-2.5 py-1.5 font-mono text-caption text-ink outline-none placeholder:text-faint focus:shadow-focusring"
+          className="min-w-0 flex-1 rounded-input border border-edge bg-elevated px-2.5 py-1.5 font-mono text-caption text-ink outline-none placeholder:text-faint focus:shadow-focusring"
         />
         <button type="submit" className={primaryBtn} disabled={busy || typed !== name}>
           {busy ? "Revoking…" : "Revoke"}

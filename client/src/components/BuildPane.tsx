@@ -2002,7 +2002,7 @@ export function BuildPane({
                     ? "The name is fixed once a plan is on the table — discard the plan to change it"
                     : "Optional. Otherwise the name is taken from your description."
               }
-              className="ml-auto w-40 bg-panel text-ink placeholder:text-faint rounded-control px-2.5 py-1 text-caption outline-none focus:shadow-focusring disabled:opacity-50"
+              className="ml-auto w-40 bg-elevated text-ink placeholder:text-faint rounded-input border border-edge px-2.5 py-1 text-caption outline-none focus:shadow-focusring disabled:opacity-50"
             />
           </div>
         )}

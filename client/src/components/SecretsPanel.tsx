@@ -369,7 +369,7 @@ function AddForm({ initialName = "", onDone }: { initialName?: string; onDone: (
           placeholder="name"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="min-w-0 flex-1 rounded-control bg-bg px-2.5 py-1.5 font-mono text-caption text-ink outline-none placeholder:text-faint focus:shadow-focusring"
+          className="min-w-0 flex-1 rounded-input border border-edge bg-elevated px-2.5 py-1.5 font-mono text-caption text-ink outline-none placeholder:text-faint focus:shadow-focusring"
         />
         <input
           type="password"
@@ -377,7 +377,7 @@ function AddForm({ initialName = "", onDone }: { initialName?: string; onDone: (
           placeholder="value"
           value={value}
           onChange={(e) => setValue(e.target.value)}
-          className="min-w-0 flex-[2] rounded-control bg-bg px-2.5 py-1.5 font-mono text-caption text-ink outline-none placeholder:text-faint focus:shadow-focusring"
+          className="min-w-0 flex-[2] rounded-input border border-edge bg-elevated px-2.5 py-1.5 font-mono text-caption text-ink outline-none placeholder:text-faint focus:shadow-focusring"
         />
         <button type="submit" className={primaryBtn} disabled={busy || !name || !value}>
           {busy ? "Saving…" : "Save"}
@@ -511,7 +511,7 @@ function ImportForm({ onDone }: { onDone: () => void }) {
         placeholder={"Paste a .env, or a 1Password / Vault / Doppler export"}
         value={text}
         onChange={(e) => setText(e.target.value)}
-        className="w-full rounded-control bg-bg px-2.5 py-1.5 font-mono text-tiny text-ink outline-none placeholder:text-faint focus:shadow-focusring"
+        className="w-full rounded-input border border-edge bg-elevated px-2.5 py-1.5 font-mono text-tiny text-ink outline-none placeholder:text-faint focus:shadow-focusring"
       />
       <div className="flex items-center gap-2">
         <button type="submit" className={primaryBtn} disabled={busy || !text.trim()}>

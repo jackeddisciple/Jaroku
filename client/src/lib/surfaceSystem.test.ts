@@ -23,7 +23,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { ELEVATION_SPEC, RADIUS_SCALE, RADIUS_TOKENS, SHADOW_RULES, SHAPE } from "./surfaces.ts";
+import { COMPONENT, ELEVATION_SPEC, RADIUS_SCALE, RADIUS_TOKENS, SHADOW_RULES, SHAPE } from "./surfaces.ts";
 import { ELEVATION, GLOW, RADIUS } from "./tokens.ts";
 
 let failures = 0;
@@ -274,6 +274,81 @@ console.log("\n§12: no dark, wide or decorative shadow anywhere");
   // nothing on the elevation ladder would have caught the 32px bloom this used to carry.
   check("GLOW.hover is a border plus E1, not a bloom",
     GLOW.hover === `0 0 0 1px #C9C9C4, ${ELEVATION.raised}`, GLOW.hover);
+}
+
+console.log("\n§11's component defaults, transcribed from the PDF");
+{
+  // The specification's own table, radius first, then the level.
+  const SPEC: Record<string, [number, string]> = {
+    button: [8, "E0"],
+    input: [10, "E0"],
+    threadRow: [0, "E0"],
+    inboxCard: [12, "E0"],
+    agentCard: [16, "E0"],
+    dropdown: [12, "E2"],
+    dialog: [16, "E3"],
+  };
+  for (const [name, [px, E]] of Object.entries(SPEC)) {
+    const row = COMPONENT[name as keyof typeof COMPONENT];
+    check(`a ${name} is ${px}px at ${E}`, row.radius === px && row.elevation === E,
+      `${String(row.radius)}px at ${row.elevation}`);
+  }
+  // The two rows that arrow rather than sit: `E0 → E1` is a rest state and an interaction, and it
+  // is the reason the Inbox's severity ladder had to give its three levels back.
+  check("an inbox card and an agent card both lift to E1",
+    COMPONENT.inboxCard.hover === "E1" && COMPONENT.agentCard.hover === "E1");
+  check("an agent avatar is §04's expressive range",
+    COMPONENT.agentAvatar.radius === SHAPE.avatarRadius);
+}
+
+console.log("\nand the components themselves stand on it");
+{
+  // §11 IS A TABLE OF PAIRS AND THIS IS WHERE IT MEETS THE MARKUP. Each check below reads the one
+  // element the row is about, because a table nothing is held to is documentation.
+  const src = (path: string): string => CODE.find((f) => f.path === path)?.text ?? "";
+
+  // AN INPUT IS `input` AND NEVER `control`. The two rungs are 8 and 10 and the components are the
+  // same height, so nothing but a rule can keep them apart — and before this pass all 54 text
+  // fields in the client were on the button's rung. The census is structural: every `<input>`,
+  // `<textarea>` and `<select>` in the client, not the ones somebody remembered.
+  const fields: string[] = [];
+  for (const { path, text } of CODE) {
+    for (const m of text.matchAll(/<(?:input|textarea|select)\b/g)) {
+      let i = m.index! + m[0].length, depth = 0;
+      while (i < text.length) {
+        const c = text[i];
+        if (c === "{") depth++;
+        else if (c === "}") depth--;
+        else if (c === ">" && depth === 0) break;
+        i++;
+      }
+      const tag = text.slice(m.index!, i + 1);
+      if (/\brounded-(?!input\b)(?:xs|sm|control|card|lg|xl|hero)\b/.test(tag)) {
+        fields.push(`${path}: ${tag.replace(/\s+/g, " ").slice(0, 70)}`);
+      }
+    }
+  }
+  check("every text field is on the input rung", fields.length === 0, fields.join("; "));
+
+  // THE AGENT CARD, which is §11's other moved row and the product's primary object.
+  const card = src("components/AgentCard.tsx");
+  const surface = card.match(/className=\{`group flex cursor-pointer[^`]*`/)?.[0] ?? "";
+  check("the agent card is at the major-container rung", /rounded-lg\b/.test(surface), surface.slice(0, 120));
+  check("...and rests flat, lifting only for the pointer or the keyboard",
+    !/(?:^|[^:])\bshadow-(?:raised|floating|overlay)\b/.test(surface) && /shadow-glow/.test(surface),
+    surface.slice(0, 160));
+
+  // THE AVATAR, whose radius is a value rather than a class because it is drawn to a canvas.
+  check("the agent avatar takes its radius from §04's expressive range",
+    /borderRadius: RADIUS\.(?:xl|hero)\b/.test(src("components/GlossAvatar.tsx")));
+
+  // AND THE THREAD ROW, which is §11's one zero: the row owns no radius and no border, and the
+  // divider belongs to the list. A border on the row would make it a card, which is a heavier claim
+  // than the row is entitled to make.
+  const row = src("components/ThreadRow.tsx").match(/className=\{`group relative cursor-pointer[^`]*`/)?.[0] ?? "";
+  check("a thread row draws no corner and no box of its own",
+    row !== "" && !/rounded-|(?:^|[^-])\bborder\b/.test(row), row.slice(0, 120));
+  check("...and the list is what divides them", /divide-y divide-hair/.test(src("components/ThreadsView.tsx")));
 }
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);

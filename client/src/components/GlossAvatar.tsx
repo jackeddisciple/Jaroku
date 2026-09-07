@@ -258,8 +258,21 @@ export function GlossAvatar({
     });
   }, [stage, agentKey]);
 
+  /**
+   * §11's agent avatar: 20–24px, which is the only row of that table given as a RANGE.
+   *
+   * `xl` is the bottom of it, and the bottom is right for the same reason §04 offers a range at
+   * all — the note beside it is "artwork may have its own silhouette". This box is a window onto a
+   * character that is already round-shouldered and already inset from its own edges; at 24px the
+   * container's corner starts cutting into a silhouette that was doing the softening itself.
+   *
+   * IT WAS `card`, WHICH IS NOW A DIFFERENT NUMBER AND WAS ALWAYS THE WRONG ROW. Sharing the
+   * standard card's rung meant an avatar sitting on an agent card had exactly the corner the card
+   * under it had, at a quarter of the size — and §04 puts avatars two rungs above cards precisely
+   * because a radius reads as a proportion: 12px on a 112px avatar is nearly square.
+   */
   const style = useMemo(
-    () => ({ width: size, height: size, borderRadius: RADIUS.card }),
+    () => ({ width: size, height: size, borderRadius: RADIUS.xl }),
     [size],
   );
 

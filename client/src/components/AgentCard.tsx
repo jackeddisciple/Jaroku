@@ -211,6 +211,13 @@ export function AgentCard({
       // re-renders whenever a broadcast lands, so a hovered card lost its glow every time an
       // unrelated agent's run emitted a step. `shadow-glow` is the same token from `tailwind.config`
       // that `GLOW.hover` is in `tokens.ts`, so nothing about the appearance changes.
+      // §11's AGENT CARD, WHICH IS THE ONE ROW OF THAT TABLE THAT MOVED A RUNG. 16px rather than
+      // the 12px every other card in the app gets, and §05 is why: "radius follows hierarchy." An
+      // agent card is not a standard card that happens to be bigger — it is the primary object of
+      // the product's primary surface, and §04 groups it with dialogs and major containers rather
+      // than with the Inbox items and thread containers on the rung below. The extra four pixels
+      // are the grid saying which of its two card sizes is the one you came here for.
+      //
       // §6.1: THE COLOUR MOVES, THE WIDTH DOES NOT. The card keeps `border` — one hairline, the
       // same one at every state — and `stateBorder` recolours it. A `border-2` on a running card
       // would reflow its contents by a pixel every time a run starts, which on a grid that
@@ -224,7 +231,7 @@ export function AgentCard({
       // ROSE HERE DUPLICATES THE `Failing` TAG DELIBERATELY (§6.2): the colour is the glance and the
       // tag is the word, which is also what keeps I8 true — no border on this card travels alone.
       style={{ borderColor: stateBorder(cardState) }}
-      className={`group flex cursor-pointer flex-col overflow-hidden rounded-card border bg-panel text-left transition-[box-shadow,border-color] duration-fast ${
+      className={`group flex cursor-pointer flex-col overflow-hidden rounded-lg border bg-panel text-left transition-[box-shadow,border-color] duration-fast ${
         focused ? "shadow-glow" : "hover:shadow-glow"
       } ${agent.archived_at ? "opacity-70" : ""}`}
     >

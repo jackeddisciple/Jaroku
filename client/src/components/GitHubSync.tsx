@@ -330,7 +330,7 @@ function ForcePushConfirm({
       <div className="mt-2 flex items-center gap-2">
         <input
           autoFocus
-          className="min-w-0 flex-1 rounded-control bg-panel px-2 py-1 text-tiny text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
+          className="min-w-0 flex-1 rounded-input border border-edge bg-elevated px-2 py-1 text-tiny text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
           placeholder={view.agentSlug}
           value={typed}
           onChange={(e) => setTyped(e.target.value)}
@@ -599,7 +599,7 @@ function RefusalCard({ view, refusal }: { view: GithubView; refusal: GithubRefus
           </p>
           <div className="mt-1.5 flex items-center gap-2">
             <input
-              className="min-w-0 flex-1 rounded-control bg-panel px-2 py-1 text-tiny text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
+              className="min-w-0 flex-1 rounded-input border border-edge bg-elevated px-2 py-1 text-tiny text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
               placeholder={view.agentSlug}
               value={typed}
               onChange={(e) => setTyped(e.target.value)}
