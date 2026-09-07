@@ -1,0 +1,81 @@
+# The first deploy: one gateway, built from source.
+#
+# WHY THIS IS NOT `deploy/fly/gateway.fly.toml`. That file is the production topology and it names
+# its image BY DIGEST on purpose — a tag is a mutable pointer, and a rolling deploy that resolves
+# one twice can put two different builds in a single release. That is the right rule and it needs a
+# registry with something already in it. This file is the bootstrap: it builds the Dockerfile, so
+# there is a first image at all. Once there is a pipeline pushing digests, that file is the one to
+# deploy and this one goes away.
+#
+# ONE TIER, NOT TWO. `worker.fly.toml` exists and is not deployed here: a worker drains the run
+# queue, and nothing is running agents yet. Sign-in, accounts and the database are all gateway.
+
+app = "jaroku-api"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[deploy]
+  # THE GATE, THEN THE MIGRATION, THEN TRAFFIC — the same order the production config uses and for
+  # the same reason. `migrate:check` refuses a statement that would break the version currently
+  # serving; a non-zero exit here stops the deploy with the old version still up. Neon is already
+  # at 068, so on this deploy it finds nothing pending and says so.
+  release_command = "npm --prefix server run migrate:check && npm --prefix server run migrate"
+  strategy = "rolling"
+
+[env]
+  NODE_ENV = "production"
+  JAROKU_DB_DRIVER = "postgres"
+  # KMS RATHER THAN DOTENV, because dotenv refuses under NODE_ENV=production: runtime/.env is one
+  # file on one machine, and a hosted deployment reading credentials out of a process environment
+  # is a deployment where a rotation means a redeploy. Needs JAROKU_MASTER_KEY, set as a secret.
+  JAROKU_SECRET_STORE = "kms"
+  # S3 for the same structural reason the database is not SQLite: the local store is a DISK, and
+  # replicas do not share one. An agent generated on replica 1 would not exist on replica 3,
+  # intermittently and in proportion to how many are running.
+  JAROKU_OBJECT_STORE = "s3"
+  JAROKU_CHECKPOINTER = "postgres"
+  JAROKU_LOG_FORMAT = "json"
+  # HSTS on, and X-Forwarded-For trusted for the per-IP rate limit. Both are explicit because both
+  # are wrong to assume: the first is a two-year promise a browser will keep for this hostname, and
+  # the second makes a client-supplied header decide which bucket a request counts against. Behind
+  # Fly's proxy, which rewrites it, that is correct; in front of nothing, it would be forgeable.
+  JAROKU_PUBLIC_TLS = "1"
+  JAROKU_TRUST_PROXY = "1"
+  JAROKU_SERVICE_NAME = "jaroku-api"
+  # Every interface, which is the opposite of the desktop default and correct here: Fly publishes
+  # the port and a process bound to loopback inside a container is one nothing can route to.
+  JAROKU_BIND_HOST = "0.0.0.0"
+  # JAROKU IS THE IDENTITY PROVIDER. Google and magic link are what prove an identity; this server
+  # signs the session at the end of both, and mounts NO passwordless route. Without this the boot
+  # refuses, because a production server with no issuer authenticates nobody.
+  JAROKU_AUTH_SELF_ISSUER = "1"
+
+[http_service]
+  internal_port = 4317
+  force_https = true
+  # NEVER ZERO, and this is the one line worth arguing about on a cheap deploy. A gateway holds
+  # WebSockets; scaling to zero closes every one of them and the clients come back in a herd
+  # against a machine that is still starting. One rather than the production two: a single replica
+  # is a restart somebody notices, not a socket storm.
+  auto_stop_machines = false
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "connections"
+    soft_limit = 400
+    hard_limit = 500
+
+  [[http_service.checks]]
+    # /readyz, not /healthz. Readiness asks whether to send TRAFFIC here, which is a question about
+    # the database; liveness asks whether the process is alive. A liveness check that touched the
+    # database would turn one Neon blip into every instance restarting at once.
+    path = "/readyz"
+    interval = "10s"
+    timeout = "3s"
+    grace_period = "30s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

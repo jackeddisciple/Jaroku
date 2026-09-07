@@ -1,0 +1,21 @@
+# Everything that is either huge, secret, or rebuilt inside the image.
+**/node_modules
+src-tauri/target
+src-tauri/binaries
+src-tauri/resources
+client/dist
+client/vendor
+runtime/.venv
+runtime/.objects
+runtime/.checkpoints
+runtime/agents
+# THE SECRETS, EXPLICITLY. `runtime/.env` holds the Neon URL, the Google secret and the Resend key,
+# and a Docker image is a tarball anybody who can pull it can read. Fly secrets are the mechanism;
+# baking them into a layer would survive every rotation.
+**/.env
+server/.devauth.json
+server/.objectkey
+server/.runtokenkey
+server/jaroku.db*
+**/.DS_Store
+.git
