@@ -85,7 +85,7 @@ function SpendCard() {
           three providers do not need one. */}
       {spend.by_provider.length > 0 && spend.usd > 0 && (
         <div className="mt-2.5 flex items-center gap-2 overflow-hidden">
-          <div className="flex h-1 min-w-0 flex-1 overflow-hidden rounded-chip bg-hair">
+          <div className="flex h-1 min-w-0 flex-1 overflow-hidden rounded-xs bg-hair">
             {spend.by_provider.map((p) => (
               <div
                 key={p.provider}
@@ -255,7 +255,7 @@ function HealthCard() {
         {/* The success/failure split — one of the only two places §3.7 allows colour on this tab. */}
         {settled > 0 && (
           <div className="mt-2.5 flex items-center gap-2">
-            <div className="flex h-1 min-w-0 flex-1 overflow-hidden rounded-chip bg-hair">
+            <div className="flex h-1 min-w-0 flex-1 overflow-hidden rounded-xs bg-hair">
               <div style={{ width: `${(h.ok / settled) * 100}%`, background: STATUS.ok }} title={`${h.ok} ok`} />
               <div style={{ width: `${(h.failed / settled) * 100}%`, background: STATUS.error }} title={`${h.failed} failed`} />
             </div>

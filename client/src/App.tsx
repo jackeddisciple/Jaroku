@@ -298,7 +298,7 @@ export function App() {
     <div className="h-full min-w-[900px] overflow-x-auto bg-void p-2">
       <div
         ref={setShell}
-        className="flex h-full flex-col overflow-hidden rounded-modal border border-edge bg-bg shadow-overlay"
+        className="flex h-full flex-col overflow-hidden rounded-lg border border-edge bg-bg shadow-overlay"
       >
         {/* top bar */}
         <TopBar />

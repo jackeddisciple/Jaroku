@@ -23,6 +23,7 @@
 // this file exists so they *can* be, in a later pass". This is that pass; both are on it.
 
 import { BORDER, CANVAS, DEEP_HARBOR, SEMANTIC, TEXT as INK, alpha } from "./palette.ts";
+import { RADIUS_SCALE } from "./surfaces.ts";
 
 /**
  * Category accents. Each answers "what kind of thing is this", never "how is it doing".
@@ -378,29 +379,29 @@ export const TYPE = {
 } as const;
 
 // ── Radius ──────────────────────────────────────────────────────────────────
-// Four steps, and the rule that picks between them is *size*, not component type: a corner
-// radius reads as a proportion of the box it turns, so the same 10px looks tight on a modal and
-// bulbous on a 20px pill. Naming the steps after the size of thing they belong to is what keeps
-// two people making the same choice.
+// UI-4 §04's nine rungs, under the specification's own names. `surfaces.ts` holds the table; this
+// is the layer above it, and what it adds is which rung a given kind of box climbs.
 //
-// Four because the app has four sizes of box and no more. Before this it had nine values —
-// `rounded`, `-sm`, `-md`, `-lg`, `-xl`, `-2xl`, and three arbitrary pixel counts — spread across
-// components that sit next to each other, which is how a composer card ended up 6px rounder than
-// the popover that opens out of it.
+// FOUR RUNGS BECAME NINE, and the old four were not a subset of the new ones. The rule that picked
+// between them was *size* — a corner radius reads as a proportion of the box it turns, so the same
+// 10px looks tight on a modal and bulbous on a 20px pill — and §05 keeps that and adds hierarchy
+// on top: "Radius follows hierarchy." Which is a rule the four could not express. A button and an
+// input are the same size box and §05 makes them two rungs, 8px and 10px, because an input is a
+// surface you put something into and a button is a control you press.
 //
-// A pill is not on this scale. Something whose radius is half its height is a *shape*, not a
-// corner treatment, and it stays `rounded-full` so it keeps working when the height changes.
+// So `chip` is `xs`, `modal` is `lg` at the spec's 16 rather than 14, `control` moved 6 → 8 and
+// `card` moved 10 → 12. `sm` keeps the 6 the old `control` was, for the genuinely tiny controls
+// that were sitting on it correctly — the connector deck's tiles are drawn at exactly that.
+//
+// A PILL IS ON THE SCALE NOW AND `rounded-full` STILL IS NOT IT. This scale used to end before
+// 999px on the argument that something whose radius is half its height is a shape rather than a
+// corner treatment, and that argument is why `pill` is worth naming: §05 reserves 999px for
+// "statuses, counts and filters", and a scale that does not contain the pill cannot say where the
+// pill is allowed to appear. A circle stays `rounded-full`. An avatar is round because it is round.
 
-export const RADIUS = {
-  /** Chips, badges, pills-that-aren't-round, inline code. Under ~22px tall. */
-  chip: 4,
-  /** Buttons, inputs, tabs, rows, popover items. Roughly 24–36px tall. */
-  control: 6,
-  /** Cards, popovers, panels — anything that holds other things. */
-  card: 10,
-  /** Modals and the composer: the largest boxes, and the only ones that float free. */
-  modal: 14,
-} as const;
+export const RADIUS = RADIUS_SCALE;
+
+export type RadiusName = keyof typeof RADIUS;
 
 // ── Elevation ───────────────────────────────────────────────────────────────
 // Depth, in four steps, so the eye can tell what is active from what is merely present.

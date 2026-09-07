@@ -112,7 +112,7 @@ export function McpConfirmModal() {
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="mcp-confirm-title"
-        className="w-[min(560px,94vw)] overflow-hidden rounded-modal bg-elevated shadow-overlay"
+        className="w-[min(560px,94vw)] overflow-hidden rounded-lg bg-elevated shadow-overlay"
         style={{ border: `1px solid ${ACCENT.mcp}33` }}
       >
         <div className="px-5 pt-4">

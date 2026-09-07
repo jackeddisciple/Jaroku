@@ -196,7 +196,7 @@ export function GrantDialog({
       aria-label={editing ? `Edit access to ${agentSlug}` : `Grant access to ${agentSlug}`}
       className="fixed inset-0 z-50 flex items-center justify-center bg-ink/35 px-4"
     >
-      <div ref={surface} className="w-full max-w-lg rounded-modal border border-edge bg-elevated p-4 shadow-overlay">
+      <div ref={surface} className="w-full max-w-lg rounded-lg border border-edge bg-elevated p-4 shadow-overlay">
         <div className={TYPE.sectionLabel}>
           {editing ? "Edit access" : "Grant access"} · {agentSlug}
         </div>

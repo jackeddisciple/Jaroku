@@ -226,7 +226,7 @@ export function Checkbox({
       />
       <span
         aria-hidden
-        className={`mt-[1px] flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-chip
+        className={`mt-[1px] flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-xs
           border transition-colors duration-fast peer-focus-visible:shadow-focusring
           ${checked ? "border-ink bg-ink text-void" : "border-edge bg-void group-hover:border-chrome"}`}
       >

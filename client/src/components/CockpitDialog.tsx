@@ -102,11 +102,11 @@ export function CockpitDialog({
         ref={ref}
         {...dialogProps}
         aria-labelledby={labelId}
-        // `RADIUS.modal` AND `SURFACE.elevated`, which is what §8 asks of the gate and what the
+        // `RADIUS.lg` AND `SURFACE.elevated`, which is what §8 asks of the gate and what the
         // other two inherit by being the same component. `shadow-overlay` is the hairline-plus-
         // shadow pair at the top rung — never the shadow alone, which `tokens.ts` states and §3D
         // restates.
-        className="w-full max-w-[400px] rounded-modal border border-edge bg-elevated p-4 shadow-overlay"
+        className="w-full max-w-[400px] rounded-lg border border-edge bg-elevated p-4 shadow-overlay"
       >
         <h2 id={labelId} className="text-label text-ink">{title}</h2>
         <div className="mt-2 text-caption leading-[1.55] text-muted">{body}</div>

@@ -121,7 +121,7 @@ export function EventFeedCard() {
         // is worse than a text button."
         <button
           onClick={() => setShowFilters(!showFilters)}
-          className={`rounded-chip p-0.5 transition-colors duration-fast ${
+          className={`rounded-xs p-0.5 transition-colors duration-fast ${
             kinds.size > 0 ? "text-ink" : "text-faint hover:text-muted"
           }`}
           title={kinds.size > 0 ? `Filtered to ${[...kinds].join(", ")}` : "Filter by kind"}
@@ -143,7 +143,7 @@ export function EventFeedCard() {
                 onClick={() => toggleKind(k)}
                 aria-pressed={on}
                 title={`${on ? "Stop showing only" : "Show only"} ${action.verb.toLowerCase()}`}
-                className={`flex items-center gap-1 rounded-chip px-1.5 py-0.5 text-tiny transition-colors duration-fast ${
+                className={`flex items-center gap-1 rounded-xs px-1.5 py-0.5 text-tiny transition-colors duration-fast ${
                   on ? "bg-active text-ink" : "text-faint hover:text-muted"
                 }`}
               >

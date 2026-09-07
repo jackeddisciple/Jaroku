@@ -133,7 +133,7 @@ export function chipClass({
 } = {}): string {
   return [
     inline ? "inline" : "inline-flex items-center",
-    "align-middle rounded-chip",
+    "align-middle rounded-xs",
     SIZE[size],
     inline ? PAD_Y_INLINE[size] : PAD_Y[size],
     TONE[tone],
@@ -235,7 +235,7 @@ export function Chip({
 }
 
 /** The chip radius, for the rare consumer that needs the number (a canvas, an inline style). */
-export const CHIP_RADIUS = RADIUS.chip;
+export const CHIP_RADIUS = RADIUS.xs;
 
 // ── The date variant ────────────────────────────────────────────────────────
 //

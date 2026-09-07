@@ -163,7 +163,7 @@ export function AgentFiles({ detail }: { detail: AgentDetailView }) {
             // jump when the real ones land.
             <div className="space-y-1 px-2">
               {[0, 1, 2, 3].map((i) => (
-                <div key={i} className="h-4 rounded-chip bg-active" style={{ width: `${70 - i * 9}%` }} />
+                <div key={i} className="h-4 rounded-xs bg-active" style={{ width: `${70 - i * 9}%` }} />
               ))}
             </div>
           ) : (

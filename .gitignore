@@ -53,6 +53,11 @@ teams.pdf
 # these two argue for, not the argument.
 colour_system.pdf
 typography.pdf
+# And a fifth shape, which is the same fourth one numbered: the visual-surface spec arrived as
+# `UI-4.pdf` — a revision number rather than a system or a destination. Named for the same reason
+# every line above is, and the reason it is not globbed to `*.pdf` is unchanged: a blanket rule
+# would also swallow a PDF somebody meant to ship.
+UI-4.pdf
 
 # Cygwin drops one of these beside the repo when a bash process faults on Windows. It is a core
 # dump with a stack trace in it, not source, and it reappears whenever the shell falls over.

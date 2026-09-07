@@ -87,7 +87,7 @@ export function InviteWithGrantDialog({
       aria-label={`Invite somebody to ${workspaceName} with access to ${agentSlug}`}
       className="fixed inset-0 z-50 flex items-center justify-center bg-ink/35 px-4"
     >
-      <div className="w-full max-w-lg rounded-modal border border-edge bg-elevated p-4 shadow-overlay">
+      <div className="w-full max-w-lg rounded-lg border border-edge bg-elevated p-4 shadow-overlay">
         <div className={TYPE.sectionLabel}>Invite to workspace</div>
 
         <label className="mt-2 block">

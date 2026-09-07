@@ -133,7 +133,7 @@ export function AgentStep() {
                     setCustom("");
                     setCategory(picked ? null : c);
                   }}
-                  className={`inline-flex items-center gap-1 rounded-chip border px-2 py-1 text-caption
+                  className={`inline-flex items-center gap-1 rounded-xs border px-2 py-1 text-caption
                     transition-colors duration-fast ${
                       picked
                         ? "border-transparent bg-active text-ink"

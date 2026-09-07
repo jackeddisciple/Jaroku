@@ -113,7 +113,7 @@ export function AttachmentRail({
         <button
           type="button"
           onClick={() => setExpanded(true)}
-          className="rounded-chip px-2 py-1 text-tiny text-muted transition-colors duration-fast hover:text-ink"
+          className="rounded-xs px-2 py-1 text-tiny text-muted transition-colors duration-fast hover:text-ink"
         >
           +{hidden} more
         </button>
@@ -122,7 +122,7 @@ export function AttachmentRail({
         <button
           type="button"
           onClick={() => setExpanded(false)}
-          className="rounded-chip px-2 py-1 text-tiny text-faint transition-colors duration-fast hover:text-ink"
+          className="rounded-xs px-2 py-1 text-tiny text-faint transition-colors duration-fast hover:text-ink"
         >
           show fewer
         </button>

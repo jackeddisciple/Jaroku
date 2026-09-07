@@ -327,7 +327,7 @@ function InviteLink() {
           {/* SELECTABLE AND WRAPPED rather than truncated. It is a credential somebody has to get
               out of this box by hand, and a middle-elided link cannot be read back if the copy
               button is the thing that failed. */}
-          <p className="mt-1.5 break-all rounded-chip bg-void px-2 py-1.5 text-tiny text-muted select-all">
+          <p className="mt-1.5 break-all rounded-xs bg-void px-2 py-1.5 text-tiny text-muted select-all">
             {url}
           </p>
           <div className="mt-1.5 flex items-center gap-2">
@@ -405,7 +405,7 @@ function TransferConfirm({ member, onDone }: { member: Member; onDone: () => voi
       aria-label={`Transfer ownership of ${name}`}
       className="fixed inset-0 z-50 flex items-center justify-center bg-ink/35 px-4"
     >
-      <div className="w-full max-w-md rounded-modal border border-edge bg-elevated p-4 shadow-overlay">
+      <div className="w-full max-w-md rounded-lg border border-edge bg-elevated p-4 shadow-overlay">
         <div className={TYPE.sectionLabel}>Transfer ownership</div>
         {/* §6.3's sentence, close to verbatim, because both halves of it are the point: who is
             getting it, and what happens to you. An owner who reads only the first half is an owner
@@ -480,7 +480,7 @@ function ConfirmDialog({
       aria-label={title}
       className="fixed inset-0 z-50 flex items-center justify-center bg-ink/35 px-4"
     >
-      <div className="w-full max-w-md rounded-modal border border-edge bg-elevated p-4 shadow-overlay">
+      <div className="w-full max-w-md rounded-lg border border-edge bg-elevated p-4 shadow-overlay">
         <div className={TYPE.sectionLabel}>{title}</div>
         <p className="mt-2 text-caption leading-[1.55] text-ink">{body}</p>
         {detail && <p className="mt-1.5 text-tiny leading-[1.55] text-muted">{detail}</p>}
@@ -1280,7 +1280,7 @@ export function WorkspacePanel() {
       <div
         ref={card}
         {...dialogProps}
-        className="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-modal border border-edge bg-elevated shadow-overlay focus-visible:outline-none"
+        className="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-edge bg-elevated shadow-overlay focus-visible:outline-none"
       >
         <div className="flex shrink-0 items-center gap-1 border-b border-hair px-4 py-2.5">
           {/* THE DIALOG'S OWN NAME, and the reason it has an id. A dialog whose accessible name is

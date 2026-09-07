@@ -450,7 +450,7 @@ function Filters() {
         <button
           type="button"
           onClick={() => choose({ agentId: null })}
-          className="ml-auto flex items-center gap-1 rounded-chip border border-hair bg-panel px-2 py-0.5 text-tiny text-ink transition-colors duration-fast hover:bg-active focus-visible:outline-none focus-visible:shadow-focusring"
+          className="ml-auto flex items-center gap-1 rounded-xs border border-hair bg-panel px-2 py-0.5 text-tiny text-ink transition-colors duration-fast hover:bg-active focus-visible:outline-none focus-visible:shadow-focusring"
           title={FILTERS.clearAgent}
         >
           <Icon.cockpitFilter.showEveryAgent size={ICON.badge} />

@@ -89,7 +89,7 @@ export function NewAgentDialog({
         ref={ref}
         {...dialogProps}
         aria-labelledby={labelId}
-        className="flex max-h-[86vh] w-full max-w-[560px] flex-col rounded-modal border border-edge bg-elevated shadow-overlay"
+        className="flex max-h-[86vh] w-full max-w-[560px] flex-col rounded-lg border border-edge bg-elevated shadow-overlay"
       >
         <div className="border-b border-hair px-4 py-3">
           <h2 id={labelId} className="text-label text-ink">New agent</h2>

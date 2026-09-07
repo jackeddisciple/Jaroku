@@ -103,15 +103,31 @@ export default {
         bespoke: "#683D8C", // written by a model for this agent only
         stateful: "#3742A8", // state fields — the agent's shape, not its capabilities
       },
-      // Corner radius — four steps, mirroring RADIUS in src/lib/tokens.ts. The scale is chosen by
-      // the SIZE of the box, not by what the component is called, because a radius reads as a
-      // proportion of the corner it turns. `rounded-full` is deliberately not on the scale: a pill
-      // is a shape, and it has to keep working when the height changes.
+      // Corner radius — UI-4 §04's nine rungs, mirroring RADIUS_SCALE in src/lib/surfaces.ts. The
+      // rule that picks between them is size AND hierarchy: a corner radius reads as a proportion
+      // of the box it turns, and §05 adds "radius follows hierarchy" on top of that, which is what
+      // makes a button 8px and an input 10px at the same box height.
+      //
+      // FOUR RUNGS BECAME NINE AND THE FOUR WERE NOT A SUBSET. This carried `chip` 4 / `control` 6 /
+      // `card` 10 / `modal` 14; every one of those either moved or was renamed, so a class that no
+      // longer exists is a class Tailwind silently emits nothing for. `surfaceSystem.test.ts` reads
+      // this block and every call site in the client, which is what turns that silence into a
+      // failure.
+      //
+      // `pill` is on the scale where the old one deliberately stopped short of it, because §05
+      // reserves 999px for "statuses, counts and filters" and a scale without the pill on it cannot
+      // say where the pill belongs. `rounded-full` stays for circles — an avatar is round because
+      // it is round, not because it is a status.
       borderRadius: {
-        chip: "4px", // chips, badges, inline code
-        control: "6px", // buttons, inputs, tabs, rows
-        card: "10px", // cards, popovers, panels
-        modal: "14px", // modals, the composer
+        xs: "4px", // tiny technical elements / compact surfaces
+        sm: "6px", // very compact controls
+        control: "8px", // buttons and standard controls
+        input: "10px", // inputs and compact interactive surfaces
+        card: "12px", // standard cards, Inbox items, Thread containers
+        lg: "16px", // agent cards, dialogs, major containers
+        xl: "20px", // prominent surfaces
+        hero: "24px", // special hero / expressive agent surfaces
+        pill: "999px", // status tags, badges and semantic pills only
       },
       // Depth — mirrors ELEVATION in src/lib/tokens.ts. Every level still pairs with a hairline
       // border, and which half does the work has swapped: on near-black the 1px edge separated two

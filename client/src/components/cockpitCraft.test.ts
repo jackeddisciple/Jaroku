@@ -154,7 +154,7 @@ console.log("\nzero layout shift, as the discipline that causes it");
   // AND THE SKELETON HAS THE SAME NUMBER OF COLUMNS AS THE ROW — the glyph, the flexible middle and
   // the right-hand figure. A skeleton of one bar under a row of three is a shift on every column.
   check("the skeleton row reserves the glyph, the input and a figure",
-    (view.match(/rounded-(?:full|chip)/g) ?? []).length >= 3);
+    (view.match(/rounded-(?:full|xs)/g) ?? []).length >= 3);
 }
 
 // --- 3. §Craft 2: the motion budget -----------------------------------------------------------------
@@ -196,7 +196,7 @@ console.log("\nno new values");
   const radii = CODE.flatMap((f) =>
     (f.text.match(/rounded-\[?[\w.%]+\]?/g) ?? []).map((m) => `${f.path}: ${m}`),
   );
-  const NAMED_RADII = /rounded-(chip|control|card|modal|full|\[1px\])\b/;
+  const NAMED_RADII = /rounded-(xs|sm|control|input|card|lg|xl|hero|pill|full|\[1px\])\b/;
   const offScale = radii.filter((r) => !NAMED_RADII.test(r));
   check("every radius is a named rung", offScale.length === 0, offScale.join("; "));
 

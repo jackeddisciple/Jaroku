@@ -267,8 +267,8 @@ function CockpitSkeleton() {
           // hover.
           <div key={i} style={{ height: ROW_HEIGHT }} className="flex items-center gap-3">
             <div style={{ width: ICON.xs, height: ICON.xs }} className="shrink-0 rounded-full bg-active/60" />
-            <div className="h-3 min-w-0 flex-1 rounded-chip bg-active/50" />
-            <div className="h-3 w-[7ch] shrink-0 rounded-chip bg-active/40" />
+            <div className="h-3 min-w-0 flex-1 rounded-xs bg-active/50" />
+            <div className="h-3 w-[7ch] shrink-0 rounded-xs bg-active/40" />
           </div>
         ))}
       </div>

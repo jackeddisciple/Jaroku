@@ -91,6 +91,19 @@
     /* §08 Brand Direction */
     --color-brand-strong: #1d1d1b;
     --color-brand-secondary: #2b4851;
+
+    /* UI-4 §04 Radius Scale — nine rungs, published for the same reason the colours above are:
+       React Flow draws its own chrome and the canvas-drawn surfaces take a number rather than a
+       class. `surfaceSystem.test.ts` compares this block to src/lib/surfaces.ts rung by rung. */
+    --radius-xs: 4px;
+    --radius-sm: 6px;
+    --radius-control: 8px;
+    --radius-input: 10px;
+    --radius-card: 12px;
+    --radius-lg: 16px;
+    --radius-xl: 20px;
+    --radius-hero: 24px;
+    --radius-pill: 999px;
   }
   html,
   body,
@@ -134,7 +147,7 @@
   }
   ::-webkit-scrollbar-thumb {
     background: var(--color-bg-active);
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
   }
   /* The thumb answers the pointer, like every other control. Ten pixels of permanently-lit chrome
      on each of forty regions is a real share of a 280px sidebar, and a thumb that never responds

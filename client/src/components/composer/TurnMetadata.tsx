@@ -107,7 +107,7 @@ export function TurnMetadata({
                 : `Open ${meta.versionLabel}'s diff`
             }
             aria-label={`Open ${meta.versionLabel}'s diff`}
-            className={`inline-flex shrink-0 items-center gap-1 rounded-chip px-1 transition-colors duration-fast
+            className={`inline-flex shrink-0 items-center gap-1 rounded-xs px-1 transition-colors duration-fast
               hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring
               disabled:cursor-default
               ${meta.versionStaged ? "text-run animate-stream-pulse motion-reduce:animate-none" : "text-muted"}`}
@@ -152,7 +152,7 @@ export function TurnMetadata({
               disabled={meta.ordinal <= 1 || !onSwitchVariant}
               aria-label="Previous response"
               title="Previous response"
-              className="rounded-chip px-1 transition-colors duration-fast hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring disabled:opacity-30"
+              className="rounded-xs px-1 transition-colors duration-fast hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring disabled:opacity-30"
             >
               ‹
             </button>
@@ -163,7 +163,7 @@ export function TurnMetadata({
               disabled={meta.ordinal >= meta.total || !onSwitchVariant}
               aria-label="Next response"
               title="Next response"
-              className="rounded-chip px-1 transition-colors duration-fast hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring disabled:opacity-30"
+              className="rounded-xs px-1 transition-colors duration-fast hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring disabled:opacity-30"
             >
               ›
             </button>

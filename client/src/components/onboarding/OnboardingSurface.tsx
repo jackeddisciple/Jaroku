@@ -78,7 +78,7 @@ export function OnboardingSurface({
 }) {
   return (
     <div className="h-full bg-void p-2">
-      <div className="relative flex h-full flex-col overflow-hidden rounded-modal border border-edge bg-elevated shadow-overlay">
+      <div className="relative flex h-full flex-col overflow-hidden rounded-lg border border-edge bg-elevated shadow-overlay">
         {/* Depth, drawn rather than cast. Both layers are behind everything and take no clicks. */}
         <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
           <div

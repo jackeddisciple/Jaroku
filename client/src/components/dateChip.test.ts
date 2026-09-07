@@ -49,7 +49,7 @@ console.log("\na calendar mark, then the formatted date, in one hairline pill");
   // variant is an inset shadow rather than a border, so an outlined chip occupies exactly the same
   // box as a filled one and the two sit level in a row.
   check("it is the chip's outline", /inset 0 0 0 1px/.test(chip), chip.slice(0, 200));
-  check("it is the chip's radius", chip.includes("rounded-chip"), chip.slice(0, 200));
+  check("it is the chip's radius", chip.includes("rounded-xs"), chip.slice(0, 200));
   // NOTHING AT ALL FOR A MISSING TIMESTAMP. An empty calendar pill claims there is a date to know.
   check("null renders nothing", markup(createElement(DateChip, { at: null })) === "");
   check("...and so does undefined", markup(createElement(DateChip, { at: undefined })) === "");

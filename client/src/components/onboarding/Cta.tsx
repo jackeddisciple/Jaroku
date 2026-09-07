@@ -57,7 +57,7 @@ export function PrimaryCta({ children, onClick, autoFocus, kbd, title, className
         // only direction left is up. Same idea, same alpha, opposite end.
         <kbd
           aria-hidden
-          className="rounded-chip px-1.5 py-0.5 text-tiny leading-none"
+          className="rounded-xs px-1.5 py-0.5 text-tiny leading-none"
           style={{ background: alpha(SURFACE.bg, 0.16), color: SURFACE.bg }}
         >
           {kbd}
@@ -90,7 +90,7 @@ export function GhostCta({ children, onClick, autoFocus, kbd, title, className =
       {kbd && (
         <kbd
           aria-hidden
-          className="rounded-chip bg-active px-1.5 py-0.5 text-tiny leading-none text-muted"
+          className="rounded-xs bg-active px-1.5 py-0.5 text-tiny leading-none text-muted"
         >
           {kbd}
         </kbd>

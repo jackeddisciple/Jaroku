@@ -137,7 +137,7 @@ export function AuthShell({
           className={`mt-8 w-full ${
             width === "narrow" ? "max-w-[420px]" : width === "wider" ? "max-w-[660px]" : "max-w-[520px]"
           }
-            rounded-modal border border-edge bg-elevated/80 p-7 shadow-overlay backdrop-blur-[2px]`}
+            rounded-lg border border-edge bg-elevated/80 p-7 shadow-overlay backdrop-blur-[2px]`}
         >
           {children}
         </div>
@@ -214,7 +214,7 @@ export function TextLink({
         if (onClick) onClick();
         else if (href) void openExternal(href);
       }}
-      className="rounded-chip underline decoration-accent/50 underline-offset-2 text-accent outline-none
+      className="rounded-xs underline decoration-accent/50 underline-offset-2 text-accent outline-none
         transition-colors duration-fast hover:text-accent-hover hover:decoration-accent-hover
         focus-visible:shadow-focusring"
     >

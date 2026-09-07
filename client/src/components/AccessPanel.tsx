@@ -142,9 +142,9 @@ export function AccessPanel({ detail }: { detail: AgentDetailView }) {
       // NOT A SPINNER (§9). Skeleton at the real geometry so the panel does not jump when the
       // answer lands — the same treatment the detail pane around it uses.
       <div className="space-y-3 p-4">
-        <div className="h-4 w-1/3 rounded-chip bg-active" />
-        <div className="h-3 w-1/2 rounded-chip bg-active" />
-        <div className="h-3 w-2/3 rounded-chip bg-active" />
+        <div className="h-4 w-1/3 rounded-xs bg-active" />
+        <div className="h-3 w-1/2 rounded-xs bg-active" />
+        <div className="h-3 w-2/3 rounded-xs bg-active" />
       </div>
     ) : (
       <EmptyState
@@ -352,7 +352,7 @@ function RevokeDialog({
       aria-label={`Revoke ${who}'s grant on ${agentSlug}`}
       className="fixed inset-0 z-50 flex items-center justify-center bg-ink/35 px-4"
     >
-      <div className="w-full max-w-md rounded-modal border border-edge bg-elevated p-4 shadow-overlay">
+      <div className="w-full max-w-md rounded-lg border border-edge bg-elevated p-4 shadow-overlay">
         <div className={TYPE.sectionLabel}>Revoke access</div>
         <p className="mt-2 text-caption leading-[1.55] text-ink">
           Revoke <span className="text-ink">{who}</span>&apos;s grant on{" "}

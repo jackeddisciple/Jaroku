@@ -1,7 +1,7 @@
 // §8's dispatch composer: one input, an agent picker, a destination label, and a gate.
 //
 // IT IS NOT THE BUILD COMPOSER, AND EVERY DIFFERENCE IS DELIBERATE. §8: "It must not look like the
-// build composer... the build composer is the app's largest floating box at `RADIUS.modal` with
+// build composer... the build composer is the app's largest floating box at `RADIUS.lg` with
 // attachments, connectors, variants and an intent label. This one is a control, at
 // `RADIUS.control`, on the panel surface, with none of those affordances. A USER MUST NEVER CONFUSE
 // THE BOX THAT EDITS AN AGENT WITH THE BOX THAT COMMANDS ONE. Different size, different radius,
@@ -192,7 +192,7 @@ export function WorkComposer() {
 
   return (
     // ON THE PANEL SURFACE, AT THE BOTTOM, IN THE FLOW — §8, "not floating, not in a modal". The
-    // build composer floats at `RADIUS.modal`; this one does not float at all.
+    // build composer floats at `RADIUS.lg`; this one does not float at all.
     <div className="shrink-0 border-t border-hair bg-panel">
       {/* §8's DESTINATION LABEL. Always visible, above the input, at `tiny`. */}
       <div className={`flex items-center gap-2 pt-2 text-tiny ${SPINE_X}`}>

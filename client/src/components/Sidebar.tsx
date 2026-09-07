@@ -466,7 +466,7 @@ function NavRail() {
             {badge > 0 && (
               <span
                 title={badgeTitle}
-                className={`absolute -right-0.5 -top-0.5 min-w-[13px] rounded-chip px-0.5 text-center text-tiny leading-[13px] tabular-nums ${
+                className={`absolute -right-0.5 -top-0.5 min-w-[13px] rounded-xs px-0.5 text-center text-tiny leading-[13px] tabular-nums ${
                   id === "threads" ? "text-run" : "text-ink"
                 }`}
                 style={id === "threads" ? undefined : { background: SURFACE.chrome }}

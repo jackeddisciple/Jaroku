@@ -238,7 +238,7 @@ export function ModelMixCard() {
             than a text button." */}
         <button
           onClick={() => setView(view === "spend" ? "volume" : "spend")}
-          className="rounded-chip p-1 text-faint transition-colors duration-fast hover:text-ink"
+          className="rounded-xs p-1 text-faint transition-colors duration-fast hover:text-ink"
           title={view === "spend" ? "Show share of volume" : "Show share of spend"}
           aria-label={view === "spend" ? "Show share of volume" : "Show share of spend"}
         >
@@ -251,7 +251,7 @@ export function ModelMixCard() {
       ) : (
         <>
           {/* One stacked bar, bare. No legend — the series are named in the rows beneath it. */}
-          <div className="flex h-1.5 overflow-hidden rounded-chip bg-hair">
+          <div className="flex h-1.5 overflow-hidden rounded-xs bg-hair">
             {models.map((m) => {
               const value = view === "spend" ? m.usd : m.tokens;
               return (

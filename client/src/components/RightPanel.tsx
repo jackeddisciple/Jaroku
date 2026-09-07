@@ -91,7 +91,7 @@ function GithubBadge({ badge, syncing }: { badge: string; syncing: boolean }) {
   return (
     <span
       title={`GitHub: ${badge}`}
-      className={`absolute -right-1 -top-1 inline-flex items-center rounded-chip bg-bg px-0.5 leading-none ${tone}`}
+      className={`absolute -right-1 -top-1 inline-flex items-center rounded-xs bg-bg px-0.5 leading-none ${tone}`}
     >
       {/* The circular arrow IS the spinner — it is drawn as three quarters of a turn for exactly
           that reason, and a refresh mark that does not turn while something is refreshing is the

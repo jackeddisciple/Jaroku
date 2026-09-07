@@ -2191,7 +2191,7 @@ export function BuildPane({
           className={
             fullscreen
               ? "flex min-h-0 flex-1 flex-col bg-panel p-4 pb-3"
-              : `rounded-modal border border-edge bg-panel p-4 pb-3 transition-shadow duration-fast
+              : `rounded-lg border border-edge bg-panel p-4 pb-3 transition-shadow duration-fast
                  focus-within:shadow-focusring ${standalone ? "shadow-glow" : "shadow-raised"}`
           }
         >

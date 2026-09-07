@@ -963,6 +963,15 @@ jobs:
           # thread glyphs. The one it exists for most is `CodeViewer`'s syntax theme, which writes
           # its own background into the markup and which no token, class or variable can reach.
           npm run test:colour-system
+          # UI-4.pdf's radius scale, beside the two specifications above it and for the third time
+          # for the same reason: what it asserts is a property of the WHOLE client. A colour that
+          # drifts stays the colour it was and a type size that drifts stays the size it was, but a
+          # RUNG THAT IS RENAMED EMITS NOTHING AT ALL — `rounded-chip` on a scale that no longer has
+          # a `chip` compiles, typechecks, renders and has square corners for ever, and Tailwind
+          # says nothing because a class it cannot match is a class somebody meant for another
+          # stylesheet. Nine rungs replaced four in 42 files here, so the census is over every file
+          # in the client rather than over the ones this pass touched.
+          npm run test:surface-system
           npm run test:reset
           # §9 ASKS FOR THIS SUITE BY NAME: "The Inbox has a test that fails if somebody 'fixes'
           # its badge to count more; write the equivalent here." A badge that counts everything

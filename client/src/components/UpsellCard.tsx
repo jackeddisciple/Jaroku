@@ -78,8 +78,8 @@ export function UpsellCard({ channel, onUpgrade }: { channel: string; onUpgrade?
               again next month, which is the opposite of true. */}
           {refusal.error === "quota_exceeded" && (
             <div className="mt-1.5">
-              <div className="h-1 w-full overflow-hidden rounded-chip bg-chrome">
-                <div className="h-full rounded-chip bg-run" style={{ width: "100%" }} />
+              <div className="h-1 w-full overflow-hidden rounded-xs bg-chrome">
+                <div className="h-full rounded-xs bg-run" style={{ width: "100%" }} />
               </div>
               <p className="mt-1 text-tiny tabular-nums text-muted">
                 {refusal.current} of {refusal.limit} {label(refusal.kind)} used

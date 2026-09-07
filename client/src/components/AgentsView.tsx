@@ -540,9 +540,9 @@ export function AgentsView() {
               <div key={i} className="overflow-hidden rounded-card border border-hair bg-panel">
                 <div className="h-[104px] w-full bg-active" />
                 <div className="space-y-2 p-3">
-                  <div className="h-3 w-1/2 rounded-chip bg-active" />
-                  <div className="h-2.5 w-1/3 rounded-chip bg-active" />
-                  <div className="h-2.5 w-3/4 rounded-chip bg-active" />
+                  <div className="h-3 w-1/2 rounded-xs bg-active" />
+                  <div className="h-2.5 w-1/3 rounded-xs bg-active" />
+                  <div className="h-2.5 w-3/4 rounded-xs bg-active" />
                 </div>
               </div>
             ))}

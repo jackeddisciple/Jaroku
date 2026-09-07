@@ -39,7 +39,7 @@ function ConfirmEnd({
       aria-label={`End ${session.name}'s session`}
       className="fixed inset-0 z-50 flex items-center justify-center bg-ink/35 px-4"
     >
-      <div className="w-full max-w-md rounded-modal border border-edge bg-elevated p-4 shadow-overlay">
+      <div className="w-full max-w-md rounded-lg border border-edge bg-elevated p-4 shadow-overlay">
         <div className={TYPE.sectionLabel}>End session</div>
         {/* §14.2's sentence, close to verbatim, and §17's rule that the consequence is in the BODY
             rather than only in the title. Both halves matter: what it does, and what it does not

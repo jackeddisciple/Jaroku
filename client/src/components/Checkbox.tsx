@@ -50,7 +50,7 @@ export function Checkbox({
       className={`-m-1.5 inline-flex shrink-0 items-center justify-center rounded-control p-1.5 transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring disabled:cursor-not-allowed disabled:opacity-40 ${className}`}
     >
       <span
-        className={`inline-flex h-3 w-3 items-center justify-center rounded-chip border transition-colors duration-fast ${
+        className={`inline-flex h-3 w-3 items-center justify-center rounded-xs border transition-colors duration-fast ${
           on || mixed ? "border-accent bg-accent text-bg" : "border-hair text-transparent"
         }`}
       >
@@ -107,7 +107,7 @@ export function CheckboxField({
     >
       <span
         aria-hidden
-        className={`inline-flex h-3 w-3 shrink-0 items-center justify-center rounded-chip border transition-colors duration-fast ${
+        className={`inline-flex h-3 w-3 shrink-0 items-center justify-center rounded-xs border transition-colors duration-fast ${
           align === "start" ? "mt-0.5" : ""
         } ${checked ? "border-accent bg-accent text-bg" : "border-hair text-transparent"}`}
       >

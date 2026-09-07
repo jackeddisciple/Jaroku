@@ -206,7 +206,7 @@ export function CommandPalette() {
       // the list rendered straight over the app with the conversation legible between its rows.
       // Every class is the same class; the only change is which of the two elements wears it.
       overlayClassName="fixed inset-0 z-50 bg-ink/40"
-      contentClassName="fixed inset-x-0 top-[12vh] z-50 mx-auto w-[min(560px,92vw)] bg-elevated rounded-modal overflow-hidden border border-edge shadow-overlay"
+      contentClassName="fixed inset-x-0 top-[12vh] z-50 mx-auto w-[min(560px,92vw)] bg-elevated rounded-lg overflow-hidden border border-edge shadow-overlay"
     >
       <Command loop>
         <Command.Input

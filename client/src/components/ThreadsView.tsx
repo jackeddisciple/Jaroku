@@ -261,9 +261,9 @@ export function ThreadsView() {
               <div key={i} className="px-5 py-2">
                 <div className="flex items-center gap-2">
                   <span className="h-3 w-3 shrink-0 rounded-full bg-active" />
-                  <span className="h-3 flex-1 rounded-chip bg-active" style={{ maxWidth: `${52 - i * 8}%` }} />
+                  <span className="h-3 flex-1 rounded-xs bg-active" style={{ maxWidth: `${52 - i * 8}%` }} />
                 </div>
-                <div className="mt-1.5 ml-5 h-2.5 w-1/3 rounded-chip bg-active" />
+                <div className="mt-1.5 ml-5 h-2.5 w-1/3 rounded-xs bg-active" />
               </div>
             ))}
           </div>

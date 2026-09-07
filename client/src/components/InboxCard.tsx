@@ -108,8 +108,8 @@ function CountBadge({ count }: { count: number }) {
   if (count < 2) return null;
   return (
     <span
-      className="shrink-0 rounded-chip px-1 py-px text-tiny tabular-nums text-muted"
-      style={{ background: SURFACE.active, borderRadius: RADIUS.chip }}
+      className="shrink-0 rounded-xs px-1 py-px text-tiny tabular-nums text-muted"
+      style={{ background: SURFACE.active, borderRadius: RADIUS.xs }}
       title={`${count} occurrences, collapsed into one item`}
     >
       ×{count}

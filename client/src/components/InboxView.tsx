@@ -149,7 +149,7 @@ function LeftRail({
                 a count of 0 beside a chip is noise, and the chip staying in place is what keeps the
                 keyboard's 1–6 a stable address. */}
             {value[f] > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 rounded-chip bg-bg px-0.5 text-tiny leading-[13px] tabular-nums text-faint">
+              <span className="absolute -right-0.5 -top-0.5 rounded-xs bg-bg px-0.5 text-tiny leading-[13px] tabular-nums text-faint">
                 {value[f]}
               </span>
             )}
@@ -518,7 +518,7 @@ export function InboxView() {
             <div className="flex gap-4">
               {[64, 44, 32].map((h, i) => (
                 <div key={i} className="flex-1 space-y-2">
-                  <div className="h-2.5 w-24 rounded-chip bg-active" />
+                  <div className="h-2.5 w-24 rounded-xs bg-active" />
                   <div className="rounded-card bg-active/60" style={{ height: h }} />
                   <div className="rounded-card bg-active/40" style={{ height: h }} />
                 </div>

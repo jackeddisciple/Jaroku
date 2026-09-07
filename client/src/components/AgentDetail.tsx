@@ -131,9 +131,9 @@ export function AgentDetail() {
     // case where neither ever arrives — a dropped frame on a reconnect.
     return (
       <div className="h-full space-y-3 p-4">
-        <div className="h-4 w-1/3 rounded-chip bg-active" />
-        <div className="h-3 w-1/2 rounded-chip bg-active" />
-        <div className="h-3 w-2/3 rounded-chip bg-active" />
+        <div className="h-4 w-1/3 rounded-xs bg-active" />
+        <div className="h-3 w-1/2 rounded-xs bg-active" />
+        <div className="h-3 w-2/3 rounded-xs bg-active" />
         {!loading && (
           <button
             onClick={() => sendLoadAgentDetail(openAgentId)}

@@ -122,7 +122,7 @@ export function FullscreenComposer({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="relative flex w-full max-w-[880px] flex-col overflow-hidden rounded-modal border
+        className="relative flex w-full max-w-[880px] flex-col overflow-hidden rounded-lg border
           border-edge bg-elevated shadow-floating animate-slide-in motion-reduce:animate-none"
         style={{ height: "70vh" }}
       >
