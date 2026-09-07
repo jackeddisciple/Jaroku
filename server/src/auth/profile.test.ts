@@ -59,6 +59,7 @@ const authConfig = {
   issuer: LOCAL_ISSUER,
   audience: DEFAULT_AUDIENCE,
   jwksUrl: `http://127.0.0.1:${jwksPort}/`,
+  devLogin: true,
 } as const;
 const verifier = new TokenVerifier(authConfig);
 

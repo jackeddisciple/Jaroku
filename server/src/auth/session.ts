@@ -254,8 +254,19 @@ export function sessionRoutes(deps: SessionDeps): { path: string; method: "GET" 
   routes.push({ path: "/v1/workspaces", method: "POST", handler: createWorkspaceHandler(deps) });
   routes.push({ path: "/v1/workspaces/rename", method: "POST", handler: renameWorkspaceHandler(deps) });
   if (deps.localIssuer) {
+    // THE KEYS ARE PUBLIC AND ALWAYS MOUNTED where this server signs. They are how a token gets
+    // VERIFIED — by this process's own verifier over loopback, and by anything else that needs to
+    // check a signature we produced — so withholding them would break the very path that makes a
+    // first-party issuer real rather than a bypass. A public key is meant to be public.
     routes.push({ path: "/v1/auth/jwks.json", method: "GET", handler: jwksHandler(deps.localIssuer) });
-    routes.push({ path: "/v1/auth/dev-login", method: "POST", handler: devLoginHandler(deps) });
+    // THE PASSWORDLESS ROUTE IS A SEPARATE DECISION, and gating it on `localIssuer` was the bug.
+    // Signing a session for an identity the server has PROVEN — a verified Google ID token, a link
+    // delivered to a mailbox somebody controls — is production behaviour. Handing a token to
+    // whatever address was typed into a box is not, and only the second belongs behind the
+    // environment. See auth/config.ts: `devLogin` is now its own field for exactly this.
+    if (deps.config.devLogin) {
+      routes.push({ path: "/v1/auth/dev-login", method: "POST", handler: devLoginHandler(deps) });
+    }
   }
   return routes;
 }
@@ -553,9 +564,12 @@ function methodsHandler(deps: SessionDeps): Handler {
       // Present when there is somewhere to send mail from AND an issuer that can mint the session
       // at the end of it. Both, because either alone is a flow that stops halfway.
       magicLink: (deps.methods?.magicLink() ?? false) && Boolean(deps.localIssuer),
-      // The development sign-in. False in every packaged and hosted configuration that has a real
-      // provider; true on a desktop install, where the local issuer IS the session issuer.
-      localIssuer: Boolean(deps.localIssuer),
+      // WHETHER THE DEVELOPMENT SIGN-IN EXISTS, which is what the client renders this as — and it
+      // is `devLogin` rather than "is there a local issuer", because those stopped being the same
+      // question. A first-party issuer in production SIGNS sessions and mounts no passwordless
+      // route; reporting true there would draw an email-and-no-password form in front of somebody
+      // whose submit button 404s.
+      localIssuer: deps.config.devLogin,
     },
   });
 }

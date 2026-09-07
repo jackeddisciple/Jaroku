@@ -28,6 +28,23 @@ export const AUTH_ENV = {
   jwksUrl: "JAROKU_AUTH_JWKS_URL",
   devAuth: "JAROKU_DEV_AUTH",
   devKeyPath: "JAROKU_DEV_AUTH_KEY",
+  /**
+   * Opt in to being a real first-party issuer in production.
+   *
+   * WHY THIS EXISTS AT ALL. Everything below `mode: "local"` is a genuine OIDC issuer — RS256, a
+   * published JWKS, tokens that go through the same verifier and the same `iss`/`aud`/`exp` checks
+   * a provider's do. What made it development-only was never the signing; it was the PASSWORDLESS
+   * ROUTE mounted beside it, `POST /v1/auth/dev-login`, which hands out a token for any address
+   * anybody types. Those are two different things and were one flag.
+   *
+   * AND SEPARATING THEM IS WHAT MAKES GOOGLE AND MAGIC LINK POSSIBLE IN PRODUCTION AT ALL. Both
+   * flows end by minting a session for an identity this server has just proven — a verified Google
+   * ID token, or a single-use link delivered to an address somebody controls. There is nothing
+   * developmental about that, and yet neither could run under NODE_ENV=production, because the only
+   * thing able to mint the token refused to exist there. A deployment pointed at Clerk or Auth0
+   * signs people in through Clerk or Auth0; a deployment that IS the identity provider needs this.
+   */
+  selfIssuer: "JAROKU_AUTH_SELF_ISSUER",
 } as const;
 
 export const DEFAULT_AUDIENCE = "jaroku";
@@ -40,6 +57,16 @@ export interface AuthConfig {
   issuer: string;
   audience: string;
   jwksUrl: string;
+  /**
+   * Whether `POST /v1/auth/dev-login` is mounted — the passwordless route, not the signing.
+   *
+   * A FIELD RATHER THAN `mode === "local"`, which is what it used to be inferred from and is the
+   * conflation this exists to end. Minting a token for an identity the server has PROVEN — a
+   * verified Google ID token, a link delivered to a real mailbox — is production behaviour.
+   * Minting one for whatever address somebody typed is not, and only the second should ever have
+   * been gated on the environment.
+   */
+  devLogin: boolean;
 }
 
 export class AuthConfigError extends Error {}
@@ -69,16 +96,42 @@ export function resolveAuthConfig(
     }
     const jwksUrl = (env[AUTH_ENV.jwksUrl] ?? "").trim() || defaultJwksUrl(issuer);
     log(`[auth] verifying tokens from ${issuer} for audience "${audience}" (keys: ${jwksUrl})`);
-    return { mode: "provider", issuer, audience, jwksUrl };
+    // A configured provider never gets the passwordless route, in any environment. Somebody who
+    // has pointed this at Clerk has said who signs people in, and it is not this process.
+    return { mode: "provider", issuer, audience, jwksUrl, devLogin: false };
   }
 
-  // No issuer configured. In production that is not a mode, it is a missing decision — a
-  // server that quietly authenticates against itself is one that authenticates nobody.
+  // No issuer configured. Two very different things can mean that, and the difference is whether
+  // somebody said out loud that THIS server is the identity provider.
+  const self = truthy(env[AUTH_ENV.selfIssuer]);
+
+  if (production && self) {
+    // JAROKU IS THE IDENTITY PROVIDER. Real tokens, real JWKS, verified through the same path — and
+    // no passwordless route, which is the whole of what made this development-only. What proves an
+    // identity here is Google's ID token or a link delivered to a real mailbox, and both of those
+    // are checked before anything is minted.
+    log(
+      `[auth] FIRST-PARTY ISSUER (${LOCAL_ISSUER}) for audience "${audience}". This server signs ` +
+        `its own sessions; Google and magic link are what prove an identity, and ${AUTH_ENV.devAuth}-` +
+        `style passwordless sign-in is NOT mounted.`,
+    );
+    return {
+      mode: "local",
+      issuer: LOCAL_ISSUER,
+      audience,
+      jwksUrl: `http://127.0.0.1:${port}/v1/auth/jwks.json`,
+      devLogin: false,
+    };
+  }
+
+  // In production, without that opt-in, this is a missing decision rather than a mode — a server
+  // that quietly authenticates against itself is one that authenticates nobody.
   if (production) {
     throw new AuthConfigError(
-      `${AUTH_ENV.issuer} is not set. The local issuer is a development facility and refuses ` +
-        `to run under NODE_ENV=production — set ${AUTH_ENV.issuer}, ${AUTH_ENV.audience} and ` +
-        `${AUTH_ENV.jwksUrl} to your auth provider.`,
+      `${AUTH_ENV.issuer} is not set. The local issuer's PASSWORDLESS sign-in refuses to run ` +
+        `under NODE_ENV=production — either set ${AUTH_ENV.issuer}, ${AUTH_ENV.audience} and ` +
+        `${AUTH_ENV.jwksUrl} to your auth provider, or set ${AUTH_ENV.selfIssuer}=1 to have Jaroku ` +
+        `issue its own sessions from Google and magic link (which mounts no passwordless route).`,
     );
   }
 
@@ -92,7 +145,21 @@ export function resolveAuthConfig(
     issuer: LOCAL_ISSUER,
     audience,
     jwksUrl: `http://127.0.0.1:${port}/v1/auth/jwks.json`,
+    // The development facility, and the only configuration that has it.
+    devLogin: true,
   };
+}
+
+/**
+ * What counts as switching something on.
+ *
+ * `"0"` AND `"false"` ARE OFF, which a bare truthiness check gets wrong in the one direction that
+ * matters here: `JAROKU_AUTH_SELF_ISSUER=0` is somebody turning this off, and a check that read it
+ * as a non-empty string would turn it on and mount a production issuer they had just declined.
+ */
+function truthy(value: string | undefined): boolean {
+  const v = (value ?? "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
 }
 
 /** The OIDC convention, and what every provider in the D3 list actually serves. */

@@ -53,7 +53,7 @@ await new Promise<void>((r) => jwksHttp.listen(0, "127.0.0.1", r));
 const jwksUrl = `http://127.0.0.1:${(jwksHttp.address() as AddressInfo).port}/jwks.json`;
 
 async function serve(db: Db, mode: AuthConfig["mode"]): Promise<{ base: string; close: () => Promise<void> }> {
-  const config: AuthConfig = { mode, issuer: LOCAL_ISSUER, audience: DEFAULT_AUDIENCE, jwksUrl };
+  const config: AuthConfig = { mode, issuer: LOCAL_ISSUER, audience: DEFAULT_AUDIENCE, jwksUrl, devLogin: mode === "local" };
   const router = new Router({ log: () => {} });
   for (const route of sessionRoutes({
     config,

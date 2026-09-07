@@ -2922,6 +2922,27 @@ const signInStore = new DbSignInStore(db);
 const emailConfig = emailConfigFrom();
 const authOrigin = (process.env[GOOGLE_ENV.authOrigin] ?? "").trim().replace(/\/+$/, "");
 const magicLinkReady = Boolean(emailConfig && authOrigin);
+
+// A SERVER NOBODY CAN SIGN INTO IS A CONFIGURATION ERROR, AND IT IS SILENT WITHOUT THIS. Under
+// `JAROKU_AUTH_SELF_ISSUER` this process is the identity provider, which means the only two ways in
+// are Google and magic link — and it mounts no passwordless route, deliberately. With neither
+// configured, everything starts, `/v1/auth/methods` answers false to all three, and the sign-in
+// screen renders a heading with nothing under it. Refusing at boot puts that in the deploy log
+// instead of in front of the first person who tries to sign in.
+//
+// Only under the self-issuer, because it is the only configuration where this server owes somebody
+// a way in: a provider deployment signs people in through the provider, and a development one has
+// the passwordless route.
+if (authConfig.mode === "local" && !authConfig.devLogin && !googleConfigFrom() && !magicLinkReady) {
+  throw new Error(
+    `${AUTH_ENV.selfIssuer} is set, so this server issues its own sessions and mounts no ` +
+      `passwordless sign-in — but neither Google nor magic link is configured, which leaves no way ` +
+      `for anybody to sign in. Set ${GOOGLE_ENV.clientId}/${GOOGLE_ENV.clientSecret}/` +
+      `${GOOGLE_ENV.authOrigin}, or ${EMAIL_ENV.provider}/${EMAIL_ENV.apiKey}/${EMAIL_ENV.from} ` +
+      `alongside ${GOOGLE_ENV.authOrigin}, or both.`,
+  );
+}
+
 for (const route of sessionRoutes({
   config: authConfig,
   verifier: tokenVerifier,

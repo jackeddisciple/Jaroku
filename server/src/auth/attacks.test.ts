@@ -441,7 +441,7 @@ async function buildStack(db: Db, keyDir: string): Promise<Stack> {
   await new Promise<void>((r) => jwksHttp.listen(0, "127.0.0.1", r));
   const jwksUrl = `http://127.0.0.1:${(jwksHttp.address() as AddressInfo).port}/jwks.json`;
 
-  const config: AuthConfig = { mode: "local", issuer: LOCAL_ISSUER, audience: DEFAULT_AUDIENCE, jwksUrl };
+  const config: AuthConfig = { mode: "local", issuer: LOCAL_ISSUER, audience: DEFAULT_AUDIENCE, jwksUrl, devLogin: true };
   const identity = new IdentityRepository(db);
   const tickets = new DbTicketStore(db);
   const resolver = new ContextResolver({ identity, log: () => {} });

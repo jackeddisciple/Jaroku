@@ -76,7 +76,7 @@ const jwksHttp: Server = createServer((_req, res) => {
 });
 await new Promise<void>((r) => jwksHttp.listen(0, "127.0.0.1", r));
 const jwksUrl = `http://127.0.0.1:${(jwksHttp.address() as AddressInfo).port}/jwks.json`;
-const config: AuthConfig = { mode: "local", issuer: LOCAL_ISSUER, audience: DEFAULT_AUDIENCE, jwksUrl };
+const config: AuthConfig = { mode: "local", issuer: LOCAL_ISSUER, audience: DEFAULT_AUDIENCE, jwksUrl, devLogin: true };
 const verifier = new TokenVerifier(config, new JwksClient({ url: jwksUrl }));
 
 const router = new Router({ log: () => {}, cors: resolveOriginPolicy({}, () => {}) });

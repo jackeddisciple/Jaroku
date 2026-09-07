@@ -92,7 +92,7 @@ function mint(opts: MintOpts = {}): string {
   return `${signing}.${sig.toString("base64url")}`;
 }
 
-const config = { mode: "provider" as const, issuer: ISSUER, audience: AUDIENCE, jwksUrl };
+const config = { mode: "provider" as const, issuer: ISSUER, audience: AUDIENCE, jwksUrl, devLogin: false };
 const verifier = new TokenVerifier(config, new JwksClient({ url: jwksUrl }));
 
 const refuses = async (token: string, msg: string, kind: AuthError["kind"] = "unauthenticated"): Promise<void> => {
@@ -226,7 +226,7 @@ console.log("\nthe local issuer verifies through the same path");
   await new Promise<void>((r) => jwksHttp.listen(0, "127.0.0.1", r));
   const localUrl = `http://127.0.0.1:${(jwksHttp.address() as AddressInfo).port}/jwks.json`;
   const localVerifier = new TokenVerifier(
-    { mode: "local", issuer: LOCAL_ISSUER, audience: DEFAULT_AUDIENCE, jwksUrl: localUrl },
+    { mode: "local", issuer: LOCAL_ISSUER, audience: DEFAULT_AUDIENCE, jwksUrl: localUrl, devLogin: true },
     new JwksClient({ url: localUrl }),
   );
 
@@ -279,6 +279,43 @@ console.log("\nconfiguration");
     refused = e instanceof AuthConfigError;
   }
   check(refused, "the local issuer REFUSES to run under NODE_ENV=production");
+  check(local.devLogin, "...because in development it mounts a passwordless sign-in");
+  check(!provider.devLogin, "a configured provider never mounts one, in any environment");
+
+  // THE SEPARATION THIS EXISTS FOR. Signing a session for an identity the server has PROVEN — a
+  // verified Google ID token, a link delivered to a real mailbox — is production behaviour, and it
+  // used to be impossible because the only thing able to mint a token refused to exist there. What
+  // must not come with it is the route that hands a token to whatever address somebody typed.
+  const self = resolveAuthConfig(4317, { NODE_ENV: "production", JAROKU_AUTH_SELF_ISSUER: "1" }, quiet);
+  check(self.mode === "local" && self.issuer === LOCAL_ISSUER, "the first-party issuer runs in production when asked");
+  check(!self.devLogin, "...and does NOT mount the passwordless route, which is the whole point");
+  check(self.jwksUrl.includes("4317"), "...still publishing its own keys, so verification is the same path");
+
+  // A provider still wins if both are set: somebody who named Clerk has said who signs people in.
+  const both = resolveAuthConfig(
+    4317,
+    { NODE_ENV: "production", JAROKU_AUTH_SELF_ISSUER: "1", JAROKU_AUTH_ISSUER: "https://x.clerk.accounts.dev" },
+    quiet,
+  );
+  check(both.mode === "provider", "a named provider outranks the self-issuer flag");
+
+  // OFF HAS TO MEAN OFF. A bare truthiness check reads "0" as a non-empty string and would mount a
+  // production issuer somebody had just declined — which is the one direction this must not fail in.
+  for (const off of ["0", "false", "no", "", "  "]) {
+    let stillRefused = false;
+    try {
+      resolveAuthConfig(4317, { NODE_ENV: "production", JAROKU_AUTH_SELF_ISSUER: off }, quiet);
+    } catch (e) {
+      stillRefused = e instanceof AuthConfigError;
+    }
+    check(stillRefused, `${JSON.stringify(off)} does not turn the self-issuer on`);
+  }
+  for (const on of ["1", "true", "TRUE", "yes", "on", " 1 "]) {
+    check(
+      resolveAuthConfig(4317, { NODE_ENV: "production", JAROKU_AUTH_SELF_ISSUER: on }, quiet).mode === "local",
+      `${JSON.stringify(on)} turns it on`,
+    );
+  }
 
   let httpRefused = false;
   try {
