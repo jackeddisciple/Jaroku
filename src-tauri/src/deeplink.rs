@@ -57,6 +57,33 @@ pub fn init(app: &AppHandle) {
         logs::say(format!("could not register the jaroku:// scheme: {err}"));
     }
 
+    // AND ON macOS, SAY SO WHEN IT CANNOT POSSIBLY WORK — which is every `tauri dev` run, because
+    // `cargo run` produces a bare executable and the scheme lives in a BUNDLE's Info.plist. There is
+    // nothing to fix here and nothing to register; what was missing was anybody being told.
+    //
+    // IT COST A REAL DEBUGGING SESSION. Google sign-in completed, the callback minted a ticket, the
+    // browser showed "You're signed in", and the application sat on "Waiting for your browser…"
+    // forever. Every part of that was working. macOS simply answered
+    // `kLSApplicationNotFoundErr: no application claims the file` for `jaroku://`, silently, because
+    // nothing had claimed it — and the only place that fact was written down was a comment in this
+    // file about the packaged build.
+    #[cfg(target_os = "macos")]
+    {
+        let bundled = std::env::current_exe()
+            .map(|p| p.to_string_lossy().contains(".app/Contents/MacOS/"))
+            .unwrap_or(false);
+        if !bundled {
+            logs::say(
+                concat!(
+                    "this build is not in a .app bundle, so macOS has nothing to claim jaroku:// ",
+                    "with — deep links will NOT open this window. Sign-in still completes in the ",
+                    "browser; the hand-off back is what cannot happen. Use `npm run tauri:build` ",
+                    "to exercise it.",
+                ),
+            );
+        }
+    }
+
     let handle = app.clone();
     app.deep_link().on_open_url(move |event| {
         for url in event.urls() {

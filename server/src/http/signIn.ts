@@ -37,7 +37,7 @@ import {
 } from "../auth/googleSignIn.ts";
 import { looksLikeSecret, type SignInProvider, type SignInStore } from "../auth/signIn.ts";
 import type { JwksClient } from "../auth/jwks.ts";
-import { authPage } from "./authPages.ts";
+import { AUTH_PAGE_SECURITY_HEADERS, authPage } from "./authPages.ts";
 
 /** The route this server's own client asks to begin a flow. Under `/v1`, unlike the callback. */
 export const GOOGLE_START_PATH = "/v1/auth/oauth/google/start";
@@ -249,6 +249,11 @@ function page(html: string, status = 200): { status: number; headers: Record<str
       // NEVER CACHED. Every one of these pages is about one sign-in attempt, and a cached success
       // page carrying a spent ticket in its markup is a page a browser would happily re-show.
       "cache-control": "no-store",
+      // AND THE POLICY THAT LETS THE PAGE HAVE ITS OWN STYLESHEET. The router's default is
+      // `default-src 'none'` with no `style-src`, which is right for data and silently strips a
+      // DOCUMENT: the markup arrives, every rule is dropped, and a real sign-in ends on Times New
+      // Roman. See authPages.ts — this names the style by hash rather than opening 'unsafe-inline'.
+      ...AUTH_PAGE_SECURITY_HEADERS,
     },
     // A Buffer, because the router serialises anything else as JSON — see `HttpResponse`. The
     // content-type above is what makes it a page rather than a download.
@@ -280,8 +285,11 @@ const successPage = (deepLink: string): string =>
   authPage({
     title: "Signed in",
     heading: "You're signed in",
-    body: "Jaroku should be opening now. You can close this tab.",
-    footer: { text: "Nothing happened?", linkText: "Open Jaroku", href: deepLink },
+    body: "Jaroku is opening. You can close this tab.",
+    // THE SENTENCE UNDER THE BUTTON RATHER THAN IN FRONT OF IT. "Nothing happened?" introduced a
+    // link; this introduces nothing, because the control above it is already the obvious thing to
+    // press — it says when to press it, which is the part somebody actually needs.
+    footer: { text: "If it did not open automatically.", linkText: "Open Jaroku", href: deepLink },
     redirect: deepLink,
   });
 

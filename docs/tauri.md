@@ -178,6 +178,31 @@ runs is `server/src/index.ts` on disk, generated agents land in the `runtime/age
 open, the database is `server/jaroku.db` with everything already in it, and your own `uv` is used
 rather than a bundled one. Nothing is extracted and nothing is copied. Only `JAROKU_PORT` is set.
 
+### Deep links do not work under `tauri dev` on macOS
+
+`jaroku://` is how a browser hands a finished sign-in back to the application, and on macOS a URL
+scheme is claimed by an **app bundle's `Info.plist`** — Tauri writes `CFBundleURLTypes` from
+`plugins.deep-link.desktop.schemes` at build time. `tauri dev` runs `cargo run`, which produces a
+bare executable at `src-tauri/target/debug/jaroku` and no bundle, so nothing claims the scheme:
+
+```
+$ open "jaroku://auth/complete?ticket=probe"
+No application knows how to open URL jaroku://auth/complete?ticket=probe
+(kLSApplicationNotFoundErr: E.g. no application claims the file)
+```
+
+Windows and Linux register the scheme at runtime against the executable's current path, which is
+why `deeplink.rs` calls `register_all()` there and not here. macOS has no equivalent.
+
+**What this looks like when you hit it, because it looks like a bug in something else.** Google
+sign-in completes, the callback mints a ticket, the browser shows "You're signed in" — and the
+application sits on "Waiting for your browser…". Every part of that is working. The shell now says
+so at startup when it is running unbundled, and the sign-in screen stops waiting after ninety
+seconds and points at the tab's own "Open Jaroku" button rather than animating forever.
+
+To exercise the hand-off for real, build the bundle: `npm run tauri:build`, then run the `.app` from
+`src-tauri/target/release/bundle/`.
+
 ### Packaged
 
 ```bash

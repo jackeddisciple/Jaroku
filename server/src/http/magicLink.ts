@@ -298,7 +298,12 @@ function webhookHandler(deps: MagicLinkDeps): Handler {
 function htmlPage(html: string, status = 200): { status: number; headers: Record<string, string>; body: Buffer } {
   return {
     status,
-    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+      // See signIn.ts's copy of this line, and authPages.ts for why it is a hash.
+      ...AUTH_PAGE_SECURITY_HEADERS,
+    },
     body: Buffer.from(html, "utf8"),
   };
 }
@@ -311,14 +316,17 @@ function htmlPage(html: string, status = 200): { status: number; headers: Record
  * product. The functions are exported from there because that is where the OAuth callback needed
  * them first; this is the second caller, which is the moment the sharing became worth arranging.
  */
-import { authPage } from "./authPages.ts";
+import { AUTH_PAGE_SECURITY_HEADERS, authPage } from "./authPages.ts";
 
 const successPage = (deepLink: string): string =>
   authPage({
     title: "Signed in",
     heading: "You're signed in",
-    body: "Jaroku should be opening now. You can close this tab.",
-    footer: { text: "Nothing happened?", linkText: "Open Jaroku", href: deepLink },
+    body: "Jaroku is opening. You can close this tab.",
+    // THE SENTENCE UNDER THE BUTTON RATHER THAN IN FRONT OF IT. "Nothing happened?" introduced a
+    // link; this introduces nothing, because the control above it is already the obvious thing to
+    // press — it says when to press it, which is the part somebody actually needs.
+    footer: { text: "If it did not open automatically.", linkText: "Open Jaroku", href: deepLink },
     redirect: deepLink,
   });
 

@@ -71,6 +71,8 @@ export function SignInScreen({
   const message = useSessionStore((s) => s.message);
   const [methods, setMethods] = useState<SignInMethods | null>(null);
   const [email, setEmail] = useState("");
+  // Whether the browser has had long enough. See the effect below.
+  const [stalled, setStalled] = useState(false);
   const [busy, setBusy] = useState<"google" | "email" | "dev" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [devName, setDevName] = useState("");
@@ -114,17 +116,40 @@ export function SignInScreen({
   const google = async (): Promise<void> => {
     if (busy) return;
     setBusy("google");
+    setStalled(false);
     setError(null);
     try {
       await startGoogleSignIn();
       // BUSY STAYS SET. The browser is open and the next thing that happens is a deep link waking
       // this window — there is nothing here to un-busy, and a button that came back to life would
       // invite a second flow whose state token invalidates the first one's.
+      //
+      // BUT NOT FOREVER, which is what it used to mean. When the deep link does not arrive this
+      // screen said "Waiting for your browser…" until the application was quit: no timeout, no
+      // message, no way to try anything else. And it does not arrive for reasons that have nothing
+      // to do with the person — the `jaroku://` scheme belongs to whichever application registered
+      // it, a webview run outside a bundle registers none at all, and a browser may simply refuse
+      // to hand a custom scheme to a background app. The sign-in itself SUCCEEDED in every one of
+      // those cases; only the handoff did not.
     } catch (err) {
       setError(err instanceof SignInFailure ? err.message : String(err));
       setBusy(null);
     }
   };
+
+  // HOW LONG "WAITING" IS ALLOWED TO MEAN WAITING.
+  //
+  // NINETY SECONDS, which is generous on purpose: choosing between Google accounts, a password
+  // manager and a second factor is a real minute of somebody's life, and a screen that gave up
+  // while they were still typing would be worse than one that waited. Past that, the browser has
+  // either come back or it is not going to, and the honest thing is to say so rather than to keep
+  // animating. The OAuth state is only good for ten minutes anyway — see signIn.ts — so waiting
+  // beyond it is waiting for something that has already expired.
+  useEffect(() => {
+    if (busy !== "google") return;
+    const timer = setTimeout(() => setStalled(true), 90_000);
+    return () => clearTimeout(timer);
+  }, [busy]);
 
   const submitEmail = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
@@ -214,9 +239,30 @@ export function SignInScreen({
         <Reveal>
           <div className="flex flex-col gap-4">
             {methods.google && (
-              <SecondaryButton onClick={() => void google()} disabled={busy !== null} icon={<GoogleMark />}>
-                {busy === "google" ? "Waiting for your browser…" : "Continue with Google"}
-              </SecondaryButton>
+              <>
+                <SecondaryButton
+                  onClick={() => void google()}
+                  // ENABLED AGAIN ONCE IT HAS STALLED, which is the whole recovery. Disabled while
+                  // the browser might still be coming back, because a second flow invalidates the
+                  // first one's state token; pressable again once it plainly is not.
+                  disabled={busy !== null && !stalled}
+                  icon={<GoogleMark />}
+                >
+                  {busy === "google" && !stalled ? "Waiting for your browser…" : "Continue with Google"}
+                </SecondaryButton>
+
+                {/* SAID ONLY WHEN IT IS TRUE, and it says what actually happened rather than
+                    "something went wrong": the sign-in itself very likely SUCCEEDED and only the
+                    hand-off back to this window did not, so the useful instruction is about the
+                    browser tab rather than about trying again from scratch. Without this the screen
+                    animated the word "Waiting" until somebody quit the application. */}
+                {busy === "google" && stalled && (
+                  <p className="text-caption leading-[1.6] text-muted">
+                    Your browser has not come back. If you finished signing in there, the tab has a
+                    link that opens Jaroku — use it, or press Continue with Google to start again.
+                  </p>
+                )}
+              </>
             )}
 
             {methods.google && methods.magicLink && <OrDivider />}
