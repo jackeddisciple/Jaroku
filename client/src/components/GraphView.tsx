@@ -257,8 +257,18 @@ function FlowNode({ data }: NodeProps) {
           >
             <Icon size={NODE_ICON.agent} />
           </span>
+          {/* THE TITLE CARRIED `font-semibold` AND THE RUNG ALREADY CARRIES A WEIGHT. `text-label`
+              is 13px at 500, so the class beside it was a second opinion about a decision the
+              ladder made — and the two drift the day the rung moves. UI-4 §02 rules on it directly:
+              "use size and weight first; do not make everything bold", and §12 again as "if
+              everything is bold, coloured, bordered or elevated, remove emphasis". It was the only
+              600 override left in the client.
+
+              WHICH LOSES NO HIERARCHY, because the pair below it is where the hierarchy was: a
+              13px/500 name over an 11px/400 subtitle at §02's secondary ink is two levels apart on
+              three axes at once. */}
           <span className="flex flex-col min-w-0 leading-tight gap-1">
-            <Truncate className="text-label font-semibold text-ink">{d.title}</Truncate>
+            <Truncate className="text-label text-ink">{d.title}</Truncate>
             <Truncate className="text-tiny text-muted">{d.subtitle}</Truncate>
           </span>
         </div>

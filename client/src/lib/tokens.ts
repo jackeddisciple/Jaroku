@@ -361,6 +361,34 @@ export const BRAND = {
 // These are class strings rather than values because every consumer is a `className` — the same
 // reason SPACE_CLASS below is.
 
+/**
+ * UI-4 §02's four levels of attention, as the class each one is spent as.
+ *
+ * `TYPE` below says which RUNG a given component climbs — a panel's name, a row's title. This says
+ * which LEVEL of attention a piece of information is entitled to, which is the question §02 asks
+ * and the one the type ladder cannot answer on its own: a timestamp and an agent name can sit on
+ * the same rung and must not read the same way.
+ *
+ * THE THREE INKS ARE §05'S AND UI-4 NAMES THEM ITSELF — "primary #1D1D1B, secondary #62625F, muted
+ * #90908C" — which is why this is a mapping rather than a decision. The two specifications were
+ * written apart and agree exactly, so a level is spendable without anybody inventing a fourth grey.
+ *
+ * SEMANTIC HAS NO ENTRY, DELIBERATELY. It is not a fourth degree of the same quantity; it is a
+ * different question — does this MEAN something — and `STATUS` above is where it is answered. A
+ * class here would be a fourth level of emphasis somebody could reach for when they wanted a
+ * slightly louder tertiary, which is precisely how a status colour stops reading as a status.
+ */
+export const ATTENTION = {
+  /** Page title, agent name, active task, the primary action. The first read. */
+  primary: "text-ink",
+  /** Descriptions, section headings, key metadata. The second read. */
+  secondary: "text-muted",
+  /** Timestamps, IDs, counts, supporting metadata. Background information. */
+  tertiary: "text-faint",
+} as const;
+
+export type AttentionName = keyof typeof ATTENTION;
+
 export const TYPE = {
   /**
    * A panel's own name: "Trace", "Step Details", "Runs", "Code". Uppercase and tracked, because

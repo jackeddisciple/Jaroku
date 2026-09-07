@@ -23,8 +23,9 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { COMPONENT, ELEVATION_SPEC, RADIUS_SCALE, RADIUS_TOKENS, SHADOW_RULES, SHAPE } from "./surfaces.ts";
-import { ELEVATION, GLOW, RADIUS } from "./tokens.ts";
+import { COMPONENT, ELEVATION_SPEC, RADIUS_SCALE, RADIUS_TOKENS, SHADOW_RULES, SHAPE, SURFACE_HIERARCHY, TIER } from "./surfaces.ts";
+import { ATTENTION, ELEVATION, GLOW, RADIUS } from "./tokens.ts";
+import { CANVAS, SIDEBAR, TEXT as INK, channels } from "./palette.ts";
 
 let failures = 0;
 const check = (name: string, ok: boolean, detail = ""): void => {
@@ -139,6 +140,10 @@ console.log("\nevery corner in the client is on the scale");
   );
   check("no inline radius is a hand-written number", literals.length === 0, literals.join("; "));
 }
+
+/** The root element of a component — its outermost `className`, and nothing inside it. */
+const src2 = (path: string): string =>
+  (CODE.find((f) => f.path === path)?.text ?? "").match(/return \(\s*<div className="([^"]*)"/)?.[1] ?? "";
 
 console.log("\n§05's two rules that are not a number");
 {
@@ -349,6 +354,105 @@ console.log("\nand the components themselves stand on it");
   check("a thread row draws no corner and no box of its own",
     row !== "" && !/rounded-|(?:^|[^-])\bborder\b/.test(row), row.slice(0, 120));
   check("...and the list is what divides them", /divide-y divide-hair/.test(src("components/ThreadsView.tsx")));
+}
+
+console.log("\n§02's four levels of attention");
+{
+  // §02 names its own contrast values in a sentence rather than a table: "Contrast: primary
+  // #1D1D1B, secondary #62625F, muted #90908C." Which are colour_system.pdf §05's three inks
+  // exactly — two specifications written apart, agreeing to the digit. Asserting it is what stops
+  // one of them being edited into a fourth grey.
+  const SPEC: Record<string, string | null> = {
+    primary: "#1D1D1B",
+    secondary: "#62625F",
+    tertiary: "#90908C",
+    semantic: null,
+  };
+  for (const [level, ink] of Object.entries(SPEC)) {
+    check(`${level} is ${ink ?? "colour only when meaning requires it"}`,
+      (TIER[level as keyof typeof TIER].ink ?? null)?.toLowerCase() === ink?.toLowerCase(),
+      String(TIER[level as keyof typeof TIER].ink));
+  }
+  check("and they are §05's own ink ladder rather than a second one",
+    TIER.primary.ink === INK.primary && TIER.secondary.ink === INK.secondary && TIER.tertiary.ink === INK.muted);
+
+  // The app-side mapping, which is what a call site actually writes.
+  check("the three levels are spent as the three ink classes",
+    ATTENTION.primary === "text-ink" && ATTENTION.secondary === "text-muted" && ATTENTION.tertiary === "text-faint");
+  // AND THERE IS NO FOURTH. `semantic` is a different question rather than a louder tertiary, and a
+  // class for it here is what somebody reaches for when they want a slightly stronger grey.
+  check("semantic has no class of its own", !("semantic" in ATTENTION));
+}
+
+console.log("\n§03: each surface's first read, and what it keeps quiet");
+{
+  // §03's five rows, and the assertion is over the ONE element each names. Its last line is the
+  // reason this is worth a test at all — "if everything is visually emphasized, nothing is
+  // emphasized" — and that failure arrives one defensible shade at a time.
+  const src = (path: string): string => CODE.find((f) => f.path === path)?.text ?? "";
+  check("the table still has all five surfaces", Object.keys(SURFACE_HIERARCHY).length === 5);
+
+  // AGENT LIST: the name is the first read; the slug, the counts and the footer are background.
+  const agentCard = src("components/AgentCard.tsx");
+  check("an agent card's name is the first read on it",
+    /<Truncate className=\{TYPE\.title\} title=\{agent\.name\}>/.test(agentCard));
+  check("...and its slug and footer stay at tertiary",
+    /text-tiny text-faint" title=\{agent\.slug\}/.test(agentCard) && /border-t border-hair pt-2 text-tiny text-faint/.test(agentCard));
+
+  // THREADS: the title is the first read and the metadata row is the second.
+  const threadRow = src("components/ThreadRow.tsx");
+  check("a thread row's title is the first read on it",
+    /text-label \$\{thread\.archived_at \? "text-muted" : "text-ink"\}/.test(threadRow));
+  check("...and its ids and figures stay under it", /text-tiny text-muted/.test(threadRow));
+
+  // SIDEBAR: the current destination, which is the one thing §03 asks the sidebar to say loudest —
+  // and the only surface of the five whose first read is a STATE rather than a piece of content.
+  check("the sidebar's current destination is the first read in it",
+    /active \? "bg-sidebar-active text-accent" : "text-muted/.test(src("components/Sidebar.tsx")));
+
+  // INBOX: the item is the first read, which §4.3 carries as size — see InboxCard's own header for
+  // why depth is no longer one of the axes.
+  check("an inbox card's severity is carried by size and type rather than by depth",
+    /pad: "px-3 py-2\.5"/.test(src("components/InboxCard.tsx")) && !/elevation:/.test(src("components/InboxCard.tsx")));
+
+  // AGENT DETAIL: identity and state first, which is the detail HEADER rather than the pane that
+  // holds it — `AgentDetail` is a panel group and owns no type of its own.
+  const overview = src("components/AgentOverview.tsx");
+  check("an agent detail leads with the character beside the name",
+    /<GlossAvatar/.test(overview) && /<Truncate className=\{TYPE\.title\} title=\{a\.name\}>/.test(overview));
+}
+
+console.log("\n§12: the rules that are checkable across every file");
+{
+  // "Use typography, contrast, spacing and alignment before colour or shadow" and "if everything is
+  // bold, coloured, bordered or elevated, remove emphasis." The type ladder carries a weight on
+  // every rung, so a `font-semibold` beside one is a SECOND OPINION about a decision the rung
+  // already made — and the two drift the day the rung moves. typography.pdf §03 says the same in
+  // its own words: hierarchy should come from size, spacing, contrast and placement "rather than
+  // repeatedly using 600/700".
+  const bold = CODE.flatMap(({ path, text }) =>
+    (text.match(/font-(?:semibold|bold)\b/g) ?? []).map(() => path),
+  );
+  check("nothing overrides the ladder's own weight to reach for bold", bold.length === 0, bold.join(", "));
+
+  // "The sidebar is a cool-grey structural plane, not a floating card." §05 already gave it no
+  // radius; this is the other half of the same sentence.
+  const sidebarRoot = src2("components/Sidebar.tsx");
+  check("the sidebar plane casts no shadow", !/shadow-/.test(sidebarRoot), sidebarRoot || "root not found");
+
+  // "Keep the main workspace lighter and more open than the sidebar." Which is a numeric claim, and
+  // the one rule in §12 that a palette edit could silently reverse.
+  const lightness = (hex: string): number => {
+    const [r, g, b] = channels(hex).split(", ").map(Number) as [number, number, number];
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  check("the main canvas is lighter than the sidebar plane",
+    lightness(CANVAS.canvas) > lightness(SIDEBAR.base),
+    `${lightness(CANVAS.canvas).toFixed(0)} vs ${lightness(SIDEBAR.base).toFixed(0)}`);
+
+  // "Agent cards are E0 by default; use E1 for interaction/hover" and "normal cards should usually
+  // be border-led, not shadow-led" are both asserted in §07's block above, over every file rather
+  // than over the agent card alone — a rule about cards is worth what the number of cards it reads.
 }
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);

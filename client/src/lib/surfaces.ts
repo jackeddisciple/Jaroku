@@ -21,6 +21,8 @@
 // TypeScript, and a stylesheet cannot import anything at all, so the scale genuinely is written
 // three times. The suite is what makes them agree.
 
+import { TEXT as INK } from "./palette.ts";
+
 /**
  * §04. The radius scale — nine rungs, in the specification's own order and under its own names.
  *
@@ -179,4 +181,60 @@ export const COMPONENT = {
   dialog: { radius: RADIUS_SCALE.lg, elevation: "E3" },
   /** The one row given as a range; see `SHAPE.avatarRadius`. */
   agentAvatar: { radius: SHAPE.avatarRadius, elevation: "E0" },
+} as const;
+
+/**
+ * §02. The four levels of attention, which is what the specification means by hierarchy: "the
+ * ordering of attention. Every screen should have an obvious first read, a clear second read and
+ * quiet background information."
+ *
+ * THE CONTRAST VALUES ARE colour_system.pdf §05's THREE INKS, which UI-4 names again in a paragraph
+ * of its own. Which is the useful thing about this table: the two specifications were written apart
+ * and agree to the digit, so a level here is spendable as a colour without anybody deciding a fourth
+ * grey.
+ *
+ * THEY ARE IMPORTED RATHER THAN TRANSCRIBED, because `colourSystem.test.ts` is right that no file
+ * but `palette.ts` may carry a colour of its own — a hex here is a copy, and the copy is what goes
+ * stale. UI-4's own three values are written out in `surfaceSystem.test.ts` instead, which is where
+ * a transcription belongs: a table compared against the module it came from proves nothing, and the
+ * agreement between two specifications is exactly the thing worth asserting.
+ *
+ * SEMANTIC IS NOT A FOURTH STEP OF THE SAME LADDER. The three above it are degrees of the same
+ * quantity — how much attention this is asking for — and this one is a different question
+ * altogether: does this mean something. §07's four colours answer it and nothing else may, which is
+ * the rule colour_system.pdf §09 already states and this table restates in the language of
+ * attention rather than of colour.
+ */
+export const TIER = {
+  /** Page title, agent name, active task, primary action. Strongest size, weight and contrast. */
+  primary: { ink: INK.primary, note: "strongest size/weight/contrast and clearest placement" },
+  /** Descriptions, section headings, key metadata. Moderate weight and contrast. */
+  secondary: { ink: INK.secondary, note: "moderate weight and contrast" },
+  /** Timestamps, IDs, counts, supporting metadata. Muted, compact and restrained. */
+  tertiary: { ink: INK.muted, note: "muted, compact and restrained" },
+  /** Live, warning, error, success, attention. Colour or icon ONLY when meaning requires it. */
+  semantic: { ink: null, note: "colour/icon only when meaning requires it" },
+} as const;
+
+export type TierName = keyof typeof TIER;
+
+/**
+ * §03. Hierarchy rules by surface — the same three levels, answered once per screen.
+ *
+ * THIS IS THE TABLE THAT MAKES §02 ACTIONABLE, and the reason it exists is in §03's own last line:
+ * "if everything is visually emphasized, nothing is emphasized." A level is easy to agree with in
+ * the abstract and impossible to apply without knowing what the FIRST read of a given screen is
+ * meant to be — five surfaces, five answers, and every one of them is a decision somebody could
+ * reasonably make differently, which is exactly why it is written down rather than inferred.
+ *
+ * THE THIRD COLUMN IS THE ONE THAT DECAYS. Nobody adds emphasis to the wrong thing on purpose;
+ * what happens is that a timestamp gets a shade darker because it was hard to read in isolation, and
+ * then a count, and then an ID — each defensible alone, and together the failure §03 names.
+ */
+export const SURFACE_HIERARCHY = {
+  agentList: { primary: "avatar + agent name", secondary: "status, current thread", quiet: "IDs, timestamps, counts" },
+  agentDetail: { primary: "agent identity + state", secondary: "stats, tabs, recent runs", quiet: "version/files metadata" },
+  threads: { primary: "thread title + active state", secondary: "agent context, activity", quiet: "IDs / low-value metadata" },
+  inbox: { primary: "blocking / attention item", secondary: "evidence + resolution action", quiet: "age, counts, secondary metadata" },
+  sidebar: { primary: "current destination", secondary: "recent threads / workspace", quiet: "low-priority account metadata" },
 } as const;
