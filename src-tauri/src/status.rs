@@ -79,6 +79,26 @@ pub fn init(app: &AppHandle, port: u16) {
     })));
 }
 
+/// The status for a shell that supervises nothing.
+///
+/// `Started` IMMEDIATELY, AND THAT IS NOT A LIE. Every other phase describes something this process
+/// is doing to a backend it owns — preparing one, restarting one, failing to start one — and in
+/// remote mode it does none of those. There is nothing to wait for and nothing that can go wrong
+/// here, so leaving the page in `Preparing` would be a spinner with no event coming to clear it.
+///
+/// Whether the remote backend is actually reachable is a question the PAGE answers, and already
+/// does: the socket either opens or it retries, and `lib/socket.ts` has said so since long before
+/// this shell existed. A host that claimed to know would be guessing at a server it never contacts.
+pub fn init_remote(app: &AppHandle, ws_url: &str) {
+    app.manage(Latest(Mutex::new(Status {
+        phase: Phase::Started,
+        ws_url: ws_url.to_string(),
+        message: None,
+        log_path: logs::path().map(|p| p.to_string_lossy().into_owned()),
+    })));
+    logs::say(format!("remote backend: {ws_url} — this shell supervises nothing"));
+}
+
 /// Say what is happening. Recorded first, emitted second, so the log and the page never disagree.
 pub fn announce(app: &AppHandle, phase: Phase, message: Option<String>) {
     let status = Status {

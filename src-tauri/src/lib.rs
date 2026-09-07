@@ -10,6 +10,7 @@
 //
 // THE ORDER IN `setup` IS LOAD-BEARING and each step says why where it happens.
 
+mod backend;
 mod clock;
 mod deeplink;
 mod firstrun;
@@ -124,22 +125,43 @@ pub fn run() {
             // logs.rs.
             logs::init();
 
+            // 0a — WHICH BACKEND THIS WINDOW TALKS TO, before anything that assumes the answer.
+            // Local means the shell supervises one here, which is everything below; remote means it
+            // supervises nothing and the page talks to a Jaroku that is already running. See
+            // backend.rs — the whole difference is which of those two this returns.
+            let backend = backend::resolve(std::env::var(backend::BACKEND_URL_ENV).ok().as_deref());
+
             // 1 — THE PORT, FIRST, because everything after it is told the answer rather than
             // asked to guess. 4317 unless something already holds it; see ports.rs.
-            let port = ports::first_free(ports::DEFAULT_PORT).ok_or_else(|| {
-                format!(
-                    "no free port between {} and {}. Something on this machine is holding the \
-                     whole range, and Jaroku's backend has nowhere to listen.",
-                    ports::DEFAULT_PORT,
-                    ports::DEFAULT_PORT + 32
-                )
-            })?;
+            //
+            // NOT RESOLVED AT ALL IN REMOTE MODE. There is no backend on this machine to give a
+            // port to, and reserving one would be a claim on something another program could
+            // legitimately want — plus the failure of the range being full would refuse a launch
+            // that needs no port whatsoever.
+            let port = if backend.is_remote() {
+                ports::DEFAULT_PORT
+            } else {
+                ports::first_free(ports::DEFAULT_PORT).ok_or_else(|| {
+                    format!(
+                        "no free port between {} and {}. Something on this machine is holding the \
+                         whole range, and Jaroku's backend has nowhere to listen.",
+                        ports::DEFAULT_PORT,
+                        ports::DEFAULT_PORT + 32
+                    )
+                })?
+            };
             app.manage(sidecar::Backend::new(port));
             // 1a — THE STATUS THE PAGE READS, before the window that reads it. Everything below
             // this line can fail, and until it exists a failure has nothing to tell anybody
             // through. See status.rs on why "the socket will not open" was the only thing the
             // page could ever say, in every one of the very different cases.
-            status::init(app.handle(), port);
+            // The page's first answer about the backend. In remote mode there is nothing to
+            // supervise, so it is reported ready immediately rather than left in `Preparing` — a
+            // status that never advances is a spinner nobody can clear.
+            match &backend {
+                backend::Backend::Remote(url) => status::init_remote(app.handle(), url),
+                backend::Backend::Local => status::init(app.handle(), port),
+            }
 
             // 1b — THE MENU BAR, which exists on macOS and nowhere else. Before the window,
             // because on macOS the menu belongs to the APPLICATION rather than to a window and
@@ -154,7 +176,15 @@ pub fn run() {
             // re-extracts, `uv sync` re-syncs — and a page that rendered the setup screen because
             // a step was briefly in flight would show a returning user a first launch for a
             // machine they set up months ago. See firstrun.rs.
-            firstrun::init(app.handle());
+            // NOT IN REMOTE MODE. First-run is about setting up a backend on THIS machine — a
+            // payload to extract, a CPython to unpack, a `uv sync` to run — and a thin client has
+            // none of that to do. Running it would show somebody a four-step setup flow for a
+            // server they are never going to start, and `Progress::required` is decided once from
+            // a marker file, so it would keep showing until the marker was written by work that
+            // never happens.
+            if !backend.is_remote() {
+                firstrun::init(app.handle());
+            }
 
             // 1c — THE `jaroku://` SCHEME, before the window rather than after it. A URL that
             // STARTED this application is delivered during startup, and the queue that catches
@@ -181,7 +211,11 @@ pub fn run() {
             // one of the two for as long as the bundle takes to load. `reveal_eventually` is the
             // guarantee that a bundle which never answers cannot leave the application invisible.
             app.manage(window::AppSize::default());
-            window::open(app.handle(), port)?;
+            let ws_url = match &backend {
+                backend::Backend::Remote(url) => url.clone(),
+                backend::Backend::Local => window::ws_url(port),
+            };
+            window::open(app.handle(), &ws_url)?;
             window::reveal_eventually(app.handle());
             logs::detail("the window is built and has been told the port; it shows on the first stage");
 
@@ -196,7 +230,16 @@ pub fn run() {
             // 3 — EXTRACT, THEN START. Not on the main thread: `payload::ensure` is file I/O
             // measured in a hundred megabytes on the launch after an install or an upgrade, and
             // on every other launch it is one file read and returns immediately.
+            //
+            // THE WHOLE OF IT IS SKIPPED IN REMOTE MODE, which is the point of remote mode. There
+            // is no payload to extract, no CPython to unpack, no `uv sync` to run and no process to
+            // supervise — the backend is somewhere else and was started by somebody else. What is
+            // left is a window pointed at a URL, which is the entire application in that shape.
             let handle = app.handle().clone();
+            if backend.is_remote() {
+                logs::detail("remote backend — nothing to extract, unpack or start");
+                return Ok(());
+            }
             tauri::async_runtime::spawn(async move {
                 // THE STARTUP CLOCK. Every line below carries how long it has been since the
                 // window appeared, which is the number that makes an intermittent hang legible:

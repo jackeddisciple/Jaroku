@@ -50,7 +50,7 @@ const APP_MIN: (f64, f64) = (1024.0, 680.0);
 #[derive(Default)]
 pub struct AppSize(Mutex<Option<LogicalSize<f64>>>);
 
-pub fn open(app: &AppHandle, port: u16) -> Result<(), Box<dyn std::error::Error>> {
+pub fn open(app: &AppHandle, ws_url: &str) -> Result<(), Box<dyn std::error::Error>> {
     WebviewWindowBuilder::new(app, MAIN, WebviewUrl::default())
         .title("Jaroku")
         .inner_size(APP.0, APP.1)
@@ -67,7 +67,7 @@ pub fn open(app: &AppHandle, port: u16) -> Result<(), Box<dyn std::error::Error>
         // after four seconds. A shell whose only path to a visible window runs through the bundle
         // is a shell that has no way to report that the bundle is what failed.
         .visible(false)
-        .initialization_script(&host_config(port))
+        .initialization_script(&host_config(ws_url))
         .build()?;
     Ok(())
 }
@@ -244,8 +244,8 @@ pub fn set_window_title(app: AppHandle, name: Option<String>) {
 /// could break out of. That is belt-and-braces rather than a real risk — the number came from
 /// `TcpListener` — but this string is executed as script in the application's own context, and
 /// "the input is trusted" is the sentence that precedes most injection bugs.
-fn host_config(port: u16) -> String {
-    let url = serde_json::Value::String(ws_url(port));
+fn host_config(ws_url: &str) -> String {
+    let url = serde_json::Value::String(ws_url.to_string());
     format!("window.__JAROKU_CONFIG__ = Object.freeze({{ wsUrl: {url} }});")
 }
 
@@ -266,7 +266,7 @@ mod tests {
     #[test]
     fn the_injected_url_is_a_ws_url_on_the_resolved_port() {
         assert_eq!(
-            host_config(4318),
+            host_config(&ws_url(4318)),
             "window.__JAROKU_CONFIG__ = Object.freeze({ wsUrl: \"ws://localhost:4318\" });"
         );
     }
@@ -275,6 +275,23 @@ mod tests {
     fn the_default_port_is_injected_unchanged_so_a_normal_launch_matches_the_build_time_fallback() {
         // The client's fallback is `ws://localhost:4317`. On the ordinary launch the host says
         // the same thing, which is what makes the override invisible when nothing needed it.
-        assert!(host_config(4317).contains("ws://localhost:4317"));
+        assert!(host_config(&ws_url(4317)).contains("ws://localhost:4317"));
+    }
+
+    #[test]
+    fn a_remote_backend_is_injected_verbatim_so_the_page_talks_to_it_like_a_browser_tab() {
+        // The whole of the thin-client change, from this file's side: the page reads whatever it is
+        // given, `hostConfig.ts` accepts wss://, and `apiBase` derives the HTTP origin from it. So
+        // one injected string moves both surfaces and they cannot drift apart.
+        assert!(host_config("wss://jaroku-api.fly.dev").contains("wss://jaroku-api.fly.dev"));
+    }
+
+    #[test]
+    fn the_injected_value_is_json_encoded_because_it_is_executed_as_script() {
+        // Belt and braces rather than a real risk — the value came from an environment variable
+        // this process read — but this string is evaluated in the application's own context, and
+        // "the input is trusted" is the sentence that precedes most injection bugs.
+        let script = host_config("wss://example.test/\" + alert(1) + \"");
+        assert!(!script.contains("alert(1) + \""), "the quote must not close the literal");
     }
 }

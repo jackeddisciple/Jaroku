@@ -118,6 +118,16 @@ jobs:
           # for which columns are timestamps and the production SQL for what is done to them, so it fails
           # on the laptop where that SQL gets written rather than here.
           npm run test:timestamp-text
+          # AND THE THIRD OF THE SAME SHAPE. A uuid is not a text either, and only Postgres says so:
+          # `spendByThread` joined thread_items.ref_id (TEXT) to work_items.id (uuid), which SQLite
+          # compares happily and Postgres refuses with "operator does not exist: text = uuid". The
+          # cost was not the missing figure — that join is inside threadSnapshot, so the whole
+          # snapshot threw and the Threads list stopped refreshing on every hosted deployment while
+          # working on every laptop. Found by reading a deployed log, which is the most expensive
+          # place to find anything. Reads the schema for which columns are uuid and the production
+          # SQL for what is compared to them, and re-runs its own detection over the original
+          # statement so a linter that quietly stopped matching cannot report success.
+          npm run test:uuid-text
 
       - name: storage, secrets and checkpoints
         working-directory: server

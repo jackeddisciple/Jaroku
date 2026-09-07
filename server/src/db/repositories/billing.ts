@@ -569,7 +569,18 @@ export class BillingRepository {
          FROM usage_events u
          JOIN work_items w ON w.workspace_id = u.workspace_id AND w.run_id = u.run_id
          JOIN thread_items ti ON ti.workspace_id = u.workspace_id
-                             AND ti.kind = 'work' AND ti.ref_id = w.id
+                             -- CAST BECAUSE THE TWO COLUMNS ARE NOT THE SAME TYPE. thread_items.ref_id
+                             -- is TEXT -- it points at whatever the row's kind column says, a run id or
+                             -- a work item id -- while work_items.id is a uuid. SQLite compares them
+                             -- happily and Postgres refuses outright: operator does not exist: text =
+                             -- uuid. The symptom was not a missing cost column but the WHOLE thread
+                             -- snapshot throwing, so the Threads list stopped refreshing on every hosted
+                             -- deployment while working perfectly on every laptop.
+                             --
+                             -- CAST(... AS TEXT) rather than ::text because both dialects run this
+                             -- string, and the Postgres-only spelling is the one that would move the
+                             -- failure to SQLite instead of removing it.
+                             AND ti.kind = 'work' AND ti.ref_id = CAST(w.id AS TEXT)
         WHERE u.workspace_id = ? AND u.run_id IS NOT NULL
         GROUP BY ti.thread_id`,
       [ctx.workspaceId],
