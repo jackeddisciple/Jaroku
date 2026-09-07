@@ -2690,10 +2690,11 @@ const router = new Router({
   beforeHandle: async (req) => {
     const action = ipRuleFor(req.path);
     if (!action) return;
-    const address = clientAddress(
-      { forwardedFor: req.header("x-forwarded-for"), realIp: req.header("x-real-ip") },
-      req.ip,
-    );
+    // `req.ip` IS ALREADY THE CLIENT'S ADDRESS. It used to be the socket's, so this call site
+    // resolved the headers itself and the sign-in limiters — which read `req.ip` — did not. Two
+    // answers to one question, and the half that mattered most was the wrong one. The router
+    // resolves it once now; see the note there.
+    const address = req.ip ?? "unknown";
     // FAILS OPEN, exactly as the socket path does and for the same reason — see `admitCommand`.
     // This half did not: `take` was awaited bare, so a limiter that could not answer turned every
     // request into a 500 rather than letting it through. Worse before the limiter grew a timeout,

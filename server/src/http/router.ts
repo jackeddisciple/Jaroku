@@ -51,6 +51,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { newRequestId } from "../db/tenant.ts";
 import { DEFAULT_HANDLER_TIMEOUT_MS } from "./security.ts";
+import { clientAddress } from "./rateLimit.ts";
 
 /** Query parameters whose values must never reach a log line. */
 const REDACTED_PARAMS = new Set(["ticket", "token", "key", "access_token", "code"]);
@@ -503,7 +504,26 @@ export class Router {
       path,
       url,
       raw,
-      ip: raw.socket?.remoteAddress ?? null,
+      // THE CLIENT'S ADDRESS, NOT THE PROXY'S — and getting that wrong is why this line has a
+      // comment. `socket.remoteAddress` is who opened the TCP connection, which behind any proxy
+      // is the proxy: on Fly every request arrived from one of a handful of 172.16.x.x internal
+      // addresses, so every caller in the world shared one bucket. That inverts what a per-IP
+      // limit is for — an attacker gets no isolation, and one busy user locks out everybody else.
+      // Magic-link sending and OAuth start are both keyed on this, and both are the routes where
+      // it matters most.
+      //
+      // `clientAddress` HONOURS `JAROKU_TRUST_PROXY` and falls back to the socket without it, so a
+      // deployment in front of nothing cannot be told a false address by a header anybody can set.
+      // Resolved HERE rather than at each call site, because it was resolved at some of them and
+      // not others — the per-IP middleware read the header while the sign-in limits read the
+      // socket, which is two answers to one question and the reason this was invisible.
+      ip: clientAddress(
+        {
+          forwardedFor: firstHeader(raw.headers["x-forwarded-for"]),
+          realIp: firstHeader(raw.headers["x-real-ip"]),
+        },
+        raw.socket?.remoteAddress ?? null,
+      ),
       header: (name) => {
         const v = raw.headers[name.toLowerCase()];
         return Array.isArray(v) ? v[0] : v;
@@ -598,4 +618,16 @@ async function readJson<T>(raw: IncomingMessage): Promise<T> {
     if (err instanceof HttpError) throw err;
     throw badRequest("body is not valid JSON");
   }
+}
+
+
+/**
+ * One header value, whatever Node handed back.
+ *
+ * `IncomingHttpHeaders` types a repeated header as an array, and `x-forwarded-for` is exactly the
+ * header that gets repeated — one proxy appends where another sets. Taking `[0]` keeps the
+ * outermost hop, which is the one `clientAddress` then splits on to find the client.
+ */
+function firstHeader(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
 }

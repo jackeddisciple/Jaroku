@@ -103,6 +103,41 @@ console.log("\nthe address a bucket is keyed by");
     clientAddress({}, "::ffff:127.0.0.1", noProxy) === clientAddress({}, "127.0.0.1", noProxy),
     "one address has many spellings, and they share one bucket",
   );
+
+// THE ROUTER'S OWN `req.ip`, WHICH IS WHERE THIS WENT WRONG IN PRODUCTION.
+//
+// `clientAddress` was correct and tested above, and the per-IP middleware used it — but the router
+// set `req.ip` from `socket.remoteAddress`, and the two limits that matter most read `req.ip`:
+// magic-link sending and OAuth start. Behind Fly's proxy every request arrives from one of a
+// handful of 172.16.x.x internal addresses, so all 200 users shared one bucket of ten an hour.
+// The eleventh sign-in by ANYBODY got a 429, and an attacker got no isolation at all. Nothing
+// failed locally, because locally the socket address IS the client.
+console.log("\nreq.ip is the client's address, not the proxy's");
+{
+  const proxied = { JAROKU_TRUST_PROXY: "1" } as NodeJS.ProcessEnv;
+  const noProxy = {} as NodeJS.ProcessEnv;
+  // The exact shape Fly presents: an internal socket peer, the real client in X-Forwarded-For.
+  const flySocket = "172.16.19.114";
+  check(
+    clientAddress({ forwardedFor: "203.0.113.7" }, flySocket, proxied) === "203.0.113.7",
+    "behind a trusted proxy the client is the header, not the 172.16 peer",
+  );
+  check(
+    clientAddress({ forwardedFor: "203.0.113.7" }, flySocket, proxied) !==
+      clientAddress({ forwardedFor: "203.0.113.8" }, flySocket, proxied),
+    "...so two clients through one proxy get two buckets, which is the whole point",
+  );
+  // AND THE REFUSAL THAT MAKES IT SAFE. Anybody can set X-Forwarded-For; without the flag it must
+  // be ignored, or a limiter is bypassed by one header and per-IP limiting means nothing.
+  check(
+    clientAddress({ forwardedFor: "203.0.113.7" }, flySocket, noProxy) === flySocket,
+    "with no trusted proxy the header is ignored and the socket wins",
+  );
+  check(
+    clientAddress({ forwardedFor: "" }, flySocket, proxied) === flySocket,
+    "an empty header falls back rather than keying everything under one blank bucket",
+  );
+}
   check(clientAddress({}, null, noProxy) === "unknown", "an address we do not have still keys something");
 }
 
