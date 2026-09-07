@@ -128,15 +128,45 @@ const sent = (poll: string) => ({ sent: true, expiresInMinutes: Math.round(MAGIC
  * collected — all `{ ready: false }`. They are one instruction to a screen that is polling on a
  * timer, and telling them apart would let somebody with a poll secret learn whether a link was
  * ever issued for it.
+ *
+ * ONE LINK CAN PRODUCE TWO TICKETS, and that is deliberate rather than overlooked. The click mints
+ * one for the redirect and this mints another for the device that asked — so a link opened on the
+ * same machine signs it in twice over, harmlessly, and a link opened elsewhere signs in exactly the
+ * device that wanted it. Collapsing them would mean either storing a raw ticket for the poll to
+ * hand back (a live credential in a table that is otherwise all digests) or withholding the
+ * redirect's, which breaks the same-device path that is the fast one.
+ *
+ * WHAT STAYS SINGLE-USE IS THE LINK, and that is the property that matters: `consumeMagicLink`
+ * spends it in one atomic statement, so five concurrent opens produce one success and four
+ * refusals. Both tickets name the same identity that one click proved, and each is itself
+ * single-use and sixty seconds old. §10 asks for the cross-device case explicitly — "clicking a
+ * magic link on a different device than they started on → Works. This is a feature, not a bug" —
+ * and this is what that costs.
  */
 function pollHandler(deps: MagicLinkDeps): Handler {
   return async (req) => {
-    const body = await req.json<{ poll?: unknown }>();
-    // Shape-checked before the query, like every other secret on an unauthenticated route: a value
-    // that could not possibly be ours is refused in-process rather than spending an index probe.
-    if (!looksLikeSecret(body.poll)) return { body: { ready: false } };
+    const body = await req.json<{ poll?: unknown; polls?: unknown }>();
 
-    const claim = await deps.store.claimMagicLink(body.poll);
+    // ONE REQUEST FOR EVERY SECRET THE SCREEN HOLDS, rather than one request each.
+    //
+    // A waiting screen can hold more than one: "Send another link" mints a new secret and
+    // invalidates nothing, so the older link — the one most likely to be clicked, because resending
+    // is what somebody does when the first mail is slow — still has to be collectable. Polling them
+    // one request at a time put sixty requests a minute on `http.request`'s two hundred and forty,
+    // a quarter of a person's whole budget spent on waiting.
+    //
+    // BOUNDED AT FIVE, because this is an unauthenticated route and the list comes from the caller.
+    // Three links an hour is the rate limit, so five is already more than a screen can legitimately
+    // accumulate, and it caps the work one request can ask for.
+    const raw = Array.isArray(body.polls) ? body.polls : [body.poll];
+    const secrets = raw.filter(looksLikeSecret).slice(0, 5);
+    if (secrets.length === 0) return { body: { ready: false } };
+
+    let claim: { userId: string } | null = null;
+    for (const secret of secrets) {
+      claim = await deps.store.claimMagicLink(secret);
+      if (claim) break;
+    }
     if (!claim) return { body: { ready: false } };
 
     const ticket = await deps.store.issueSessionTicket({

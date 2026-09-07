@@ -238,9 +238,13 @@ export async function requestMagicLink(email: string): Promise<MagicLinkSent> {
  * be briefly unreachable, and a screen that gave up on the first refused fetch would be a screen
  * that gives up when somebody's wifi blinks.
  */
-export async function pollMagicLink(poll: string): Promise<string | null> {
+export async function pollMagicLink(polls: string[]): Promise<string | null> {
+  if (polls.length === 0) return null;
   try {
-    const answer = await post<{ ready?: unknown; ticket?: unknown }>("/v1/auth/magic-link/poll", { poll });
+    // ALL OF THEM IN ONE REQUEST. A screen can hold more than one secret — a resend mints a new
+    // link and invalidates nothing, and the older one is the more likely to be clicked — and asking
+    // separately put a quarter of a person's per-IP budget into waiting.
+    const answer = await post<{ ready?: unknown; ticket?: unknown }>("/v1/auth/magic-link/poll", { polls });
     return answer.ready === true && typeof answer.ticket === "string" ? answer.ticket : null;
   } catch {
     return null;

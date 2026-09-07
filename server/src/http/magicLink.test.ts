@@ -431,6 +431,62 @@ console.log("\nand a poll secret that names nothing is refused the same way as o
   }
 }
 
+console.log("\nRESENDING and then opening the OLDER link still finishes — the way people actually behave");
+{
+  // THE BUG THIS PINS WAS FOUND BY ADVERSARIAL TESTING, AFTER THE CROSS-DEVICE FIX SHIPPED.
+  //
+  // "Send another link" mints a new link with a new poll secret and INVALIDATES NOTHING — both
+  // mails work. And resending is what somebody does when the first is slow, so both then land
+  // together and they click the first one they see, which is the OLDER one. A screen that kept only
+  // the newest secret polled a secret that link never claims against: the older link consumed
+  // perfectly, the browser said "You're signed in", and the app waited out the full fifteen minutes.
+  // Exactly the failure the poll was added to fix, reached through the resend button instead.
+  //
+  // So the screen keeps EVERY secret it has issued and asks about all of them at once.
+  const email = "resender@example.com";
+  const first = JSON.parse((await ask(email)).body).poll as string;
+  const firstLink = lastLink();
+  const second = JSON.parse((await ask(email)).body).poll as string;
+  check(first !== second, "a resend mints a second, different poll secret");
+  check(firstLink !== lastLink(), "...and a second, different link");
+
+  // The older link — the one that arrived first and is the one most likely to be clicked.
+  const url = new URL(firstLink);
+  const opened = await request(url.pathname + url.search);
+  check(opened.status === 200, "the OLDER link still opens");
+
+  // The newest secret alone cannot see it, which is precisely what made this a bug.
+  const newestOnly = await request(MAGIC_LINK_POLL_PATH, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ polls: [second] }),
+  });
+  check(JSON.parse(newestOnly.body).ready === false, "the newest secret alone cannot collect it");
+
+  const both = await request(MAGIC_LINK_POLL_PATH, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ polls: [first, second] }),
+  });
+  check(JSON.parse(both.body).ready === true, "...and asking about both collects it");
+}
+
+console.log("\nthe poll list is bounded, because it is a list from an unauthenticated caller");
+{
+  const flood = await request(MAGIC_LINK_POLL_PATH, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ polls: Array.from({ length: 500 }, () => "a".repeat(43)) }),
+  });
+  check(JSON.parse(flood.body).ready === false, "five hundred secrets is answered, not obeyed");
+  const junk = await request(MAGIC_LINK_POLL_PATH, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ polls: [{ a: 1 }, null, 5, true] }),
+  });
+  check(JSON.parse(junk.body).ready === false, "...and values that are not secrets are dropped rather than queried");
+}
+
 server.close();
 await db.close();
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);

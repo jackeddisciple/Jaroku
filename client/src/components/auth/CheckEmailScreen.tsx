@@ -49,12 +49,19 @@ export function CheckEmailScreen({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resent, setResent] = useState(false);
-  // THE SECRET THAT IS CURRENTLY WORTH POLLING, which is not always the one this screen opened
-  // with. "Send another link" issues a NEW link with a NEW poll secret and invalidates nothing —
-  // so a person who resends and then opens the SECOND mail would have been polling a secret that
-  // link never claims against, and the screen would wait out the full expiry with the sign-in
-  // already done. Seeded from the prop, replaced on every successful resend.
-  const [livePoll, setLivePoll] = useState(poll);
+  // EVERY SECRET THIS SCREEN HAS ISSUED, not the newest one.
+  //
+  // "Send another link" mints a NEW link with a NEW poll secret and INVALIDATES NOTHING — both
+  // mails work. And people click the first one that arrives, which is usually the older one, since
+  // resending is what somebody does when the first is slow and then both land together. Polling
+  // only the newest meant the older link consumed perfectly, said "You're signed in" in the
+  // browser, and left this screen waiting out the full fifteen minutes: exactly the bug the poll
+  // was added to fix, reached through the resend button instead.
+  //
+  // A LIST RATHER THAN A SET OF TIMERS. Each tick tries them in turn and stops at the first that
+  // answers — the rate limit is three links an hour, so this is at most a handful of requests every
+  // three seconds and cannot grow beyond it.
+  const [polls, setPolls] = useState<string[]>(poll ? [poll] : []);
 
   // WHETHER THE LINK HAS BEEN OPENED YET, ASKED FROM HERE RATHER THAN WAITED FOR.
   //
@@ -72,29 +79,31 @@ export function CheckEmailScreen({
   // IT STOPS WHEN THE LINK WOULD HAVE EXPIRED. Past that there is nothing left to collect: the
   // token is dead and the claim with it, so continuing would be a timer nobody ever clears.
   useEffect(() => {
-    if (!livePoll) return;
+    if (polls.length === 0) return;
     let live = true;
     const deadline = Date.now() + expiresInMinutes * 60_000;
+    const tick = async (): Promise<void> => {
+      const ticket = await pollMagicLink(polls);
+      // `live` again after the await: the screen can be unmounted while a request is in flight, and
+      // spending a ticket into a component that no longer exists would sign somebody in behind a
+      // screen they had already left.
+      if (!live || !ticket) return;
+      clearInterval(timer);
+      onTicket(ticket);
+    };
     const timer = setInterval(() => {
       if (!live) return;
       if (Date.now() > deadline) {
         clearInterval(timer);
         return;
       }
-      void pollMagicLink(livePoll).then((ticket) => {
-        // `live` again after the await: the screen can be unmounted while a request is in flight,
-        // and spending a ticket into a component that no longer exists would sign somebody in
-        // behind a screen they had already left.
-        if (!live || !ticket) return;
-        clearInterval(timer);
-        onTicket(ticket);
-      });
+      void tick();
     }, 3_000);
     return () => {
       live = false;
       clearInterval(timer);
     };
-  }, [livePoll, expiresInMinutes, onTicket]);
+  }, [polls, expiresInMinutes, onTicket]);
 
   useEffect(() => {
     if (remaining <= 0) return;
@@ -111,9 +120,9 @@ export function CheckEmailScreen({
     setError(null);
     try {
       const again = await requestMagicLink(email);
-      // Kept only when the server gave one: an older server answers without it, and overwriting a
-      // working secret with null would turn a resend into the bug this screen exists to avoid.
-      if (again.poll) setLivePoll(again.poll);
+      // APPENDED, NEVER REPLACED. The previous link is still live and is the one most likely to be
+      // clicked; dropping its secret is what made a resend break the flow.
+      if (again.poll) setPolls((seen) => (seen.includes(again.poll!) ? seen : [...seen, again.poll!]));
       setResent(true);
       setRemaining(RESEND_COOLDOWN_S);
     } catch (err) {
