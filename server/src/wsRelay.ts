@@ -7,6 +7,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { Socket } from "node:net";
 import { readFile } from "node:fs/promises";
 import { WebSocketServer, WebSocket } from "ws";
+import { LOOPBACK } from "./auth/bindHost.ts";
 import type { TraceStore } from "./store.ts";
 import type { ThreadStatus } from "./threadStore.ts";
 import type { TenantContext } from "./db/tenant.ts";
@@ -3402,6 +3403,14 @@ function refuseUpgrade(socket: Socket, status: number, message: string): void {
 
 export interface RelayOptions {
   port: number;
+  /**
+   * The interface to bind, from `auth/bindHost.ts`.
+   *
+   * OPTIONAL, AND ABSENT MEANS LOOPBACK rather than meaning Node's default. Node's default for a
+   * missing host is EVERY interface, which for this server is a passwordless sign-in route on the
+   * LAN — see that module's header. A test or an embedder that omits this gets the safe one.
+   */
+  host?: string;
   store: TraceStore;
   /**
    * The workspace a SOCKET acts in, resolved when it connects.
@@ -3897,8 +3906,13 @@ export class WsRelay {
       ws.on("error", forget);
     });
 
-    this.http.listen(opts.port, () => {
-      console.log(`[relay] http+ws listening on http://localhost:${opts.port}`);
+    // THE HOST IS PASSED EXPLICITLY, always. `listen(port)` with the argument omitted binds `::`
+    // with dual-stack — every interface the machine has — and that is the shape this server must
+    // not have by accident: a desktop install mounts a sign-in route that takes an email and no
+    // password. `auth/bindHost.ts` is where the decision lives; this line only carries it.
+    const host = opts.host ?? LOOPBACK;
+    this.http.listen(opts.port, host, () => {
+      console.log(`[relay] http+ws listening on http://${host}:${opts.port}`);
     });
 
     if (opts.revalidate) {

@@ -124,7 +124,16 @@ try {
     if (!ready) throw new Error("the backend never became ready; nothing below can be asserted");
 
     const boot = log.join("");
-    check(boot.includes(`listening on http://localhost:${port}`), "...on the port the shell chose, not on its default");
+    // THE PORT IS WHAT THIS ASSERTS, and the host deliberately is not. The boot line now names the
+    // interface actually bound — `auth/bindHost.ts` made that a decision rather than Node's
+    // every-interface default — so pinning "localhost" here would fail the day somebody correctly
+    // closes the server down to 127.0.0.1, which is the direction this suite should never argue
+    // with. What matters is that the shell's chosen port reached the backend rather than 4317.
+    check(
+      new RegExp(`listening on http://[^\\s:]+:${port}\\b`).test(boot),
+      "...on the port the shell chose, not on its default",
+      boot.match(/listening on \S+/)?.[0] ?? "",
+    );
     check(
       boot.includes("origin allowlist:") && !boot.includes("origin allowlist (development default)"),
       "...with the packaged origin allowlist rather than the development one",

@@ -144,6 +144,14 @@ jobs:
           npm run test:security-headers
           npm run test:rate-limit
           npm run test:jwks
+          # WHICH INTERFACES THE SERVER ANSWERS ON, which was Node's default and is now a decision.
+          # `listen(port)` with no host binds every interface, and a desktop install mounts
+          # `POST /v1/auth/dev-login` — an email in, a real session token out, no password. On a
+          # café or office Wi-Fi that is account takeover for anybody who can reach the port, and
+          # `/v1/auth/methods` advertised it by answering `"localIssuer": true` to the same
+          # unauthenticated caller. The assertions are about the DEFAULT, because that is the half
+          # that was wrong and the half nobody sets.
+          npm run test:bind-host
           npm run test:jwt
           npm run test:session
           npm run test:resolve

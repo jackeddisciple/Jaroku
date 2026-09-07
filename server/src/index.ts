@@ -95,6 +95,7 @@ import { AttachmentStore } from "./attachmentStore.ts";
 import { estimateTokens, MAX_ATTACHMENTS } from "./attachments.ts";
 import { ContextResolver } from "./auth/resolve.ts";
 import { resolveOriginPolicy } from "./auth/origin.ts";
+import { resolveBindHost } from "./auth/bindHost.ts";
 import { resolveSocketAuth } from "./auth/socketAuth.ts";
 import { DbTicketStore } from "./db/repositories/tickets.ts";
 import { DbSignInStore } from "./db/repositories/signIn.ts";
@@ -2544,6 +2545,10 @@ async function agentGraph(ctx: TenantContext, agentId: string): Promise<GraphRes
 // on another port, so every request it makes here is cross-origin — without this the browser
 // blocks the response to the sign-in exchange and the app cannot sign anybody in at all.
 const originPolicy = resolveOriginPolicy();
+// Beside the origin policy because they are the same kind of decision made at the same moment: one
+// says which origins may open a socket, the other says which interfaces there is a socket on at
+// all. Resolved here so the boot log carries both before anything is listening.
+const bindHost = resolveBindHost();
 // AND THE HEADERS EVERY ANSWER CARRIES. Session 8: CORS says which origins may READ a response,
 // and this says what a browser may do with one once it has. They are different questions with
 // different failure modes — see http/security.ts, including why HSTS rides on an explicit
@@ -4276,6 +4281,11 @@ async function attachmentBody(
 
 const relay = new WsRelay({
   port: PORT,
+  // WHICH INTERFACES THIS ANSWERS ON, and it is loopback unless somebody said otherwise. See
+  // auth/bindHost.ts: the local issuer mounts a route that mints a session for any email with no
+  // password, and bound to every interface — which is what `listen(port)` alone does — that route
+  // is reachable from every other machine on the network.
+  host: bindHost,
   store,
   router,
   originPolicy,
