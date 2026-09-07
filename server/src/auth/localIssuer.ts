@@ -22,6 +22,14 @@ import { dirname } from "node:path";
 import { createPrivateKey, createPublicKey, generateKeyPairSync, randomUUID, sign } from "node:crypto";
 import { LOCAL_ISSUER } from "./config.ts";
 
+/**
+ * Where a hosted deployment's issuer key comes from.
+ *
+ * NOT `JAROKU_DEV_AUTH_KEY`, which is a PATH and is the development story. This is the key itself,
+ * because the thing that has to be identical across replicas cannot be a file on one of them.
+ */
+export const SIGNING_KEY_ENV = "JAROKU_AUTH_SIGNING_KEY";
+
 /** How long a locally-minted token lasts. Short, so the refresh path is exercised too. */
 export const LOCAL_TOKEN_TTL_S = 60 * 60;
 
@@ -46,10 +54,60 @@ export class LocalIssuer {
     keyPath: string,
     private audience: string,
     private log: (m: string) => void = console.log,
+    /**
+     * The key itself, as base64 JSON, when it comes from the environment rather than from disk.
+     *
+     * WHY THIS EXISTS, AND IT IS NOT A CONVENIENCE. A file is a per-MACHINE fact, and the moment
+     * this issuer signs sessions for a hosted deployment there is more than one machine. Two
+     * replicas each generating their own key means a token minted by one does not verify on the
+     * other — every reader fetches JWKS from `127.0.0.1`, its OWN copy — so a person signs in,
+     * gets a token, and is signed out again the moment the load balancer sends them to the other
+     * replica. Intermittent, in proportion to how many replicas are running, and indistinguishable
+     * from an expiry bug. It is exactly what `JAROKU_OBJECT_SIGNING_KEY` exists to prevent one
+     * concern over, and it needed the same answer.
+     */
+    keyMaterial?: string,
   ) {
-    const stored = this.load(keyPath) ?? this.create(keyPath);
+    const stored = (keyMaterial ? this.fromEnv(keyMaterial) : null) ?? this.load(keyPath) ?? this.create(keyPath);
     this.kid = stored.kid;
     this.privateJwk = stored.privateJwk;
+  }
+
+  /**
+   * Read a key handed in as base64 JSON, or refuse.
+   *
+   * IT THROWS RATHER THAN FALLING BACK TO GENERATING ONE. A deployment that set this variable said
+   * "here is the key every replica shares"; quietly generating a different one per machine because
+   * the value was malformed would produce precisely the intermittent sign-out this exists to stop,
+   * while looking like a successful boot.
+   */
+  private fromEnv(material: string): StoredKey {
+    let parsed: StoredKey;
+    try {
+      parsed = JSON.parse(Buffer.from(material.trim(), "base64").toString("utf8")) as StoredKey;
+    } catch {
+      throw new Error(
+        `${SIGNING_KEY_ENV} is not base64-encoded JSON. Generate one with: npm --prefix server run auth:key`,
+      );
+    }
+    if (typeof parsed?.kid !== "string" || typeof parsed?.privateJwk !== "object" || parsed.privateJwk === null) {
+      throw new Error(`${SIGNING_KEY_ENV} must be base64 JSON of { kid, privateJwk }`);
+    }
+    // Prove it imports before trusting it, for `load`'s reason: a key that fails here fails at
+    // boot, where the message says what is wrong, rather than at somebody's first sign-in.
+    createPrivateKey({ key: parsed.privateJwk as never, format: "jwk" });
+    this.log(`[auth] the issuer's signing key came from ${SIGNING_KEY_ENV} (kid ${parsed.kid}) — shared across replicas`);
+    return parsed;
+  }
+
+  /** Generate a key in the shape the environment variable wants. For ops, and for the suite. */
+  static generateKeyMaterial(): string {
+    const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const stored: StoredKey = {
+      kid: `jaroku-${randomUUID().slice(0, 8)}`,
+      privateJwk: privateKey.export({ format: "jwk" }) as Record<string, unknown>,
+    };
+    return Buffer.from(JSON.stringify(stored), "utf8").toString("base64");
   }
 
   /** The public half, in the shape jwks.ts expects to fetch. */

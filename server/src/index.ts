@@ -80,7 +80,7 @@ import { enforcementRefusal, limitsUnderEnforcement, refusesWork } from "./abuse
 import { EnforcementRepository } from "./db/repositories/enforcement.ts";
 import { healthz, readyz } from "./http/health.ts";
 import { AUTH_ENV, resolveAuthConfig } from "./auth/config.ts";
-import { LocalIssuer } from "./auth/localIssuer.ts";
+import { LocalIssuer, SIGNING_KEY_ENV } from "./auth/localIssuer.ts";
 import { TokenVerifier } from "./auth/verifier.ts";
 import { authenticate, sessionRoutes } from "./auth/session.ts";
 import { conversationRoutes } from "./http/conversations.ts";
@@ -2866,11 +2866,33 @@ function handleHostedMcpConfirmRequest(runId: string, payload: Record<string, un
 // that authenticates a developer every day is the code that authenticates a user in
 // production. See auth/config.ts — it is loud about which of the two it is doing.
 const authConfig = resolveAuthConfig(PORT);
+// THE KEY THAT SIGNS EVERY SESSION, AND WHERE IT COMES FROM. On a desktop install or a developer's
+// machine it is a file, generated once and kept — that is one process on one disk and a file is the
+// honest shape for it. On a hosted deployment it CANNOT be: replicas do not share a disk, so each
+// one would generate its own, and a token minted by replica 1 would fail verification on replica 2
+// because every reader fetches JWKS from its own 127.0.0.1. The symptom is somebody signing in
+// successfully and being signed out again on their next request, intermittently, in proportion to
+// how many replicas are running — the same shape of bug JAROKU_OBJECT_SIGNING_KEY exists to prevent,
+// and it took a real deploy to notice this one had the same hole.
+const issuerKeyMaterial = process.env[SIGNING_KEY_ENV];
+if (authConfig.mode === "local" && !authConfig.devLogin && !issuerKeyMaterial) {
+  // REFUSED RATHER THAN GENERATED. `!devLogin` is the first-party issuer in production, which is
+  // exactly and only the configuration that has more than one machine. Generating here would boot
+  // green and fail in a way nobody can reproduce on one replica.
+  throw new Error(
+    `${SIGNING_KEY_ENV} must be set when Jaroku issues its own sessions in production. Without it ` +
+      `every replica generates a different signing key, so a token minted by one is refused by the ` +
+      `next — which presents as being signed out at random rather than as the configuration error ` +
+      `it is. Generate one with: npm --prefix server run auth:key`,
+  );
+}
 const localIssuer =
   authConfig.mode === "local"
     ? new LocalIssuer(
         process.env[AUTH_ENV.devKeyPath] ?? join(SERVER_DIR, ".devauth.json"),
         authConfig.audience,
+        console.log,
+        issuerKeyMaterial,
       )
     : undefined;
 const tokenVerifier = new TokenVerifier(authConfig);

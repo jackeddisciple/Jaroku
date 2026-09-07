@@ -51,6 +51,11 @@ primary_region = "iad"
   # signs the session at the end of both, and mounts NO passwordless route. Without this the boot
   # refuses, because a production server with no issuer authenticates nobody.
   JAROKU_AUTH_SELF_ISSUER = "1"
+  # NO FIXTURE RUN ON BOOT. The server fires one run of the hand-written fixture agent at startup so
+  # a developer sees a live trace immediately; here it only produces `spawn uv ENOENT` twice per
+  # deploy, because the gateway image carries no Python toolchain and is not the tier that would
+  # run one anyway — that is the sandbox.
+  JAROKU_NO_AUTORUN = "1"
 
 [http_service]
   internal_port = 4317

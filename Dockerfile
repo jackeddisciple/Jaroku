@@ -40,6 +40,10 @@ RUN npm --prefix server ci --include=dev --ignore-scripts
 COPY server/src ./server/src
 COPY server/migrations ./server/migrations
 COPY server/tsconfig.json ./server/
+# The dependency-free fallback client the relay serves at `/`. Without it that route throws while
+# trying to read a file that is not there, so the friendliest URL in the deployment — the one
+# somebody pastes into a browser first — answers 500 on a server that is working perfectly.
+COPY server/debug-client.html ./server/
 
 # RUNTIME_DIR IS DERIVED FROM index.ts's OWN LOCATION — `join(REPO_DIR, "runtime")` — so the
 # directory has to exist beside `server/` even where this tier never executes an agent. Under

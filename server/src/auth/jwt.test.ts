@@ -13,14 +13,14 @@
 import { createServer } from "node:http";
 import { createHmac, generateKeyPairSync, sign as cryptoSign } from "node:crypto";
 import type { AddressInfo } from "node:net";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { JwksClient } from "./jwks.ts";
 import { JwtError, readUnverifiedHeader, verifyJwt } from "./jwt.ts";
 import { TokenVerifier, AuthError } from "./verifier.ts";
-import { LocalIssuer, subjectFor } from "./localIssuer.ts";
+import { LocalIssuer, SIGNING_KEY_ENV, subjectFor } from "./localIssuer.ts";
 import { resolveAuthConfig, AuthConfigError, LOCAL_ISSUER, DEFAULT_AUDIENCE } from "./config.ts";
 
 let failures = 0;
@@ -255,6 +255,49 @@ console.log("\nthe local issuer verifies through the same path");
 
   await new Promise<void>((r) => jwksHttp.close(() => r()));
   rmSync(dir, { recursive: true, force: true });
+}
+
+console.log("\nthe issuer's signing key, which is a per-DEPLOYMENT fact and was a per-machine one");
+{
+  // THE BUG THIS PINS SHIPPED TO A REAL DEPLOY AND WAS FOUND IN ITS LOG. `LocalIssuer` generated a
+  // key on disk when it found none, which is right for one process on one laptop and wrong the
+  // moment the same issuer signs sessions for two replicas: each generates its own, every reader
+  // fetches JWKS from its OWN 127.0.0.1, and a token minted by one machine is refused by the other.
+  // Nobody sees "misconfigured" — they see themselves signed out at random, in proportion to how
+  // many replicas are running.
+  const material = LocalIssuer.generateKeyMaterial();
+  const quiet = () => {};
+  const a = new LocalIssuer("/nonexistent/never-written-a.json", DEFAULT_AUDIENCE, quiet, material);
+  const b = new LocalIssuer("/nonexistent/never-written-b.json", DEFAULT_AUDIENCE, quiet, material);
+
+  const kidA = (a.jwks().keys[0] as { kid: string }).kid;
+  const kidB = (b.jwks().keys[0] as { kid: string }).kid;
+  check(kidA === kidB, "two issuers given the same material are the same key");
+  check(
+    JSON.stringify(a.jwks()) === JSON.stringify(b.jwks()),
+    "...so they publish identical JWKS, which is what makes one replica able to verify the other's token",
+  );
+  // The material carries the PRIVATE half, so a second replica can SIGN rather than only verify.
+  const signedByA = a.mint({ email: "ada@example.com" }).token;
+  const signedByB = b.mint({ email: "ada@example.com" }).token;
+  const headerOf = (t: string) => JSON.parse(Buffer.from(t.split(".")[0]!, "base64url").toString("utf8"));
+  check(headerOf(signedByA).kid === headerOf(signedByB).kid, "...and both sign under that same kid");
+  // Neither wrote anything: the path handed in does not exist and must not have been created,
+  // because a key that lands on a container's disk is a key the next deploy silently replaces.
+  check(!existsSync("/nonexistent/never-written-a.json"), "material from the environment writes no file");
+
+  // A MALFORMED VALUE THROWS RATHER THAN FALLING BACK TO GENERATING ONE. A deployment that set the
+  // variable has said "here is the key every replica shares"; quietly generating a different one
+  // per machine because the value was mistyped reproduces the exact bug above, while booting green.
+  for (const bad of ["not-base64-at-all!!", Buffer.from('{"kid":"x"}', "utf8").toString("base64")]) {
+    let threw = false;
+    try {
+      new LocalIssuer("/nonexistent/never-written-c.json", DEFAULT_AUDIENCE, quiet, bad);
+    } catch {
+      threw = true;
+    }
+    check(threw, `a malformed ${SIGNING_KEY_ENV} is refused rather than replaced`);
+  }
 }
 
 console.log("\nconfiguration");
