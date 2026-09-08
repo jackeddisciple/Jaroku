@@ -229,13 +229,23 @@ async function storeSuite(label: string, store: SignInStore): Promise<void> {
     check(counts[3]! > MAGIC_LINK_LIMITS.perEmail, "...so the fourth exceeds the per-address limit");
   }
   {
-    // ...and an 11th from the same IP. A separate counter, because a request refused on the
-    // address limit writes no token row — counting rows would let one address's refusals fund
-    // another's attempts from the same machine.
+    // ...and one past the ceiling from the same IP. A separate counter, because a request refused
+    // on the address limit writes no token row — counting rows would let one address's refusals
+    // fund another's attempts from the same machine.
+    //
+    // COUNTED OFF THE LIMIT RATHER THAN OFF THE NUMBER IT USED TO BE. This loop ran eleven times
+    // and asserted `last === 11`, which reads as "the eleventh is refused" and is really "the
+    // ceiling is ten" written where nobody would look for it. The moment the ceiling became a
+    // setting, the assertion was a claim about a literal that no longer existed — and the way it
+    // failed was `11 > 40` being false, which says nothing about what changed.
     const key = rateKeyForIp(`203.0.113.${Math.floor(Math.random() * 250)}`);
+    const overIp = MAGIC_LINK_LIMITS.perIp + 1;
     let last = 0;
-    for (let i = 0; i < 11; i++) last = (await store.countAttempt(key, MAGIC_LINK_LIMITS.windowS)).count;
-    check(last === 11 && last > MAGIC_LINK_LIMITS.perIp, "the eleventh from one address exceeds the per-IP limit");
+    for (let i = 0; i < overIp; i++) last = (await store.countAttempt(key, MAGIC_LINK_LIMITS.windowS)).count;
+    check(
+      last === overIp && last > MAGIC_LINK_LIMITS.perIp,
+      `attempt ${overIp} from one machine exceeds the per-IP limit of ${MAGIC_LINK_LIMITS.perIp}`,
+    );
   }
   {
     const key = rateKeyForEmail(`window-${randomUUID()}@example.com`);

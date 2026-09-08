@@ -35,6 +35,10 @@
 
 import { createHash, randomBytes } from "node:crypto";
 
+// The positive-number-from-environment reader, shared with the deploy layer. See its header
+// for why `Number(process.env.X ?? default)` is the shape that fails silently and backwards.
+import { numberFromEnv } from "../env.ts";
+
 export { OAUTH_STATE_TTL_S } from "../oauth/pkce.ts";
 
 /** §3.3. Fifteen minutes, and the reasoning is in the header. */
@@ -314,9 +318,35 @@ export interface SignInStore {
 export const rateKeyForEmail = (email: string): string => `email:${normaliseEmail(email)}`;
 export const rateKeyForIp = (ip: string): string => `ip:${ip}`;
 
-/** §3.3: three per address per hour, ten per IP per hour, over a one-hour window. */
+/**
+ * §3.3: three per address per hour, forty per IP per hour, over a one-hour window — and all three
+ * are now settings rather than literals.
+ *
+ * WHY THE PER-IP CEILING MOVED, AND WHY IT IS THE ONE THAT NEEDED TO. The two limits protect
+ * different people and only one of them is about a person at all. The per-ADDRESS limit protects
+ * whoever owns the mailbox, and three an hour is already generous for a flow that needs one link;
+ * it stays. The per-IP limit protects everybody from one machine enumerating, and it is keyed by
+ * something users SHARE — office NAT, a university, a coworking space, CGNAT. At ten an hour that
+ * is one bucket for everyone behind the egress, so the eleventh real person signing up is refused
+ * for what the first ten did. Enumeration is already blunted at the route itself, which answers 200
+ * whether or not an address has an account, so the ceiling can be a ceiling on abuse rather than on
+ * a shared office.
+ *
+ * READ FROM THE ENVIRONMENT SO THE NUMBER CAN MOVE WITHOUT A RELEASE. A limit that can only be
+ * changed by editing a constant is a limit nobody changes at three in the morning, which is exactly
+ * when a legitimate spike looks like an attack and vice versa. `numberFromEnv` is what makes that
+ * safe: it refuses NaN, zero and negatives and falls back with a warning, because a mistyped
+ * ceiling must cost you the setting rather than the limit — `count > NaN` is false for every count,
+ * which is a rate limiter that admits everything and says nothing.
+ *
+ * AT MODULE LOAD, ONCE. These are read where every other setting in this server is read, so the
+ * effective values are fixed for the life of the process and `index.ts` can log them at boot.
+ */
 export const MAGIC_LINK_LIMITS = {
-  windowS: 60 * 60,
-  perEmail: 3,
-  perIp: 10,
+  windowS: numberFromEnv("JAROKU_SIGNIN_WINDOW_S", 60 * 60),
+  perEmail: numberFromEnv("JAROKU_SIGNIN_PER_EMAIL", 3),
+  perIp: numberFromEnv("JAROKU_SIGNIN_PER_IP", 40),
 } as const;
+
+/** The defaults, so a boot log can say when a deployment is not running them. */
+export const MAGIC_LINK_LIMIT_DEFAULTS = { windowS: 60 * 60, perEmail: 3, perIp: 40 } as const;

@@ -328,8 +328,9 @@ console.log("\nthe per-IP limit, which is the other half of §7's rule 3");
     statuses.slice(0, MAGIC_LINK_LIMITS.perIp).every((s) => s === 200),
     `${MAGIC_LINK_LIMITS.perIp} requests for ${MAGIC_LINK_LIMITS.perIp} different addresses are accepted`,
   );
-  // §12's criterion 11's second half: "and an 11th from the same IP in an hour".
-  check(statuses[MAGIC_LINK_LIMITS.perIp] === 429, `...and the ${MAGIC_LINK_LIMITS.perIp + 1}th from the same machine is refused`);
+  // §12's criterion 11's second half: one past the ceiling from the same IP in an hour. The
+  // ceiling is a setting now, so the number is read rather than written down here.
+  check(statuses[MAGIC_LINK_LIMITS.perIp] === 429, `...and request ${MAGIC_LINK_LIMITS.perIp + 1} from the same machine is refused`);
   check(sent.length === MAGIC_LINK_LIMITS.perIp, "...having sent one message per accepted request and no more");
   check(
     audited.some((a) => a.action === "auth.rate_limited" && a.metadata.scope === "ip"),

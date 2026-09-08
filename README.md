@@ -2627,6 +2627,9 @@ to happen because a browser cannot put a header on a WebSocket:
 | `JAROKU_OAUTH_SLACK_CLIENT_ID` / `_SECRET` | — | The same, for Slack |
 | `JAROKU_OAUTH_REDIRECT_BASE` | `http://localhost:<port>` | Where a provider sends the browser back. `{base}/v1/oauth/{provider}/callback` must be registered as an authorised redirect URI |
 | `JAROKU_APP_URL` | `http://localhost:5173` | Where the browser is sent once a flow finishes. A `returnTo` is a PATH joined to this and never a URL of its own — see [the flow](#the-flow-and-the-two-things-that-defend-it) |
+| `JAROKU_SIGNIN_PER_EMAIL` | `3` | Sign-in links per ADDRESS per window. This is the one that protects a mailbox from being filled, and three is already generous for a flow that needs one link — raise it only for a reason |
+| `JAROKU_SIGNIN_PER_IP` | `40` | Sign-in requests per ORIGIN per window, shared by the magic link and the Google start route. Keyed by something users share — office NAT, a university, CGNAT — so a low ceiling refuses real people for what everyone else behind the egress did. Enumeration is blunted at the route itself, which answers 200 whether or not an address has an account |
+| `JAROKU_SIGNIN_WINDOW_S` | `3600` | The window both ceilings are counted over |
 | `JAROKU_MCP_ALLOW_LOOPBACK` | on in dev | `0` refuses loopback MCP endpoints locally too. Always off under `NODE_ENV=production`, and no value overrides that — it exists so `npm run mock:mcp` keeps working |
 | `JAROKU_CHECKPOINTER` | `sqlite` | `sqlite` \| `postgres`. Where pause/resume/branch state lives |
 | `JAROKU_CHECKPOINT_PG_URL` | — | The checkpointer's OWN connection. Not `JAROKU_PG_URL`: LangGraph never issues `SET LOCAL`, so it must not borrow the pool whose isolation depends on it |

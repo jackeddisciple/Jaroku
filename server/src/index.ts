@@ -105,7 +105,7 @@ import { linkIdentity } from "./auth/linkIdentity.ts";
 import { EMAIL_ENV, emailConfigFrom, emailTransport } from "./email/transport.ts";
 import { magicLinkRoutes } from "./http/magicLink.ts";
 import { signInRoutes } from "./http/signIn.ts";
-import { MAGIC_LINK_LIMITS, rateKeyForIp } from "./auth/signIn.ts";
+import { MAGIC_LINK_LIMIT_DEFAULTS, MAGIC_LINK_LIMITS, rateKeyForIp } from "./auth/signIn.ts";
 import {
   Generator, agentsDir, slugify, uniqueAgentSlug, MAX_TOKENS as GEN_MAX_TOKENS, type UsageSummary,
 } from "./generator.ts";
@@ -3211,6 +3211,21 @@ if (emailConfig && authOrigin) {
       ? `[auth] email sign-in is on, but NOTHING IS SENT — links are written to this log. Development only.`
       : `[auth] email sign-in is on via ${transport.provider}, from ${emailConfig.from}`,
   );
+  // SAID ONLY WHEN IT IS NOT THE DEFAULT. Both sign-in ceilings are settings, and a raised one is
+  // the kind of change that gets made during an incident and then outlives it by a year — so a
+  // deployment that is not running the shipped numbers says which numbers it IS running, every
+  // boot, where whoever is reading the log to work out why sign-ins are being refused will see it.
+  // Silence therefore means the defaults, which is the common case and deserves no line.
+  {
+    const d = MAGIC_LINK_LIMIT_DEFAULTS;
+    const l = MAGIC_LINK_LIMITS;
+    if (l.perIp !== d.perIp || l.perEmail !== d.perEmail || l.windowS !== d.windowS) {
+      console.log(
+        `[auth] sign-in rate limits are overridden: ${l.perEmail}/address and ${l.perIp}/IP ` +
+          `per ${l.windowS}s (defaults ${d.perEmail}, ${d.perIp}, ${d.windowS}s)`,
+      );
+    }
+  }
   for (const route of magicLinkRoutes({
     store: signInStore,
     transport,
