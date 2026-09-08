@@ -113,6 +113,27 @@ console.log("\nstarting a new attempt clears the old one's stall");
   }
 }
 
+console.log("\nan error about an address does not outlive the address");
+{
+  // Every message the email path can show names what was SUBMITTED — "that does not look like an
+  // email address", "too many sign-in links have been requested for this address". `setError(null)`
+  // ran at submit only, so the sentence stayed on screen while somebody typed a DIFFERENT address
+  // and read as a refusal of the one they were typing. Worse than an uncleared error: an error
+  // attached to the wrong subject, telling them the obvious next move has already failed.
+  check(
+    "the address fields clear the error as they change",
+    /const editEmail = \(value: string\): void => \{[\s\S]*?setEmail\(value\);[\s\S]*?setError\(null\);[\s\S]*?\}/.test(SCREEN),
+    "expected an onChange that clears the error",
+  );
+  const fields = [...SCREEN.matchAll(/onChange=\{(\w+)\}/g)].map((m) => m[1] ?? "");
+  check("found the address fields", fields.length >= 2, `found ${fields.length}`);
+  check(
+    "no field sets the address without clearing the error",
+    fields.filter((f) => f === "setEmail").length === 0,
+    fields.join(", "),
+  );
+}
+
 console.log("\nthe recovery the copy promises is the recovery that exists");
 {
   // The paragraph tells the reader to press Continue with Google. The button must therefore be

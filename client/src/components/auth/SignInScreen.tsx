@@ -96,6 +96,25 @@ export function SignInScreen({
    */
   const inFlight = busy !== null && !stalled;
 
+  /**
+   * AN ERROR ABOUT AN ADDRESS DOES NOT OUTLIVE THE ADDRESS.
+   *
+   * Every message this screen can show about the email path names what was SUBMITTED — "that does
+   * not look like an email address", "too many sign-in links have been requested for this address".
+   * `setError(null)` ran only at submit, so the sentence stayed on screen while somebody typed a
+   * different address, and read as a refusal of the one they were typing. That is worse than an
+   * error nobody clears: it is an error attached to the wrong subject, and it says the new address
+   * is refused too — so the obvious next move, trying another address, looks like it has already
+   * failed before it is sent.
+   *
+   * Cleared on CHANGE rather than on focus, because re-focusing a field to read the message that
+   * explains it should not take the message away.
+   */
+  const editEmail = (value: string): void => {
+    setEmail(value);
+    setError(null);
+  };
+
   // Read once, at mount. The URL cannot change under this screen — there is no router — and the
   // redemption that removes the parameter only runs once there is a session, which is the moment
   // this screen stops being rendered.
@@ -298,7 +317,7 @@ export function SignInScreen({
                 <TextField
                   type="email"
                   value={email}
-                  onChange={setEmail}
+                  onChange={editEmail}
                   placeholder="Enter your email"
                   ariaLabel="Email address"
                   autoFocus={!methods.google}
@@ -335,7 +354,7 @@ export function SignInScreen({
           <TextField
             type="email"
             value={email}
-            onChange={setEmail}
+            onChange={editEmail}
             placeholder="you@example.com"
             ariaLabel="Email address"
             autoFocus
