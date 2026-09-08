@@ -581,9 +581,11 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
               : linked ? "Open a pull request for this agent"
               : "Connect this agent to a repository"
           }
-          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-control transition-colors hover:bg-sidebar-hover focus-visible:outline-none focus-visible:shadow-focusring ${
-            pr ? "text-ok" : "text-faint hover:text-ink"
-          }`}
+          // GREEN IN EVERY STATE. It was green only when a PR was open and muted otherwise, which
+          // made the mark carry the state as well as the action — and the state is already in the
+          // tooltip and in what pressing it does. What the colour buys here is a control the eye
+          // finds on a row of grey text; the three states differ in behaviour, not in shade.
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-ok transition-colors hover:bg-sidebar-hover focus-visible:outline-none focus-visible:shadow-focusring"
         >
           <Icon.github.openPullRequest size={ICON.sm} />
         </button>
