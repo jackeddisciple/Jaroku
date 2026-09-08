@@ -380,14 +380,24 @@ export function App() {
             `jaroku-layout-v4`, because the outer group's panels are not the ones v3 saved sizes
             for. Reusing the id would restore a two-panel layout into a two-panel group whose
             second panel is now a container, and the composer/right split would come back at
-            whatever width the trace panel used to have. */}
+            whatever width the trace panel used to have.
+
+            EVERY PANEL BELOW CARRIES AN `id`, AND THAT IS WHAT MAKES `autoSaveId` MEAN ANYTHING
+            HERE. Without one the library keys the saved layout by the panel's own constraints —
+            `${order}:${JSON.stringify(constraints)}` — on the documented assumption that min/max
+            are constants. Ours are not: `sidebarMin` and `composerMin` are pixel floors MEASURED
+            against the live container, so the key carried a different `minSize` at every window
+            width. A sidebar dragged to 402px at 1440 came back at the 20% default the moment the
+            window was 1600, and localStorage grew another entry — remembered per window size,
+            which is not what remembering a layout means. An `id` is compared before the
+            constraints ever are, so the key is now the panel rather than its arithmetic. */}
         <PanelGroup direction="horizontal" autoSaveId="jaroku-layout-v4" className="flex-1 min-h-0">
           {mountSidebar && (
             <>
               {/* `minSize` IS A MEASURED PIXEL FLOOR, not a share of the window. 16% is 307px
                   at 1920 and 164px at 1024 — one rule expressing two different requirements, and
                   the narrow one is the one nobody is looking at while writing it. */}
-              <Panel defaultSize={20} minSize={sidebarMin} maxSize={SIDEBAR_MAX_PCT} order={1}>
+              <Panel id="sidebar" defaultSize={20} minSize={sidebarMin} maxSize={SIDEBAR_MAX_PCT} order={1}>
                 <div className="h-full animate-panel-in motion-reduce:animate-none">
                   <Sidebar />
                 </div>
@@ -395,7 +405,7 @@ export function App() {
               <PaneDivider />
             </>
           )}
-          <Panel order={2}>
+          <Panel id="workspace" order={2}>
             {/* THE THREE PANES STAY MOUNTED WHILE A FULL-SCREEN VIEW IS UP, and that is the second
                 promise §2 makes: clicking the active agent in the sidebar "returns you to the
                 three-pane view exactly where you left it". Unmounting would lose a half-typed
@@ -412,8 +422,18 @@ export function App() {
                   {/* `minSize` IS A MEASURED PIXEL FLOOR HERE TOO, for the reason the sidebar's is:
                       the composer's control bar is a row of 32px hit targets and 8px gaps that its
                       own rules forbid to wrap, and 30% of this group is 354px at 1440 and 192px at
-                      900 — one rule expressing two different requirements again. */}
-                  <Panel defaultSize={45} minSize={composerMin} order={1}>
+                      900 — one rule expressing two different requirements again.
+
+                      `defaultSize` IS THE SHARE IT TAKES BESIDE THE RIGHT PANEL, so during step 3 —
+                      when this is the group's only panel — there is no 55 to add to and a declared
+                      45 is a layout that does not total 100. The library normalises it and says so,
+                      once per mount. One panel gets the whole width because that is what it has. */}
+                  <Panel
+                    id="composer"
+                    defaultSize={mountRightPanel ? 45 : 100}
+                    minSize={composerMin}
+                    order={1}
+                  >
                     {/* The composer, alone during step 3 and still the centre of the screen through
                         step 4. Wrapped rather than swapped, so BuildPane is never torn down. */}
                     <ComposerColumn phase={phase} />
@@ -421,7 +441,7 @@ export function App() {
                   {mountRightPanel && (
                     <>
                       <PaneDivider />
-                      <Panel defaultSize={55} minSize={32} order={2}>
+                      <Panel id="inspector" defaultSize={55} minSize={32} order={2}>
                         <div className="h-full animate-panel-in motion-reduce:animate-none">
                           <RightPanel />
                         </div>

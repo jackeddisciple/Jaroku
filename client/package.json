@@ -29,6 +29,7 @@
     "test:bare-keys": "tsx src/lib/bareKeys.test.ts",
     "test:format": "tsx src/lib/format.test.ts",
     "test:pane-floor": "tsx src/lib/paneFloor.test.ts",
+    "test:pane-identity": "tsx src/lib/paneIdentity.test.ts",
     "test:dialog": "tsx src/lib/dialog.test.ts",
     "test:row-facts": "tsx src/lib/rowFacts.test.ts",
     "test:palette-keys": "tsx src/components/paletteKeys.test.ts",

@@ -1389,6 +1389,17 @@ jobs:
           # is 307px at 1920 and 164px at 1024: one number, two requirements, and only one of them
           # is on the developer's monitor. The assertions are §24's five viewports.
           npm run test:pane-floor
+          # AND WHO THE SAVED LAYOUT IS SAVED FOR, which is the same two panes one question over.
+          # `autoSaveId` is the whole of "remember how I sized this", and with no `id` on a Panel
+          # the library keys what it saves by that panel's own constraints — safe, its comment says,
+          # because min/max are constants. Ours are measurements: the floors above are computed
+          # against the live container, so the key carried a different minSize at every window
+          # width. A sidebar dragged to 402px at 1440 came back at the 20% default at 1600, and
+          # localStorage grew another entry each time — not a layout lost but a layout remembered
+          # PER WINDOW SIZE, which looks like working persistence until somebody resizes a window.
+          # The last assertions read the rule out of node_modules, because the fix rests on a
+          # library behaviour and an upgrade that changed it would silently restore the bug.
+          npm run test:pane-identity
           # AND WHAT MAKES AN OVERLAY A DIALOG. The workspace panel — the one that owns "delete this
           # workspace permanently" — dimmed the application behind it and was, to anything but a
           # pair of eyes, a div: no role, no aria-modal, no initial focus, no containment, no scroll
