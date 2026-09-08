@@ -36,6 +36,7 @@ import { useEvalStore } from "./evalStore.ts";
 import { useGithubStore } from "./githubStore.ts";
 import { useInboxStore } from "./inboxStore.ts";
 import { useGraphStore } from "./graphStore.ts";
+import { useHistoryStore } from "./historyStore.ts";
 import { useMcpStore } from "./mcpStore.ts";
 import { useMemberStore } from "./memberStore.ts";
 import { useProviderStore } from "./providerStore.ts";
@@ -147,6 +148,11 @@ export const WORKSPACE_STORES: Record<string, Resettable> = {
   // under another tenant's agent — and the Push button beside it would be pointed at them.
   githubStore: useGithubStore as unknown as Resettable,
   graphStore: useGraphStore as unknown as Resettable,
+  // WHERE YOU HAVE BEEN, and it is workspace-shaped: a spot names an AGENT ID, so a history
+  // carried across a switch would put another tenant's agent behind the Back arrow — pressed,
+  // it would ask this workspace to select an id it does not contain. The arrows also have to go
+  // dim on arrival, because "back" from the first screen of a workspace is nowhere.
+  historyStore: useHistoryStore as unknown as Resettable,
   mcpStore: useMcpStore as unknown as Resettable,
   memberStore: useMemberStore as unknown as Resettable,
   providerStore: useProviderStore as unknown as Resettable,

@@ -32,6 +32,8 @@ import { RUN_PHASE } from "../lib/domainPhase.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { keyHint } from "../lib/modKey.ts";
 import { startNewAgent } from "../lib/newAgent.ts";
+import { goBack, goForward } from "../lib/navHistory.ts";
+import { canGoBack, canGoForward, useHistoryStore } from "../store/historyStore.ts";
 import { hasHostWindow } from "../lib/windowStage.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { CheckIcon, GlobeIcon, RocketIcon, LoaderIcon, SearchIcon, SparklesIcon } from "./panelIcons.tsx";
@@ -170,6 +172,8 @@ function RunRow({ run }: { run: RunSummary }) {
 function SidebarChrome() {
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
   const setPaletteOpen = useUiStore((s) => s.setPaletteOpen);
+  const back = useHistoryStore(canGoBack);
+  const forward = useHistoryStore(canGoForward);
   const underHost = hasHostWindow();
 
   return (
@@ -177,6 +181,35 @@ function SidebarChrome() {
       data-tauri-drag-region
       className={`flex h-11 shrink-0 items-center gap-1 pr-2 ${underHost ? "pl-[76px]" : "pl-2"}`}
     >
+      {/* WHERE YOU HAVE BEEN, since there is no address bar to hold it. A place here is a
+          destination plus the agent the panes are pointed at — see `store/historyStore`.
+
+          DISABLED IS THE HONEST STATE AND IT IS SAID TWICE: `disabled` so the pointer and the
+          keyboard both skip it, and the ink drops to `faint` so it reads as unavailable before
+          anybody presses it. At the start of a session both are dim, which is correct — there is
+          nowhere behind you yet. */}
+      <button
+        onClick={goBack}
+        disabled={!back}
+        title="Back"
+        aria-label="Back"
+        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+          back ? "text-ink hover:bg-sidebar-hover" : "cursor-default text-faint"
+        }`}
+      >
+        <Icon.nav.historyBack size={ICON.lg} />
+      </button>
+      <button
+        onClick={goForward}
+        disabled={!forward}
+        title="Forward"
+        aria-label="Forward"
+        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+          forward ? "text-ink hover:bg-sidebar-hover" : "cursor-default text-faint"
+        }`}
+      >
+        <Icon.nav.historyForward size={ICON.lg} />
+      </button>
       <span className="flex-1" data-tauri-drag-region />
       {/* SEARCH IS ONE CONTROL FOR BOTH SEARCHES. The palette already carries "Go to agent…"
           beside every other destination, so a second, narrower agent-only box beside it would be
@@ -577,12 +610,20 @@ function AccountRow() {
           <Truncate className="min-w-0 flex-1 text-label text-ink" title={name}>{name}</Truncate>
           {/* Only when the session carries one. A chip is a claim about what the workspace is
               paying, and inventing a default for it is how the hardcoded `Free` got there in the
-              first place. */}
+              first place.
+
+              `sm` IS ALREADY THE SMALLEST CHIP — 11px against the name's 13 — so what made this
+              read as the row's equal was `caps`, which uppercases AND adds tracking. Dropping it
+              is the change; a fourth chip size would have put a hardcoded pixel value at a call
+              site, which `test:type-scale` refuses for good reason. */}
           {workspace?.plan?.label && (
-            <Chip caps size="sm" tone="faint" className="shrink-0">{workspace.plan.label}</Chip>
+            <Chip size="sm" tone="faint" className="shrink-0">{workspace.plan.label}</Chip>
           )}
+          {/* SMALLER THAN THE NAME IT BELONGS TO, both of these. The plan and the disclosure are
+              qualifiers on a row whose subject is a person; at the row's own size they read as
+              three equal things rather than as a name with two notes after it. */}
           <span className="shrink-0 text-faint">
-            {open ? <Icon.workspace.switcherOpen size={ICON.lg} /> : <Icon.workspace.switcherClosed size={ICON.lg} />}
+            {open ? <Icon.workspace.switcherOpen size={ICON.sm} /> : <Icon.workspace.switcherClosed size={ICON.sm} />}
           </span>
         </button>
         {/* SIGN OUT LIVES WITH THE PERSON, and stays OUT of the menu above it. Ending a session is

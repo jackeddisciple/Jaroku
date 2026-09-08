@@ -36,6 +36,17 @@ export const MANIFEST = {
      * A second mark would be a second thing to keep in step for no gain.
      */
     sidebarToggle: "PanelLeftCloseIcon",
+    /**
+     * Stepping back and forward through the places this session has been.
+     *
+     * THE SAME TWO MARKS THE EVAL COMPARER USES, under names that say what these ones do. This
+     * table's whole claim is that a call site asks for a key by its ACTION — `prevResponse` is
+     * about walking a turn's variants, and a history control borrowing that key would make one
+     * name mean two unrelated things and a future change to either break the other. Two keys, one
+     * pair of glyphs, and no new mark enters the set.
+     */
+    historyBack: "ChevronLeftIcon",
+    historyForward: "ChevronRightIcon",
   },
 
   // ── §5 Sidebar panel + §6 Workspace panel ─────────────────────────────────

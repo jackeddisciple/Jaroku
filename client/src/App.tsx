@@ -13,6 +13,7 @@ import { firstRunOnScreen, useFirstRunStore } from "./store/firstRunStore.ts";
 import { SplashScreen } from "./components/auth/SplashScreen.tsx";
 import { splashOnScreen, useSplashStore } from "./store/splashStore.ts";
 import { hasHostWindow, setWindowStage } from "./lib/windowStage.ts";
+import { useNavigationHistory } from "./lib/navHistory.ts";
 import { Icon } from "./lib/icons/registry.ts";
 import { ICON } from "./lib/tokens.ts";
 import { McpConfirmModal } from "./components/McpConfirmModal.tsx";
@@ -134,6 +135,10 @@ export function App() {
   // First run. Everything below is the normal app once `phase` is "complete", which it is for
   // every session after the first — see components/onboarding/useOnboarding.ts.
   const { phase, mountSidebar, mountRightPanel } = useOnboarding();
+
+  // The trail the Back and Forward arrows walk. Mounted once, here, because it watches the two
+  // fields that make a place and there must be exactly one recorder — see lib/navHistory.
+  useNavigationHistory();
 
   // The MACHINE's first run, which is a different question from the person's — see §1.3, and the
   // gate below where it is spent. Both selectors read the same store; `firstRunOnScreen` is what

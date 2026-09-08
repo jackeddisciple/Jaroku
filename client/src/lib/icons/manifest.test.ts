@@ -20,10 +20,11 @@ const icons = (await import("@hugeicons/core-free-icons")) as unknown as Record<
 
 console.log("\nthe manifest parses, and it is the size the specification asks for");
 {
-  // 152 SINCE THE SIDEBAR REBUILD, and the one added is `nav.sidebarToggle`. Counted rather than globbed for the
+  // 154 SINCE THE HISTORY ARROWS, which added two KEYS and no mark — they point at the pair the
+  // eval comparer already uses. Counted rather than globbed for the
   // reason the icon release gave: a number in a test is a decision somebody has to change on
   // purpose, and a key added without one is a key nobody argued for.
-  check("152 registry keys", entries.length === 152, `${entries.length}`);
+  check("154 registry keys", entries.length === 154, `${entries.length}`);
   const names = new Set(entries.map((e) => e.export));
   // 104 from icons_integration's appendix, plus D8's 13 — the composer glyphs that had to move
   // here when `@hugeicons/react` came out. See the note at the top of `registry.ts`.
