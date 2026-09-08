@@ -108,6 +108,13 @@ console.log("\nevery token in the specification's tables, transcribed from the P
     "--color-info": "#4B78B8",
     "--color-brand-strong": "#1D1D1B",
     "--color-brand-secondary": "#2B4851",
+    // THE ONE PAIR THIS TABLE HOLDS THAT colour_system.pdf DOES NOT, added deliberately and to be
+    // added to the document. The runs capsule on the sidebar's agent rows was specified with these
+    // exact values; the alternative was two hex literals in a component, which is the failure the
+    // rest of this suite exists to prevent. Filed outside `SEMANTIC` on purpose — §09 reserves
+    // those four for state, and a run count is a quantity. See lib/palette.ts's `RUNS`.
+    "--color-runs-soft": "#FCE7F3",
+    "--color-runs-ink": "#DB2777",
   };
 
   for (const [token, value] of Object.entries(SPEC)) {

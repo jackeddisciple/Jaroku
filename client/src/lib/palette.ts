@@ -136,6 +136,30 @@ export const SEMANTIC = {
 } as const;
 
 /**
+ * THE RUNS CAPSULE, AND IT EXTENDS A LOCKED SPECIFICATION — say so rather than bury it.
+ *
+ * `colour_system.pdf` names four semantic colours and no pink. This pair was asked for explicitly,
+ * with these values, for one thing: the count of runs an agent has, on its sidebar row. It is
+ * DELIBERATELY NOT in `SEMANTIC` above, because §09 says those four "may never be spent on
+ * decoration" — a run count is a quantity, not a state, and filing it beside success/danger would
+ * be the exact dilution that rule protects against.
+ *
+ * IT LIVES HERE RATHER THAN AS A HEX AT THE CALL SITE for the reason this whole module exists:
+ * `test:colour-system` fails any source file that carries a colour of its own, and it is right to.
+ * A palette entry is reviewable and moves in one place; nine hex literals in nine components are
+ * what that suite was written after.
+ *
+ * The PDF is now behind the code by this one pair. Nothing automated can notice that — the suite
+ * checks the four files against each other, not against the document — so it is written down here.
+ */
+export const RUNS = {
+  /** The capsule's ground — Tailwind's pink-100. */
+  soft: "#FCE7F3",
+  /** Its mark and figures — Tailwind's pink-600. */
+  ink: "#DB2777",
+} as const;
+
+/**
  * §08. There is no brand colour, and that is the brand.
  *
  * "No single coloured brand accent; Jaroku remains neutral/off-white." So `brand` has no value —
@@ -195,6 +219,9 @@ export const SPEC_TOKENS: Readonly<Record<string, string>> = {
   "--color-border-subtle": BORDER.subtle,
   "--color-border-default": BORDER.default,
   "--color-border-strong": BORDER.strong,
+
+  "--color-runs-soft": RUNS.soft,
+  "--color-runs-ink": RUNS.ink,
 
   "--color-success": SEMANTIC.success,
   "--color-warning": SEMANTIC.warning,

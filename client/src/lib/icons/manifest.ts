@@ -106,6 +106,11 @@ export const MANIFEST = {
     // failed operation — and this is none of them: it re-runs the collision-avoiding assignment and
     // proposes a different mark, which is a change rather than a repeat.
     shuffleEmoji: "ShuffleIcon",
+    /**
+     * The runs capsule's mark, on an agent's sidebar row. A count of runs is a count of times this
+     * agent has been STARTED, so the mark is a play button rather than a clock or a list.
+     */
+    runsBadge: "PlayCircle02Icon",
   },
 
   // ── §5/§6 Auth and onboarding ─────────────────────────────────────────────

@@ -43,7 +43,7 @@ console.log("\n...and produces exactly the committed set");
   const onlyWritten = [...after.keys()].filter((f) => !before.has(f));
   check("the same file list", onlyCommitted.length === 0 && onlyWritten.length === 0,
     `committed only: ${onlyCommitted.join(", ")} · written only: ${onlyWritten.join(", ")}`);
-  check("120 files — 119 marks and the barrel", after.size === 120, `${after.size}`);
+  check("121 files — 120 marks and the barrel", after.size === 121, `${after.size}`);
 }
 
 console.log("\n...byte for byte");

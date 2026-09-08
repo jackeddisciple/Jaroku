@@ -20,19 +20,19 @@ const icons = (await import("@hugeicons/core-free-icons")) as unknown as Record<
 
 console.log("\nthe manifest parses, and it is the size the specification asks for");
 {
-  // 155 SINCE `nav.newAgent`, which like the history arrows is a KEY and not a mark — it takes the
-  // plain `PlusIcon` three other keys already use. Counted rather than globbed for the
+  // 156 SINCE `agents.runsBadge`. The PR marker beside it needed no key at all — `github.openPullRequest`
+  // already names that action, and a second name for one action is what this table forbids. Counted rather than globbed for the
   // reason the icon release gave: a number in a test is a decision somebody has to change on
   // purpose, and a key added without one is a key nobody argued for.
-  check("155 registry keys", entries.length === 155, `${entries.length}`);
+  check("156 registry keys", entries.length === 156, `${entries.length}`);
   const names = new Set(entries.map((e) => e.export));
   // 104 from icons_integration's appendix, plus D8's 13 — the composer glyphs that had to move
   // here when `@hugeicons/react` came out. See the note at the top of `registry.ts`.
-  // 119 SINCE THE SIDEBAR REBUILD. `PanelLeftCloseIcon` is the one mark it adds — a shuffle rather
+  // 120 SINCE THE RUNS CAPSULE — `PlayCircle02Icon` is the one mark it adds, a shuffle rather
   // than one of D3's three refreshes, because re-running an assignment is a change and not a
   // repeat. Nothing was removed: D5b was considered and declined, so `threadsFilter.running`
   // stays and this release deletes no registry key at all.
-  check("119 distinct marks", names.size === 119, `${names.size}`);
+  check("120 distinct marks", names.size === 120, `${names.size}`);
   check("no key is declared twice", new Set(entries.map((e) => e.key)).size === entries.length);
 }
 

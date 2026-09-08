@@ -85,6 +85,14 @@ export default {
         // §07. Semantic colours — reserved exclusively for meaning, never decoration. §09: "green,
         // amber, red and blue retain functional meaning and are not replaced by the secondary
         // palette."
+        // The runs capsule. Not a semantic colour — see palette.ts's RUNS for why a run
+        // count is a quantity rather than a state, and why it is not filed with the four.
+        // ONE WORD EACH, UNQUOTED. `test:type-scale` reads the palette straight out of this file
+        // to know which `text-*` classes are colours rather than typos, and its census matches
+        // `[a-z]+` at this indent — so a hyphenated `runs-ink` is invisible to it and `text-runs`
+        // reads as a type step that does not exist.
+        runssoft: "#FCE7F3", // --color-runs-soft
+        runsink: "#DB2777", // --color-runs-ink
         ok: "#3B8F5A", // --color-success
         err: "#C94A43", // --color-danger
         run: "#B77A1B", // --color-warning — in this product amber means IN FLIGHT

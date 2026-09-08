@@ -83,6 +83,9 @@
     --color-border-strong: #c9c9c4;
 
     /* §07 Semantic Colours */
+    /* The runs capsule — a quantity, not a state. See lib/palette.ts's RUNS. */
+    --color-runs-soft: #fce7f3;
+    --color-runs-ink: #db2777;
     --color-success: #3b8f5a;
     --color-warning: #b77a1b;
     --color-danger: #c94a43;
