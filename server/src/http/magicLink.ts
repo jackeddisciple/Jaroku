@@ -209,6 +209,14 @@ function requestHandler(deps: MagicLinkDeps): Handler {
     const over =
       perEmail.count > MAGIC_LINK_LIMITS.perEmail || (perIp !== null && perIp.count > MAGIC_LINK_LIMITS.perIp);
     if (over) {
+      // WHICH LIMIT REFUSED THIS, decided once. It was spelled three times — twice as the same
+      // comparison and once as a sentence that assumed the answer — and the sentence was the copy
+      // that disagreed: every refusal said "for this address", including the ones where the address
+      // had never been seen before and the origin was what had run out. That message names the one
+      // thing the person can change, so it sends them to change it, and a second address refuses
+      // exactly as fast. On a shared office address or behind NAT the ten attempts are not even
+      // theirs, and everybody after the tenth is told the problem is their own mailbox.
+      const scope: "email" | "ip" = perEmail.count > MAGIC_LINK_LIMITS.perEmail ? "email" : "ip";
       // §7's rule 5 names this as one of the two highest-signal audit rows, and says not to sample it.
       await deps.audit("auth.rate_limited", {
         requestId: req.requestId,
@@ -216,11 +224,22 @@ function requestHandler(deps: MagicLinkDeps): Handler {
         // THE ADDRESS IS NOT IN THE METADATA, only its digest. This row is read by whoever is
         // investigating abuse, and an audit log full of the addresses somebody probed is a list of
         // people's email addresses assembled by an attacker and stored by us.
-        metadata: { route: "magic_link", scope: perEmail.count > MAGIC_LINK_LIMITS.perEmail ? "email" : "ip" },
+        metadata: { route: "magic_link", scope },
       });
-      const window = perEmail.count > MAGIC_LINK_LIMITS.perEmail ? perEmail : perIp!;
+      const window = scope === "email" ? perEmail : perIp!;
       const wait = Math.max(1, Math.ceil((window.windowStart + MAGIC_LINK_LIMITS.windowS * 1000 - Date.now()) / 1000));
-      throw tooMany("too many sign-in links have been requested for this address — try again later", wait);
+      // "from here" is the spelling `/v1/auth/oauth/google/start` already uses for the same limit on
+      // the same origin, so the two sign-in paths refuse a busy machine in the same words.
+      //
+      // IT ALSO SAYS STRICTLY LESS THAN IT USED TO. An address-scoped refusal is a fact about what
+      // has been asked for that address recently — which somebody else may have asked for — so the
+      // fewer requests that answer it, the smaller that signal is.
+      throw tooMany(
+        scope === "email"
+          ? "too many sign-in links have been requested for this address — try again later"
+          : "too many sign-in links have been requested from here — try again later",
+        wait,
+      );
     }
 
     // §8.4: a blocked address is not mailed, AND THE CALLER IS NOT TOLD. Telling them would answer

@@ -244,6 +244,13 @@ console.log("\nthe two rate limits, both of which apply");
     !JSON.stringify(audited.filter((a) => a.action === "auth.rate_limited")).includes(email),
     "...without the address in it, so the log is not a list of addresses somebody probed",
   );
+  // AND THE SENTENCE NAMES THE LIMIT THAT REFUSED IT. The audit row's `scope` was asserted here and
+  // in the per-IP section below, and the message was asserted in neither — which is exactly how a
+  // refusal that named the wrong subject shipped past a suite that already knew the right one.
+  check(
+    /for this address/.test(refused.body),
+    "...and the refusal says it is the ADDRESS that has run out",
+  );
 }
 
 await forgetThisMachine();
@@ -327,6 +334,17 @@ console.log("\nthe per-IP limit, which is the other half of §7's rule 3");
   check(
     audited.some((a) => a.action === "auth.rate_limited" && a.metadata.scope === "ip"),
     "...and the row says which of the two limits it was",
+  );
+  // THE HALF THE ROW GOT RIGHT AND THE MESSAGE DID NOT. Every address in this loop is brand new and
+  // under its own limit; what has run out is the machine. The refusal said "for this address"
+  // anyway — which names the one thing the person can change, so they change it, and the next
+  // address refuses just as fast. Behind NAT or on an office egress the ten attempts are not even
+  // theirs, and everybody after the tenth is told the problem is their own mailbox.
+  const overIp = await ask(`enumerate-final-${randomUUID()}@example.com`);
+  check(overIp.status === 429, "a further address from this machine is still refused");
+  check(
+    /from here/.test(overIp.body) && !/for this address/.test(overIp.body),
+    "...and the refusal blames the machine rather than an address it has never seen",
   );
 }
 
