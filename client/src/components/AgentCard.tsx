@@ -22,12 +22,11 @@ import { Chip, DateChip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { AgentTagRow } from "./AgentTagRow.tsx";
 import { AgentSparkline } from "./AgentSparkline.tsx";
-import { ArchiveIcon, ArchiveRestoreIcon } from "./agentIcons.tsx";
 import { StatusGlyph, GLYPH_SIZE } from "./StatusGlyph.tsx";
 import { AVATAR_SIZE, GlossAvatar } from "./GlossAvatar.tsx";
 import { agentPhase } from "../lib/domainPhase.ts";
 import { stateBorder } from "../lib/stateBorder.ts";
-import { AlertTriangleIcon, GitForkIcon, PencilIcon } from "./panelIcons.tsx";
+import { AlertTriangleIcon, GitForkIcon } from "./panelIcons.tsx";
 import { agentContextMarkdown } from "../lib/agentContext.ts";
 import { showsCategory } from "../lib/agentCategories.ts";
 import { absTime, fmtCost } from "../lib/format.ts";
@@ -107,17 +106,17 @@ function Overflow({
           <div className="fixed inset-0 z-30" aria-hidden onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
           <div className="absolute right-0 top-full z-30 mt-1 w-52 animate-slide-in rounded-card border border-edge bg-elevated p-1 shadow-floating motion-reduce:animate-none">
             {archived
-              ? item("Restore", ArchiveRestoreIcon, onRestore)
+              ? item("Restore", Icon.agents.restore, onRestore)
               : [
                   item("Fork", GitForkIcon, onFork),
-                  item("Rename", PencilIcon, onRename),
+                  item("Rename", Icon.agentDetail.rename, onRename),
                   item("Export current version", Icon.agentDetail.export, onExport),
                   // ARCHIVE, AND THERE IS NO DELETE HERE. §5.2 lists both and this product has no
                   // delete path for an agent, deliberately: its versions, runs, traces and costs are
                   // the record every past comparison points at. The confirmation §7.5 asks for —
                   // naming the creator, as the collaborative-workspace safety net — is on this,
                   // because this is the destructive-looking act that actually exists.
-                  item("Archive", ArchiveIcon, onArchive, true),
+                  item("Archive", Icon.threads.archive, onArchive, true),
                 ]}
           </div>
         </>

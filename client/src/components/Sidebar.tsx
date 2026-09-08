@@ -14,7 +14,7 @@ import { RUN_PHASE } from "../lib/domainPhase.ts";
 import { PHASE_WORD, type Phase } from "../lib/statusPhase.ts";
 import { selectAgent, selectRun } from "../lib/selection.ts";
 import {
-  sendArchiveAgent, sendLoadHistory, sendLoadRun, sendRenameAgent, sendRestoreAgent, sendRun, signOut,
+  sendLoadHistory, sendLoadRun, sendOpenGithubPr, sendRun, signOut,
 } from "../lib/socket.ts";
 import { ICON, SURFACE } from "../lib/tokens.ts";
 import { quietBtn, secondaryBtn } from "./buttons.ts";
@@ -462,71 +462,6 @@ function NavList() {
 const RUNS_AT_FIRST = 5;
 
 /**
- * The per-agent overflow: rename, archive, restore.
- *
- * REVEALED ON HOVER AND ON FOCUS. `group-hover` alone is a control the keyboard can reach but
- * never see, so the same opacity is tied to `focus-within` — the row it lives in is the group.
- */
-function AgentActions({ agent, onRename }: { agent: AgentSummary; onRename: () => void }) {
-  const [confirming, setConfirming] = useState(false);
-  const archived = Boolean(agent.archived_at);
-
-  if (archived) {
-    // A GLYPH, LIKE THE OTHER TWO ACTIONS ON THIS ROW. It was the word `Restore` while a live row
-    // ended in an icon-only pencil and X — so the same list switched between a text affordance and
-    // an icon affordance depending on row state, which is visible the moment an archived row sits
-    // among live ones.
-    return (
-      <button
-        onClick={() => sendRestoreAgent(agent.agent_id)}
-        title="Bring this agent back"
-        aria-label="Restore this agent"
-        className="shrink-0 rounded-control p-1 text-muted transition-colors hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink"
-      >
-        <Icon.agents.restore size={ICON.sm} />
-      </button>
-    );
-  }
-
-  return (
-    <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-      <button
-        onClick={onRename}
-        title="Rename (double-click the row)"
-        aria-label="Rename this agent"
-        className="rounded-control p-1 text-faint transition-colors hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink"
-      >
-        <Icon.agentDetail.rename size={ICON.sm} />
-      </button>
-      {confirming ? (
-        <button
-          autoFocus
-          onBlur={() => setConfirming(false)}
-          onClick={() => {
-            sendArchiveAgent(agent.agent_id);
-            setConfirming(false);
-          }}
-          className="rounded-control border border-sidebar-border px-1.5 py-0.5 text-tiny text-ink"
-        >
-          Archive?
-        </button>
-      ) : (
-        <button
-          onClick={() => setConfirming(true)}
-          // The tooltip is the promise. Archiving is reversible and destroys nothing, and somebody
-          // reaching for a control on the product's central object is entitled to know that before
-          // they press it rather than after.
-          title="Archive — nothing is deleted; its versions, runs and threads stay"
-          className="rounded-control p-1 text-faint transition-colors hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink"
-        >
-          <Icon.threads.archive size={ICON.sm} />
-        </button>
-      )}
-    </span>
-  );
-}
-
-/**
  * An agent, and its runs beneath it when you open it.
  *
  * THE TREE IS THE POINT, and it replaces two flat lists that were not related to each other on
@@ -541,16 +476,22 @@ function AgentActions({ agent, onRename }: { agent: AgentSummary; onRename: () =
 function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[] }) {
   const [open, setOpen] = useState(false);
   const [all, setAll] = useState(false);
-  const [renaming, setRenaming] = useState(false);
-  const [draft, setDraft] = useState(agent.name);
   const activeAgentId = useBuildStore((s) => s.activeAgentId);
   const selected = activeAgentId === agent.agent_id;
   const hasRuns = runs.length > 0;
   const shown = all ? runs : runs.slice(0, RUNS_AT_FIRST);
-  // `runs` is newest-first, so the head is when this agent last did anything.
+  // `runs` is newest-first, so the head is when this agent last did anything — and when it has
+  // never run, when it was made. THE ROW SHOWED NOTHING for a new agent, which is the one moment
+  // the column is most likely to be looked at: the agent you just described, with no time beside
+  // it. Two different facts, so the label below says which.
   const lastRunAt = runs[0]?.started_at ?? null;
+  const stamp = lastRunAt ?? agent.created_at ?? null;
+  const stampWord = lastRunAt ? "last run" : "created";
   // Null until this agent has a pull request open — see the marker below.
   const pr = useGithubStore((st) => st.views[agent.agent_id]?.pr ?? null);
+  // Whether this agent has a repository behind it at all — which decides whether the control below
+  // opens a pull request or opens the panel where one becomes possible.
+  const linked = useGithubStore((st) => Boolean(st.views[agent.agent_id]?.link));
   // WHETHER THE COUNT BESIDE THE NAME IS A TOTAL OR A WINDOW. `listRuns` takes a cap, so until the
   // server says the history is complete this agent may have runs nobody has fetched — and a badge
   // reading `5 Runs` on an agent with forty-seven is the wrong-count failure §13 names: "A missing
@@ -558,19 +499,16 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
   // sentence on hover stops it being a claim about the total.
   const historyComplete = useTraceStore((st) => st.historyComplete);
 
-  const commit = (): void => {
-    const next = draft.trim();
-    // SENT EVEN WHEN IT MATCHES the name already shown, because committing the editor is a CHOICE:
-    // the server's rename also sets the custom flag that stops the next disk sync overwriting it, so
-    // "I want this name" and "this name happens to be what the file says" are different states.
-    if (next) sendRenameAgent(agent.agent_id, next);
-    setRenaming(false);
-  };
+
 
   return (
     <>
       <div
-        className="group flex h-7 w-full items-center gap-1 rounded-control pr-1 transition-colors duration-fast hover:bg-sidebar-hover"
+        // ELEVEN, NOT SEVEN. This row carries two lines now — a name over a category and a time —
+        // and 28px was the height of the single-line row it replaced: the two lines met in the
+        // middle with nothing between them and nothing above or below. 44px is the pair plus the
+        // air that makes them read as one row rather than as two cramped ones.
+        className="group flex h-11 w-full items-center gap-1 rounded-control pr-1 transition-colors duration-fast hover:bg-sidebar-hover"
       >
         {/* THE TWISTY AND THE NAME ARE TWO CONTROLS, because they do two things: one opens the
             agent's runs, the other selects the agent into the three panes. Nesting a button inside
@@ -589,82 +527,82 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
           // The twisty's width, kept, so names line up whether or not an agent has ever run.
           <span className="h-6 w-6 shrink-0" aria-hidden />
         )}
-        {renaming ? (
-          <input
-            autoFocus
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") commit();
-              // ESCAPE ABANDONS, and puts the draft back to the name on screen — otherwise
-              // reopening the editor starts from the edit somebody just decided against.
-              if (e.key === "Escape") { setDraft(agent.name); setRenaming(false); }
-            }}
-            className="min-w-0 flex-1 rounded-input bg-sidebar-active px-1.5 py-0.5 text-caption text-ink outline-none focus-visible:shadow-focusring"
-          />
-        ) : (
-          <>
-          <button
-            onClick={() => selectAgent(agent.agent_id)}
-            title={identityTitle(agent.name, agent.category)}
-            className="flex min-w-0 flex-1 items-center gap-2 py-1 text-left focus-visible:outline-none focus-visible:shadow-focusring"
-          >
-            <AgentEmoji emoji={agent.emoji} size={EMOJI_SIZE.sidebar} />
-            {/* TWO LINES: who it is, then what it is and when it last ran. The category and the
-                timestamp are both qualifiers on the name, so they share the second line and the
-                name gets the first to itself — at 13px semibold it is the thing the eye lands on
-                when scanning a column of agents. */}
-            <span className="flex min-w-0 flex-1 flex-col leading-tight">
-              <Truncate className={`text-label ${selected ? "text-accent" : "text-ink"}`} title={agent.name}>
-                {agent.name}
-              </Truncate>
-              <span className="flex min-w-0 items-center gap-1.5 text-tiny text-faint">
-                {agent.category && <Truncate className="min-w-0" title={agent.category}>{agent.category}</Truncate>}
-                {agent.category && lastRunAt && <span aria-hidden>·</span>}
-                {lastRunAt && (
-                  <span className="shrink-0 tabular-nums" title={absTime(lastRunAt)}>{relTime(lastRunAt)}</span>
-                )}
-              </span>
+        <button
+          onClick={() => selectAgent(agent.agent_id)}
+          title={identityTitle(agent.name, agent.category)}
+          className="flex min-w-0 flex-1 items-center gap-2 py-1 text-left focus-visible:outline-none focus-visible:shadow-focusring"
+        >
+          <AgentEmoji emoji={agent.emoji} size={EMOJI_SIZE.sidebar} />
+          {/* TWO LINES: who it is, then what it is and when it last ran. The category and the
+              timestamp are both qualifiers on the name, so they share the second line and the
+              name gets the first to itself — at 13px semibold it is the thing the eye lands on
+              when scanning a column of agents. */}
+          <span className="flex min-w-0 flex-1 flex-col leading-tight">
+            <Truncate className={`text-label ${selected ? "text-accent" : "text-ink"}`} title={agent.name}>
+              {agent.name}
+            </Truncate>
+            <span className="flex min-w-0 items-center gap-1.5 text-tiny text-faint">
+              {agent.category && <Truncate className="min-w-0" title={agent.category}>{agent.category}</Truncate>}
+              {agent.category && stamp && <span aria-hidden>·</span>}
+              {stamp && (
+                <span className="shrink-0 tabular-nums" title={`${stampWord} ${absTime(stamp)}`}>
+                  {relTime(stamp)}
+                </span>
+              )}
             </span>
-          </button>
-          {/* THE PULL REQUEST, ONLY WHEN THERE IS ONE. `pr` is null until the agent has one open,
-              and an indicator that is always there says nothing. It sits beside the count because
-              both are facts about the agent rather than actions on it — and it is the one control
-              on this row that leaves the application, so it says where it goes. */}
-          {pr && (
-            <a
-              href={pr.url}
-              target="_blank"
-              rel="noreferrer noopener"
-              onClick={(e) => e.stopPropagation()}
-              title={`Pull request #${pr.number} — ${pr.title}`}
-              aria-label={`Open pull request #${pr.number} on GitHub`}
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-ok transition-colors hover:bg-sidebar-hover focus-visible:outline-none focus-visible:shadow-focusring"
-            >
-              <Icon.github.openPullRequest size={ICON.sm} />
-            </a>
-          )}
-          {/* THE RUN COUNT, ALWAYS — `0 Runs` included. A badge that disappears at zero makes the
-              one state somebody most wants to see at a glance, "this has never run", the only
-              state with nothing to read. */}
-          <span
-            title={
-              historyComplete
-                ? `${runs.length} run${runs.length === 1 ? "" : "s"}`
-                : `${runs.length} run${runs.length === 1 ? "" : "s"} loaded — older runs have not been fetched`
-            }
-            className="flex shrink-0 items-center gap-1 rounded-full bg-runssoft px-2.5 py-1 text-tiny font-medium text-runsink"
-          >
-            <Icon.agents.runsBadge size={ICON.xs} />
-            <span className="tabular-nums">{runs.length}</span>
-            <span>Runs</span>
           </span>
-          </>
-        )}
-        {!renaming && (
-          <AgentActions agent={agent} onRename={() => { setDraft(agent.name); setRenaming(true); }} />
-        )}
+        </button>
+        {/* THE PULL REQUEST, AND IT IS ON EVERY ROW because it is a control rather than a badge.
+            "Only when there is one" made it invisible on exactly the agents somebody would want to
+            open one FOR — and an affordance you cannot find until after you have used it is not an
+            affordance. It has a real action in all three states, so it is never a dead control:
+
+              a PR is open        green, and it opens that PR on GitHub
+              linked, no PR       muted, and it opens one — `sendOpenGithubPr`
+              not linked yet      muted, and it opens the GitHub panel, where linking happens
+
+            Green ONLY for the first, because green here means "there is something to look at"
+            rather than "this worked" — the run capsules own that meaning two rows down. */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (pr) { window.open(pr.url, "_blank", "noopener,noreferrer"); return; }
+            if (linked) { sendOpenGithubPr(agent.agent_id); return; }
+            selectAgent(agent.agent_id);
+            useUiStore.getState().setRightTab("github");
+          }}
+          title={
+            pr ? `Pull request #${pr.number} — ${pr.title}`
+              : linked ? "Open a pull request for this agent"
+              : "Connect this agent to a repository"
+          }
+          aria-label={
+            pr ? `Open pull request #${pr.number} on GitHub`
+              : linked ? "Open a pull request for this agent"
+              : "Connect this agent to a repository"
+          }
+          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-control transition-colors hover:bg-sidebar-hover focus-visible:outline-none focus-visible:shadow-focusring ${
+            pr ? "text-ok" : "text-faint hover:text-ink"
+          }`}
+        >
+          <Icon.github.openPullRequest size={ICON.sm} />
+        </button>
+        {/* THE RUN COUNT, ALWAYS — `0 Runs` included. A badge that disappears at zero makes the
+            one state somebody most wants to see at a glance, "this has never run", the only
+            state with nothing to read. */}
+        <span
+          title={
+            historyComplete
+              ? `${runs.length} run${runs.length === 1 ? "" : "s"}`
+              : `${runs.length} run${runs.length === 1 ? "" : "s"} loaded — older runs have not been fetched`
+          }
+          className="flex shrink-0 items-center gap-1 rounded-full bg-runssoft px-2.5 py-1 text-tiny font-medium text-runsink"
+        >
+          <Icon.agents.runsBadge size={ICON.xs} />
+          {/* THE MARK AND THE FIGURE, AND NOTHING ELSE. `Runs` was a third element on a row that is
+              already two lines of words, and the play glyph beside a number says what it counts. */}
+          <span className="tabular-nums">{runs.length}</span>
+        </span>
       </div>
 
       {open && hasRuns && (
