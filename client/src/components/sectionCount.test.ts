@@ -90,12 +90,21 @@ console.log("\nevery count is a total");
     ["components/AccessInvites.tsx", "invites.length"],
     ["components/DatasetBuilder.tsx", "datasets.length"],
     ["components/GitHubPanel.tsx", "view.unpushed.length"],
-    // THE SIDEBAR'S RUNS LIST IS THE ONE THAT IS A WINDOW, and it is in this table rather than in
-    // the one below because it can say both: `listRuns` takes a cap and the column has a "load
-    // older" control, so the total is unknown until the history is complete — at which point the
-    // length IS the total. That is I6 doing exactly what it exists for, on a real list.
-    ["components/Sidebar.tsx", "historyComplete ? runList.length : null"],
   ];
+  // THE SIDEBAR'S RUNS COUNT IS NO LONGER A SECTION HEADER — it moved onto each agent's row as a
+  // capsule when runs stopped being a flat list and became a tree under the agent that produced
+  // them. The REQUIREMENT did not move: that list is still a window (`listRuns` takes a cap, and
+  // the column still has a "load older" control), so a bare figure would be a claim about a total
+  // nobody has. A capsule has no `count` prop to pass null to, so the figure stays and the sentence
+  // on hover carries the qualification — checked here rather than dropped, because dropping it is
+  // how the wrong count comes back.
+  {
+    const text = read("src/components/Sidebar.tsx");
+    check("the sidebar's runs capsule says when its figure is only what is loaded",
+      /historyComplete/.test(text) && /older runs have not been fetched/.test(text),
+      "the capsule claims a total it cannot know");
+  }
+
   for (const [path, source] of COUNTED) {
     const text = read(`src/${path}`);
     check(`${path} counts ${source}`,

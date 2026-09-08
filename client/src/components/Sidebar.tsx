@@ -9,6 +9,9 @@ import { useBuildStore } from "../store/buildStore.ts";
 import type { AgentSummary, RunSummary, RunStatus } from "../types.ts";
 import { absTime, relTime } from "../lib/format.ts";
 import { agentStatus } from "../lib/agentStatus.ts";
+import { StatusGlyph } from "./StatusGlyph.tsx";
+import { RUN_PHASE } from "../lib/domainPhase.ts";
+import { PHASE_WORD, type Phase } from "../lib/statusPhase.ts";
 import { selectAgent, selectRun } from "../lib/selection.ts";
 import {
   sendArchiveAgent, sendLoadHistory, sendLoadRun, sendRenameAgent, sendRestoreAgent, sendRun, signOut,
@@ -34,7 +37,7 @@ import { goBack, goForward } from "../lib/navHistory.ts";
 import { canGoBack, canGoForward, useHistoryStore } from "../store/historyStore.ts";
 import { hasHostWindow } from "../lib/windowStage.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
-import { CheckIcon, LoaderIcon, SearchIcon, SparklesIcon, XIcon } from "./panelIcons.tsx";
+import { SearchIcon, SparklesIcon } from "./panelIcons.tsx";
 
 
 /**
@@ -100,25 +103,44 @@ function errorSnippet(error: string): string {
   return clipped;
 }
 
-/** Green for a run that finished, red for one that did not. Amber is IN FLIGHT and stays amber. */
+/**
+ * A run's outcome as a capsule: a coloured ground, the SHARED glyph, and the phase's own word.
+ *
+ * THE MARK IS `StatusGlyph` AND THE WORD IS `PHASE_WORD`, NOT A CHECK AND A CROSS PICKED HERE.
+ * This product draws one status vocabulary across nine surfaces — the Cockpit, Threads, Deploy,
+ * MCP, evals, the agent cards — and `test:status-glyph` holds every one of them to it, in both
+ * directions: the surfaces that must draw it and the four that must not. A tick chosen locally
+ * would have been a tenth vocabulary that agreed with the other nine today and drifted the first
+ * time `done` changed shape.
+ *
+ * WHAT IS NEW HERE IS THE CAPSULE, not the glyph: a soft ground and the word beside the mark, so a
+ * run's outcome reads at a glance in a dense list. `RUN_PHASE` maps the four run statuses onto the
+ * four phases, so `paused` gets amber and its own word for free rather than falling into an
+ * `ok ? green : red` that would call it a failure.
+ */
+const PHASE_TONE: Record<Phase, string> = {
+  pending: "bg-sidebar-active text-muted",
+  ready: "bg-sidebar-active text-muted",
+  // The only phase permitted amber, here as everywhere else.
+  active: "bg-run/10 text-run",
+  waiting: "bg-sidebar-active text-muted",
+  // GREEN FOR DONE IS THIS CAPSULE'S OWN CHOICE, and worth naming: `PHASE_COLOUR` draws a finished
+  // thing NEUTRAL across the product, because "it worked" is the ordinary case and a wall of green
+  // ticks is a wall of noise. On one row inside a list of runs the outcome IS the content, so the
+  // ground carries it. The GLYPH is still the shared one; only the capsule around it is new.
+  done: "bg-ok/10 text-ok",
+  failed: "bg-err/10 text-err",
+  halted: "bg-sidebar-active text-muted",
+};
+
 function RunStatusCapsule({ status }: { status: RunStatus }) {
-  if (status === "running") {
-    return (
-      <span className="flex shrink-0 items-center gap-1 rounded-full bg-run/10 px-2 py-0.5 text-tiny font-medium text-run">
-        <LoaderIcon size={ICON.xs} className="animate-spin motion-reduce:animate-none" />
-        running
-      </span>
-    );
-  }
-  const ok = status === "completed";
+  const phase = RUN_PHASE[status];
   return (
     <span
-      className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-tiny font-medium ${
-        ok ? "bg-ok/10 text-ok" : "bg-err/10 text-err"
-      }`}
+      className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-tiny font-medium ${PHASE_TONE[phase]}`}
     >
-      {ok ? <CheckIcon size={ICON.xs} /> : <XIcon size={ICON.xs} />}
-      {ok ? "ok" : "failed"}
+      <StatusGlyph phase={phase} size={ICON.xs} />
+      {PHASE_WORD[phase]}
     </span>
   );
 }
@@ -529,6 +551,12 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
   const lastRunAt = runs[0]?.started_at ?? null;
   // Null until this agent has a pull request open — see the marker below.
   const pr = useGithubStore((st) => st.views[agent.agent_id]?.pr ?? null);
+  // WHETHER THE COUNT BESIDE THE NAME IS A TOTAL OR A WINDOW. `listRuns` takes a cap, so until the
+  // server says the history is complete this agent may have runs nobody has fetched — and a badge
+  // reading `5 Runs` on an agent with forty-seven is the wrong-count failure §13 names: "A missing
+  // count is fine. A wrong count is not." The figure stays (it is what the row is for) and the
+  // sentence on hover stops it being a claim about the total.
+  const historyComplete = useTraceStore((st) => st.historyComplete);
 
   const commit = (): void => {
     const next = draft.trim();
@@ -621,7 +649,11 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
               one state somebody most wants to see at a glance, "this has never run", the only
               state with nothing to read. */}
           <span
-            title={`${runs.length} run${runs.length === 1 ? "" : "s"}`}
+            title={
+              historyComplete
+                ? `${runs.length} run${runs.length === 1 ? "" : "s"}`
+                : `${runs.length} run${runs.length === 1 ? "" : "s"} loaded — older runs have not been fetched`
+            }
             className="flex shrink-0 items-center gap-1 rounded-full bg-runssoft px-2.5 py-1 text-tiny font-medium text-runsink"
           >
             <Icon.agents.runsBadge size={ICON.xs} />
