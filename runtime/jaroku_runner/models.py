@@ -30,6 +30,39 @@ from .fake import build_dry_run_model
 # cost of the feature with none of the benefit. An unset or unrecognised value means the provider's
 # own default, so a run started before this existed is byte-identical to the one that shipped.
 _THINKING_BUDGETS = {"medium": 4_000, "high": 12_000, "xhigh": 24_000}
+
+# WHICH MODELS STILL TAKE A FIXED THINKING BUDGET, and it is a closed, shrinking set.
+#
+# `{"type": "enabled", "budget_tokens": N}` was the whole of extended thinking until the 4.6
+# generation. It is DEPRECATED on Opus 4.6 / Sonnet 4.6 and REJECTED WITH A 400 on everything
+# newer — Opus 4.7, 4.8 and 5, Sonnet 5, Fable 5 — which is the bug this table exists for: the
+# runtime sent the old shape to every Anthropic model, so every run on a current model died on
+# `"thinking.type.enabled" is not supported for this model`, before a single token was generated.
+#
+# THE DEFAULT IS THE MODERN SHAPE AND THE EXCEPTIONS ARE NAMED, which is the direction that fails
+# safe. A model released after this line is written gets `adaptive` and works; the alternative — an
+# allowlist of adaptive models — would greet every new release with the 400 above.
+#
+# EFFORT IS NOT SENT TO THESE, either: `output_config.effort` errors on Haiku 4.5 and Sonnet 4.5.
+# The two halves are one decision, so they are made in one place.
+_FIXED_BUDGET_MODELS = frozenset({
+    "claude-haiku-4-5",
+    "claude-sonnet-4-5",
+    "claude-opus-4-5",
+    "claude-3-5-haiku-latest",
+    "claude-3-5-sonnet-latest",
+})
+
+# `output_config.effort` takes the level as a NAME, so the server's four levels pass straight
+# through. `low` is a real level here rather than "off": thinking is on by default on Opus 5, and
+# `{"type": "disabled"}` is both refused above effort `high` and documented to make the model write
+# tool calls into its visible text. Lowering effort is the supported way to spend less.
+_ADAPTIVE_EFFORT = {"low": "low", "medium": "medium", "high": "high", "xhigh": "xhigh"}
+
+# ROOM FOR THE ANSWER PLUS THE THINKING IT IS SPENT OUT OF. The client's own default is small, and
+# a thinking block drawn from the same allowance is how a response gets truncated mid-sentence with
+# no error attached — the failure the fixed-budget branch below already doubled `max_tokens` for.
+_ADAPTIVE_MAX_TOKENS = 16_000
 # OpenAI takes a NAME rather than a budget, and takes three of the four — xhigh clamps to high,
 # which is the same clamp effort.ts applies for the same reason.
 _OPENAI_EFFORT = {"low": "low", "medium": "medium", "high": "high", "xhigh": "high"}
@@ -67,21 +100,42 @@ def build_model(provider: str, model_name: str, tools: Sequence[Any]) -> tuple[A
     if provider == "anthropic":
         from langchain_anthropic import ChatAnthropic
 
-        # `max_tokens` HAS TO RISE WITH THE BUDGET. A thinking block is spent out of the output
-        # allowance, so a 12k budget under the client's default ceiling is a response the provider
-        # truncates — which reads as the model giving up mid-sentence, with no error attached.
-        budget = _THINKING_BUDGETS.get(level or "", 0)
-        if budget:
+        if model_name in _FIXED_BUDGET_MODELS:
+            # `max_tokens` HAS TO RISE WITH THE BUDGET. A thinking block is spent out of the output
+            # allowance, so a 12k budget under the client's default ceiling is a response the
+            # provider truncates — which reads as the model giving up mid-sentence, with no error
+            # attached. No `effort` on this path: these models reject it.
+            budget = _THINKING_BUDGETS.get(level or "", 0)
+            if budget:
+                return (
+                    ChatAnthropic(
+                        model=model_name,
+                        max_tokens=budget * 2,
+                        thinking={"type": "enabled", "budget_tokens": budget},
+                    ),
+                    provider,
+                    model_name,
+                )
+            return ChatAnthropic(model=model_name), provider, model_name
+
+        # THE MODERN SHAPE. Thinking is adaptive — the model decides how much to spend — and the
+        # level is expressed as effort rather than as a token count.
+        effort = _ADAPTIVE_EFFORT.get(level or "")
+        if effort:
             return (
                 ChatAnthropic(
                     model=model_name,
-                    max_tokens=budget * 2,
-                    thinking={"type": "enabled", "budget_tokens": budget},
+                    max_tokens=_ADAPTIVE_MAX_TOKENS,
+                    thinking={"type": "adaptive"},
+                    effort=effort,
                 ),
                 provider,
                 model_name,
             )
-        return ChatAnthropic(model=model_name), provider, model_name
+        # No level asked for: the provider's own defaults, which on a current model already means
+        # adaptive thinking at the default effort. Byte-identical to a run started before any of
+        # this existed.
+        return ChatAnthropic(model=model_name, max_tokens=_ADAPTIVE_MAX_TOKENS), provider, model_name
 
     if provider == "openai":
         from langchain_openai import ChatOpenAI
