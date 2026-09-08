@@ -75,7 +75,7 @@ console.log("\nand the two labels that pointed here still point here");
 {
   // The fix has to leave them true rather than making them true by deleting them.
   check("the sidebar still sends people to the palette to find an agent",
-    /Search agents — \$\{keyHint\("⌘K"\)\} opens the palette/.test(SIDEBAR), "the sidebar tooltip changed");
+    /Search agents and commands — \$\{keyHint\("⌘K"\)\} opens the palette/.test(SIDEBAR), "the sidebar tooltip changed");
   check("the placeholder still offers a search", PALETTE.includes("Type a command or search…"));
   // And the dedicated mode is untouched: it is still reachable, and it is still the way to browse
   // agents rather than to find one.

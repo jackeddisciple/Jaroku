@@ -276,6 +276,16 @@ interface UiState {
    */
   openCockpitForAgent: (agentId: string | null) => void;
   takeCockpitAgentIntent: () => string | null;
+  /**
+   * Whether the sidebar is hidden. Chrome, not navigation: the destination stays selected, the
+   * three panes keep their sizes, and showing it again is one control — so this is the one piece of
+   * layout state that is NOT persisted. A window that reopened with its sidebar gone would look
+   * broken to somebody who collapsed it once a week ago, and the cost of being wrong in the other
+   * direction is a single click.
+   */
+  sidebarHidden: boolean;
+  toggleSidebar: () => void;
+
   navView: NavDestination | null;
   openNav: (destination: NavDestination) => void;
   closeNav: () => void;
@@ -493,6 +503,9 @@ const onboarding = DEFAULT_PROGRESS;
 export const useUiStore = create<UiState>((set) => ({
   paletteOpen: false,
   setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
+
+  sidebarHidden: false,
+  toggleSidebar: () => set((st) => ({ sidebarHidden: !st.sidebarHidden })),
 
   navView: null,
   navSection: null,

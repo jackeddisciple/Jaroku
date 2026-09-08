@@ -20,18 +20,18 @@ const icons = (await import("@hugeicons/core-free-icons")) as unknown as Record<
 
 console.log("\nthe manifest parses, and it is the size the specification asks for");
 {
-  // 151 SINCE §8.5, and the one added is `agents.shuffleEmoji`. Counted rather than globbed for the
+  // 152 SINCE THE SIDEBAR REBUILD, and the one added is `nav.sidebarToggle`. Counted rather than globbed for the
   // reason the icon release gave: a number in a test is a decision somebody has to change on
   // purpose, and a key added without one is a key nobody argued for.
-  check("151 registry keys", entries.length === 151, `${entries.length}`);
+  check("152 registry keys", entries.length === 152, `${entries.length}`);
   const names = new Set(entries.map((e) => e.export));
   // 104 from icons_integration's appendix, plus D8's 13 — the composer glyphs that had to move
   // here when `@hugeicons/react` came out. See the note at the top of `registry.ts`.
-  // 118 SINCE §8.5. The picker's shuffle is the one mark this release adds — a shuffle rather
+  // 119 SINCE THE SIDEBAR REBUILD. `PanelLeftCloseIcon` is the one mark it adds — a shuffle rather
   // than one of D3's three refreshes, because re-running an assignment is a change and not a
   // repeat. Nothing was removed: D5b was considered and declined, so `threadsFilter.running`
   // stays and this release deletes no registry key at all.
-  check("118 distinct marks", names.size === 118, `${names.size}`);
+  check("119 distinct marks", names.size === 119, `${names.size}`);
   check("no key is declared twice", new Set(entries.map((e) => e.key)).size === entries.length);
 }
 

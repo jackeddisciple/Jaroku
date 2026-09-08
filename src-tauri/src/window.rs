@@ -51,12 +51,23 @@ const APP_MIN: (f64, f64) = (1024.0, 680.0);
 pub struct AppSize(Mutex<Option<LogicalSize<f64>>>);
 
 pub fn open(app: &AppHandle, ws_url: &str) -> Result<(), Box<dyn std::error::Error>> {
-    WebviewWindowBuilder::new(app, MAIN, WebviewUrl::default())
+    let builder = WebviewWindowBuilder::new(app, MAIN, WebviewUrl::default())
         .title("Jaroku")
         .inner_size(APP.0, APP.1)
         .min_inner_size(APP_MIN.0, APP_MIN.1)
         .center()
         .resizable(true)
+        // THE TITLE BAR IS THE PAGE'S. `Overlay` keeps the traffic lights and drops the bar they
+        // sit on, so the webview reaches the top of the window and the sidebar's own first row is
+        // what renders behind them — which is the only way a column can start level with those
+        // three dots rather than 28px below a strip of chrome nothing else uses.
+        //
+        // TWO THINGS FOLLOW FROM IT AND BOTH ARE IN THE CLIENT. The window can no longer be
+        // dragged by a bar that is not there, so `SidebarChrome` carries `data-tauri-drag-region`;
+        // and the lights now sit OVER page content, so that same row reserves their width.
+        //
+        // `hidden_title` because the name would otherwise be drawn over the page, centred, in a
+        // row the application is using for its own controls.
         // HIDDEN UNTIL THE PAGE SAYS WHICH SIZE IT NEEDS, which is the only way the welcome screen
         // does not open as a flash of the full application. The bundle decides between the two
         // stages on its first render — it depends on whether there is a session, which is a
@@ -67,8 +78,19 @@ pub fn open(app: &AppHandle, ws_url: &str) -> Result<(), Box<dyn std::error::Err
         // after four seconds. A shell whose only path to a visible window runs through the bundle
         // is a shell that has no way to report that the bundle is what failed.
         .visible(false)
-        .initialization_script(&host_config(ws_url))
-        .build()?;
+        .initialization_script(&host_config(ws_url));
+
+    // MACOS ONLY, AND NOT BY PREFERENCE — `title_bar_style` and `hidden_title` are compiled only
+    // for macOS in Tauri, so chaining them unconditionally is a build that fails on the other three
+    // targets `release.yml` uploads. The other platforms keep their ordinary title bar; the
+    // client's reservation for the traffic lights is keyed off the host bridge rather than off the
+    // platform, so a Windows window simply has a chrome row with nothing reserved on its left.
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true);
+
+    builder.build()?;
     Ok(())
 }
 

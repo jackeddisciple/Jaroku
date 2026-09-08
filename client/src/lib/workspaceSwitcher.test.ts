@@ -144,7 +144,13 @@ console.log("\n§2.1's collapsed row");
   });
   check(html.includes("Acme Corp"), "the current workspace's name is in the row");
   check(!html.includes("Adarsh</"), "...and the other workspace's is not, until the menu is open");
-  check(html.includes("Team"), "the plan chip comes from the session");
+  // THE PLAN LEFT THIS ROW, and the rule it was here to hold did not. What a workspace pays is a
+  // property of the ACCOUNT, and the account row at the foot of the sidebar chips it forty pixels
+  // below this one — one fact rendered twice in one column. So the collapsed row is now about
+  // exactly one thing, which workspace you are in, and the assertion inverts: the plan must NOT be
+  // restated here. Where it IS drawn it still comes from the session and is never defaulted, which
+  // is what the `noPlan` case below keeps true.
+  check(!html.includes("Team"), "the collapsed row does not restate the plan the account row carries");
   // THE PLAN IS THE SERVER'S LABEL AND IS NEVER DEFAULTED. A chip is a claim about what a
   // workspace is paying, and inventing one is how a hardcoded "Free" ends up over a paid team.
   const noPlan = render({

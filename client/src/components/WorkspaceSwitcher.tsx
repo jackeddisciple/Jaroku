@@ -458,9 +458,12 @@ export function WorkspaceSwitcher() {
             name no longer takes the slack: the plan is pinned to the right edge and the dropdown
             travels with the name, however long or short the name is. The expiring dot carries it
             too, for the case where there is no plan chip to pin. */}
-        {current?.plan?.label && (
-          <Chip caps size="sm" tone="faint" className="ml-auto shrink-0">{current.plan.label}</Chip>
-        )}
+        {/* THE PLAN IS NOT HERE ANY MORE. It was on this row AND on the account row at the foot of
+            the sidebar — one fact, twice, forty pixels apart in the same column. What a workspace
+            is paying is a property of the ACCOUNT, so it stays where the account is named and the
+            widest control in the sidebar goes back to being about one thing: which workspace. The
+            switcher's own list still chips each row, because there the plan distinguishes the
+            workspaces from one another rather than restating the one you are in. */}
       </button>
 
       {/* §5.2 — "show an error inline in the switcher and revert to the previous workspace".

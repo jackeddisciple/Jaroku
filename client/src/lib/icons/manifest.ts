@@ -25,6 +25,17 @@ export const MANIFEST = {
     inbox: "InboxIcon",
     activity: "RadioTowerIcon",
     providerKeys: "KeySquareIcon",
+    /**
+     * The sidebar's own collapse control, and the one mark in this table that names a piece of
+     * CHROME rather than a destination. It sits in the window's title row beside search, which is
+     * where a pane toggle belongs and why it is grouped with the rail it hides.
+     *
+     * ONE GLYPH FOR BOTH DIRECTIONS. `PanelLeftOpenIcon` exists and is not used: a toggle in this
+     * client is one control in two states and its label names the ACTION — "Hide the sidebar",
+     * then "Show the sidebar" — exactly as the workspace switcher's chevrons are documented below.
+     * A second mark would be a second thing to keep in step for no gain.
+     */
+    sidebarToggle: "PanelLeftCloseIcon",
   },
 
   // ── §5 Sidebar panel + §6 Workspace panel ─────────────────────────────────

@@ -115,6 +115,13 @@ export function StatusBar() {
           the agent dot, the run glyph, the deploy chip — and this one indicator, the one that says
           whether any of the others can update at all, was static in all three states with only its
           colour changing. */}
+      {/* SILENT WHEN THERE IS NOTHING WRONG. A dot and the word "connected", permanently lit in the
+          corner of a working application, is a status light for the state that needs no light — it
+          reports the absence of a problem, every second, for the life of the session. What it must
+          never do is go quiet when something IS wrong, so `connecting`, `disconnected` and a
+          backend the shell has given up on all still take the row: the strip appears when it has
+          something to say. */}
+      {(failed || connection !== "open") && (
       <span className="flex items-center gap-1.5" title={failed ? (backend?.message ?? BACKEND_STOPPED) : DETAIL[connection]}>
         <span
           className={`h-1.5 w-1.5 rounded-full ${failed ? "bg-err" : DOT[connection]} ${
@@ -128,6 +135,7 @@ export function StatusBar() {
           {failed ? "backend stopped" : LABEL[connection]}
         </span>
       </span>
+      )}
 
       {/* A deploy is the one thing that happens outside this machine, and it can be running
           while the user is reading something else entirely. It gets the far end of the strip. */}

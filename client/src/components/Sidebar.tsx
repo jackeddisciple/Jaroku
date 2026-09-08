@@ -9,7 +9,6 @@ import { useBuildStore } from "../store/buildStore.ts";
 import type { AgentSummary, RunSummary, RunStatus } from "../types.ts";
 import { absTime, relTime } from "../lib/format.ts";
 import { agentStatus, type AgentStatus } from "../lib/agentStatus.ts";
-import { ProviderMark } from "../lib/icons.tsx";
 import { selectAgent, selectRun } from "../lib/selection.ts";
 import {
   sendArchiveAgent, sendLoadHistory, sendLoadRun, sendRenameAgent, sendRestoreAgent, signOut,
@@ -29,12 +28,12 @@ import { Truncate } from "./Truncate.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
 import { StatusGlyph } from "./StatusGlyph.tsx";
 import { AgentIdentityLine, identityTitle } from "./AgentIdentityLine.tsx";
-import { SectionHeader } from "./SectionHeader.tsx";
 import { RUN_PHASE } from "../lib/domainPhase.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { keyHint } from "../lib/modKey.ts";
+import { hasHostWindow } from "../lib/windowStage.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
-import { ActivityIcon, CheckIcon, GlobeIcon, RocketIcon, LoaderIcon, SearchIcon, SparklesIcon, XIcon } from "./panelIcons.tsx";
+import { CheckIcon, GlobeIcon, RocketIcon, LoaderIcon, SearchIcon, SparklesIcon } from "./panelIcons.tsx";
 
 /**
  * §2's nav buttons, in the order the spec lists them.
@@ -155,21 +154,116 @@ function RunRow({ run }: { run: RunSummary }) {
 }
 
 /**
- * The row's lifecycle actions — PS-01's missing affordance.
+ * The window's own top row, and the first thing in the sidebar rather than a bar above it.
  *
- * THERE WAS NO WAY TO REMOVE OR RENAME AN AGENT AT ALL. The row was a single button with no context
- * menu and no overflow, and there was no `deleteAgent`, `renameAgent` or `archiveAgent` anywhere in
- * the product — so an agent created by mistake stayed in this list, in the filter counts, in the eval
- * picker and in the composer's targets forever, while every other resource in the product had a
- * lifecycle.
+ * IT IS THE TITLE BAR. The macOS window is built with an overlay title bar (see
+ * `src-tauri/src/window.rs`), so the page extends under the traffic lights and this strip is what
+ * sits behind them — which is why it reserves their width on the left and carries
+ * `data-tauri-drag-region`: take that off and the window can no longer be dragged by its own top
+ * edge, because there is no longer a title bar to grab.
  *
- * ARCHIVE, NOT DELETE, which is the answer threads got and for the same reasons: the versions, runs,
- * traces and costs hanging off an agent are the record, and "tidy the sidebar" must not be the same
- * button as "destroy the history". One press back either way.
+ * THE RESERVATION IS CONDITIONAL, because in a browser tab there are no traffic lights and 76px of
+ * nothing would be a hole. `hasHostWindow()` is the same check `windowStage` uses to decide whether
+ * there is a shell to talk to at all.
+ */
+function SidebarChrome() {
+  const toggleSidebar = useUiStore((s) => s.toggleSidebar);
+  const setPaletteOpen = useUiStore((s) => s.setPaletteOpen);
+  const underHost = hasHostWindow();
+
+  return (
+    <div
+      data-tauri-drag-region
+      className={`flex h-11 shrink-0 items-center gap-1 pr-2 ${underHost ? "pl-[76px]" : "pl-2"}`}
+    >
+      <span className="flex-1" data-tauri-drag-region />
+      {/* SEARCH IS ONE CONTROL FOR BOTH SEARCHES. The palette already carries "Go to agent…"
+          beside every other destination, so a second, narrower agent-only box beside it would be
+          two answers to one question — and the one people reach for is whichever is nearer. */}
+      <button
+        onClick={() => setPaletteOpen(true)}
+        title={`Search agents and commands — ${keyHint("⌘K")} opens the palette`}
+        aria-label="Search agents and commands"
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+      >
+        <Icon.agents.search size={ICON.sm} />
+      </button>
+      {/* THE LABEL NAMES THE ACTION, not the state — the `IconButton` contract, and the reason one
+          mark serves both directions. */}
+      <button
+        onClick={toggleSidebar}
+        title="Hide the sidebar"
+        aria-label="Hide the sidebar"
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+      >
+        <Icon.nav.sidebarToggle size={ICON.sm} />
+      </button>
+    </div>
+  );
+}
+
+/**
+ * The five destinations, as rows rather than as a rail of glyphs.
  *
- * ON HOVER AND ON KEYBOARD FOCUS, not always. Two controls on every row of a dense column would
- * out-weigh the agent's own name; `group-focus-within` is what keeps them reachable without a mouse,
- * which is the trap a hover-only affordance sets.
+ * A GLYPH PLUS ITS NAME, ALWAYS. The rail traded the names for forty pixels of width and put them
+ * behind a hover tooltip, which is an affordance you have to already know about to find. These are
+ * the product's five surfaces; they are worth a line each.
+ */
+function NavList() {
+  const navSection = useUiStore((s) => s.navSection);
+  const openNav = useUiStore((s) => s.openNav);
+  const needsYou = useThreadStore((s) => s.counts.needs_you);
+  const waiting = useInboxStore((s) => s.counts.badge);
+  const waitingOnYou = useWorkStore((s) => workBadgeCount(s.workspaceCounts));
+
+  return (
+    <div className="flex shrink-0 flex-col gap-0.5 px-2 pb-1">
+      {NAV_DESTINATIONS.map(({ id, label, icon: Mark }) => {
+        const active = navSection === id;
+        const badge = id === "inbox" ? waiting : id === "threads" ? needsYou : id === "work" ? waitingOnYou : 0;
+        const badgeTitle =
+          id === "inbox"
+            ? `${waiting} item${waiting === 1 ? "" : "s"} blocked or waiting on a decision`
+            : id === "work"
+              ? `${waitingOnYou} job${waitingOnYou === 1 ? "" : "s"} waiting for somebody to answer something`
+              : `${needsYou} thread${needsYou === 1 ? "" : "s"} waiting on you`;
+        return (
+          <button
+            key={id}
+            onClick={() => openNav(id)}
+            aria-current={active ? "page" : undefined}
+            className={`flex h-8 w-full shrink-0 items-center gap-2.5 rounded-control px-2 text-left transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+              active ? "bg-sidebar-active text-accent" : "text-muted hover:bg-sidebar-hover hover:text-ink"
+            }`}
+          >
+            <Mark size={ICON.md} />
+            <span className="min-w-0 flex-1 truncate text-caption">{label}</span>
+            {badge > 0 && (
+              <span
+                title={badgeTitle}
+                className={`shrink-0 rounded-xs px-1 text-tiny leading-[15px] tabular-nums ${
+                  id === "threads" ? "text-run" : "text-ink"
+                }`}
+                style={id === "threads" ? undefined : { background: SURFACE.chrome }}
+              >
+                {badge}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** How many of an agent's runs are shown before "Show more" — a glance, not a history. */
+const RUNS_AT_FIRST = 5;
+
+/**
+ * The per-agent overflow: rename, archive, restore.
+ *
+ * REVEALED ON HOVER AND ON FOCUS. `group-hover` alone is a control the keyboard can reach but
+ * never see, so the same opacity is tied to `focus-within` — the row it lives in is the group.
  */
 function AgentActions({ agent, onRename }: { agent: AgentSummary; onRename: () => void }) {
   const [confirming, setConfirming] = useState(false);
@@ -230,265 +324,112 @@ function AgentActions({ agent, onRename }: { agent: AgentSummary; onRename: () =
   );
 }
 
-function AgentRow({ agent }: { agent: AgentSummary }) {
-  const activeAgentId = useBuildStore((s) => s.activeAgentId);
-  const runs = useTraceStore((s) => s.runs);
-  // §4: the same delta the tab badge carries, on the row. An agent list that says "synced" without
-  // saying HOW synced makes you open each one to find out which is the one with work on it.
-  const github = useGithubStore((s) => s.views[agent.agent_id]);
-  const active = agent.agent_id === activeAgentId;
-  const status = agentStatus(agent.agent_id, runs, agent.deployment);
-  const archived = Boolean(agent.archived_at);
+/**
+ * An agent, and its runs beneath it when you open it.
+ *
+ * THE TREE IS THE POINT, and it replaces two flat lists that were not related to each other on
+ * screen. Runs used to sit in their own section under every agent, so the question "what has THIS
+ * agent been doing" was answered by reading a mixed list and matching ids by eye. A run belongs to
+ * exactly one agent; nesting is what that fact looks like.
+ *
+ * AN AGENT WITH NO RUNS DOES NOT OPEN, and shows no chevron. A disclosure control that discloses
+ * nothing is the dead control this codebase has a suite about — and the absence of the twisty is
+ * itself the answer to "has this ever run".
+ */
+function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[] }) {
+  const [open, setOpen] = useState(false);
+  const [all, setAll] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(agent.name);
-
-  // Newest run for this agent → last-active timestamp.
-  let last: RunSummary | undefined;
-  for (const r of Object.values(runs)) {
-    if (r.agent_id === agent.agent_id && (!last || r.started_at > last.started_at)) last = r;
-  }
+  const activeAgentId = useBuildStore((s) => s.activeAgentId);
+  const selected = activeAgentId === agent.agent_id;
+  const hasRuns = runs.length > 0;
+  const shown = all ? runs : runs.slice(0, RUNS_AT_FIRST);
 
   const commit = (): void => {
     const next = draft.trim();
     // SENT EVEN WHEN IT MATCHES the name already shown, because committing the editor is a CHOICE:
     // the server's rename also sets the custom flag that stops the next disk sync overwriting it, so
-    // "I want this name" and "this name happens to be what the file says" are different states. That
-    // is the same mistake §5's thread rename made and the same fix.
+    // "I want this name" and "this name happens to be what the file says" are different states.
     if (next) sendRenameAgent(agent.agent_id, next);
     setRenaming(false);
   };
 
-  // Everything the old second line said, as one sentence. Assembled from what is true rather than
-  // from a fixed template, so an agent with no connectors and no repository does not advertise two
-  // empty fields.
-  const detail = [
-    agent.default_provider,
-    agent.connectors.length > 0 ? agent.connectors.join(", ") : null,
-    github ? `${github.link.repo_full_name} — ${github.verdict}` : null,
-    agent.deployment?.status === "live" && agent.deployment.url
-      ? agent.deployment.url.replace(/^https?:\/\//, "")
-      : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-
   return (
-    // A DIV WRAPPING TWO BUTTONS rather than one button wrapping everything, which is what it was:
-    // a control inside a control is invalid markup and un-clickable in practice, so the row's own
-    // selection and its lifecycle actions have to be siblings.
-    <div
-      className={`group relative transition-colors ${active ? "bg-sidebar-active" : "hover:bg-sidebar-hover"} ${
-        archived ? "opacity-60" : ""
-      }`}
-      onDoubleClick={() => {
-        if (archived) return;
-        setDraft(agent.name);
-        setRenaming(true);
-      }}
-    >
-      {active && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-accent" />}
-      <div className="flex items-center gap-1 px-4 py-2">
-        <button
-          onClick={() => selectAgent(agent.agent_id)}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
-          // WHAT THE SECOND LINE USED TO SAY. The row carried a wrapping chip strip under the
-          // name — provider, every connector, the repository and the deploy URL — which is four
-          // or more chips that could wrap to a third line, on the app's primary list, at two to
-          // three times the height of the row it is a list of. The facts are not gone; they are
-          // where a fact you consult belongs, rather than where a fact you scan belongs.
-          // §7: "The full name and category go in the row's title attribute for the hover case." On
-          // the first line, because that is what the truncation gave up; the facts that used to be a
-          // chip strip follow on the second.
-          title={detail ? `${identityTitle(agent.name, agent.category)}\n${detail}` : identityTitle(agent.name, agent.category)}
-        >
-          {agent.runnable ? (
-            <AgentDot status={status} />
-          ) : (
-            <StatusDot state="error" icon={XIcon} title="missing agent.py" />
-          )}
-          {/* The provider's mark rides inline before the name instead of as a chip beneath it —
-              it is one glyph, it is always present, and it is the one thing on the old second
-              line that reads at a glance. */}
-          <span className="shrink-0 text-faint" aria-hidden>
-            <ProviderMark provider={agent.default_provider} size={ICON.badge} />
-          </span>
-          {renaming ? (
-            <input
-              autoFocus
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onBlur={commit}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") commit();
-                if (e.key === "Escape") setRenaming(false);
-              }}
-              // The click that lands in the field must not also select the agent underneath it.
-              onClick={(e) => e.stopPropagation()}
-              className="min-w-0 flex-1 rounded-input border border-edge bg-elevated px-1.5 py-0.5 text-label text-ink outline-none focus-visible:shadow-focusring"
-            />
-          ) : (
-            <>
-              {/* §7'S LINE. The emoji, the name, an em dash, the category — and only the CATEGORY may
-                  be cut. The name used to be the thing that truncated here, which is the rule
-                  inverted: a cut name is a different agent, in the list whose whole job is telling
-                  them apart. See `AgentIdentityLine`. */}
-              <AgentIdentityLine
-                emoji={agent.emoji}
-                name={agent.name}
-                category={agent.category}
-                nameClassName={active ? "text-accent" : "text-ink"}
-              />
-            </>
-          )}
-          {archived && <Chip size="sm" tone="faint" variant="bare">archived</Chip>}
-          {/* NO `ml-auto` ON EITHER OF THESE ANY MORE, and its removal is what makes §7's line work.
-              An auto margin absorbs a flex line's free space BEFORE `flex-grow` gets any, so the
-              category's slot — which grows into whatever the name leaves — was allocated nothing at
-              all and every category vanished. The identity line's own `flex-1` does the pushing
-              now, which is the same visual result by the mechanism that leaves room behind it. */}
-          {github?.badge && (
-            <span
-              className={`shrink-0 text-tiny tabular-nums ${
-                github.badge === "↕" || github.badge === "⚠" ? "text-err" : "text-faint"
-              }`}
-              title={github.verdict}
-            >
-              {github.badge}
-            </span>
-          )}
-          {last && (
-            <span
-              className="shrink-0 text-tiny tabular-nums text-faint"
-              title={absTime(last.started_at)}
-            >
-              {relTime(last.started_at)}
-            </span>
-          )}
-        </button>
-        <AgentActions
-          agent={agent}
-          onRename={() => {
-            setDraft(agent.name);
-            setRenaming(true);
-          }}
-        />
-      </div>
-    </div>
-  );
-}
-
-/**
- * The four top-level destinations (§2), with §2.1's live badge on Threads.
- *
- * THE BADGE IS THE COUNT OF WHAT IS BLOCKED, AND NOTHING ELSE. Never `running`: a run is cost accruing,
- * not something waiting on a person, and a badge that added the two would answer two different
- * questions at once — which is exactly the ambiguity the GitHub tab's badge vocabulary was designed to
- * avoid. Zero renders NO badge at all, matching the empty-sections discipline: a badge showing 0 is
- * noise, not information.
- *
- * IT IS THE SAME NUMBER THE `Needs you` CHIP SHOWS, from the same snapshot field — one count, computed
- * once on the server, rendered twice. Two independently-derived counts of "what is waiting on me" that
- * disagreed would be visible in two places a person compares, which is the trust-eroding mismatch §2.1
- * names.
- *
- * The active one wears the same left accent and `bg-sidebar-active` an agent row does when selected, because
- * it is the same fact — this is what the panel to the right is showing. A second visual vocabulary for
- * "current" in one column would make the two compete.
- */
-function NavRail() {
-  /**
-   * `navSection`, NOT `navView` — §2's fourth rule.
-   *
-   * "The sidebar item stays visually active the entire time, in both the full-width and the 3-pane
-   * state." Picking a row or a card collapses the full-width view, which is the transition, so an
-   * item drawn from `navView` went dark at exactly the moment the spec says it must not — and the
-   * only way back to the list stopped looking like a way back to anything.
-   */
-  const navSection = useUiStore((s) => s.navSection);
-  const openNav = useUiStore((s) => s.openNav);
-  const needsYou = useThreadStore((s) => s.counts.needs_you);
-  /**
-   * §5.2's badge: BLOCKING PLUS PROPOSALS ONLY.
-   *
-   * ATTENTION IS DELIBERATELY EXCLUDED, and the specification asks in as many words that nobody
-   * "fix" it: if the badge counted everything it would never reach zero, and a badge that is never
-   * zero is a badge people train themselves to ignore.
-   *
-   * ONE NUMBER, COMPUTED ONCE ON THE SERVER. `counts.badge` is the same field the board's own rail
-   * reads, which is the rule the Threads badge above already follows — two independently-derived
-   * counts of "what is waiting on me" that disagree are visible in two places somebody compares.
-   */
-  const waiting = useInboxStore((s) => s.counts.badge);
-  /**
-   * §9's badge: `waiting` and nothing else.
-   *
-   * THROUGH `workBadgeCount` RATHER THAN READING THE FIELD, so there is exactly one definition
-   * of what this badge means and `test:work-badge` can hold it. §9 asks for the equivalent of
-   * the Inbox's test — the one that fails if somebody "fixes" the badge to count more — and a
-   * selector reaching straight into `counts.waiting` would be a second definition beside it.
-   *
-   * NOT `running`, which would be lit whenever the product was working; not `failed`, which is
-   * over and is the Inbox's to raise; not `queued`, which is a moment. `waiting` is the only
-   * state where a HUMAN is the blocker, and that is the only thing a badge should ever mean.
-   */
-  const waitingOnYou = useWorkStore((s) => workBadgeCount(s.workspaceCounts));
-
-  return (
-    <div className="flex w-10 shrink-0 flex-col items-center gap-0.5 py-2">
-      {NAV_DESTINATIONS.map(({ id, label, icon: Mark }) => {
-        const active = navSection === id;
-        const badge = id === "inbox" ? waiting : id === "threads" ? needsYou : id === "work" ? waitingOnYou : 0;
-        const badgeTitle =
-          id === "inbox"
-            ? `${waiting} item${waiting === 1 ? "" : "s"} blocked or waiting on a decision`
-            : id === "work"
-              ? `${waitingOnYou} job${waitingOnYou === 1 ? "" : "s"} waiting for somebody to answer something`
-              : `${needsYou} thread${needsYou === 1 ? "" : "s"} waiting on you`;
-        return (
-          <button
-            key={id}
-            onClick={() => openNav(id)}
-            // The tooltip IS the label. Four words of chrome bought nothing that a glyph plus a
-            // name on hover does not, and they cost a hundred pixels of the column the agent list
-            // is trying to use.
-            title={label}
-            aria-label={label}
-            aria-current={active ? "page" : undefined}
-            className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
-              active ? "bg-sidebar-active text-accent" : "text-muted hover:bg-sidebar-hover hover:text-ink"
-            }`}
-          >
-            <Mark size={ICON.md} />
-            {/* Present only when there is something to say, and `tabular-nums` so a count going
-                from 9 to 10 does not shift the glyph beside it. Neutral rather than amber on the
-                Inbox: amber means RUNNING in this palette, which is the one thing v0.2.2's
-                wordmark pass established it may never be borrowed for. */}
-            {badge > 0 && (
-              <span
-                title={badgeTitle}
-                className={`absolute -right-0.5 -top-0.5 min-w-[13px] rounded-xs px-0.5 text-center text-tiny leading-[13px] tabular-nums ${
-                  id === "threads" ? "text-run" : "text-ink"
-                }`}
-                style={id === "threads" ? undefined : { background: SURFACE.chrome }}
-              >
-                {badge}
-              </span>
-            )}
-          </button>
-        );
-      })}
-
-      {/* THE FOOT OF THE RAIL. A bare gear, where a `⚙ Settings ›` row used to spend a whole line
-          on one word and a chevron that pointed at nothing navigable. */}
-      <button
-        onClick={() => useUiStore.getState().setProviderPanel(true)}
-        title="Provider keys"
-        aria-label="Provider keys"
-        className="mt-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-sidebar-hover hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+    <>
+      <div
+        className={`group flex h-8 w-full items-center gap-1 rounded-control pr-1 transition-colors duration-fast ${
+          selected ? "bg-sidebar-active" : "hover:bg-sidebar-hover"
+        }`}
       >
-        <Icon.nav.providerKeys size={ICON.md} />
-      </button>
-    </div>
+        {/* THE TWISTY AND THE NAME ARE TWO CONTROLS, because they do two things: one opens the
+            agent's runs, the other selects the agent into the three panes. Nesting a button inside
+            a button is invalid markup and makes the inner one unreachable by keyboard. */}
+        {hasRuns ? (
+          <button
+            onClick={() => setOpen((v) => !v)}
+            title={open ? `Hide ${agent.name}'s runs` : `Show ${agent.name}'s runs`}
+            aria-label={open ? `Hide ${agent.name}'s runs` : `Show ${agent.name}'s runs`}
+            aria-expanded={open}
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-control text-faint transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+          >
+            {open ? <Icon.workspace.switcherOpen size={ICON.xs} /> : <Icon.workspace.switcherClosed size={ICON.xs} />}
+          </button>
+        ) : (
+          // The twisty's width, kept, so names line up whether or not an agent has ever run.
+          <span className="h-5 w-5 shrink-0" aria-hidden />
+        )}
+        {renaming ? (
+          <input
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commit();
+              // ESCAPE ABANDONS, and puts the draft back to the name on screen — otherwise
+              // reopening the editor starts from the edit somebody just decided against.
+              if (e.key === "Escape") { setDraft(agent.name); setRenaming(false); }
+            }}
+            className="min-w-0 flex-1 rounded-input bg-sidebar-active px-1.5 py-0.5 text-caption text-ink outline-none focus-visible:shadow-focusring"
+          />
+        ) : (
+          <button
+            onClick={() => selectAgent(agent.agent_id)}
+            title={identityTitle(agent.name, agent.category)}
+            className="flex min-w-0 flex-1 items-center gap-2 py-1 text-left focus-visible:outline-none focus-visible:shadow-focusring"
+          >
+            <AgentDot status={agentStatus(agent.agent_id, useTraceStore.getState().runs, agent.deployment)} />
+            <AgentIdentityLine emoji={agent.emoji} name={agent.name} category={agent.category} nameClassName="text-caption" />
+          </button>
+        )}
+        {!renaming && (
+          <AgentActions agent={agent} onRename={() => { setDraft(agent.name); setRenaming(true); }} />
+        )}
+      </div>
+
+      {open && hasRuns && (
+        <div className="flex flex-col">
+          {shown.map((r) => (
+            // Indented to the twisty's width, so a run reads as belonging to the row above it.
+            <div key={r.id} className="pl-5">
+              <RunRow run={r} />
+            </div>
+          ))}
+          {/* Offered only when there is genuinely more, and it says how much more rather than
+              "Show more" — a count is the difference between a control you can decide about and
+              one you have to press to find out. */}
+          {!all && runs.length > RUNS_AT_FIRST && (
+            <button
+              onClick={() => setAll(true)}
+              className="w-full py-1 pl-10 pr-3 text-left text-tiny text-muted transition-colors hover:bg-sidebar-hover hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+            >
+              Show {runs.length - RUNS_AT_FIRST} more…
+            </button>
+          )}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -514,73 +455,114 @@ function AccountRow() {
   const workspaces = useSessionStore((s) => s.workspaces);
   const workspaceId = useSessionStore((s) => s.workspaceId);
   const openWorkspacePanel = useUiStore((s) => s.openWorkspacePanel);
+  const setProviderPanel = useUiStore((s) => s.setProviderPanel);
   const workspace = workspaces.find((w) => w.id === workspaceId);
   const name = user?.displayName || user?.email;
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  /**
+   * The three ways out, on one listener — the shape `WorkspaceSwitcher` already uses.
+   *
+   * `mousedown` RATHER THAN `click`, so a press that starts outside closes the menu before the
+   * thing underneath it receives the release. With `click` the first press anywhere else both
+   * closes this and activates whatever it landed on, which is one gesture doing two things.
+   */
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent): void => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const key = (e: KeyboardEvent): void => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", key);
+    return () => {
+      document.removeEventListener("mousedown", away);
+      document.removeEventListener("keydown", key);
+    };
+  }, [open]);
 
   // Before the session lands there is no account to name. An empty row is quieter than a
   // placeholder that flashes into somebody else's initial.
   if (!user) return <div className="h-8" />;
 
+  /**
+   * WHAT THE MENU OPENS, AND WHERE. Each row here closes the menu and opens a panel that renders
+   * CENTRED over the application — the workspace panel and the provider-key dialog both already
+   * do, and they are the two things somebody clicking their own name is reaching for. The menu is
+   * the near thing, anchored to the row; the dialog is the far thing, over everything.
+   */
+  const choose = (run: () => void) => () => { setOpen(false); run(); };
+
   return (
-    <div>
+    <div ref={ref} className="relative">
+      {open && (
+        // ANCHORED TO THE BOTTOM OF THE SIDEBAR, opening UPWARD, because the row it belongs to is
+        // the last one in the column: a menu that dropped down would open off the bottom edge.
+        <div
+          role="menu"
+          aria-label="Account"
+          className="absolute bottom-full left-0 z-30 mb-1 w-full overflow-hidden rounded-control border border-sidebar-border bg-panel py-1 shadow-pop"
+        >
+          <button role="menuitem" onClick={choose(() => openWorkspacePanel("account"))} className={ACCOUNT_MENU_ROW}>
+            <Icon.workspace.settings size={ICON.sm} />
+            <span className="min-w-0 flex-1 truncate">Account &amp; workspace</span>
+          </button>
+          <button role="menuitem" onClick={choose(() => setProviderPanel(true))} className={ACCOUNT_MENU_ROW}>
+            <Icon.nav.providerKeys size={ICON.sm} />
+            <span className="min-w-0 flex-1 truncate">Provider keys</span>
+          </button>
+          <AdminModeToggle />
+        </div>
+      )}
+
       {/* TWO CONTROLS, NOT ONE BUTTON WITH A SECOND INSIDE IT. Nesting is invalid markup and the
           browser's own recovery from it is to flatten — which is how a "sign out" glyph inside a
           row ends up firing the row's own click as well. */}
       <div className="flex items-center gap-1">
-      <button
-        // YOUR OWN NAME OPENS YOUR OWN ACCOUNT, which it did not: it opened the Members list,
-        // because that was the only door the workspace panel had. §10.1 gave the workspace a door
-        // of its own — the switcher's settings row — so this one can be what it looks like.
-        onClick={() => openWorkspacePanel("account")}
-        title={`${user.email}${workspace ? ` — ${workspace.role} of ${workspace.name}` : ""}`}
-        className="flex min-w-0 flex-1 items-center gap-2 rounded-control px-2 py-1.5 text-left transition-colors hover:bg-sidebar-hover active:bg-sidebar-active"
-      >
-        {/* The first letter of whoever is actually here, uppercased. */}
-        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-control bg-sidebar-active text-tiny text-ink">
-          {(name ?? "?").trim().charAt(0).toUpperCase()}
-        </span>
-        <Truncate className="min-w-0 flex-1 text-caption text-ink" title={name}>{name}</Truncate>
-        {/* Only when the session carries one. A chip is a claim about what the workspace is paying,
-            and inventing a default for it is how the hardcoded `Free` got there in the first place. */}
-        {workspace?.plan?.label && (
-          <Chip caps size="sm" tone="faint" className="shrink-0">{workspace.plan.label}</Chip>
-        )}
-      </button>
-      {/* SIGN OUT LIVES WITH THE PERSON, not in the workspace switcher, and moving it here is what
-          §2.2's list of dropdown contents implies rather than a tidy-up. Ending a session is not a
-          thing you do to a workspace — it is the same act whichever one you are in, and a menu
-          whose subject is "which tenant am I acting in" ending with "leave entirely" put the one
-          irreversible-feeling row at the bottom of the one menu people open to switch. */}
-      <button
-        onClick={signOut}
-        title="Sign out"
-        aria-label="Sign out"
-        className="shrink-0 rounded-control p-1.5 text-faint transition-colors hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
-      >
-        <Icon.auth.signOut size={ICON.sm} />
-      </button>
+        <button
+          onClick={() => setOpen((v) => !v)}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          title={name}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-control px-2 py-1.5 text-left transition-colors hover:bg-sidebar-hover active:bg-sidebar-active focus-visible:outline-none focus-visible:shadow-focusring"
+        >
+          {/* The first letter of whoever is actually here, uppercased. */}
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-control bg-sidebar-active text-tiny text-ink">
+            {(name ?? "?").trim().charAt(0).toUpperCase()}
+          </span>
+          <Truncate className="min-w-0 flex-1 text-caption text-ink" title={name}>{name}</Truncate>
+          {/* Only when the session carries one. A chip is a claim about what the workspace is
+              paying, and inventing a default for it is how the hardcoded `Free` got there in the
+              first place. */}
+          {workspace?.plan?.label && (
+            <Chip caps size="sm" tone="faint" className="shrink-0">{workspace.plan.label}</Chip>
+          )}
+          <span className="shrink-0 text-faint">
+            {open ? <Icon.workspace.switcherOpen size={ICON.xs} /> : <Icon.workspace.switcherClosed size={ICON.xs} />}
+          </span>
+        </button>
+        {/* SIGN OUT LIVES WITH THE PERSON, and stays OUT of the menu above it. Ending a session is
+            the one irreversible-feeling thing here, and a list you open to change a setting is the
+            wrong place to put it — it is its own control, beside the name, where a mis-aimed click
+            on a menu row cannot reach it. */}
+        <button
+          onClick={signOut}
+          title="Sign out"
+          aria-label="Sign out"
+          className="shrink-0 rounded-control p-1.5 text-faint transition-colors hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+        >
+          <Icon.auth.signOut size={ICON.sm} />
+        </button>
       </div>
-      {/* RENDERED ONLY FOR AN ADMIN, and `AdminModeToggle` itself returns null otherwise — so for
-          everybody else there is no element, no comment and nothing in view-source suggesting the
-          mode exists. Absent rather than hidden, which is the specification's own instruction and
-          the difference between invisible and one devtools panel away. */}
-      <AdminModeToggle />
     </div>
   );
 }
 
-/**
- * The founder's switch, in the one place a session-wide setting belongs.
- *
- * NOTHING AT ALL FOR A NON-ADMIN. Not a disabled control, not a tooltip explaining why — the
- * component returns null, so the DOM contains no evidence that admin mode is a thing this product
- * has. That is deliberate: a greyed-out "Admin mode" row would be an invitation.
- *
- * IT CONFIRMS BEFORE TURNING ON AND NOT BEFORE TURNING OFF. Enabling removes every limit and starts
- * logging every bypass, which is worth a sentence somebody reads; disabling puts things back, and a
- * confirmation there would be friction on the safe direction — the one somebody reaches for when
- * they have just realised they are recording a demo.
- */
+/** One row of the account menu. Spelled once so the three cannot drift apart. */
+const ACCOUNT_MENU_ROW =
+  "flex w-full items-center gap-2.5 px-2.5 py-1.5 text-left text-caption text-muted transition-colors hover:bg-sidebar-hover hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring";
+
 function AdminModeToggle() {
   const user = useSessionStore((s) => s.user);
   const setAdminMode = useSessionStore((s) => s.setAdminMode);
@@ -638,32 +620,6 @@ function AdminModeToggle() {
       <span>Admin mode</span>
       <span className="ml-auto shrink-0">off</span>
     </button>
-  );
-}
-
-/**
- * A section's heading inside the sidebar's one scroller.
- *
- * ONE RULE, STATED ONCE. The column drew four dividers at four different top margins — 8px after
- * the nav, 4px after the pinned group, none on the Runs header, none on the footer — which reads
- * as a rhythm error down a 280px column even when nobody can say which line is wrong. The rule is:
- * a hairline sits above a section's label, never between a label and its own rows.
- *
- * Sticky, because a single scroller needs its headings to stay put. `bg-sidebar` rather than
- * transparent for the same reason: a sticky header that rows scroll through is worse than no
- * header at all.
- */
-function RailSection({ label, count, first = false }: { label: string; count: number | null; first?: boolean }) {
-  return (
-    <div
-      className={`sticky top-0 z-10 flex items-center bg-sidebar px-4 py-1.5 ${first ? "" : "mt-1 border-t border-sidebar-border"}`}
-    >
-      {/* THE COUNT MOVES OFF THE ROW'S EDGE AND SITS AGAINST THE NAME. It was `ml-auto`, so a 280px
-          column had its numbers pinned to the right while the Threads list and the Inbox board put
-          theirs immediately after the label — the same header, two arrangements, one product. §4.1
-          is explicit about which of the two: name, then the count. */}
-      <SectionHeader name={label} count={count} />
-    </div>
   );
 }
 
@@ -771,8 +727,11 @@ export function Sidebar() {
   const agents = useBuildStore((s) => s.agents);
   const activeAgentId = useBuildStore((s) => s.activeAgentId);
   const [filter, setFilter] = useState<Filter>("all");
-  const [query, setQuery] = useState("");
-  const [searching, setSearching] = useState(false);
+  // Searching moved into the palette (see `SidebarChrome`), so the query the list filters by
+  // is now only ever empty here. Kept as the one place the filter reads from, so restoring an
+  // in-column box later is a change to one component rather than to the filter predicate.
+  const query = "";
+  const [recentsOpen, setRecentsOpen] = useState(true);
   // Per AGENT rather than per workspace — §4. Different agents legitimately belong in different
   // repositories, and one repo per workspace would break the monorepo case the subdirectory field
   // exists for.
@@ -834,189 +793,103 @@ export function Sidebar() {
   const historyWindow = useTraceStore((st) => st.historyWindow);
   const historyComplete = useTraceStore((st) => st.historyComplete);
 
+  /**
+   * Every run, filed under the agent that produced it.
+   *
+   * BUILT ONCE PER RENDER RATHER THAN FILTERED PER ROW. A `runList.filter(...)` inside `AgentRow`
+   * is O(agents x runs) and this column is the one that redraws on every trace event — the list is
+   * already ordered newest-first, so a single pass keeps that order inside each bucket for free.
+   */
+  const runsByAgent = new Map<string, RunSummary[]>();
+  for (const r of runList) {
+    const bucket = runsByAgent.get(r.agent_id);
+    if (bucket) bucket.push(r);
+    else runsByAgent.set(r.agent_id, [r]);
+  }
+
+  // §2: pinned first, then everything else, with no agent appearing twice.
+  const pinnedSet = new Set(pinned.map((a) => a.agent_id));
+  const recents = [...pinned, ...visible.filter((a) => !pinnedSet.has(a.agent_id))];
+
   return (
-    // header over (rail | column). §2's four destinations are the rail — the sidebar itself still
-    // never collapses and never hides, and clicking one still replaces the centre pane and the
-    // right panel with one full-width view while leaving this column exactly as it is, selection
-    // included. What changes is that they cost forty pixels of width instead of a hundred pixels
-    // of height plus a divider, and the column beside them belongs entirely to the list.
-    //
-    // THE SWITCHER SPANS BOTH, which is the one thing in this layout that is not free: it costs a
-    // row the agent list would otherwise have. §2.1 asks for it "at the top of the sidebar, above
-    // the four tab destinations", and above BOTH is the only reading that is true — the four
-    // destinations are views of this workspace and the list beneath them is this workspace's
-    // agents, so a switcher inside the column would be scoped by something it scopes.
-    //
-    // AND IT IS ITS OWN PLANE NOW, which is §02 of the colour system rather than a shade: "the
-    // sidebar is a distinct, slightly cool-grey structural plane. It should visibly differ from the
-    // main content without becoming dark or dashboard-like. It has no outer shadow and no outer
-    // radius; a quiet border separates it from the main workspace."
-    //
-    // Which is why every surface in this file is `sidebar-*` and not the app's own `panel`/`active`
-    // — the sidebar's hover is a cool grey and the content area's is a warm one, and the moment
-    // one of these rows reaches for `hover:bg-active` it will be the only warm row in a cool
-    // column. It was `bg-bg`, the canvas itself, and the column read as part of the workspace with
-    // a line drawn down it.
+    /**
+     * ONE COLUMN, NO DIVISIONS. This was a 40px rail of glyphs beside a list, with a switcher
+     * spanning both and a status strip under the whole application. Five regions stacked in one
+     * plane replace it: the window's own title row, the workspace, the five destinations, the
+     * agents, and whoever is signed in — in that order, because that is the order they scope each
+     * other in. Only the agents scroll; everything else is chrome and stays put.
+     */
     <div className="flex h-full flex-col bg-sidebar">
+      <SidebarChrome />
       <WorkspaceSwitcher />
-      <div className="flex min-h-0 flex-1">
-      <NavRail />
-      <div className="flex min-w-0 flex-1 flex-col border-l border-sidebar-border">
-      {/* THE COLUMN'S HEADER ROW. `+ New Agent` was a full-width text button spending a whole row
-          on two words for the one control that is unmistakably a plus. It sits here now beside the
-          column's own name, which is where a creation affordance goes. */}
-      <div className="flex shrink-0 items-center gap-1 px-3 pt-3">
-        {/* THE FIELD IS A GLYPH UNTIL IT IS WANTED. It was a full row of its own beneath a full
-            row of `New Agent`, permanently open, on a column whose entire job is to be a list —
-            and a search box at rest is a control asking to be noticed for something nobody is
-            doing yet. Open it and it takes the row; leave it empty and it gives the row back. */}
-        {searching ? (
-          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-control bg-sidebar-active px-2 py-0.5">
-            <span className="shrink-0 text-faint"><Icon.agents.search size={ICON.xs} /></span>
-            <input
-              autoFocus
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onBlur={() => { if (!query) setSearching(false); }}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") { setQuery(""); setSearching(false); }
-              }}
-              placeholder="search agents…"
-              className="min-w-0 flex-1 bg-transparent text-caption text-ink outline-none focus-visible:shadow-focusring placeholder:text-faint"
-            />
-            {query && (
+      <NavList />
+
+      {/* RECENTS — the agents, and their runs under them. */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="flex h-8 shrink-0 items-center gap-1 pl-1.5 pr-2">
+          <button
+            onClick={() => setRecentsOpen((v) => !v)}
+            aria-expanded={recentsOpen}
+            title={recentsOpen ? "Collapse recents" : "Expand recents"}
+            aria-label={recentsOpen ? "Collapse recents" : "Expand recents"}
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-control text-faint transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+          >
+            {recentsOpen ? <Icon.workspace.switcherOpen size={ICON.xs} /> : <Icon.workspace.switcherClosed size={ICON.xs} />}
+          </button>
+          <span className={`min-w-0 flex-1 ${TYPE.panelLabel}`}>Recents</span>
+          <FilterMenu filter={filter} setFilter={setFilter} counts={counts} />
+          <button
+            onClick={() => selectAgent(null)}
+            title="New agent"
+            aria-label="New agent"
+            className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+              activeAgentId === null ? "bg-sidebar-active text-accent" : "text-muted hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink"
+            }`}
+          >
+            <Icon.agents.new size={ICON.sm} />
+          </button>
+        </div>
+
+        {/* `overflow-x-hidden` RATHER THAN NOTHING: a row that runs out of room truncates, and a
+            truncation ends in an ellipsis rather than in a horizontal scrollbar nobody looks for. */}
+        {recentsOpen && (
+          <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-1.5 pb-2">
+            {recents.length === 0 ? (
+              <EmptyState
+                size="inline"
+                icon={agents.length === 0 ? SparklesIcon : SearchIcon}
+                title={agents.length === 0 ? "No agents yet" : "Nothing here"}
+                hint={
+                  agents.length === 0
+                    ? "Describe one in the composer and you’ll get a plan to approve first."
+                    : undefined
+                }
+              />
+            ) : (
+              recents.map((a) => (
+                <AgentTreeRow key={a.agent_id} agent={a} runs={runsByAgent.get(a.agent_id) ?? []} />
+              ))
+            )}
+
+            {/* THE WINDOW, WIDENED FROM HERE. The history read stops at a cap, so the runs nested
+                above are the ones that have been FETCHED — this is how the 51st-newest becomes
+                reachable at all, and it stays out of any one agent's subtree because it widens the
+                window for all of them. */}
+            {runList.length >= historyWindow && !historyComplete && (
               <button
-                onClick={() => { setQuery(""); setSearching(false); }}
-                title="Clear"
-                aria-label="Clear search"
-                className="shrink-0 text-faint transition-colors hover:text-ink"
+                onClick={() => sendLoadHistory(Math.min(historyWindow * 2, 500))}
+                className="mt-1 w-full rounded-control px-2 py-1.5 text-left text-tiny text-muted transition-colors hover:bg-sidebar-hover hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
               >
-                <Icon.global.clearSearch size={ICON.xs} />
+                Load older runs…
               </button>
             )}
           </div>
-        ) : (
-          <span className={TYPE.panelLabel}>Agents</span>
-        )}
-        {!searching && (
-          <button
-            onClick={() => setSearching(true)}
-            title={`Search agents — ${keyHint("⌘K")} opens the palette`}
-            aria-label="Search agents"
-            className="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
-          >
-            <Icon.agents.search size={ICON.sm} />
-          </button>
-        )}
-        <FilterMenu filter={filter} setFilter={setFilter} counts={counts} />
-        <button
-          onClick={() => selectAgent(null)}
-          title="New agent"
-          aria-label="New agent"
-          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
-            activeAgentId === null ? "bg-sidebar-active text-accent" : "text-muted hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink"
-          }`}
-        >
-          <Icon.agents.new size={ICON.sm} />
-        </button>
-      </div>
-
-
-
-      {/* ONE SCROLLER, WITH THE SECTION HEADINGS PINNED TO IT.
-          There were two: the agent list capped at `max-h-[38%]` with its own `overflow-auto`, and
-          the runs list below it on `flex-1` with another. Two independently scrolling regions in
-          one 280px column, which also meant two ten-pixel scrollbars stacked vertically inside it
-          — and a 38% cap that decides how many agents you may see regardless of how many runs
-          there are to look at.
-
-          The section rule is one rule now, and it is stated once here rather than four times at
-          four different offsets: a hairline sits ABOVE a section's label and never between a label
-          and its own rows. `sticky` on the header is what makes a single scroller readable — the
-          heading you are under stays where you can see it. */}
-      {/* NO `scroll-fade` HERE, deliberately. A top fade and a sticky header are the same pixels
-            arguing: the heading pins itself to the top edge and the mask then dims the thing it
-            pinned. The sticky headers are the stronger cue in this column — they say what you are
-            under as well as that there is more — so they win and the mask goes to the scrollers
-            that have no headings. */}
-      {/* `overflow-x-hidden` RATHER THAN NOTHING. The class set only `overflow-y-auto`, so
-          `overflow-x` computed to `auto` and 32px of content it could not fit became a HORIZONTAL
-          SCROLLBAR inside a vertical list — a scrollbar nobody looks for, under rows whose names
-          had already been cut. A list of rows overflows sideways because a row ran out of room,
-          which is a truncation, and a truncation ends in an ellipsis. `min-w-0` is what lets the
-          rows inside it shrink to reach one. */}
-      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
-        {/* PINNED, above the rest of the list — §2's order for this column.
-            Only when there is something pinned: an empty PINNED heading is the same noise as an
-            empty section in the Threads view, and the same rule applies. Pinning is `P` on a
-            selected thread, which pins that thread's AGENT — see uiStore's pins for why it is per
-            person and not shared. */}
-        {pinned.length > 0 && (
-          <>
-            <RailSection label="Pinned" count={pinned.length} first />
-            {pinned.map((a) => <AgentRow key={`pinned-${a.agent_id}`} agent={a} />)}
-          </>
-        )}
-
-        {pinned.length > 0 && <RailSection label="All agents" count={visible.length} />}
-        {visible.length === 0 ? (
-          <EmptyState
-            size="inline"
-            icon={agents.length === 0 ? SparklesIcon : SearchIcon}
-            title={agents.length === 0 ? "No agents yet" : "Nothing here"}
-            hint={
-              agents.length === 0
-                ? "Describe one in the composer and you’ll get a plan to approve first."
-                : undefined
-            }
-          />
-        ) : (
-          visible.map((a) => <AgentRow key={a.agent_id} agent={a} />)
-        )}
-
-        {/* runs — how you re-open a past trace */}
-        {/* I5, ON THE ONE LIST IN THIS COLUMN THAT IS A WINDOW RATHER THAN A SET. `listRuns` takes a
-            cap and this list has a "load older" control under it, so `runList.length` is how many
-            have been fetched and not how many exist — and the search line below already says so in
-            words, "the N loaded runs". Until the history is complete the total is genuinely unknown,
-            which is what the dash says; once it is, the length IS the total. */}
-        <RailSection label="Runs" count={historyComplete ? runList.length : null} />
-        {runList.length === 0 ? (
-          <EmptyState size="inline" icon={ActivityIcon} title="No runs yet" />
-        ) : (
-          runList.map((r) => <RunRow key={r.id} run={r} />)
-        )}
-        {/* OLDER RUNS — the paging this product had none of.
-            The list read stops at a window, and until now that window could not be widened: the
-            51st-newest run was unreachable because `loadRun` needs an id and the only source of ids
-            was this list. It offers itself once the window is full, because before that there is
-            demonstrably nothing behind it, and it disappears when the server says a window came back
-            short — which is the only reliable end-of-list signal there is. */}
-        {runList.length >= historyWindow && !historyComplete && (
-          <button
-            onClick={() => sendLoadHistory(Math.min(historyWindow * 2, 500))}
-            className="w-full px-4 py-2 text-left text-tiny text-muted transition-colors hover:bg-sidebar-hover hover:text-ink"
-          >
-            Load older runs…
-          </button>
-        )}
-        {/* AND THE HONEST NOTE ABOUT THE SEARCH BOX. It filters what has been loaded, so somebody
-            searching for last month's run used to be told there was no such run. Said plainly rather
-            than left to be inferred, and only while there is more to load. */}
-        {q && !historyComplete && (
-          <p className="px-4 pb-2 text-tiny leading-[1.5] text-faint">
-            Searching the {runList.length} loaded runs. Load older ones to search further back.
-          </p>
         )}
       </div>
 
-      {/* bottom-anchored: who is signed in, and what this workspace is paying. Settings moved to
-          the foot of the rail — a gear is the whole control, and the row it used to sit in spent a
-          line on one word plus a chevron that pointed at nothing navigable. */}
-      <div className="shrink-0 border-t border-sidebar-border px-3 py-2.5">
+      {/* Bottom-anchored: who is signed in. */}
+      <div className="shrink-0 border-t border-sidebar-border px-2 py-2">
         <AccountRow />
-        </div>
-      </div>
       </div>
     </div>
   );

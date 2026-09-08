@@ -13,6 +13,8 @@ import { firstRunOnScreen, useFirstRunStore } from "./store/firstRunStore.ts";
 import { SplashScreen } from "./components/auth/SplashScreen.tsx";
 import { splashOnScreen, useSplashStore } from "./store/splashStore.ts";
 import { hasHostWindow, setWindowStage } from "./lib/windowStage.ts";
+import { Icon } from "./lib/icons/registry.ts";
+import { ICON } from "./lib/tokens.ts";
 import { McpConfirmModal } from "./components/McpConfirmModal.tsx";
 import { FullScreenView } from "./components/FullScreenView.tsx";
 import { AdminModeBanner } from "./components/AdminModeBanner.tsx";
@@ -126,6 +128,8 @@ export function App() {
   const sessionStatus = useSessionStore((s) => s.status);
   // §2's whole mechanism, as one nullable field. Null is the ordinary three panes.
   const navView = useUiStore((s) => s.navView);
+  // Chrome, not navigation — see uiStore. The destination stays selected while it is hidden.
+  const sidebarHidden = useUiStore((s) => s.sidebarHidden);
 
   // First run. Everything below is the normal app once `phase` is "complete", which it is for
   // every session after the first — see components/onboarding/useOnboarding.ts.
@@ -346,9 +350,6 @@ export function App() {
         ref={setShell}
         className="flex h-full flex-col overflow-hidden rounded-lg border border-edge bg-bg shadow-overlay"
       >
-        {/* top bar */}
-        <TopBar />
-
         {/* WHY THE WORKSPACE CANNOT START ANYTHING, when that is the case. Directly under the top
             bar and above every pane, because it is not a setting somebody goes looking for: it is
             the reason the last thing they pressed was refused, and until now the only place that
@@ -392,7 +393,7 @@ export function App() {
             which is not what remembering a layout means. An `id` is compared before the
             constraints ever are, so the key is now the panel rather than its arithmetic. */}
         <PanelGroup direction="horizontal" autoSaveId="jaroku-layout-v4" className="flex-1 min-h-0">
-          {mountSidebar && (
+          {mountSidebar && !sidebarHidden && (
             <>
               {/* `minSize` IS A MEASURED PIXEL FLOOR, not a share of the window. 16% is 307px
                   at 1920 and 164px at 1024 — one rule expressing two different requirements, and
@@ -405,7 +406,38 @@ export function App() {
               <PaneDivider />
             </>
           )}
-          <Panel id="workspace" order={2}>
+          {/* THE WAY BACK, and it exists because the control that hides the sidebar lives INSIDE
+              the sidebar. Without this, pressing it once removes the only thing that could undo it
+              — which is the trap this codebase's disabled-state discipline is about, one step
+              further out: not a control that does nothing, but one that removes itself.
+
+              It takes the space the traffic lights need under the desktop shell, for the same
+              reason `SidebarChrome` does — with the sidebar gone, this strip is what sits under
+              them, and it carries the drag region so the window can still be moved by its top
+              edge. */}
+          {mountSidebar && sidebarHidden && (
+            <div
+              data-tauri-drag-region
+              className={`flex h-11 shrink-0 items-center bg-sidebar ${hasHostWindow() ? "pl-[76px]" : "pl-2"}`}
+            >
+              <button
+                onClick={() => useUiStore.getState().toggleSidebar()}
+                title="Show the sidebar"
+                aria-label="Show the sidebar"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-sidebar-hover hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+              >
+                <Icon.nav.sidebarToggle size={ICON.sm} />
+              </button>
+            </div>
+          )}
+          <Panel id="workspace" order={2} className="flex min-h-0 flex-col">
+            {/* THE TOP BAR STARTS WHERE THE SIDEBAR ENDS. It spanned the whole window, which put a
+                44px strip of chrome above the sidebar and stopped that column reaching the top of
+                the frame — and on macOS the traffic lights then sat on the bar rather than on the
+                sidebar's own first row. Everything left in it is about the OPEN AGENT and its run,
+                so the panel that holds the agent is where it belongs; the sidebar is now the full
+                height of the window and begins level with the lights. */}
+            <TopBar />
             {/* THE THREE PANES STAY MOUNTED WHILE A FULL-SCREEN VIEW IS UP, and that is the second
                 promise §2 makes: clicking the active agent in the sidebar "returns you to the
                 three-pane view exactly where you left it". Unmounting would lose a half-typed
@@ -416,7 +448,7 @@ export function App() {
                 resize observer is never handed a zero-width container and its saved sizes survive
                 the round trip. It also drops out of the tab order, which is what stops the keyboard
                 reaching a composer nobody can see. */}
-            <div ref={setPanes} className="relative h-full">
+            <div ref={setPanes} className="relative min-h-0 flex-1">
               <div className={`absolute inset-0 ${navView ? "invisible" : ""}`}>
                 <PanelGroup direction="horizontal" autoSaveId="jaroku-panes-v1" className="h-full">
                   {/* `minSize` IS A MEASURED PIXEL FLOOR HERE TOO, for the reason the sidebar's is:

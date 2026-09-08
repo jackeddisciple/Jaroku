@@ -13,39 +13,24 @@
 import { useEffect, useRef } from "react";
 import { useBuildStore } from "../store/buildStore.ts";
 import { providerLabelOf, useProviderStore } from "../store/providerStore.ts";
-import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { useDeployStore } from "../store/deployStore.ts";
 import { sendCancelDeploy, sendSetOwnKeyForPlatform } from "../lib/socket.ts";
 import { isDeployInFlight } from "../types.ts";
 import { useCanRun } from "../lib/useCapability.ts";
-import { agentStatus } from "../lib/agentStatus.ts";
 import { fmtPercent } from "../lib/format.ts";
-import { ProviderMark, BRAND_COLOR, JarokuGlyph } from "../lib/icons.tsx";
-import { BRAND, ICON, TYPE } from "../lib/tokens.ts";
+import { ProviderMark, BRAND_COLOR } from "../lib/icons.tsx";
+import { ICON, TYPE } from "../lib/tokens.ts";
 
-import { Truncate } from "./Truncate.tsx";
 import { Chip } from "./Chip.tsx";
-import { GitBranchIcon, KeyIcon } from "./panelIcons.tsx";
+import { KeyIcon } from "./panelIcons.tsx";
 import { Icon } from "../lib/icons/registry.ts";
-import { useGithubStore } from "../store/githubStore.ts";
-import { useSessionStore } from "../store/sessionStore.ts";
 import { useEvalStore } from "../store/evalStore.ts";
 import { StatusBadge } from "./StatusBadge.tsx";
 import { iconBtn, outlineBtn } from "./buttons.ts";
 import { RunFigures } from "./StatusBar.tsx";
 import { CheckboxField } from "./Checkbox.tsx";
 
-function StatusDot({ status }: { status: string }) {
-  const color = status === "running" ? "bg-run" : status === "draft" ? "bg-faint" : "bg-ok";
-  const label = status === "running" ? "running" : status === "draft" ? "draft" : "ready";
-  return (
-    <span className="inline-flex items-center gap-1.5 text-muted text-caption">
-      <span className={`w-1.5 h-1.5 rounded-full ${color} ${status === "running" ? "animate-stream-pulse motion-reduce:animate-none" : ""}`} />
-      {label}
-    </span>
-  );
-}
 
 // THE LABELS USED TO BE HERE, as a three-entry record with no `google` key that fell back to the
 // raw id — so a provider the product fully supports was "Gemini" in the composer's model selector,
@@ -197,79 +182,6 @@ function ProviderMenu({ provider, model }: { provider: string; model: string }) 
   );
 }
 
-/**
- * What this agent is linked to — §A.7.
- *
- * THE TAB BADGE AND THIS CHIP ANSWER DIFFERENT QUESTIONS, and that is why they are two elements
- * rather than one. The badge (↑2 / ↓1 / ↕ / ⚠) says HOW OUT OF SYNC an agent is right now; it is
- * the live half, changing constantly. This says WHAT it is linked to; it is close to static,
- * changing only on a relink or a branch switch. Collapsing them would mean either the identity
- * gets buried under a number that changes every minute, or the number gets buried in a string that
- * mostly does not — and each stays legible only on its own update cadence.
- *
- * AN UNLINKED AGENT SHOWS NO CHIP AT ALL, not an empty placeholder. §2.1's principle: describe what
- * is true rather than what is missing.
- *
- * The click is a shortcut into the specific action it implies — the branch switcher — rather than
- * merely the tab, because somebody who clicked the element naming their branch was reaching for
- * the branch.
- */
-function GithubChip({ agentId }: { agentId: string }) {
-  const view = useGithubStore((s) => s.views[agentId]);
-  const openGithubBranches = useUiStore((s) => s.openGithubBranches);
-  if (!view) return null;
-  return (
-    <Chip
-      size="sm"
-      tone="faint"
-      variant="bare"
-      icon={<Icon.panel.github size={ICON.badge} />}
-      onClick={openGithubBranches}
-      title={`${view.link.repo_full_name} · ${view.link.branch} — open the branch switcher`}
-      className="max-w-[320px]"
-    >
-      {/* owner/repo SHRINKS BEFORE branch does, because the branch is the more decision-relevant
-          half day to day — you switch branches far more often than you switch repositories. Two
-          Truncates rather than one over the joined string, so the shrinking is allocated rather
-          than left to whichever half happens to be on the right. */}
-      <Truncate variant="path" className="min-w-0 max-w-[160px]">{view.link.repo_full_name}</Truncate>
-      <span className="shrink-0 text-faint">·</span>
-      <Truncate className="min-w-0 shrink-0">{view.link.branch}</Truncate>
-    </Chip>
-  );
-}
-
-/**
- * Where you are, under what you are looking at: `workspace ⑂ branch`.
- *
- * TEN PIXELS AND FAINT, deliberately. It is not something to read — it is something to have
- * already read by the time you wonder. Both halves are optional and the line disappears entirely
- * when neither is known, because a breadcrumb with nothing in it is worse than none.
- *
- * It does not duplicate the GitHub chip beside it. The chip is a control that opens the branch
- * switcher and names the repository; this is the sentence that says which workspace the agent
- * above it belongs to, which nothing in the chrome said before.
- */
-function Breadcrumb({ agentId }: { agentId: string }) {
-  const view = useGithubStore((s) => s.views[agentId]);
-  const workspaces = useSessionStore((s) => s.workspaces);
-  const workspaceId = useSessionStore((s) => s.workspaceId);
-  const workspace = workspaces.find((w) => w.id === workspaceId);
-  const branch = view?.link.branch;
-  if (!workspace && !branch) return null;
-  return (
-    <span className="flex min-w-0 items-center gap-1 text-tiny text-faint">
-      {workspace && <Truncate className="min-w-0 max-w-[160px]">{workspace.name}</Truncate>}
-      {workspace && branch && <span aria-hidden>·</span>}
-      {branch && (
-        <>
-          <span className="shrink-0" aria-hidden><GitBranchIcon size={9} /></span>
-          <Truncate className="min-w-0 max-w-[140px]">{branch}</Truncate>
-        </>
-      )}
-    </span>
-  );
-}
 
 /**
  * A ring and a percentage for the one thing in this product that has a real denominator.
@@ -318,11 +230,9 @@ function SyncRing() {
 
 export function TopBar() {
   const agent = useBuildStore((s) => s.agents.find((a) => a.agent_id === s.activeAgentId));
-  const runs = useTraceStore((s) => s.runs);
   const provider = useUiStore((s) => s.provider);
   const model = useUiStore((s) => s.model);
 
-  const status = agent ? agentStatus(agent.agent_id, runs) : "draft";
   const setRightTab = useUiStore((s) => s.setRightTab);
   const inFlight = useDeployStore((s) => s.deployments.find((d) => isDeployInFlight(d.status)));
   // `deploy:manage`, not `agent:write`. See the guard on the button itself.
@@ -333,32 +243,14 @@ export function TopBar() {
 
   return (
     <div className="flex h-11 shrink-0 items-center gap-3 border-b border-hair px-4">
-      {/* brand — the mark alone, no wordmark beside it. A logo that has to be captioned with
-          its own name is a logo the product doesn't trust, and the name is already on the tab.
-          Sized up from the inline default because it is now carrying the slot by itself, and
-          labelled because the glyph is aria-hidden: the brand still has to reach a reader. */}
-      <span role="img" aria-label="Jaroku" className="flex items-center text-ink">
-        <JarokuGlyph size={BRAND.chrome} />
-      </span>
+      {/* THE LEFT CLUSTER IS GONE, and what it said is said better one column over. The mark, the
+          active agent's name, its status dot and the breadcrumb all sat here — four facts about the
+          agent, in a bar that now begins where the sidebar ends. The sidebar names the agent it has
+          selected AND selects it; a second name beside the first is two places to read one fact and
+          only one of them can be acted on.
 
-      {/* active agent + status, as a two-line title block.
-          THE SECOND LINE IS THE CHEAPEST ORIENTATION CUE THERE IS and the app had none: nothing in
-          the chrome said, persistently, which workspace and which branch you were working in. The
-          workspace switcher on the right knows the first and the GitHub chip knows the second, but
-          both are controls you go and read rather than facts you are already looking at. */}
-      {agent && (
-        <>
-          <span className="text-faint">·</span>
-          <span className="flex min-w-0 flex-col justify-center leading-tight">
-            <Truncate className="max-w-[280px] text-label text-ink" title={agent.name}>{agent.name}</Truncate>
-            <Breadcrumb agentId={agent.agent_id} />
-          </span>
-          <StatusDot status={status} />
-          {/* Hidden below ~1280px. It is the widest element in the bar and the one whose fact —
-              which repository, which branch — is now also on the breadcrumb two lines above it. */}
-          <span className="hidden xl:inline-flex"><GithubChip agentId={agent.agent_id} /></span>
-        </>
-      )}
+          `RunFigures` keeps its `ml-auto`, so with nothing to its left it is simply the first thing
+          in the row rather than the thing pushed away from the brand. */}
 
       {/* WHAT THE RUN IS DOING, WHILE IT DOES IT — promoted out of the bottom strip. It sits
           against the left group rather than in the right one because it belongs to the agent
