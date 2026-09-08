@@ -278,7 +278,16 @@ function NavList() {
           newIsCurrent ? "text-accent" : "text-muted hover:text-ink"
         }`}
       >
-        <Icon.agents.new size={ICON.lg} />
+        {/* THE MARK GETS THE FILL, NOT THE ROW. `New` is the column's one button and the tile is
+            what says so — a small black square with a white plus, the size of the marks beside it,
+            so the row still scans as a row. Filling the whole row instead would make it a banner
+            and put a black bar across the top of a column of quiet text. */}
+        <span
+          aria-hidden
+          className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-xs bg-ink text-bg"
+        >
+          <Icon.nav.newAgent size={ICON.sm} />
+        </span>
         <span className="min-w-0 flex-1 truncate text-label">New</span>
         {/* THE CHORD, ON APPROACH. A shortcut printed permanently is a second thing to read on a
             row with two words on it; one that appears when the pointer arrives is there exactly

@@ -47,6 +47,18 @@ export const MANIFEST = {
      */
     historyBack: "ChevronLeftIcon",
     historyForward: "ChevronRightIcon",
+    /**
+     * The sidebar's `New`, and it is a BARE plus on purpose.
+     *
+     * `agents.new` is `PlusSignSquareIcon` — a plus already inside a drawn square — and the row it
+     * is used in here paints its own filled square behind the mark. Two squares, one nested in the
+     * other. So this key takes the plain glyph and lets the container be the container, while the
+     * Agents grid keeps the squared mark it uses on a bare surface.
+     *
+     * NOTHING PREMIUM IS INVOLVED. A filled black tile with a white plus is not a distinct icon to
+     * be bought; it is this free stroke glyph on a background, which is CSS.
+     */
+    newAgent: "PlusIcon",
   },
 
   // ── §5 Sidebar panel + §6 Workspace panel ─────────────────────────────────
