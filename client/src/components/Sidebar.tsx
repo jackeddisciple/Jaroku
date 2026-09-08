@@ -212,12 +212,34 @@ function SidebarChrome() {
 function NavList() {
   const navSection = useUiStore((s) => s.navSection);
   const openNav = useUiStore((s) => s.openNav);
+  const activeAgentId = useBuildStore((s) => s.activeAgentId);
   const needsYou = useThreadStore((s) => s.counts.needs_you);
   const waiting = useInboxStore((s) => s.counts.badge);
   const waitingOnYou = useWorkStore((s) => workBadgeCount(s.workspaceCounts));
 
   return (
-    <div className="flex shrink-0 flex-col gap-0.5 px-2 pb-1">
+    <div className="flex shrink-0 flex-col px-2 pb-1">
+      {/* NEW IS THE FIRST THING AND THE DEFAULT ONE, which is what makes it a destination rather
+          than a button that happened to be moved here. It was a `+` in the Recents header, filed
+          with that section's filter — a creation control scoped by a list it does not belong to.
+
+          IT IS ACTIVE WHEN NOTHING ELSE IS. `activeAgentId === null` IS the empty composer: it is
+          the state the application already opens in, so this row is lit on first paint without
+          anything having to select it. `navSection` has to be null too, or opening Threads would
+          leave two rows looking chosen. */}
+      <button
+        onClick={() => { useUiStore.getState().closeNav(); selectAgent(null); }}
+        aria-current={activeAgentId === null && navSection === null ? "page" : undefined}
+        className={`flex h-8 w-full shrink-0 items-center gap-2.5 rounded-control px-2 text-left transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+          activeAgentId === null && navSection === null
+            ? "bg-sidebar-active text-accent"
+            : "text-muted hover:bg-sidebar-hover hover:text-ink"
+        }`}
+      >
+        <Icon.agents.new size={ICON.lg} />
+        <span className="min-w-0 flex-1 truncate text-label">New</span>
+      </button>
+
       {NAV_DESTINATIONS.map(({ id, label, icon: Mark }) => {
         const active = navSection === id;
         const badge = id === "inbox" ? waiting : id === "threads" ? needsYou : id === "work" ? waitingOnYou : 0;
@@ -232,7 +254,7 @@ function NavList() {
             key={id}
             onClick={() => openNav(id)}
             aria-current={active ? "page" : undefined}
-            className={`flex h-9 w-full shrink-0 items-center gap-2.5 rounded-control px-2 text-left transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+            className={`flex h-8 w-full shrink-0 items-center gap-2.5 rounded-control px-2 text-left transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
               active ? "bg-sidebar-active text-accent" : "text-muted hover:bg-sidebar-hover hover:text-ink"
             }`}
           >
@@ -358,7 +380,7 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
   return (
     <>
       <div
-        className={`group flex h-9 w-full items-center gap-1 rounded-control pr-1 transition-colors duration-fast ${
+        className={`group flex h-8 w-full items-center gap-1 rounded-control pr-1 transition-colors duration-fast ${
           selected ? "bg-sidebar-active" : "hover:bg-sidebar-hover"
         }`}
       >
@@ -725,7 +747,6 @@ function FilterMenu({
 export function Sidebar() {
   const runs = useTraceStore((s) => s.runs);
   const agents = useBuildStore((s) => s.agents);
-  const activeAgentId = useBuildStore((s) => s.activeAgentId);
   const [filter, setFilter] = useState<Filter>("all");
   // Searching moved into the palette (see `SidebarChrome`), so the query the list filters by
   // is now only ever empty here. Kept as the one place the filter reads from, so restoring an
@@ -837,17 +858,11 @@ export function Sidebar() {
             {recentsOpen ? <Icon.workspace.switcherOpen size={ICON.xs} /> : <Icon.workspace.switcherClosed size={ICON.xs} />}
           </button>
           <span className={`min-w-0 flex-1 ${TYPE.panelLabel}`}>Recents</span>
+          {/* THE PLUS LEFT THIS ROW for the `New` destination at the top of the column. A control
+              that creates an agent was filed beside the filter that narrows a list of them, which
+              made "new" read as a thing you do to the list rather than the first thing you do at
+              all. What is left here is what genuinely belongs to Recents: how it is filtered. */}
           <FilterMenu filter={filter} setFilter={setFilter} counts={counts} />
-          <button
-            onClick={() => selectAgent(null)}
-            title="New agent"
-            aria-label="New agent"
-            className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
-              activeAgentId === null ? "bg-sidebar-active text-accent" : "text-muted hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink"
-            }`}
-          >
-            <Icon.agents.new size={ICON.sm} />
-          </button>
         </div>
 
         {/* `overflow-x-hidden` RATHER THAN NOTHING: a row that runs out of room truncates, and a

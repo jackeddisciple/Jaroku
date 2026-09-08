@@ -109,6 +109,21 @@ export function StatusBar() {
 
   const sep = <span className="text-faint" aria-hidden>·</span>;
 
+  /**
+   * NOTHING TO SAY IS NO STRIP AT ALL.
+   *
+   * Hiding the connection indicator when it read "connected" left the ROW — 28px and a `border-t`
+   * across the whole application, permanently, holding nothing. On a window with no title bar that
+   * line is the last horizontal rule on screen, so the product read as content sitting on a second
+   * plane with a seam under it: the exact "two layers" the shell's own inset had just been removed
+   * for. An empty container is not neutral; it is a border and a gap.
+   *
+   * The three things this strip exists to say are all conditional, so the strip is too — and when
+   * any of them becomes true it comes back with its border, its height and its place.
+   */
+  if (!failed && connection === "open" && !deploying && live === 0) return null;
+
+
   return (
     <div className="flex h-7 shrink-0 items-center gap-3 border-t border-hair px-4 text-tiny text-muted">
       {/* The dot moves while it is connecting. Every other in-flight mark in this app pulses —

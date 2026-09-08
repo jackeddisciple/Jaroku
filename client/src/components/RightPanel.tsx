@@ -243,11 +243,16 @@ export function RightPanel() {
               title={t.label}
               aria-label={t.label}
               onClick={() => setTab(t.id)}
-              className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+              className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
                 active ? "bg-active text-accent" : "text-muted hover:bg-active/40 hover:text-ink"
               }`}
             >
-              <t.Mark size={ICON.md} />
+              {/* `lg`, MATCHING THE SIDEBAR'S DESTINATIONS. These two rails are the same kind of
+                  control on opposite edges of the window — a column of marks that each swap what
+                  fills the middle — and two of them at different sizes reads as one of them being
+                  a lesser version of the other. The cell grows with the mark so the padding around
+                  it is unchanged. */}
+              <t.Mark size={ICON.lg} />
               {/* THE ONE BADGE IN THIS RAIL, and it is computable while the tab is locked — the
                   health route answers in counts, without elevation, so somebody is not asked for a
                   passcode to be told whether they need to care. Carries a title as well as a colour,
