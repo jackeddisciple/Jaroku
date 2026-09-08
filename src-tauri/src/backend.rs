@@ -59,6 +59,38 @@ impl Backend {
 /// what keeps one binary usable against staging without rebuilding it.
 const BAKED_IN: Option<&str> = option_env!("JAROKU_BACKEND_URL");
 
+/// A DISTRIBUTION BUILD CANNOT SILENTLY SHIP IN LOCAL MODE.
+///
+/// The failure this exists for left no trace anywhere: `release.yml` did not set
+/// `JAROKU_BACKEND_URL`, `option_env!` answered `None` exactly as designed, `resolve` returned
+/// `Local` exactly as designed, and every published artefact was a private Jaroku with its own
+/// database. Nothing was wrong with any line of it. The bug was an ABSENCE, and an absence is
+/// precisely what a test cannot notice — so the check has to be the one thing that fails on
+/// nothing being there.
+///
+/// AT COMPILE TIME, because that is when the value is read. A runtime check would fail on the
+/// user's machine, after the download, which is the one place this must never be discovered.
+///
+/// `debug_assertions` IS THE LINE BETWEEN THE TWO BUILDS, and it is drawn where the meaning
+/// changes rather than where a flag is convenient: `tauri dev` and `cargo test` are debug and are
+/// meant to be LOCAL, while a release profile is something somebody will run without a terminal.
+///
+/// AND THERE IS A DELIBERATE WAY PAST IT. `JAROKU_ALLOW_LOCAL_DIST=1` builds a packaged app that
+/// supervises its own backend — a real thing to want, and how a single-user or air-gapped install
+/// is made. What it is not, any more, is what you get by forgetting.
+#[cfg(not(debug_assertions))]
+const _: () = {
+    if BAKED_IN.is_none() && option_env!("JAROKU_ALLOW_LOCAL_DIST").is_none() {
+        panic!(
+            "this is a release build with no JAROKU_BACKEND_URL, so it would ship as its own \
+             private Jaroku: its own database, accounts nobody else can see, and a Google \
+             callback on a localhost port that differs per machine and cannot be registered. \
+             Set JAROKU_BACKEND_URL=wss://<host> to point it at a deployment, or \
+             JAROKU_ALLOW_LOCAL_DIST=1 if a self-contained install is what you actually want."
+        );
+    }
+};
+
 /// Read the mode, or fall back to supervising one here.
 ///
 /// IT VALIDATES RATHER THAN TRUSTING, for `hostConfig.ts`'s reason one layer down: the value ends

@@ -116,6 +116,23 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # WHICH JAROKU A DOWNLOADED BUILD TALKS TO, and it has to be decided HERE because it is
+          # read at COMPILE time. `src-tauri/src/backend.rs` resolves the mode from
+          # `option_env!("JAROKU_BACKEND_URL")`, and an absent value is LOCAL — which is the right
+          # default for `cargo test` and for somebody's laptop, and the wrong one for every artefact
+          # this job uploads. That module's own header says why: "two installs of that are two
+          # databases, and signing up on one of them is invisible to the other."
+          #
+          # It was absent here, so every published build shipped as its own private Jaroku: an
+          # account made in one did not exist in another, and Google sign-in could not work at all,
+          # because each install's callback would be `http://localhost:<port>/oauth/google/callback`
+          # and `ports.rs` walks that port upward whenever 4317 is busy. There is no redirect URI you
+          # can register for an address that differs per machine.
+          #
+          # A REPOSITORY VARIABLE WITH A LITERAL FALLBACK, so moving the API to another host — say
+          # `wss://api.getjaroku.com` — is a settings change rather than a commit, while an unset
+          # variable still cannot produce an empty value and fall back to LOCAL by accident.
+          JAROKU_BACKEND_URL: ${{ vars.JAROKU_BACKEND_URL || 'wss://jaroku-api.fly.dev' }}
           # AD-HOC SIGNING ON macOS, AND IT IS NOT COSMETIC. An arm64 Mach-O binary must carry a
           # signature to execute at all — Apple silicon has no "unsigned" execution path the way
           # Intel did. An unsigned `.app` downloaded to an M-series Mac therefore fails with

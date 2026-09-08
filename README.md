@@ -251,6 +251,28 @@ builds, where code-signing certificates go, and a section separating what has be
 has not — `tauri dev` and `tauri build` exercise different halves of the shell, and only the first
 has been earned so far.
 
+**A build somebody downloads talks to a Jaroku that is already running.** The shell has two shapes,
+and the difference is one variable read at COMPILE time — `JAROKU_BACKEND_URL`, a `ws://` or
+`wss://` address:
+
+| | Unset | `JAROKU_BACKEND_URL=wss://host` |
+|---|---|---|
+| Backend | supervised here: a port, a payload, a CPython, a database on this machine | none — the window talks to the deployment |
+| Right for | `npm run tauri:dev`, and a self-contained single-user install | anything you distribute |
+
+Unset means LOCAL, because a shell that works with no network at all is the safe direction to guess
+in. That default is wrong for every artefact a release uploads: two installs of a LOCAL build are
+two databases, so an account made in one does not exist in the other, and Google sign-in cannot work
+at all — each install's callback would be `http://localhost:<port>/oauth/google/callback`, and
+`ports.rs` walks that port upward whenever 4317 is taken, so there is no redirect URI you could
+register for it. `release.yml` therefore bakes the address in, from the `JAROKU_BACKEND_URL`
+repository variable, and **a release-profile build with neither that nor `JAROKU_ALLOW_LOCAL_DIST=1`
+refuses to compile** — the original bug was an absence, and an absence is what no test notices.
+
+A runtime `JAROKU_BACKEND_URL` still overrides the baked-in one, which is how one binary is pointed
+at staging. It cannot configure a packaged `.app`, though: a bundle launched from Finder inherits no
+shell environment, which is the whole reason the value is baked at build time.
+
 ---
 
 ## First run
