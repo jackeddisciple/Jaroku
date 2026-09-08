@@ -8,6 +8,86 @@ release notes and the commits in that release's range.
 
 ---
 
+## v0.3.15 : Bug Fixes and a Production-Grade Check Pass
+
+A full functional-integrity audit of the shipped product — every route, every interactive control,
+every mutation traced from the button to the row it writes — driven against the running application
+rather than read off the source. 175 controls were pressed across all five surfaces and every
+finding below was reproduced live before it was fixed and re-verified live afterwards.
+
+Two real defects came out of it. Both are the same shape: a control that LOOKS like it works,
+enabled and inviting, whose handler declines to act.
+
+### Fixed
+
+- **A stalled Google sign-in no longer takes the whole screen with it.** When the deep link never
+  arrives — a `jaroku://` scheme claimed by another application, a webview outside a bundle, or
+  Google refusing the redirect URI outright — a ninety-second timer already existed to end the
+  "Waiting for your browser…" animation. It set a flag the LABEL read while every GUARD went on
+  reading `busy`: so the button re-enabled itself, the paragraph beside it said *press Continue with
+  Google to start again*, and `google()` returned on its first line. The email field was worse — its
+  `disabled` had no notion of stalling at all, so a Google attempt that never came back disabled the
+  OTHER sign-in path for the life of the process. The only way out was still to quit, which is
+  precisely the state the timeout was added to end, reached through the timeout itself.
+  `inFlight` is now "is an attempt still running", computed once, and nothing that gates an action
+  reads `busy`. Verified against a real ninety-second stall.
+
+- **The pane layout is remembered per person rather than per window width.** With no `id` on a
+  `Panel`, react-resizable-panels keys the saved layout by that panel's own constraints — safe, its
+  own comment says, because min/max are constants. This application's are measurements: the sidebar
+  and composer floors are pixel minimums computed against the live container, so the storage key
+  carried a different `minSize` at every window width. A sidebar dragged to 402px at 1440 came back
+  at the 20% default the moment the window was 1600, and `localStorage` grew another entry each
+  time — not a layout lost but a layout remembered per window size, which looks like working
+  persistence right up until somebody resizes a window. Stable ids make the key the panel instead of
+  its arithmetic. The composer's `defaultSize` is now conditional on the right panel it shares the
+  group with, so onboarding's one-panel group stops declaring a layout totalling 45%.
+
+### Added
+
+- **`client/src/lib/signInRecovery.test.ts`** (`test:sign-in-recovery`) — the rule that nothing
+  gating an action on the sign-in screen may read `busy`, plus the two facts the fix rests on: that
+  the stall keeps `busy` so the guidance still renders, and that each entry point clears `stalled`
+  so a new attempt is not treated as the old one's.
+- **`client/src/lib/paneIdentity.test.ts`** (`test:pane-identity`) — every `<Panel>` carries a
+  distinct `id`, the pane minimums are still measured (which is what makes the ids load-bearing),
+  and — read out of the installed copy rather than restated — the library rule that an `id` is
+  preferred over the constraints when the storage key is built, so an upgrade that changed it fails
+  here instead of silently restoring per-width keys.
+
+### Verified
+
+Exercised end-to-end against the running application, not asserted from source:
+
+- **Inbox `Mark as done`** — button → WebSocket → server → `inbox_items.state = 'resolved'` with
+  `resolved_at` set, the card gone, the section and sidebar counts down by one, and all of it still
+  true after a reload.
+- **Double submission** — five rapid clicks on one Inbox action produce exactly one resolved row.
+- **All five surfaces** — Threads, Agents, Cockpit, Inbox, Activity: 175 controls pressed, no
+  errors, no unhandled rejections, no failed requests.
+- **Command palette** — opens on the mod key, filters (`trace` → 1, `agent` → 4, `zzzzz` → 0),
+  arrow-and-Enter navigates, Escape closes.
+- **Two tabs at once** — both obtain their own single-use ticket and connect; neither disturbs the
+  other.
+- **Sign-in rate limits** — per-IP and per-email windows are enforced from the database and survive
+  a server restart, which is what makes them limits.
+- **The client/server contract** — every `/v1/...` path the client names is answered by a mounted
+  route. No 404s, no stale endpoints.
+- **The eighteen server auth suites** and the eighty-one client suites.
+
+### Notes
+
+- `redirect_uri_mismatch` on a locally-run desktop app is configuration, not code: the redirect URI
+  is built from `JAROKU_AUTH_ORIGIN`, and the deployed server already sends the URI its Google
+  client has registered. A local install needs its own origin — `http://localhost:4317`, Google's
+  one non-HTTPS exception — registered alongside the deployed one. Pointing a local server at the
+  deployed origin does not work and cannot: the OAuth state is minted and spent on the same server,
+  and the two have different databases.
+- The Gloss avatar system's no-WebGL fallback was confirmed on a machine with no GPU: the emoji
+  placeholder stands in, and the surface renders.
+
+---
+
 ## v0.3.14 : Agent Avatars — a Curated Cast, One WebGL Context, and a Category
 
 Every agent had a name, a slug and — since the last release — one emoji. What it did not have was a
