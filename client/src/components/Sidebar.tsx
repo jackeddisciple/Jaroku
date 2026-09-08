@@ -232,12 +232,12 @@ function NavList() {
             key={id}
             onClick={() => openNav(id)}
             aria-current={active ? "page" : undefined}
-            className={`flex h-8 w-full shrink-0 items-center gap-2.5 rounded-control px-2 text-left transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+            className={`flex h-9 w-full shrink-0 items-center gap-2.5 rounded-control px-2 text-left transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
               active ? "bg-sidebar-active text-accent" : "text-muted hover:bg-sidebar-hover hover:text-ink"
             }`}
           >
-            <Mark size={ICON.md} />
-            <span className="min-w-0 flex-1 truncate text-caption">{label}</span>
+            <Mark size={ICON.lg} />
+            <span className="min-w-0 flex-1 truncate text-label">{label}</span>
             {badge > 0 && (
               <span
                 title={badgeTitle}
@@ -358,7 +358,7 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
   return (
     <>
       <div
-        className={`group flex h-8 w-full items-center gap-1 rounded-control pr-1 transition-colors duration-fast ${
+        className={`group flex h-9 w-full items-center gap-1 rounded-control pr-1 transition-colors duration-fast ${
           selected ? "bg-sidebar-active" : "hover:bg-sidebar-hover"
         }`}
       >
@@ -400,7 +400,7 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
             className="flex min-w-0 flex-1 items-center gap-2 py-1 text-left focus-visible:outline-none focus-visible:shadow-focusring"
           >
             <AgentDot status={agentStatus(agent.agent_id, useTraceStore.getState().runs, agent.deployment)} />
-            <AgentIdentityLine emoji={agent.emoji} name={agent.name} category={agent.category} nameClassName="text-caption" />
+            <AgentIdentityLine emoji={agent.emoji} name={agent.name} category={agent.category} nameClassName="text-label" />
           </button>
         )}
         {!renaming && (
@@ -531,7 +531,7 @@ function AccountRow() {
           <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-control bg-sidebar-active text-tiny text-ink">
             {(name ?? "?").trim().charAt(0).toUpperCase()}
           </span>
-          <Truncate className="min-w-0 flex-1 text-caption text-ink" title={name}>{name}</Truncate>
+          <Truncate className="min-w-0 flex-1 text-label text-ink" title={name}>{name}</Truncate>
           {/* Only when the session carries one. A chip is a claim about what the workspace is
               paying, and inventing a default for it is how the hardcoded `Free` got there in the
               first place. */}

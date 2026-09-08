@@ -26,8 +26,13 @@ const check = (name: string, ok: boolean, detail = ""): void => {
   else { fail++; console.log(`  FAIL ${name}${detail ? ` — ${detail}` : ""}`); }
 };
 
-/** The shell inside the viewport: 8px of inset either side (`p-2`) and a 1px border either side. */
-const shellFor = (viewport: number): number => viewport - 16 - 2;
+/**
+ * The shell IS the viewport now. It used to be inset 8px either side with a 1px border either
+ * side — 18px of the width this arithmetic is about — and both went when the app stopped being
+ * drawn as a card floating on a second plane. Kept as a named function rather than inlined,
+ * because the next thing to wrap the panes will subtract something again.
+ */
+const shellFor = (viewport: number): number => viewport;
 
 /** What the sidebar pane actually gets, in pixels, at a viewport width. */
 const sidebarPx = (viewport: number): number => {

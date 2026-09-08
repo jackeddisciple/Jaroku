@@ -331,10 +331,13 @@ export function App() {
   if (onboardingNeeded) return <AccountOnboarding />;
 
   return (
-    // The app is a panel on a surface, not the surface. A few pixels of inset and one outer
-    // shadow, so the three columns read as a lifted object with edges — which is what they are
-    // once this is wrapped as a desktop window, and is worth the eight pixels in a browser tab
-    // too. The layout inside is untouched: same PanelGroup, same sizes, same resize handles.
+    // THE APP IS THE SURFACE NOW, not a panel resting on one. It was inset eight pixels inside a
+    // `bg-void` gutter and given a radius, a border and an outer shadow, so the whole product read
+    // as a card floating on a second plane — a lifted object with edges, which is exactly what it
+    // was drawn to be and exactly what looks wrong once the window itself has no title bar. Two
+    // frames, the OS window and this one, four pixels apart.
+    //
+    // WHAT THE WRAPPER IS STILL FOR is the sentence below it, and none of it was about the border:
     // `min-w-[900px]` and a horizontal scroll below it. The shell had no minimum at all, and the
     // pane minimums are PERCENTAGES — at a 1000px window the sidebar's `minSize={14}` is 140px,
     // narrower than its own rows plus their padding, which is why its filter row used to clip. The
@@ -345,11 +348,8 @@ export function App() {
     // names vanished entirely, run rows were cut mid-word and a horizontal scrollbar appeared
     // inside a vertical list. The sidebar's floor is stated in PIXELS and converted against the
     // width this group actually has — see lib/paneFloor.
-    <div className="h-full min-w-[900px] overflow-x-auto bg-void p-2">
-      <div
-        ref={setShell}
-        className="flex h-full flex-col overflow-hidden rounded-lg border border-edge bg-bg shadow-overlay"
-      >
+    <div className="h-full min-w-[900px] overflow-x-auto bg-bg">
+      <div ref={setShell} className="flex h-full flex-col overflow-hidden bg-bg">
         {/* WHY THE WORKSPACE CANNOT START ANYTHING, when that is the case. Directly under the top
             bar and above every pane, because it is not a setting somebody goes looking for: it is
             the reason the last thing they pressed was refused, and until now the only place that

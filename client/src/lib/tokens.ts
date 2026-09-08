@@ -321,6 +321,14 @@ export const ICON = {
   sm: 14,
   /** Standalone controls. */
   md: 16,
+  /**
+   * A NAVIGATION ROW, which is the one place a mark anchors a line rather than sitting level with
+   * it. The five destinations and the agents under them are what somebody scans this column for,
+   * and at `md` beside 12px text the whole rail read as a footnote to the workspace beside it —
+   * legible, and asking to be squinted at. Two pixels is the smallest step that changes that, and
+   * the ladder is short on purpose: this is the top of it, not an invitation to a sixth.
+   */
+  lg: 18,
   strokeWidth: 1.75,
 } as const;
 
