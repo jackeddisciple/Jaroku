@@ -319,7 +319,7 @@ function AgentActions({ agent, onRename }: { agent: AgentSummary; onRename: () =
         aria-label="Restore this agent"
         className="shrink-0 rounded-control p-1 text-muted transition-colors hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink"
       >
-        <Icon.agents.restore size={ICON.lg} />
+        <Icon.agents.restore size={ICON.sm} />
       </button>
     );
   }
@@ -332,7 +332,7 @@ function AgentActions({ agent, onRename }: { agent: AgentSummary; onRename: () =
         aria-label="Rename this agent"
         className="rounded-control p-1 text-faint transition-colors hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink"
       >
-        <Icon.agentDetail.rename size={ICON.lg} />
+        <Icon.agentDetail.rename size={ICON.sm} />
       </button>
       {confirming ? (
         <button
@@ -355,7 +355,7 @@ function AgentActions({ agent, onRename }: { agent: AgentSummary; onRename: () =
           title="Archive — nothing is deleted; its versions, runs and threads stay"
           className="rounded-control p-1 text-faint transition-colors hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink"
         >
-          <Icon.threads.archive size={ICON.lg} />
+          <Icon.threads.archive size={ICON.sm} />
         </button>
       )}
     </span>
@@ -396,9 +396,7 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
   return (
     <>
       <div
-        className={`group flex h-7 w-full items-center gap-1 rounded-control pr-1 transition-colors duration-fast ${
-          selected ? "bg-sidebar-active" : "hover:bg-sidebar-hover"
-        }`}
+        className="group flex h-7 w-full items-center gap-1 rounded-control pr-1 transition-colors duration-fast hover:bg-sidebar-hover"
       >
         {/* THE TWISTY AND THE NAME ARE TWO CONTROLS, because they do two things: one opens the
             agent's runs, the other selects the agent into the three panes. Nesting a button inside
@@ -438,7 +436,14 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
             className="flex min-w-0 flex-1 items-center gap-2 py-1 text-left focus-visible:outline-none focus-visible:shadow-focusring"
           >
             <AgentDot status={agentStatus(agent.agent_id, useTraceStore.getState().runs, agent.deployment)} />
-            <AgentIdentityLine emoji={agent.emoji} name={agent.name} category={agent.category} nameClassName="text-label" />
+            <AgentIdentityLine
+              emoji={agent.emoji}
+              name={agent.name}
+              category={agent.category}
+              // The destinations' size, because an agent is the same kind of row as the places
+              // above it. `text-accent` is all that is left of "selected" now the fill has gone.
+              nameClassName={`text-label ${selected ? "text-accent" : ""}`}
+            />
           </button>
         )}
         {!renaming && (
@@ -862,7 +867,10 @@ export function Sidebar() {
       <NavList />
 
       {/* RECENTS — the agents, and their runs under them. */}
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {/* THE GAP IS THE SECTION BREAK. Above it are six places you can go; below it is the contents
+          of one of them. They were four pixels apart, so the column read as ten interchangeable
+          rows and `Recents` looked like a seventh destination rather than a heading over a list. */}
+      <div className="mt-4 flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="flex h-8 shrink-0 items-center gap-1 pl-1.5 pr-2">
           <button
             onClick={() => setRecentsOpen((v) => !v)}
@@ -876,7 +884,7 @@ export function Sidebar() {
           {/* NOT `TYPE.panelLabel`, which uppercases. This heading names a place in a column of
               places — `New`, `Threads`, `Agents` — and shouting one of them makes it a
               different kind of thing from the rows above it. */}
-          <span className="min-w-0 flex-1 text-tiny tracking-wide text-faint">Recents</span>
+          <span className="min-w-0 flex-1 text-caption tracking-wide text-faint">Recents</span>
           {/* THE PLUS LEFT THIS ROW for the `New` destination at the top of the column. A control
               that creates an agent was filed beside the filter that narrows a list of them, which
               made "new" read as a thing you do to the list rather than the first thing you do at
