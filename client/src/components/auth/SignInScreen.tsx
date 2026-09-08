@@ -77,6 +77,25 @@ export function SignInScreen({
   const [error, setError] = useState<string | null>(null);
   const [devName, setDevName] = useState("");
 
+  /**
+   * WHETHER AN ATTEMPT IS STILL RUNNING — which is what every guard on this screen has always
+   * meant by `busy`, and stops being the same question the moment one stalls.
+   *
+   * `busy` records WHICH flow was started; it is what the label and the help paragraph below read,
+   * and it has to survive the timeout or the guidance about the stalled attempt would disappear
+   * with it. `stalled` says that attempt is no longer coming back. So after ninety seconds `busy`
+   * is still "google" and nothing is in flight, and the two readings diverge exactly where the
+   * recovery lives.
+   *
+   * NOTHING ELSE ON THIS SCREEN GUARDS ON `busy` DIRECTLY. Until this existed the Google button
+   * re-enabled itself on `!stalled` while `google()` still returned early on `busy` — a control
+   * the copy beside it tells you to press, that had been made pressable on purpose, and that did
+   * nothing — and the email field never re-enabled at all, so a Google attempt that never came
+   * back disabled the other sign-in path for the life of the process. That is the state the
+   * timeout was added to end, reached through the timeout itself.
+   */
+  const inFlight = busy !== null && !stalled;
+
   // Read once, at mount. The URL cannot change under this screen — there is no router — and the
   // redemption that removes the parameter only runs once there is a session, which is the moment
   // this screen stops being rendered.
@@ -114,7 +133,7 @@ export function SignInScreen({
   }, [attempt]);
 
   const google = async (): Promise<void> => {
-    if (busy) return;
+    if (inFlight) return;
     setBusy("google");
     setStalled(false);
     setError(null);
@@ -153,10 +172,14 @@ export function SignInScreen({
 
   const submitEmail = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
-    if (busy) return;
+    if (inFlight) return;
     const address = email.trim();
     if (!address) return;
     setBusy("email");
+    // A NEW ATTEMPT IS NOT THE OLD ONE'S STALL. Without this the flag survives into this request
+    // and `inFlight` stays false through it — so the field and the button would both stay live
+    // while a link was being sent, which is the double-submit the guard above exists to refuse.
+    setStalled(false);
     setError(null);
     try {
       const sent = await requestMagicLink(address);
@@ -175,8 +198,9 @@ export function SignInScreen({
 
   const devSubmit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
-    if (busy) return;
+    if (inFlight) return;
     setBusy("dev");
+    setStalled(false);
     setError(null);
     try {
       await devSignIn(email.trim(), devName.trim() || undefined);
@@ -244,8 +268,10 @@ export function SignInScreen({
                   onClick={() => void google()}
                   // ENABLED AGAIN ONCE IT HAS STALLED, which is the whole recovery. Disabled while
                   // the browser might still be coming back, because a second flow invalidates the
-                  // first one's state token; pressable again once it plainly is not.
-                  disabled={busy !== null && !stalled}
+                  // first one's state token; pressable again once it plainly is not. `inFlight` is
+                  // that sentence, and `google()` now reads the same one — it used to re-enable
+                  // here and return early there.
+                  disabled={inFlight}
                   icon={<GoogleMark />}
                 >
                   {busy === "google" && !stalled ? "Waiting for your browser…" : "Continue with Google"}
@@ -276,7 +302,7 @@ export function SignInScreen({
                   placeholder="Enter your email"
                   ariaLabel="Email address"
                   autoFocus={!methods.google}
-                  disabled={busy !== null}
+                  disabled={inFlight}
                   maxLength={254}
                   icon={
                     <svg width={ICON.md} height={ICON.md} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={ICON.strokeWidth} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -285,7 +311,7 @@ export function SignInScreen({
                     </svg>
                   }
                 />
-                <PrimaryButton type="submit" disabled={busy !== null || email.trim().length === 0}>
+                <PrimaryButton type="submit" disabled={inFlight || email.trim().length === 0}>
                   <Icon.auth.signIn size={ICON.sm} />
                   {busy === "email" ? "Sending a link…" : "Continue with email"}
                 </PrimaryButton>
@@ -313,17 +339,17 @@ export function SignInScreen({
             placeholder="you@example.com"
             ariaLabel="Email address"
             autoFocus
-            disabled={busy !== null}
+            disabled={inFlight}
           />
           <TextField
             value={devName}
             onChange={setDevName}
             placeholder="Your name (optional)"
             ariaLabel="Display name"
-            disabled={busy !== null}
+            disabled={inFlight}
           />
           {error && <FormError>{error}</FormError>}
-          <PrimaryButton type="submit" disabled={busy !== null || email.trim().length === 0}>
+          <PrimaryButton type="submit" disabled={inFlight || email.trim().length === 0}>
             <Icon.auth.signIn size={ICON.sm} />
             {busy === "dev" ? "Signing in…" : "Sign in"}
           </PrimaryButton>

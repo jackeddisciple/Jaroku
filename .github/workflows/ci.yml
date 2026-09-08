@@ -1248,6 +1248,17 @@ jobs:
           # the refusals that decide what the screen says: a 401 on an exchange is an expired link
           # with a way back, a 500 is ours, and an unreachable server is neither.
           npm run test:auth-sign-in
+          # AND WHAT THE SIGN-IN SCREEN DOES WHEN THE BROWSER NEVER COMES BACK, which is a state a
+          # misconfigured OAuth client reaches every single time. A ninety-second timer already
+          # existed to end the "Waiting for your browser…" animation, and it set a flag the LABEL
+          # read while every GUARD went on reading `busy`: so the Google button re-enabled itself,
+          # the copy beside it said to press it, and `google()` returned early on the first line.
+          # The email field was worse — its `disabled` had no notion of stalling at all, so a
+          # Google attempt that never returned disabled the other sign-in path for the life of the
+          # process. The whole recovery was unreachable through the recovery timeout itself. The
+          # rule is that nothing gating an action reads `busy`; "is an attempt still running" is
+          # one name, computed once.
+          npm run test:sign-in-recovery
           # §5S STEP ARITHMETIC, which is pure and is therefore the only reason these rules get
           # exercised at all — a resume that could only be checked by closing a desktop app
           # mid-flow and reopening it is a rule nobody checks. Two of them matter most. The

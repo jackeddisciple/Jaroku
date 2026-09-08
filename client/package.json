@@ -49,6 +49,7 @@
     "test:auth-link": "tsx src/lib/authLink.test.ts",
     "test:auth-first-run": "tsx src/lib/firstRun.test.ts",
     "test:auth-sign-in": "tsx src/lib/signIn.test.ts",
+    "test:sign-in-recovery": "tsx src/lib/signInRecovery.test.ts",
     "test:account-onboarding": "tsx src/lib/accountOnboarding.test.ts",
     "test:provider-keys": "tsx src/lib/providerKeys.test.ts",
     "test:host-backend": "tsx src/lib/hostBackend.test.ts",
