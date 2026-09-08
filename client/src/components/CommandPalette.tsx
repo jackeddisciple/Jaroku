@@ -28,6 +28,7 @@ import { AgentEmoji } from "./AgentEmoji.tsx";
 import { relTime } from "../lib/format.ts";
 import { paneOwnsBareKey } from "../lib/bareKeys.ts";
 import { keyHint } from "../lib/modKey.ts";
+import { startNewAgent } from "../lib/newAgent.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { ICON } from "../lib/tokens.ts";
 
@@ -139,11 +140,18 @@ export function CommandPalette() {
       // about what is on screen. Removed from `useThreadKeys` in the same change rather than added
       // alongside it — a chord with two owners is a chord whose behaviour depends on which listener
       // ran first, which is the argument this file already makes about ⌘/.
+      //
+      // ⌘N NOW MAKES AN AGENT AND ⇧⌘N MAKES A THREAD, which is a reassignment rather than an
+      // addition and is worth saying plainly. The plain chord goes to the bigger noun: an agent is
+      // the thing this product is for, a thread is a conversation with one, and macOS spells
+      // "the other new thing" with Shift throughout. The sidebar's `New` row prints ⌘N on hover, so
+      // the chord and the button agree by construction — both call `startNewAgent`.
       if (mod && e.key.toLowerCase() === "n") {
         e.preventDefault();
-        sendCreateThread();
+        if (e.shiftKey) sendCreateThread();
+        else startNewAgent();
         // The palette's own row closes it on the way; the chord does the same, so pressing it with
-        // the palette open does not leave the list sitting over the thread it just made.
+        // the palette open does not leave the list sitting over what it just made.
         useUiStore.getState().setPaletteOpen(false);
         return;
       }
@@ -391,7 +399,8 @@ export function CommandPalette() {
                     ))}
                   </>
                 )}
-                <Item onSelect={run(() => sendCreateThread())} kbd={keyHint("⌘N")}>New thread</Item>
+                <Item onSelect={run(startNewAgent)} kbd={keyHint("⌘N")}>New agent</Item>
+                <Item onSelect={run(() => sendCreateThread())} kbd={keyHint("⇧⌘N")}>New thread</Item>
                 {/* No chord: ⌘/ opens the composer's ⊕ menu as of the composer spec. A keycap on a row that
                     no longer answers to it is worse than no keycap. */}
                 <Item onSelect={run(focusChat)}>Focus chat</Item>

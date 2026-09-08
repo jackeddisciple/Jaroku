@@ -13,7 +13,7 @@ import { selectAgent, selectRun } from "../lib/selection.ts";
 import {
   sendArchiveAgent, sendLoadHistory, sendLoadRun, sendRenameAgent, sendRestoreAgent, signOut,
 } from "../lib/socket.ts";
-import { ICON, SURFACE, TYPE } from "../lib/tokens.ts";
+import { ICON, SURFACE } from "../lib/tokens.ts";
 import { quietBtn, secondaryBtn } from "./buttons.ts";
 import { AlertTriangleIcon } from "./panelIcons.tsx";
 import { useUiStore, type NavDestination } from "../store/uiStore.ts";
@@ -31,6 +31,7 @@ import { AgentIdentityLine, identityTitle } from "./AgentIdentityLine.tsx";
 import { RUN_PHASE } from "../lib/domainPhase.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { keyHint } from "../lib/modKey.ts";
+import { startNewAgent } from "../lib/newAgent.ts";
 import { hasHostWindow } from "../lib/windowStage.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { CheckIcon, GlobeIcon, RocketIcon, LoaderIcon, SearchIcon, SparklesIcon } from "./panelIcons.tsx";
@@ -130,7 +131,7 @@ function RunRow({ run }: { run: RunSummary }) {
           <>
             <span className="absolute left-[7px] top-0 bottom-0 w-px bg-sidebar-border" aria-hidden />
             <span className="relative shrink-0 bg-inherit text-faint" title="branch">
-              <Icon.agents.fork size={ICON.xs} />
+              <Icon.agents.fork size={ICON.lg} />
             </span>
           </>
         )}
@@ -186,7 +187,7 @@ function SidebarChrome() {
         aria-label="Search agents and commands"
         className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
       >
-        <Icon.agents.search size={ICON.sm} />
+        <Icon.agents.search size={ICON.lg} />
       </button>
       {/* THE LABEL NAMES THE ACTION, not the state — the `IconButton` contract, and the reason one
           mark serves both directions. */}
@@ -196,7 +197,7 @@ function SidebarChrome() {
         aria-label="Hide the sidebar"
         className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
       >
-        <Icon.nav.sidebarToggle size={ICON.sm} />
+        <Icon.nav.sidebarToggle size={ICON.lg} />
       </button>
     </div>
   );
@@ -213,6 +214,7 @@ function NavList() {
   const navSection = useUiStore((s) => s.navSection);
   const openNav = useUiStore((s) => s.openNav);
   const activeAgentId = useBuildStore((s) => s.activeAgentId);
+  const newIsCurrent = activeAgentId === null && navSection === null;
   const needsYou = useThreadStore((s) => s.counts.needs_you);
   const waiting = useInboxStore((s) => s.counts.badge);
   const waitingOnYou = useWorkStore((s) => workBadgeCount(s.workspaceCounts));
@@ -228,16 +230,30 @@ function NavList() {
           anything having to select it. `navSection` has to be null too, or opening Threads would
           leave two rows looking chosen. */}
       <button
-        onClick={() => { useUiStore.getState().closeNav(); selectAgent(null); }}
-        aria-current={activeAgentId === null && navSection === null ? "page" : undefined}
-        className={`flex h-8 w-full shrink-0 items-center gap-2.5 rounded-control px-2 text-left transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
-          activeAgentId === null && navSection === null
-            ? "bg-sidebar-active text-accent"
-            : "text-muted hover:bg-sidebar-hover hover:text-ink"
+        onClick={startNewAgent}
+        // ACCURATE EVEN THOUGH THE FILL IS NOT. The background below is permanent; `aria-current`
+        // is not, because two rows announcing themselves as the current page is worse for somebody
+        // reading this column through a screen reader than no emphasis at all.
+        aria-current={newIsCurrent ? "page" : undefined}
+        title={`New agent — ${keyHint("⌘N")}`}
+        className={`group/new flex h-7 w-full shrink-0 items-center gap-2.5 rounded-control bg-sidebar-active px-2 text-left transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+          // THE FILL IS ALWAYS THERE; ONLY THE INK MOVES. Every other row in this column is lit
+          // only while it is the destination you are in, and this one is not a destination — it is
+          // the thing to press. Keeping the surface makes it read as the column's one button
+          // rather than as a tab that happens to be selected, and the accent still says whether
+          // you are actually sitting in it.
+          newIsCurrent ? "text-accent" : "text-muted hover:text-ink"
         }`}
       >
         <Icon.agents.new size={ICON.lg} />
         <span className="min-w-0 flex-1 truncate text-label">New</span>
+        {/* THE CHORD, ON APPROACH. A shortcut printed permanently is a second thing to read on a
+            row with two words on it; one that appears when the pointer arrives is there exactly
+            when somebody is deciding whether to click or to type. `group-focus-within` as well, so
+            the keyboard is told what the pointer is told. */}
+        <kbd className="shrink-0 text-tiny leading-none text-faint opacity-0 transition-opacity duration-fast group-hover/new:opacity-100 group-focus-within/new:opacity-100">
+          {keyHint("⌘N")}
+        </kbd>
       </button>
 
       {NAV_DESTINATIONS.map(({ id, label, icon: Mark }) => {
@@ -254,7 +270,7 @@ function NavList() {
             key={id}
             onClick={() => openNav(id)}
             aria-current={active ? "page" : undefined}
-            className={`flex h-8 w-full shrink-0 items-center gap-2.5 rounded-control px-2 text-left transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+            className={`flex h-7 w-full shrink-0 items-center gap-2.5 rounded-control px-2 text-left transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
               active ? "bg-sidebar-active text-accent" : "text-muted hover:bg-sidebar-hover hover:text-ink"
             }`}
           >
@@ -303,7 +319,7 @@ function AgentActions({ agent, onRename }: { agent: AgentSummary; onRename: () =
         aria-label="Restore this agent"
         className="shrink-0 rounded-control p-1 text-muted transition-colors hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink"
       >
-        <Icon.agents.restore size={ICON.xs} />
+        <Icon.agents.restore size={ICON.lg} />
       </button>
     );
   }
@@ -316,7 +332,7 @@ function AgentActions({ agent, onRename }: { agent: AgentSummary; onRename: () =
         aria-label="Rename this agent"
         className="rounded-control p-1 text-faint transition-colors hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink"
       >
-        <Icon.agentDetail.rename size={ICON.xs} />
+        <Icon.agentDetail.rename size={ICON.lg} />
       </button>
       {confirming ? (
         <button
@@ -339,7 +355,7 @@ function AgentActions({ agent, onRename }: { agent: AgentSummary; onRename: () =
           title="Archive — nothing is deleted; its versions, runs and threads stay"
           className="rounded-control p-1 text-faint transition-colors hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink"
         >
-          <Icon.threads.archive size={ICON.xs} />
+          <Icon.threads.archive size={ICON.lg} />
         </button>
       )}
     </span>
@@ -380,7 +396,7 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
   return (
     <>
       <div
-        className={`group flex h-8 w-full items-center gap-1 rounded-control pr-1 transition-colors duration-fast ${
+        className={`group flex h-7 w-full items-center gap-1 rounded-control pr-1 transition-colors duration-fast ${
           selected ? "bg-sidebar-active" : "hover:bg-sidebar-hover"
         }`}
       >
@@ -393,13 +409,13 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
             title={open ? `Hide ${agent.name}'s runs` : `Show ${agent.name}'s runs`}
             aria-label={open ? `Hide ${agent.name}'s runs` : `Show ${agent.name}'s runs`}
             aria-expanded={open}
-            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-control text-faint transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-faint transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
           >
-            {open ? <Icon.workspace.switcherOpen size={ICON.xs} /> : <Icon.workspace.switcherClosed size={ICON.xs} />}
+            {open ? <Icon.workspace.switcherOpen size={ICON.lg} /> : <Icon.workspace.switcherClosed size={ICON.lg} />}
           </button>
         ) : (
           // The twisty's width, kept, so names line up whether or not an agent has ever run.
-          <span className="h-5 w-5 shrink-0" aria-hidden />
+          <span className="h-6 w-6 shrink-0" aria-hidden />
         )}
         {renaming ? (
           <input
@@ -527,11 +543,11 @@ function AccountRow() {
           className="absolute bottom-full left-0 z-30 mb-1 w-full overflow-hidden rounded-control border border-sidebar-border bg-panel py-1 shadow-pop"
         >
           <button role="menuitem" onClick={choose(() => openWorkspacePanel("account"))} className={ACCOUNT_MENU_ROW}>
-            <Icon.workspace.settings size={ICON.sm} />
+            <Icon.workspace.settings size={ICON.lg} />
             <span className="min-w-0 flex-1 truncate">Account &amp; workspace</span>
           </button>
           <button role="menuitem" onClick={choose(() => setProviderPanel(true))} className={ACCOUNT_MENU_ROW}>
-            <Icon.nav.providerKeys size={ICON.sm} />
+            <Icon.nav.providerKeys size={ICON.lg} />
             <span className="min-w-0 flex-1 truncate">Provider keys</span>
           </button>
           <AdminModeToggle />
@@ -561,7 +577,7 @@ function AccountRow() {
             <Chip caps size="sm" tone="faint" className="shrink-0">{workspace.plan.label}</Chip>
           )}
           <span className="shrink-0 text-faint">
-            {open ? <Icon.workspace.switcherOpen size={ICON.xs} /> : <Icon.workspace.switcherClosed size={ICON.xs} />}
+            {open ? <Icon.workspace.switcherOpen size={ICON.lg} /> : <Icon.workspace.switcherClosed size={ICON.lg} />}
           </span>
         </button>
         {/* SIGN OUT LIVES WITH THE PERSON, and stays OUT of the menu above it. Ending a session is
@@ -574,7 +590,7 @@ function AccountRow() {
           aria-label="Sign out"
           className="shrink-0 rounded-control p-1.5 text-faint transition-colors hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
         >
-          <Icon.auth.signOut size={ICON.sm} />
+          <Icon.auth.signOut size={ICON.lg} />
         </button>
       </div>
     </div>
@@ -714,7 +730,7 @@ function FilterMenu({
           filtering || open ? "bg-sidebar-active text-accent" : "text-muted hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink"
         }`}
       >
-        <Icon.agents.filter size={ICON.sm} />
+        <Icon.agents.filter size={ICON.lg} />
         {filtering && current?.count != null && (
           <span className="text-tiny tabular-nums">{current.count}</span>
         )}
@@ -853,11 +869,14 @@ export function Sidebar() {
             aria-expanded={recentsOpen}
             title={recentsOpen ? "Collapse recents" : "Expand recents"}
             aria-label={recentsOpen ? "Collapse recents" : "Expand recents"}
-            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-control text-faint transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-faint transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
           >
-            {recentsOpen ? <Icon.workspace.switcherOpen size={ICON.xs} /> : <Icon.workspace.switcherClosed size={ICON.xs} />}
+            {recentsOpen ? <Icon.workspace.switcherOpen size={ICON.lg} /> : <Icon.workspace.switcherClosed size={ICON.lg} />}
           </button>
-          <span className={`min-w-0 flex-1 ${TYPE.panelLabel}`}>Recents</span>
+          {/* NOT `TYPE.panelLabel`, which uppercases. This heading names a place in a column of
+              places — `New`, `Threads`, `Agents` — and shouting one of them makes it a
+              different kind of thing from the rows above it. */}
+          <span className="min-w-0 flex-1 text-tiny tracking-wide text-faint">Recents</span>
           {/* THE PLUS LEFT THIS ROW for the `New` destination at the top of the column. A control
               that creates an agent was filed beside the filter that narrows a list of them, which
               made "new" read as a thing you do to the list rather than the first thing you do at
