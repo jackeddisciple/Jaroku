@@ -159,7 +159,8 @@
        through it. Anything darker here and the column reads as "gone grey", which is the outcome
        the brief rules out by name — and it is what a `--color-bg-subtle` ground did.
 
-       0.45 IS THE DIAL AND IT WAS WALKED DOWN TO IT. Earlier passes sat at 0.76, 0.62 and 0.58, and
+       0.36 IS THE DIAL AND IT WAS WALKED DOWN TO IT. Earlier passes sat at 0.76, 0.62, 0.58 and
+       0.45, and
        the first two looked too dark — but the alpha was only ever half the cause. The column also
        stood on a ground six levels under the workspace, and the WINDOW had no appearance pinned, so
        on a machine in dark mode AppKit handed back the DARK variant of the material and no amount
@@ -171,7 +172,7 @@
 
        If the influence is invisible, lower this. If the wallpaper starts to read as content rather
        than as tint, raise it. Nothing else in this file needs to move. */
-    --sidebar-material-tint: rgba(246, 246, 244, 0.45);
+    --sidebar-material-tint: rgba(246, 246, 244, 0.36);
   }
   html,
   body,
