@@ -27,7 +27,16 @@ import { fileURLToPath } from "node:url";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const PALETTE = readFileSync(`${HERE}CommandPalette.tsx`, "utf8");
-const SIDEBAR = readFileSync(`${HERE}Sidebar.tsx`, "utf8");
+/**
+ * THE WHOLE SIDEBAR COLUMN, NOT ONE FILE OF IT. The magnifier this suite follows used to sit in
+ * `Sidebar.tsx`'s title row and now sits at the right-hand end of the workspace row, which is a
+ * different file — so a check bound to one filename went red for a control that had MOVED rather
+ * than changed. Both files are the sidebar as far as this assertion is concerned, and reading them
+ * together is what makes it a claim about the product instead of about a path.
+ */
+const SIDEBAR = [`${HERE}Sidebar.tsx`, `${HERE}WorkspaceSwitcher.tsx`]
+  .map((f) => readFileSync(f, "utf8"))
+  .join("\n");
 
 let fail = 0;
 const check = (name: string, ok: boolean, detail = ""): void => {

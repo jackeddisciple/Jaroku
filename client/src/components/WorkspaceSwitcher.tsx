@@ -35,6 +35,7 @@ import { acceptInvite, createWorkspace, storedToken } from "../lib/auth.ts";
 import { switchWorkspace } from "../lib/socket.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
+import { keyHint } from "../lib/modKey.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { ICON } from "../lib/tokens.ts";
 import { inviteTokenFromInput } from "../lib/invite.ts";
@@ -314,6 +315,7 @@ export function WorkspaceSwitcher() {
   const switchError = useSessionStore((s) => s.switchError);
   const clearSwitchError = useSessionStore((s) => s.clearSwitchError);
   const openWorkspacePanel = useUiStore((s) => s.openWorkspacePanel);
+  const setPaletteOpen = useUiStore((s) => s.setPaletteOpen);
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [joining, setJoining] = useState(false);
@@ -410,66 +412,91 @@ export function WorkspaceSwitcher() {
     // own; `index.css` clears the border only where the column is a material, so every other
     // platform keeps the seam it needs.
     <div ref={ref} className="sidebar-seam relative shrink-0 border-b border-hair">
-      <button
-        ref={triggerRef}
-        onClick={() => setOpen((v) => !v)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        // THE MOST PROMINENT TEXT IN THE SIDEBAR — §9.1: larger than the tab labels, smaller than
-        // a page title. 13px against the 12px the agent rows and the account row use, which is one
-        // step and is enough: this is the thing every other row in the column is scoped BY, and a
-        // heading twice the size of its list would be a banner.
-        className={`flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-active/40 active:bg-chrome focus-visible:outline-none focus-visible:shadow-focusring ${
-          open ? "bg-active/40" : ""
-        }`}
-        title={`${current?.name ?? "workspace"} — ${current?.kind ?? ""}, you are ${current?.role ?? "a member"}`}
-      >
-        {/* NO KIND MARK. A person/people glyph sat here to say whether the workspace was personal
-            or a team — but it qualified a name that is already the most prominent text in the
-            sidebar, and it is the one fact in this row that never changes: `kind` is fixed at
-            creation. A permanent glyph for a permanent value is decoration on the row every other
-            row in the column is scoped by. It stays in the row's tooltip, which reads
-            "<name> — team, you are owner", so the fact is still reachable where somebody asking
-            for it would look. */}
-        <Truncate className="min-w-0 text-label text-ink" title={current?.name}>
-          {current?.name ?? "workspace"}
-        </Truncate>
-        {/* THE AFFORDANCE SITS AGAINST THE NAME, NOT AT THE ROW'S EDGE — and the difference is
-            whether it reads as belonging to the name or to the row. It used to be last, after the
-            plan chip, with the whole of the row's slack between it and the word it opens: the
-            arrow was there, but "Adarsh's workspace" did not look like a control, because the one
-            mark saying so had another element sitting in the gap. Beside the name, the two read as
-            one dropdown and the plan chip goes back to being what it is — metadata at the end of
-            the row.
+      {/* A ROW OF TWO CONTROLS, WHICH IS WHY THE SWITCHER IS NO LONGER `w-full`. Search cannot be
+          nested inside the switcher — a button inside a button is invalid, and the browser's own
+          repair for it is to close the outer one early, which would have quietly detached the name
+          from the thing that opens the list. They are siblings, and the switcher takes the slack. */}
+      <div className="flex items-center">
+        <button
+          ref={triggerRef}
+          onClick={() => setOpen((v) => !v)}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          // THE MOST PROMINENT TEXT IN THE SIDEBAR — §9.1: larger than the tab labels, smaller than
+          // a page title. 13px against the 12px the agent rows and the account row use, which is one
+          // step and is enough: this is the thing every other row in the column is scoped BY, and a
+          // heading twice the size of its list would be a banner.
+          className={`flex min-w-0 flex-1 items-center gap-2 py-2 pl-3 pr-2 text-left transition-colors hover:bg-active/40 active:bg-chrome focus-visible:outline-none focus-visible:shadow-focusring ${
+            open ? "bg-active/40" : ""
+          }`}
+          title={`${current?.name ?? "workspace"} — ${current?.kind ?? ""}, you are ${current?.role ?? "a member"}`}
+        >
+          {/* NO KIND MARK. A person/people glyph sat here to say whether the workspace was personal
+              or a team — but it qualified a name that is already the most prominent text in the
+              sidebar, and it is the one fact in this row that never changes: `kind` is fixed at
+              creation. A permanent glyph for a permanent value is decoration on the row every other
+              row in the column is scoped by. It stays in the row's tooltip, which reads
+              "<name> — team, you are owner", so the fact is still reachable where somebody asking
+              for it would look. */}
+          <Truncate className="min-w-0 text-label text-ink" title={current?.name}>
+            {current?.name ?? "workspace"}
+          </Truncate>
+          {/* THE AFFORDANCE SITS AGAINST THE NAME, NOT AT THE ROW'S EDGE — and the difference is
+              whether it reads as belonging to the name or to the row. It used to be last, after the
+              plan chip, with the whole of the row's slack between it and the word it opens: the
+              arrow was there, but "Adarsh's workspace" did not look like a control, because the one
+              mark saying so had another element sitting in the gap. Beside the name, the two read as
+              one dropdown and the plan chip goes back to being what it is — metadata at the end of
+              the row.
 
-            §5's pair, and the reason there are two: `arrow-down-01` closed, `arrow-up-01` open.
-            The direction is the state, so the mark says which way pressing it will go. */}
-        <span className="shrink-0 text-faint" aria-hidden>
-          {open ? <Icon.workspace.switcherOpen size={ICON.xs} /> : <Icon.workspace.switcherClosed size={ICON.xs} />}
-        </span>
-        {expiring && (
-          // The token behind this socket is nearly out. Said quietly rather than as a modal:
-          // nothing has failed yet, and the reconnect will renew it.
-          <span className="ml-auto shrink-0 text-tiny text-run" title="your session is about to end">
-            ●
+              §5's pair, and the reason there are two: `arrow-down-01` closed, `arrow-up-01` open.
+              The direction is the state, so the mark says which way pressing it will go. */}
+          <span className="shrink-0 text-faint" aria-hidden>
+            {open ? <Icon.workspace.switcherOpen size={ICON.xs} /> : <Icon.workspace.switcherClosed size={ICON.xs} />}
           </span>
-        )}
-        {/* THE PLAN, FROM THE SESSION, NEVER MAPPED HERE. `planFor` on the server is the same
-            function the budget gate resolves limits through, so the chip in this row and the figure
-            in the Usage panel are one computation — see the footer's own note for the paid
-            workspace that read "Free" in one place and "Pro" in the other.
+          {expiring && (
+            // The token behind this socket is nearly out. Said quietly rather than as a modal:
+            // nothing has failed yet, and the reconnect will renew it.
+            <span className="ml-auto shrink-0 text-tiny text-run" title="your session is about to end">
+              ●
+            </span>
+          )}
+          {/* THE PLAN, FROM THE SESSION, NEVER MAPPED HERE. `planFor` on the server is the same
+              function the budget gate resolves limits through, so the chip in this row and the figure
+              in the Usage panel are one computation — see the footer's own note for the paid
+              workspace that read "Free" in one place and "Pro" in the other.
 
-            `ml-auto` HERE RATHER THAN ON THE NAME, which is what holds the row's shape now that the
-            name no longer takes the slack: the plan is pinned to the right edge and the dropdown
-            travels with the name, however long or short the name is. The expiring dot carries it
-            too, for the case where there is no plan chip to pin. */}
-        {/* THE PLAN IS NOT HERE ANY MORE. It was on this row AND on the account row at the foot of
-            the sidebar — one fact, twice, forty pixels apart in the same column. What a workspace
-            is paying is a property of the ACCOUNT, so it stays where the account is named and the
-            widest control in the sidebar goes back to being about one thing: which workspace. The
-            switcher's own list still chips each row, because there the plan distinguishes the
-            workspaces from one another rather than restating the one you are in. */}
-      </button>
+              `ml-auto` HERE RATHER THAN ON THE NAME, which is what holds the row's shape now that the
+              name no longer takes the slack: the plan is pinned to the right edge and the dropdown
+              travels with the name, however long or short the name is. The expiring dot carries it
+              too, for the case where there is no plan chip to pin. */}
+          {/* THE PLAN IS NOT HERE ANY MORE. It was on this row AND on the account row at the foot of
+              the sidebar — one fact, twice, forty pixels apart in the same column. What a workspace
+              is paying is a property of the ACCOUNT, so it stays where the account is named and the
+              widest control in the sidebar goes back to being about one thing: which workspace. The
+              switcher's own list still chips each row, because there the plan distinguishes the
+              workspaces from one another rather than restating the one you are in. */}
+        </button>
+        {/* SEARCH, AT THE END OF THE ROW THAT NAMES WHAT IS SEARCHED. It was in the title bar, in a
+            cluster of window controls it had nothing to do with; a workspace is the scope of every
+            search this opens, so the control belongs on the row that says which workspace you are in.
+
+            ONE CONTROL FOR BOTH SEARCHES. The palette already carries "Go to agent…" beside every
+            other destination, so a second, narrower agent-only box would be two answers to one
+            question — and the one people reach for is whichever is nearer.
+
+            `sm` RATHER THAN `md`. It shares a row with 13px text and a 12px chevron rather than with
+            the 16px window controls it used to sit beside, and a mark a rung above everything around
+            it reads as the loudest thing on the row it is a footnote to. */}
+        <button
+          onClick={() => setPaletteOpen(true)}
+          title={`Search agents and commands — ${keyHint("⌘K")} opens the palette`}
+          aria-label="Search agents and commands"
+          className="mr-2 flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-muted transition-colors hover:bg-active/40 active:bg-chrome hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+        >
+          <Icon.agents.search size={ICON.sm} />
+        </button>
+      </div>
 
       {/* §5.2 — "show an error inline in the switcher and revert to the previous workspace".
           BENEATH THE ROW RATHER THAN INSIDE THE DROPDOWN, because by the time it exists the

@@ -314,7 +314,6 @@ function RunRow({ run, runs, agentId }: { run: RunSummary; runs: RunSummary[]; a
  */
 function SidebarChrome() {
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
-  const setPaletteOpen = useUiStore((s) => s.setPaletteOpen);
   const back = useHistoryStore(canGoBack);
   const forward = useHistoryStore(canGoForward);
   const underHost = hasHostWindow();
@@ -324,8 +323,17 @@ function SidebarChrome() {
       data-tauri-drag-region
       className={`flex h-11 shrink-0 items-center gap-1 pr-2 ${underHost ? "pl-[76px]" : "pl-2"}`}
     >
+      {/* THE SLACK COMES FIRST, so the whole row's controls sit together at the right edge. What
+          is on the left is the traffic lights and the space this reserves for them — and that
+          space is the drag handle, which is the other reason to leave it empty. */}
+      <span className="flex-1" data-tauri-drag-region />
       {/* WHERE YOU HAVE BEEN, since there is no address bar to hold it. A place here is a
           destination plus the agent the panes are pointed at — see `store/historyStore`.
+
+          BESIDE THE TOGGLE RATHER THAN ACROSS THE ROW FROM IT. These three are the window's
+          controls — where you were, and how much of the window the column takes — and they were
+          split to opposite ends with the title bar's slack between them, which made two clusters
+          out of one group and left `Back` sitting where a title would go.
 
           DISABLED IS THE HONEST STATE AND IT IS SAID TWICE: `disabled` so the pointer and the
           keyboard both skip it, and the ink drops to `faint` so it reads as unavailable before
@@ -353,18 +361,9 @@ function SidebarChrome() {
       >
         <Icon.nav.historyForward size={ICON.md} />
       </button>
-      <span className="flex-1" data-tauri-drag-region />
-      {/* SEARCH IS ONE CONTROL FOR BOTH SEARCHES. The palette already carries "Go to agent…"
-          beside every other destination, so a second, narrower agent-only box beside it would be
-          two answers to one question — and the one people reach for is whichever is nearer. */}
-      <button
-        onClick={() => setPaletteOpen(true)}
-        title={`Search agents and commands — ${keyHint("⌘K")} opens the palette`}
-        aria-label="Search agents and commands"
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
-      >
-        <Icon.agents.search size={ICON.md} />
-      </button>
+      {/* SEARCH HAS LEFT THIS ROW for the workspace row below it — see `WorkspaceSwitcher`. It is
+          the one control here that was not about the window, and it now sits at the end of the row
+          that names what is being searched. */}
       {/* THE LABEL NAMES THE ACTION, not the state — the `IconButton` contract, and the reason one
           mark serves both directions. */}
       <button
