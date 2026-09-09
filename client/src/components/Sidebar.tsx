@@ -416,7 +416,11 @@ function NavList() {
             and read as heavier still once the column became a translucent material. `AddSquareIcon`
             is the same idea drawn rather than built: a plus already inside its square, at the same
             stroke weight as every other mark in the column. */}
-        <Icon.nav.newAgent size={ICON.md} />
+        {/* `lg`, THE SAME RUNG AS THE FIVE DESTINATIONS BELOW IT. This was `md` when the black tile
+            came off — the tile had been carrying the visual weight, and the glyph inside it was
+            drawn smaller to fit. Without the tile that left `New` two pixels under every mark under
+            it, on the one row that leads the column. */}
+        <Icon.nav.newAgent size={ICON.lg} />
         <span className="min-w-0 flex-1 truncate text-label">New</span>
         {/* THE CHORD, ON APPROACH. A shortcut printed permanently is a second thing to read on a
             row with two words on it; one that appears when the pointer arrives is there exactly
@@ -1178,6 +1182,7 @@ export function Sidebar() {
   // in-column box later is a change to one component rather than to the filter predicate.
   const query = "";
   const [recentsOpen, setRecentsOpen] = useState(true);
+  const [pinnedOpen, setPinnedOpen] = useState(true);
   // Per AGENT rather than per workspace — §4. Different agents legitimately belong in different
   // repositories, and one repo per workspace would break the monorepo case the subdirectory field
   // exists for.
@@ -1253,9 +1258,19 @@ export function Sidebar() {
     else runsByAgent.set(r.agent_id, [r]);
   }
 
-  // §2: pinned first, then everything else, with no agent appearing twice.
+  // §2 wanted pinned agents first and no agent appearing twice; a section of their own gives both,
+  // and says out loud what "first" only implied.
   const pinnedSet = new Set(pinned.map((a) => a.agent_id));
-  const recents = [...pinned, ...visible.filter((a) => !pinnedSet.has(a.agent_id))];
+  // PINNED AGENTS LEAVE RECENTS ENTIRELY. They used to be sorted to the top of it, which is a
+  // silent ordering: pinning something moved it a few rows and nothing on screen said why, and the
+  // agent still counted as a recent one. A section of its own is what a pin is FOR — a shelf you
+  // put things on, above the list they came from.
+  const recents = visible.filter((a) => !pinnedSet.has(a.agent_id));
+  // Filtered like everything else. A pinned agent that the current filter excludes — archived, or
+  // not running — should not reappear on a shelf above the filter that hid it, which would make
+  // the filter look broken on the one row a person is most attached to.
+  const visibleSet = new Set(visible.map((a) => a.agent_id));
+  const pinnedVisible = pinned.filter((a) => visibleSet.has(a.agent_id));
 
   return (
     /**
@@ -1269,6 +1284,41 @@ export function Sidebar() {
       <SidebarChrome />
       <WorkspaceSwitcher />
       <NavList />
+
+      {/* PINNED — a shelf above the list, and only when something is on it.
+          NOTHING WHEN EMPTY, deliberately: a permanent `Pinned` header over nothing is a section
+          that teaches people it is broken, and the column already has an empty state for the case
+          where there are no agents at all. It appears the moment somebody pins one and goes away
+          again when they unpin the last. */}
+      {pinnedVisible.length > 0 && (
+        <div className="mt-4 flex shrink-0 flex-col">
+          <div className="flex h-8 shrink-0 items-center gap-1 pl-1.5 pr-2">
+            <button
+              onClick={() => setPinnedOpen((v) => !v)}
+              aria-expanded={pinnedOpen}
+              title={pinnedOpen ? "Collapse pinned" : "Expand pinned"}
+              aria-label={pinnedOpen ? "Collapse pinned" : "Expand pinned"}
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-faint transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+            >
+              {pinnedOpen ? <Icon.workspace.switcherOpen size={ICON.lg} /> : <Icon.workspace.switcherClosed size={ICON.lg} />}
+            </button>
+            <span className="min-w-0 flex-1 text-caption tracking-wide text-faint">Pinned</span>
+          </div>
+          {/* CAPPED, WHICH IS THE DIFFERENCE FROM RECENTS. The shelf is `shrink-0` so the list below
+              can never squeeze it — and that is exactly what makes an unbounded one dangerous:
+              forty pinned agents would push Recents to nothing and shove the account row off the
+              bottom of the window. Past the cap it scrolls, so the shelf stays a shelf however many
+              things somebody puts on it. In `vh` rather than `%` because a percentage height
+              resolves against a parent that is `auto` here, which is to say it does not. */}
+          {pinnedOpen && (
+            <div className="flex max-h-[38vh] flex-col overflow-y-auto overflow-x-hidden px-1.5">
+              {pinnedVisible.map((a) => (
+                <AgentTreeRow key={a.agent_id} agent={a} runs={runsByAgent.get(a.agent_id) ?? []} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* RECENTS — the agents, and their runs under them. */}
       {/* THE GAP IS THE SECTION BREAK. Above it are six places you can go; below it is the contents
