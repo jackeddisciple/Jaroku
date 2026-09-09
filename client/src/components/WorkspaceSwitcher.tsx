@@ -400,11 +400,16 @@ export function WorkspaceSwitcher() {
   // too, and an empty row is quieter than a placeholder that flashes into somebody else's
   // workspace name. A fixed height, so the four destinations beneath it do not jump when the
   // session lands.
-  if (!user || !workspaceId) return <div className="h-9 shrink-0 border-b border-hair" />;
+  if (!user || !workspaceId) return <div className="sidebar-seam h-9 shrink-0 border-b border-hair" />;
   const current = workspaces.find((w) => w.id === workspaceId);
 
   return (
-    <div ref={ref} className="relative shrink-0 border-b border-hair">
+    // `sidebar-seam` MARKS THIS AS A DIVIDER THE MATERIAL SHOULD SWALLOW. `border-hair` is an
+    // opaque #E6E6E2, which is a hairline on a painted panel and a bright white stroke across a
+    // translucent one — lighter than the material it crosses. The class carries no styling of its
+    // own; `index.css` clears the border only where the column is a material, so every other
+    // platform keeps the seam it needs.
+    <div ref={ref} className="sidebar-seam relative shrink-0 border-b border-hair">
       <button
         ref={triggerRef}
         onClick={() => setOpen((v) => !v)}

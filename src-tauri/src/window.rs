@@ -96,24 +96,29 @@ pub fn open(app: &AppHandle, ws_url: &str) -> Result<(), Box<dyn std::error::Err
         // pushing its contents up, which moves Jaroku's own chrome to accommodate three buttons it
         // does not own.
         //
-        // THE `y` IS NEITHER THE BUTTON'S TOP NOR ITS CENTRE, WHICH IS WHY THIS WAS WRONG TWICE.
-        // `tao`'s `inset_traffic_lights` resizes the title-bar container to `buttonHeight + y`,
-        // anchors it to the top of the window, and leaves each button's offset INSIDE that
-        // container alone — so what `y` moves is the container, and the button follows it by an
-        // amount that depends on where AppKit had already placed it. Reading the source gives the
-        // shape of the relationship but not the constant.
+        // THE `y` IS NOT THE BUTTON'S CENTRE AND IT DOES NOT MOVE IT ONE FOR ONE. `tao`'s
+        // `inset_traffic_lights` resizes the title-bar container to `buttonHeight + y` and lets the
+        // button follow, so reading the source gives the shape of the relationship and none of the
+        // constants. Three values were guessed from it and all three missed.
         //
-        // SO IT WAS MEASURED. Screenshotting the window's top-left corner and finding the close
-        // button's red pixels: at `y = 22` it occupied rows 26–53 of a 2× capture — 14pt tall, its
-        // centre 19.8pt from the top of the window. That fixes the relationship at
-        // `centre = y - 2.2`, and 16 and 22 were both guesses that landed 8.2 and 2.2 points high.
+        // SO IT WAS CALIBRATED, from two measurements on the SAME window — which is the part that
+        // took three tries to get right, because a reading taken on the 560×620 splash window does
+        // not describe the 1440×843 app window and mixing them produced a slope that appeared to
+        // move the buttons UP as `y` rose. Screenshotting the corner and finding the close button's
+        // red pixels gave `y=24.2 → 15.8` and `y=30.4 → 28.2`:
+        //
+        //     slope  = (28.2 - 15.8) / (30.4 - 24.2) = 2.0
+        //     centre = 2y - 32.6
+        //
+        // The 2.0 is the tell: the inset is being applied in a doubled coordinate space on this
+        // display, which is exactly why every one-point extrapolation from it was wrong.
         //
         // 22 IS THE TARGET, ARITHMETICALLY: `SidebarChrome` is `h-11` (44px) with `items-center`,
-        // so everything in it centres on 22 — hence `24.2`. If that row's height changes, this
-        // moves with it, which is why the derivation is here and not just the number. `20` is the
-        // horizontal inset macOS itself uses, and `SidebarChrome`'s `pl-[76px]` reservation is that
-        // inset plus the three buttons and their spacing.
-        .traffic_light_position(tauri::LogicalPosition::new(20.0, 24.2))
+        // so everything in it centres on 22. Solving gives 27.3. If that row's height changes this
+        // has to move with it, which is why the derivation is here and not just the number. `20` is
+        // the horizontal inset macOS itself uses, and `SidebarChrome`'s `pl-[76px]` reservation is
+        // that inset plus the three buttons and their spacing.
+        .traffic_light_position(tauri::LogicalPosition::new(20.0, 27.3))
         .initialization_script(&host_config(ws_url));
 
     // MACOS ONLY, AND NOT BY PREFERENCE — `title_bar_style` and `hidden_title` are compiled only

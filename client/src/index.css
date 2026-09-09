@@ -172,7 +172,26 @@
 
        If the influence is invisible, lower this. If the wallpaper starts to read as content rather
        than as tint, raise it. Nothing else in this file needs to move. */
-    --sidebar-material-tint: transparent;
+    /* ── The luminance floor ────────────────────────────────────────────────────────────────────
+       WHAT IS WANTED IS A MATERIAL THAT IS LIT, not a window that is clear: colour from the
+       environment, brightness mostly its own. Pure vibrancy gives the first and none of the second
+       — the column tracked whatever was behind it, so a dark window parked under it dragged the
+       whole sidebar grey.
+
+       AN ALPHA VEIL CANNOT DO THIS AND IT IS WORTH SAYING WHY, because it is the obvious reach.
+       Blending is linear: `a·white + (1-a)·backdrop`. Over black the result is `a·255`, so a floor
+       bright enough to survive a black backdrop needs a ≈ 0.78 — which is very nearly opaque and
+       takes the environmental colour with it. That is the trade the brief rules out.
+
+       WHAT DOES CREATE A FLOOR IS COMPRESSING THE RANGE. `contrast()` below 1 pulls both ends
+       toward mid-grey — blacks come UP, which is the floor, and whites come down, which is the
+       ceiling nobody minds. It costs chroma, so `saturate()` puts it back, and `brightness()` sets
+       where the compressed band sits. The thin veil on top is then doing what a veil is good at:
+       making the surface milky rather than making it bright.
+
+       Read in order: compress the range, restore the colour, lift it, then milk it. */
+    --sidebar-material-filter: contrast(0.45) saturate(1.8) brightness(1.35);
+    --sidebar-material-tint: rgba(246, 246, 244, 0.38);
     /* THE ROW STATES, AND THEY ONLY EXIST BECAUSE THE COLUMN IS TRANSLUCENT. `--color-bg-hover`
        and `--color-bg-active` are opaque, which is right on a painted panel and wrong on a
        material: a fixed `#ECECEA` sitting on a surface that tracks the desktop punches a solid
@@ -375,6 +394,14 @@
        over its vibrancy, and neither does this one. */
     background-image: none;
     box-shadow: none;
+    -webkit-backdrop-filter: var(--sidebar-material-filter);
+    backdrop-filter: var(--sidebar-material-filter);
+  }
+  /* The workspace row's divider, swallowed by the material. See `sidebar-seam` in
+     WorkspaceSwitcher.tsx — the border stays in the markup for every platform that has no material
+     behind the column, and is cleared only here. */
+  :root[data-vibrancy="sidebar"] .sidebar-seam {
+    border-color: transparent;
   }
   /* The row states, overridden where — and only where — the column is a material. The escaped
      selectors are Tailwind's own compiled class names (`hover:bg-sidebar-hover` emits
