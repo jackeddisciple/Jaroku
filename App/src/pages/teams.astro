@@ -1,0 +1,242 @@
+---
+import Base from "@layouts/Base.astro";
+import Icon from "@components/Icon.astro";
+import DownloadButton from "@components/DownloadButton.astro";
+import { SITE } from "@data/site";
+
+const contactHref = `mailto:${SITE.contactEmail}?subject=Jaroku%20Team`;
+---
+<Base
+  title="Teams"
+  description="Workspaces, members, roles, per-agent access grants, shared spend visibility and audit — for small teams running real agents."
+>
+  <section class="section">
+    <div class="container-narrow head">
+      <span class="eyebrow">Teams</span>
+      <h1>Who did what, what it cost, who approved it.</h1>
+      <p class="lead">
+        Jaroku Teams is for small teams running real agents &mdash; the ones that talk to real
+        customers, spend real money, and take real actions on the outside world. It answers
+        the three questions the person on the other end of an incident actually asks, and it
+        does so from the same rows the rest of the product runs on.
+      </p>
+      <div class="head-cta">
+        <a class="btn btn-primary" href={contactHref}>
+          <Icon name="external" size={14} /> Contact for Team
+        </a>
+        <DownloadButton variant="quiet">
+          <Icon name="download" size={16} />
+        </DownloadButton>
+      </div>
+      <p class="faint tiny">Team is a mailto because a team is a conversation. Pro and Free download the app.</p>
+    </div>
+  </section>
+
+  <section class="section-tight limits">
+    <div class="container">
+      <div class="limits-grid">
+        <div>
+          <span class="badge">Team</span>
+          <h3>Unlimited workspaces, up to 20 members</h3>
+          <p class="muted">
+            50,000 runs a month pooled, a year of trace history, $30 of inference each &mdash; also pooled &mdash;
+            with overage at cost + 15%.
+          </p>
+        </div>
+        <div class="limits-detail">
+          <div>
+            <div class="k">Members</div>
+            <div class="v">Up to 20 per workspace</div>
+          </div>
+          <div>
+            <div class="k">Runs</div>
+            <div class="v">50,000 / month, pooled</div>
+          </div>
+          <div>
+            <div class="k">Retention</div>
+            <div class="v">365 days trace + audit</div>
+          </div>
+          <div>
+            <div class="k">Included credit</div>
+            <div class="v">$30 / user / month, pooled</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="s-workspaces">
+    <div class="container">
+      <div class="two-col">
+        <div>
+          <span class="eyebrow"><Icon name="workspace" size={12} /> Workspaces</span>
+          <h2 id="s-workspaces">The workspace is the tenancy unit.</h2>
+          <p>
+            Every row a member reads or writes lives inside a workspace. The database enforces it as row-level
+            security &mdash; not as a WHERE clause a well-meaning query might forget &mdash; and the tests
+            connect as the application role rather than the superuser, so the boundary is proven where it
+            actually runs.
+          </p>
+          <ul class="dots">
+            <li><Icon name="check" size={16} /> Switching workspaces resets the client&rsquo;s stores by invariant, so a stale row from the previous one cannot cross over.</li>
+            <li><Icon name="check" size={16} /> Membership revocation has a bounded staleness window across replicas; the replica that performed the revocation is exact.</li>
+          </ul>
+        </div>
+        <aside class="card side" aria-label="Workspace surface">
+          <div class="mono muted small">workspace &middot; server/src/tenancy.ts</div>
+          <ul class="k-list">
+            <li><span class="k">Tenancy</span><span class="v">Workspace-scoped rows</span></li>
+            <li><span class="k">Boundary</span><span class="v">Row-level security in Postgres</span></li>
+            <li><span class="k">Test posture</span><span class="v">As the app role, not the superuser</span></li>
+            <li><span class="k">Client stores</span><span class="v">Reset on workspace switch</span></li>
+          </ul>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="s-roles">
+    <div class="container">
+      <div class="two-col reverse">
+        <div>
+          <span class="eyebrow"><Icon name="users" size={12} /> Roles &amp; Access</span>
+          <h2 id="s-roles">Roles are data, with one capability matrix.</h2>
+          <p>
+            One matrix maps a role to what it can do &mdash; there isn&rsquo;t a second copy in the client
+            that reads differently. Access grants live per-agent on Team: you can invite a stakeholder to see
+            the trace of one production agent without handing them the workspace.
+          </p>
+          <ul class="dots">
+            <li><Icon name="check" size={16} /> Owner &middot; Admin &middot; Developer &middot; Viewer &mdash; capabilities in one file.</li>
+            <li><Icon name="check" size={16} /> Per-agent Access grants (Team). Shipped in v0.3.8 alongside the Access tab.</li>
+            <li><Icon name="check" size={16} /> Audit log retained for a year, alongside the trace history.</li>
+          </ul>
+        </div>
+        <aside class="card side" aria-label="Roles surface">
+          <div class="mono muted small">roles &middot; server/src/capabilities.ts</div>
+          <ul class="k-list">
+            <li><span class="k">Owner</span><span class="v">Billing, membership, everything</span></li>
+            <li><span class="k">Admin</span><span class="v">Membership + workspace settings</span></li>
+            <li><span class="k">Developer</span><span class="v">Build, edit, deploy, evaluate</span></li>
+            <li><span class="k">Viewer</span><span class="v">Read agents, traces, cost</span></li>
+          </ul>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="s-spend">
+    <div class="container">
+      <div class="two-col">
+        <div>
+          <span class="eyebrow"><Icon name="cost" size={12} /> Shared spend, honest</span>
+          <h2 id="s-spend">Cost is summed from the steps, not from a summary.</h2>
+          <p>
+            Every step of every run has a token count and a price attached. When a run crashes, the money it
+            already spent is already recorded &mdash; the total doesn&rsquo;t &ldquo;go missing&rdquo;. When
+            Jaroku doesn&rsquo;t know the price of a model, the cell reports <em>unknown</em>, not $0.00.
+          </p>
+          <ul class="dots">
+            <li><Icon name="check" size={16} /> Included credits are pooled across the team ($30/user/month).</li>
+            <li><Icon name="check" size={16} /> Overage settles at cost + 15%. There is no per-seat overage cliff.</li>
+            <li><Icon name="check" size={16} /> Asking-costs (thread conversation) are counted apart from agent spend.</li>
+          </ul>
+        </div>
+        <aside class="card side" aria-label="Spend surface">
+          <div class="mono muted small">spend &middot; server/src/pricing.ts</div>
+          <ul class="k-list">
+            <li><span class="k">Attribution</span><span class="v">Per agent, per member, per day</span></li>
+            <li><span class="k">Pricing source</span><span class="v">runtime/pricing.json (one file)</span></li>
+            <li><span class="k">Unknown</span><span class="v">Reported as unknown, never zero</span></li>
+            <li><span class="k">Budgets</span><span class="v">Hard ceilings the server enforces</span></li>
+          </ul>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="s-github">
+    <div class="container">
+      <div class="two-col reverse">
+        <div>
+          <span class="eyebrow"><Icon name="git" size={12} /> GitHub sync</span>
+          <h2 id="s-github">Bidirectional GitHub, on Team.</h2>
+          <p>
+            Pro pushes to GitHub. Team syncs both ways &mdash; you can edit an agent from the app or from a
+            branch, resolve conflicts on the same object, and every push is a first-class Jaroku artifact
+            with its own trace of the edits that produced it.
+          </p>
+          <ul class="dots">
+            <li><Icon name="check" size={16} /> GitHub App installation is the connection &mdash; not a personal token.</li>
+            <li><Icon name="check" size={16} /> Reviewed connector templates land into the repo, not opaque binaries.</li>
+            <li><Icon name="check" size={16} /> Checks on a pull request run in Jaroku&rsquo;s pipeline; the PR sees them.</li>
+          </ul>
+        </div>
+        <aside class="card side" aria-label="GitHub surface">
+          <div class="mono muted small">github &middot; server/src/github/</div>
+          <ul class="k-list">
+            <li><span class="k">Pro</span><span class="v">Push</span></li>
+            <li><span class="k">Team</span><span class="v">Push + pull, both ways</span></li>
+            <li><span class="k">Connection</span><span class="v">GitHub App installation</span></li>
+            <li><span class="k">Branches</span><span class="v">One branch per agent version</span></li>
+          </ul>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <section class="section closer">
+    <div class="container-narrow closer-inner">
+      <h2>Small teams. Real agents. Answerable questions.</h2>
+      <div class="cta-row">
+        <a class="btn btn-accent" href={contactHref}>
+          <Icon name="external" size={14} /> Contact for Team
+        </a>
+        <a class="btn btn-quiet" href="/pricing">Compare plans</a>
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .head { text-align: center; }
+  .head h1 { max-width: 22ch; margin-inline: auto; }
+  .head .lead { max-width: 60ch; margin: 12px auto 20px; }
+  .head-cta { display: inline-flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+  .tiny { font-size: 12px; margin-top: 10px; }
+
+  .limits-grid {
+    display: grid; gap: 24px; grid-template-columns: 1fr;
+    padding: 24px; background: var(--panel-2); border: 1px solid var(--hair); border-radius: var(--radius-lg);
+  }
+  @media (min-width: 900px) { .limits-grid { grid-template-columns: 1.15fr 1fr; } }
+  .limits-detail {
+    display: grid; gap: 12px 24px; grid-template-columns: repeat(2, 1fr);
+    align-content: center;
+  }
+  .limits-detail .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--faint); }
+  .limits-detail .v { font-size: 14px; color: var(--ink-2); margin-top: 2px; }
+  .limits-grid h3 { font-size: 22px; margin: 12px 0 6px; }
+
+  .two-col { display: grid; gap: 32px; grid-template-columns: 1fr; }
+  @media (min-width: 900px) { .two-col { grid-template-columns: 1.1fr 1fr; gap: 48px; } .two-col.reverse > :first-child { order: 2; } }
+
+  .side { padding: 24px; }
+  .side .small { font-size: 11.5px; }
+
+  .dots { padding: 0; margin: 18px 0 0; list-style: none; }
+  .dots li { display: flex; gap: 10px; padding: 8px 0; color: var(--ink-2); font-size: 14.5px; align-items: baseline; }
+  .dots li svg { color: var(--ok); flex-shrink: 0; margin-top: 3px; }
+
+  .k-list { padding: 0; margin: 12px 0 0; list-style: none; }
+  .k-list li {
+    display: grid; grid-template-columns: 130px 1fr; gap: 8px 16px;
+    padding: 12px 0; border-top: 1px solid var(--hair); align-items: baseline;
+  }
+  .k-list li:first-child { border-top: 0; }
+  .k-list .k { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .k-list .v { color: var(--ink); font-size: 14px; }
+
+  .closer-inner { text-align: center; }
+  .cta-row { display: inline-flex; gap: 12px; margin-top: 16px; flex-wrap: wrap; justify-content: center; }
+</style>

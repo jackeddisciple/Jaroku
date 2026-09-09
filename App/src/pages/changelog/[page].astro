@@ -1,0 +1,148 @@
+---
+import Base from "@layouts/Base.astro";
+import Icon from "@components/Icon.astro";
+import { loadReleases, pageRelease, paginate } from "@lib/changelog";
+import { SITE } from "@data/site";
+
+// The file is enormous — one release per screen would be a lot, but so would every one on a
+// single page. Six per page balances read time against the number of clicks to reach an
+// older version.
+const PAGE_SIZE = 6;
+
+export function getStaticPaths() {
+  const releases = loadReleases();
+  const pages = paginate(releases, 6);
+  return pages.map((releases, i) => ({
+    params: { page: String(i + 1) },
+    props: { releases, pageIndex: i, total: pages.length },
+  }));
+}
+
+const { releases, pageIndex, total } = Astro.props;
+const prev = pageIndex > 0 ? pageIndex : null;
+const next = pageIndex + 1 < total ? pageIndex + 2 : null;
+---
+<Base
+  title={`Changelog — page ${pageIndex + 1} of ${total}`}
+  description={`Every Jaroku release, newest first. Currently v${SITE.version}.`}
+>
+  <section class="section">
+    <div class="container-narrow head">
+      <span class="eyebrow">Changelog</span>
+      <h1>Every release, newest first.</h1>
+      <p class="lead">
+        Drawn straight from <code class="mono">CHANGELOG.md</code>. Currently
+        <strong>v{SITE.version}</strong>. Format follows Keep a Changelog; versions follow SemVer.
+      </p>
+    </div>
+  </section>
+
+  <section class="section-tight">
+    <div class="container-narrow releases">
+      {releases.map((r) => {
+        const p = pageRelease(r);
+        return (
+          <article class="release" id={`v${r.slug}`}>
+            <header class="rel-head">
+              <div class="ver">
+                <span class="ver-tag">v{r.version}</span>
+              </div>
+              <div class="title">
+                <h2>{r.title || `v${r.version}`}</h2>
+                {p.headline && <p class="muted headline" set:html={p.headline} />}
+              </div>
+            </header>
+
+            <div class="sections">
+              {p.sections.filter((s) => s.title !== "Overview" && s.html.trim()).map((s) => (
+                <section class="cl-section">
+                  <h3>{s.title}</h3>
+                  <div class="cl-body" set:html={s.html} />
+                </section>
+              ))}
+            </div>
+
+            <a class="perma" href={`#v${r.slug}`} aria-label={`Permalink to v${r.version}`}>
+              <Icon name="external" size={12} /> permalink
+            </a>
+          </article>
+        );
+      })}
+    </div>
+  </section>
+
+  <nav class="pager" aria-label="Changelog pages">
+    <div class="container-narrow pager-inner">
+      {prev ? (
+        <a class="btn btn-quiet" href={prev === 1 ? "/changelog" : `/changelog/${prev}`}>
+          <Icon name="arrow-right" size={14} class="flip" /> Newer
+        </a>
+      ) : <span />}
+
+      <span class="pager-count muted">Page {pageIndex + 1} of {total}</span>
+
+      {next ? (
+        <a class="btn btn-quiet" href={`/changelog/${next}`}>
+          Older <Icon name="arrow-right" size={14} />
+        </a>
+      ) : <span />}
+    </div>
+  </nav>
+</Base>
+
+<style>
+  .head { text-align: center; }
+  .head h1 { max-width: 22ch; margin-inline: auto; }
+  .head .lead { max-width: 62ch; margin: 12px auto 0; }
+
+  .releases { display: grid; gap: 40px; }
+  .release {
+    position: relative;
+    background: var(--panel);
+    border: 1px solid var(--hair);
+    border-radius: var(--radius-lg);
+    padding: 28px 28px 24px;
+    scroll-margin-top: 96px;
+  }
+  .rel-head { display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: baseline; margin-bottom: 12px; }
+  .ver-tag {
+    display: inline-flex; align-items: center;
+    padding: 3px 8px; border-radius: 999px;
+    background: var(--ink); color: #fff;
+    font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums;
+  }
+  .title h2 { margin: 0 0 4px; font-size: 22px; letter-spacing: -0.015em; line-height: 1.25; }
+  .headline { margin: 4px 0 0; font-size: 14px; line-height: 1.55; }
+
+  .sections { margin-top: 20px; display: grid; gap: 20px; }
+  .cl-section h3 { margin: 0 0 8px; font-size: 12.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); }
+  .cl-body :global(p) { margin: 0 0 10px; color: var(--ink-2); font-size: 14px; line-height: 1.6; }
+  .cl-body :global(ul) { margin: 0 0 10px; padding: 0; list-style: none; display: grid; gap: 6px; }
+  .cl-body :global(li) {
+    position: relative;
+    padding-left: 18px;
+    font-size: 14px; line-height: 1.55;
+    color: var(--ink-2);
+  }
+  .cl-body :global(li)::before {
+    content: ""; position: absolute; left: 4px; top: 10px;
+    width: 4px; height: 4px; border-radius: 999px; background: var(--faint);
+  }
+  .cl-body :global(a) { color: var(--accent); text-decoration: underline; text-decoration-thickness: 0.5px; text-underline-offset: 3px; }
+  .cl-body :global(code) { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
+
+  .perma {
+    position: absolute; top: 20px; right: 20px;
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; color: var(--faint);
+  }
+  .perma:hover { color: var(--accent); }
+
+  .pager { margin: 40px 0 20px; }
+  .pager-inner {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px;
+  }
+  .pager-count { font-size: 13px; font-variant-numeric: tabular-nums; }
+  .flip { transform: rotate(180deg); }
+</style>

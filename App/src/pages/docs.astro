@@ -1,0 +1,265 @@
+---
+import Base from "@layouts/Base.astro";
+import Icon from "@components/Icon.astro";
+import { SITE } from "@data/site";
+
+// The docs shell mirrors the structure of the repository README. Deep pages don't exist as
+// web routes yet — the desktop app IS the manual today. The sidebar linkifies README anchors
+// on GitHub so a reader who wants the whole thing right now has an honest route to it.
+//
+// TELLING YOU HONESTLY (per the brief): this is a shell. It is not a knowledge base with
+// article-per-topic yet, and adding one would either duplicate the README or fabricate
+// content that doesn't exist. Each item below is a real README section link, marked as such.
+
+interface DocLink { href: string; label: string; description?: string; }
+interface DocGroup { title: string; items: DocLink[]; }
+
+const README = SITE.github + "/blob/main/README.md";
+
+const NAV: DocGroup[] = [
+  {
+    title: "Getting started",
+    items: [
+      { href: `${README}#requirements`, label: "Requirements", description: "Node 22+, Python 3.12+, uv." },
+      { href: `${README}#quick-start`, label: "Quick start", description: "Runtime, server, client, provider keys." },
+      { href: `${README}#first-run`, label: "First run", description: "What the app walks you through the first time." },
+      { href: `${README}#try-it-in-60-seconds`, label: "Try it in 60 seconds" },
+    ],
+  },
+  {
+    title: "The product, top to bottom",
+    items: [
+      { href: `${README}#threads`, label: "Threads", description: "Build a conversation with an agent about its work." },
+      { href: `${README}#agents`, label: "Agents", description: "The artefact tab: version, deploy, edit." },
+      { href: `${README}#the-inbox`, label: "The Inbox", description: "What&rsquo;s waiting on you. What dies on its own." },
+      { href: `${README}#activity`, label: "Activity", description: "What this workspace is doing." },
+      { href: `${README}#the-composer`, label: "The composer", description: "One composer, deterministic intent routing." },
+    ],
+  },
+  {
+    title: "Building",
+    items: [
+      { href: `${README}#the-agent-contract`, label: "The agent contract", description: "Three symbols. Nothing imported from Jaroku." },
+      { href: `${README}#the-build-pipeline-plan--generate--validate`, label: "Build pipeline", description: "Plan → generate → validate → atomic swap." },
+      { href: `${README}#the-fix-loop-propose--apply--undo`, label: "The fix loop", description: "Full-file rewrites, reviewable diffs, snapshot undo." },
+      { href: `${README}#debug-depth-pause-resume-branch`, label: "Debug depth", description: "Pause, resume, branch from any checkpoint." },
+    ],
+  },
+  {
+    title: "Running",
+    items: [
+      { href: `${README}#the-event-schema`, label: "The event schema", description: "Frozen, versioned, one JSON object per line." },
+      { href: `${README}#the-python-runtime`, label: "The Python runtime", description: "Runner, interceptor, stdout guard." },
+      { href: `${README}#cost-accounting`, label: "Cost accounting", description: "Summed from steps. Unknown reported as unknown." },
+      { href: `${README}#the-eval-engine`, label: "The eval engine", description: "Data-driven rubric, LLM as judge." },
+    ],
+  },
+  {
+    title: "Integrations",
+    items: [
+      { href: `${README}#connectors`, label: "Connectors", description: "Reviewed templates, copied verbatim." },
+      { href: `${README}#mcp-servers`, label: "MCP servers", description: "Third-party code, treated as untrusted by design." },
+      { href: `${README}#github`, label: "GitHub", description: "The GitHub App is the connection." },
+      { href: `${README}#deploying-an-agent`, label: "Deploying an agent", description: "Into your Railway. Bearer token is yours." },
+    ],
+  },
+];
+---
+<Base
+  title="Docs"
+  description="Documentation for Jaroku — the desktop app is the manual, and this page links each section of the repository README."
+>
+  <section class="section-tight">
+    <div class="container docs-shell">
+      <aside class="doc-nav">
+        <div class="doc-nav-head">
+          <span class="eyebrow">Docs</span>
+          <p class="muted small">
+            The app is the manual. Deep sections live in the repository&rsquo;s
+            <code class="mono">README.md</code>.
+          </p>
+        </div>
+        <nav aria-label="Documentation">
+          {NAV.map((g) => (
+            <div class="doc-nav-group">
+              <h4>{g.title}</h4>
+              <ul>
+                {g.items.map((it) => (
+                  <li>
+                    <a href={it.href} rel="noopener noreferrer" target="_blank">
+                      {it.label}
+                      <Icon name="arrow-up-right" size={11} class="chev" />
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </nav>
+      </aside>
+
+      <article class="doc-body">
+        <span class="eyebrow">Overview</span>
+        <h1>Documentation, honestly.</h1>
+        <p class="lead">
+          The desktop app is the primary manual for Jaroku &mdash; every feature is documented in the same
+          place it lives, and the readme walks the product end to end. This page is a structural shell that
+          links each section as it exists today rather than duplicating it into a separate knowledge base
+          that would drift.
+        </p>
+
+        <div class="callout">
+          <Icon name="clock" size={16} />
+          <p>
+            A dedicated docs site with per-page URLs is planned. For this pass the outbound links open the
+            section on GitHub, which is the single copy of the manual today.
+          </p>
+        </div>
+
+        <section class="doc-section">
+          <h2>What&rsquo;s in the app</h2>
+          <div class="doc-grid">
+            <a class="doc-card" href={`${SITE.github}/blob/main/README.md#threads`} target="_blank" rel="noopener noreferrer">
+              <h4>Threads &amp; the composer</h4>
+              <p>Deterministic intent routing, reasoning-effort control, the permission shield, and the connector deck.</p>
+              <span class="lnk">Read section <Icon name="arrow-up-right" size={11} /></span>
+            </a>
+            <a class="doc-card" href={`${SITE.github}/blob/main/README.md#the-event-schema`} target="_blank" rel="noopener noreferrer">
+              <h4>Traces &amp; the event schema</h4>
+              <p>NDJSON, one JSON object per step. Schema versioned and frozen; shape changes get a new version.</p>
+              <span class="lnk">Read section <Icon name="arrow-up-right" size={11} /></span>
+            </a>
+            <a class="doc-card" href={`${SITE.github}/blob/main/README.md#cost-accounting`} target="_blank" rel="noopener noreferrer">
+              <h4>Cost accounting</h4>
+              <p>Summed from steps, not from a summary. A crashed run still reports what it spent.</p>
+              <span class="lnk">Read section <Icon name="arrow-up-right" size={11} /></span>
+            </a>
+            <a class="doc-card" href={`${SITE.github}/blob/main/README.md#the-eval-engine`} target="_blank" rel="noopener noreferrer">
+              <h4>Evals</h4>
+              <p>Evaluations run as ordinary runs on a persisted queue. LLM-as-judge with a data-driven rubric.</p>
+              <span class="lnk">Read section <Icon name="arrow-up-right" size={11} /></span>
+            </a>
+            <a class="doc-card" href={`${SITE.github}/blob/main/README.md#connectors`} target="_blank" rel="noopener noreferrer">
+              <h4>Connectors</h4>
+              <p>Gmail (drafts-only), Calendar, Postgres (read-only), Stripe (restricted key), HTTP/Webhook with an allowlist, Slack.</p>
+              <span class="lnk">Read section <Icon name="arrow-up-right" size={11} /></span>
+            </a>
+            <a class="doc-card" href={`${SITE.github}/blob/main/README.md#deploying-an-agent`} target="_blank" rel="noopener noreferrer">
+              <h4>Deploy</h4>
+              <p>Into your own Railway account. Same runner as your desktop; the deployed run is a traced run.</p>
+              <span class="lnk">Read section <Icon name="arrow-up-right" size={11} /></span>
+            </a>
+          </div>
+        </section>
+
+        <section class="doc-section">
+          <h2>Where the source of truth is</h2>
+          <ul class="src-list">
+            <li>
+              <Icon name="book" size={14} />
+              <div>
+                <strong>README.md</strong> &mdash; the manual, end to end.
+                <a href={README} rel="noopener noreferrer" target="_blank">Open on GitHub <Icon name="arrow-up-right" size={11} /></a>
+              </div>
+            </li>
+            <li>
+              <Icon name="layers" size={14} />
+              <div>
+                <strong>adr/</strong> &mdash; 38 architecture decision records. Rationale, alternatives, trade-offs, references.
+                <a href={`${SITE.github}/tree/main/adr`} rel="noopener noreferrer" target="_blank">Open on GitHub <Icon name="arrow-up-right" size={11} /></a>
+              </div>
+            </li>
+            <li>
+              <Icon name="clock" size={14} />
+              <div>
+                <strong>CHANGELOG.md</strong> &mdash; every release, newest first.
+                <a href="/changelog">Rendered here</a>
+                &middot;
+                <a href={`${SITE.github}/blob/main/CHANGELOG.md`} rel="noopener noreferrer" target="_blank">Source on GitHub <Icon name="arrow-up-right" size={11} /></a>
+              </div>
+            </li>
+            <li>
+              <Icon name="shield" size={14} />
+              <div>
+                <strong>SECURITY.md</strong> &mdash; disclosure policy, scope, known limitations.
+                <a href="/security">On-site page</a>
+                &middot;
+                <a href={`${SITE.github}/blob/main/SECURITY.md`} rel="noopener noreferrer" target="_blank">Source on GitHub <Icon name="arrow-up-right" size={11} /></a>
+              </div>
+            </li>
+            <li>
+              <Icon name="terminal" size={14} />
+              <div>
+                <strong>docs/</strong> &mdash; Tauri stabilisation, email flows.
+                <a href={`${SITE.github}/tree/main/docs`} rel="noopener noreferrer" target="_blank">Open on GitHub <Icon name="arrow-up-right" size={11} /></a>
+              </div>
+            </li>
+          </ul>
+        </section>
+      </article>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .docs-shell {
+    display: grid; gap: 40px;
+    grid-template-columns: 1fr;
+    padding-top: 40px;
+  }
+  @media (min-width: 900px) { .docs-shell { grid-template-columns: 260px 1fr; gap: 56px; } }
+
+  .doc-nav { position: sticky; top: 80px; align-self: start; }
+  .doc-nav-head { margin-bottom: 20px; }
+  .doc-nav-head .small { font-size: 12.5px; margin-top: 6px; }
+
+  .doc-nav-group { margin-bottom: 20px; }
+  .doc-nav-group h4 {
+    margin: 0 0 6px;
+    font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint);
+  }
+  .doc-nav-group ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 2px; }
+  .doc-nav-group a {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 8px; margin-left: -8px; border-radius: 6px;
+    color: var(--ink-2); font-size: 13.5px;
+    line-height: 1.35;
+  }
+  .doc-nav-group a:hover { background: var(--panel-2); color: var(--ink); }
+  .doc-nav-group a .chev { color: var(--faint); }
+
+  .doc-body h1 { margin-top: 8px; }
+  .callout {
+    display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: start;
+    padding: 14px 18px; margin: 20px 0 32px;
+    background: var(--panel-2); border: 1px dashed var(--edge); border-radius: var(--radius);
+  }
+  .callout svg { color: var(--muted); margin-top: 3px; }
+  .callout p { margin: 0; font-size: 13.5px; }
+
+  .doc-section { margin-top: 40px; }
+  .doc-section h2 { font-size: 22px; margin-bottom: 16px; }
+
+  .doc-grid { display: grid; gap: 12px; grid-template-columns: 1fr; }
+  @media (min-width: 720px) { .doc-grid { grid-template-columns: repeat(2, 1fr); } }
+  .doc-card {
+    display: block; padding: 20px;
+    background: var(--panel); border: 1px solid var(--hair); border-radius: var(--radius);
+    color: var(--ink);
+    transition: border-color 140ms ease, transform 140ms ease;
+  }
+  .doc-card:hover { border-color: var(--edge); transform: translateY(-2px); color: var(--ink); }
+  .doc-card h4 { margin: 0 0 6px; font-size: 15px; }
+  .doc-card p { margin: 0 0 8px; color: var(--muted); font-size: 13px; }
+  .doc-card .lnk { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--accent); }
+
+  .src-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+  .src-list li {
+    display: grid; grid-template-columns: auto 1fr; gap: 12px;
+    padding: 14px 16px;
+    background: var(--panel-2); border: 1px solid var(--hair); border-radius: var(--radius);
+  }
+  .src-list svg { color: var(--muted); margin-top: 3px; }
+  .src-list strong { color: var(--ink); font-weight: 500; }
+  .src-list a { color: var(--accent); font-size: 13px; margin-left: 4px; }
+</style>

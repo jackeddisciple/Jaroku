@@ -1,0 +1,99 @@
+---
+import Legal from "@layouts/Legal.astro";
+import { SITE } from "@data/site";
+---
+<Legal
+  title="Privacy Policy"
+  description="What Jaroku collects, why, where it lives, and what you can do about it."
+  intro="A short policy for a small company that does not want your data. Everything below reflects how the software actually behaves — where it says the file is local, the file is local."
+>
+  <h2>1. What Jaroku is, for privacy purposes</h2>
+  <p>
+    Jaroku is desktop software. The server and the runtime live inside the same window and bind to
+    <code class="mono">localhost</code>. Provider keys are written to a local file only the local
+    server reads. Traces are stored in your workspace&rsquo;s database on your machine. Nothing you
+    build leaves the machine unless <em>you</em> deploy, sync or share it.
+  </p>
+
+  <h2>2. Data we hold about you</h2>
+  <p>
+    We hold only what an account requires:
+  </p>
+  <ul>
+    <li>Your email address, so we can sign you in and contact you about your account.</li>
+    <li>Your OIDC subject and issuer, if you use single sign-on.</li>
+    <li>Your subscription state and billing history (Stripe holds the payment details themselves).</li>
+    <li>Workspace names and member lists, so the tenancy boundary can be enforced.</li>
+    <li>Coarse product events (a version installed, a deploy started) &mdash; no personal content, no message payloads, no traces.</li>
+  </ul>
+  <p>
+    We do not run analytics on the marketing site, and there is no third-party tracker on any Jaroku
+    page.
+  </p>
+
+  <h2>3. Data we do NOT hold</h2>
+  <ul>
+    <li><strong>Your provider API keys.</strong> They live in a file on your computer.</li>
+    <li><strong>Your traces.</strong> They live in your workspace&rsquo;s database on your computer, or on your own hosting account for a deployed agent.</li>
+    <li><strong>The content of your agent conversations.</strong> Same location as the traces.</li>
+    <li><strong>Your MCP server credentials.</strong> Same location.</li>
+    <li><strong>Your Railway or GitHub tokens.</strong> Same location. When you connect either, the token is stored locally and is not sent to us.</li>
+  </ul>
+
+  <h2>4. Data processors we use</h2>
+  <table>
+    <thead>
+      <tr><th>Processor</th><th>Purpose</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Stripe</td><td>Payment processing for Pro and Team.</td></tr>
+      <tr><td>Your OIDC issuer</td><td>Authentication; we trust its signatures.</td></tr>
+      <tr><td>Anthropic, OpenAI, Google</td><td>Only if you route inference through us on Pro or Team. Otherwise you pay them directly and we never see the request.</td></tr>
+      <tr><td>Railway</td><td>Only if you deploy an agent, and only for your own container.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>5. Cookies</h2>
+  <p>
+    The marketing site sets no cookies. When you sign in to the checkout subdomain we set a session
+    cookie for the duration of that flow; it does not persist.
+  </p>
+
+  <h2>6. Your rights</h2>
+  <p>
+    You can request a copy of the data we hold about you, ask us to correct anything that is wrong,
+    or ask us to delete your account. Email <a href={`mailto:${SITE.contactEmail}`}>{SITE.contactEmail}</a>
+    with the subject line <code class="mono">Data request</code>. We respond within 30 days, usually
+    within a week.
+  </p>
+  <p>
+    Deletion is genuine. When you delete your account, we delete your workspace records, your
+    membership records, and your subscription record from our database. We may retain a compliance
+    record of the deletion itself (date, subject id, requested by whom) for legal purposes.
+  </p>
+
+  <h2>7. Where data is stored</h2>
+  <p>
+    Account data is hosted in Frankfurt (eu-central-1). Deployed agents live in the region you pick
+    when you deploy them in Railway; we don&rsquo;t choose it for you. Traces from a deployed agent are
+    ingested to whichever region your workspace is in.
+  </p>
+
+  <h2>8. Data breaches</h2>
+  <p>
+    In the event of a data breach affecting your account, we will notify you within 72 hours of
+    confirming the breach, describe what was accessed, and describe what we&rsquo;ve done to contain
+    it. Our security policy is on the <a href="/security">Security page</a>.
+  </p>
+
+  <h2>9. Changes to this policy</h2>
+  <p>
+    When this policy changes materially we update the &ldquo;current as of&rdquo; date at the top and
+    email account holders at least 30 days before the change takes effect.
+  </p>
+
+  <h2>Contact</h2>
+  <p>
+    Privacy questions: <a href={`mailto:${SITE.contactEmail}`}>{SITE.contactEmail}</a>.
+  </p>
+</Legal>

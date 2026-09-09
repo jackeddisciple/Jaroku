@@ -1,0 +1,41 @@
+---
+// PLACEHOLDER — this button has no real destination. The installer URLs do not exist yet
+// and inventing one would let a wrong shape ship into production. Every download control
+// on the site routes here; when a real CDN lands, replace the `href` in exactly one place.
+//
+// The button is styled and sized as if it were live so nothing changes when it becomes
+// live, and it carries `data-placeholder="true"` so a global search finds every one.
+interface Props {
+  label?: string;
+  variant?: "accent" | "primary" | "quiet";
+  size?: "sm" | "md";
+  os?: "auto" | "macos" | "windows" | "linux";
+  class?: string;
+}
+const {
+  label = "Download",
+  variant = "primary",
+  size = "md",
+  os = "auto",
+  class: className = "",
+} = Astro.props;
+
+const cls = [
+  "btn",
+  variant === "accent" ? "btn-accent" : variant === "quiet" ? "btn-quiet" : "btn-primary",
+  size === "sm" ? "btn-sm" : "",
+  className,
+].filter(Boolean).join(" ");
+---
+
+<a
+  class={cls}
+  href="#download-placeholder"
+  data-placeholder="true"
+  data-download-os={os}
+  aria-label={`${label} — build not yet published`}
+  title="Downloads are not wired up in this pass"
+>
+  <slot />
+  <span>{label}</span>
+</a>

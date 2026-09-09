@@ -1,0 +1,175 @@
+---
+import Base from "@layouts/Base.astro";
+import Icon from "@components/Icon.astro";
+import { SITE } from "@data/site";
+
+// Honest about what support exists today.
+// Ground truth:
+//  - SECURITY.md says the project is maintained by one person; the security reporting SLA
+//    is a *communication* commitment.
+//  - Pricing tiers say: Free = GitHub Issues; Pro = Email, 48h; Team = Priority email, 24h.
+//  - No paid bug bounty (SECURITY.md, "Recognition").
+// So the routes are: GitHub Issues (community), email for Pro/Team, security private channels.
+
+interface FAQ { q: string; a: string; }
+
+const FAQ: FAQ[] = [
+  {
+    q: "Is Jaroku a hosted service?",
+    a: "No. Jaroku is a desktop application. The server, the WebSocket relay and the Python runtime all live inside the same Tauri window and bind to localhost. You install it and it runs on your machine.",
+  },
+  {
+    q: "Do I need an API key to try it?",
+    a: "No. The dry-run provider walks your agent's tools and answers plainly, without a key. Add an Anthropic key later, from Settings, if you want a real model.",
+  },
+  {
+    q: "Do you have access to my agents, keys or traces?",
+    a: "No. Provider keys are written to a local file only the local server reads. Traces are stored in your workspace's database. Nothing leaves your machine unless you deploy an agent — and even then it lands in your Railway account, not ours.",
+  },
+  {
+    q: "Can I take an agent out of Jaroku?",
+    a: "Yes. That's the point. A generated agent imports nothing from Jaroku, ships its own pyproject.toml, and runs standalone on any LangGraph-compatible host. The validator refuses code that would break the portability promise.",
+  },
+  {
+    q: "Which models can I use?",
+    a: "Anthropic, OpenAI and Google today, plus the free dry-run provider. The exact list — with real prices — is on the Models page and drawn from the same file the runtime uses.",
+  },
+  {
+    q: "Can I use my own OIDC issuer?",
+    a: "Yes. Jaroku ships with a provider-agnostic OIDC layer and a local issuer for development. In production you point it at your own IdP (Auth0, Clerk, WorkOS, a self-hosted issuer) and Jaroku trusts it as far as its signatures.",
+  },
+  {
+    q: "Is there a hosted cloud version?",
+    a: "No. There is a plan to offer a managed cloud tier eventually; there is nothing to announce today. The current shape of the product is desktop + your own hosting account for deployments.",
+  },
+  {
+    q: "How do I upgrade to Pro or Team?",
+    a: "Download the app, sign in, and upgrade from inside it — the same flow every other upgrade goes through. There is deliberately no checkout on the web; a second checkout entry point would mean getting webhook linking and workspace association right in two places instead of one.",
+  },
+  {
+    q: "What's the support SLA?",
+    a: "Free is GitHub Issues, community-supported. Pro is email with a 48-hour target response. Team is priority email with a 24-hour target. These are targets, not contractual — the maintainer is one person and says so plainly.",
+  },
+  {
+    q: "How do I report a security issue?",
+    a: "Privately, not on GitHub. Email the address on the Security page with subject prefix [SECURITY] Jaroku:, or open a private security advisory on the repository. Acknowledgement within 48 hours.",
+  },
+];
+---
+<Base
+  title="Help"
+  description="Frequently asked questions and support routes for Jaroku."
+>
+  <section class="section">
+    <div class="container-narrow head">
+      <span class="eyebrow">Help</span>
+      <h1>Answers you can rely on. Routes to a human you can reach.</h1>
+      <p class="lead">
+        The questions below come up before the download. If yours isn&rsquo;t here, GitHub Issues is the
+        fastest path today &mdash; and for Pro or Team, email lands with the maintainer.
+      </p>
+    </div>
+  </section>
+
+  <section class="section-tight">
+    <div class="container">
+      <div class="chan-grid">
+        <a class="chan" href={`${SITE.github}/issues`} target="_blank" rel="noopener noreferrer">
+          <Icon name="git" size={22} />
+          <div>
+            <h3>GitHub Issues</h3>
+            <p class="muted">Community. Best for bugs and feature requests. Free tier support channel.</p>
+            <span class="lnk">Open issue tracker <Icon name="arrow-up-right" size={11} /></span>
+          </div>
+        </a>
+        <a class="chan" href={`mailto:${SITE.contactEmail}?subject=Jaroku%20Support`}>
+          <Icon name="clock" size={22} />
+          <div>
+            <h3>Email support</h3>
+            <p class="muted">Pro: 48h target. Team: priority, 24h target. These are targets, not contractual.</p>
+            <span class="lnk">{SITE.contactEmail}</span>
+          </div>
+        </a>
+        <a class="chan" href="/security">
+          <Icon name="shield" size={22} />
+          <div>
+            <h3>Security reports</h3>
+            <p class="muted">Private channels for vulnerabilities. Do not open a public GitHub issue for a security problem.</p>
+            <span class="lnk">Read the policy</span>
+          </div>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="s-faq">
+    <div class="container-narrow">
+      <span class="eyebrow">FAQ</span>
+      <h2 id="s-faq">Straight answers to the ten most common questions.</h2>
+      <ul class="faq">
+        {FAQ.map((f) => (
+          <li>
+            <details>
+              <summary>
+                <span>{f.q}</span>
+                <Icon name="chevron-down" size={16} class="chev" />
+              </summary>
+              <p>{f.a}</p>
+            </details>
+          </li>
+        ))}
+      </ul>
+    </div>
+  </section>
+
+  <section class="section-tight closer">
+    <div class="container-narrow closer-inner">
+      <p class="muted">
+        Not finding what you need? Email <a href={`mailto:${SITE.contactEmail}`}>{SITE.contactEmail}</a>
+        &mdash; it&rsquo;s a real inbox with a real person on the other side.
+      </p>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .head { text-align: center; }
+  .head h1 { max-width: 22ch; margin-inline: auto; }
+  .head .lead { max-width: 62ch; margin: 12px auto 0; }
+
+  .chan-grid { display: grid; gap: 16px; grid-template-columns: 1fr; }
+  @media (min-width: 720px) { .chan-grid { grid-template-columns: repeat(3, 1fr); } }
+  .chan {
+    display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: start;
+    padding: 20px;
+    background: var(--panel); border: 1px solid var(--hair); border-radius: var(--radius-lg);
+    color: var(--ink);
+    transition: border-color 140ms ease, transform 140ms ease;
+  }
+  .chan:hover { border-color: var(--edge); transform: translateY(-2px); color: var(--ink); }
+  .chan svg { color: var(--muted); margin-top: 2px; }
+  .chan h3 { margin: 0 0 4px; font-size: 16px; }
+  .chan p { margin: 0 0 8px; font-size: 13px; }
+  .chan .lnk { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--accent); }
+
+  .faq { list-style: none; padding: 0; margin: 24px 0 0; display: grid; gap: 4px; }
+  .faq details {
+    background: var(--panel); border: 1px solid var(--hair); border-radius: var(--radius);
+    overflow: hidden;
+    transition: border-color 120ms ease;
+  }
+  .faq details[open] { border-color: var(--edge); }
+  .faq summary {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 14px 18px;
+    cursor: pointer; list-style: none;
+    font-size: 14.5px; color: var(--ink);
+  }
+  .faq summary::-webkit-details-marker { display: none; }
+  .faq summary .chev { color: var(--faint); transition: transform 160ms ease; }
+  .faq details[open] summary .chev { transform: rotate(180deg); }
+  .faq p { margin: 0; padding: 0 18px 16px; color: var(--muted); font-size: 14px; line-height: 1.6; }
+
+  .closer-inner { text-align: center; }
+  .closer-inner p { font-size: 14px; }
+</style>

@@ -1,0 +1,278 @@
+---
+import Base from "@layouts/Base.astro";
+import Icon from "@components/Icon.astro";
+import DownloadButton from "@components/DownloadButton.astro";
+import { SITE } from "@data/site";
+
+// The tauri.conf.json bundle.targets = ["app","dmg","nsis","deb","appimage"] — so the three
+// platform surfaces are macOS (dmg), Windows (nsis) and Linux (deb + appimage). Anything the
+// installer needs on each side is what we say here; do NOT invent a download URL shape.
+
+interface Build {
+  os: "macos" | "windows" | "linux";
+  label: string;
+  icon: "apple" | "windows" | "linux";
+  format: string;
+  requirements: string[];
+}
+
+const BUILDS: Build[] = [
+  {
+    os: "macos",
+    label: "macOS",
+    icon: "apple",
+    format: ".dmg — universal build",
+    requirements: [
+      "macOS 11.0 or later (Big Sur+)",
+      "Apple Silicon or Intel",
+      "~250 MB free disk",
+    ],
+  },
+  {
+    os: "windows",
+    label: "Windows",
+    icon: "windows",
+    format: ".exe — NSIS installer",
+    requirements: [
+      "Windows 10 or later",
+      "WebView2 (installed automatically if missing)",
+      "~350 MB free disk",
+    ],
+  },
+  {
+    os: "linux",
+    label: "Linux",
+    icon: "linux",
+    format: ".AppImage · .deb",
+    requirements: [
+      "libwebkit2gtk-4.1, libgtk-3, libayatana-appindicator3",
+      "glibc 2.35+ (Ubuntu 22.04+, Fedora 36+)",
+      "~300 MB free disk",
+    ],
+  },
+];
+---
+<Base
+  title="Download"
+  description="Download Jaroku for macOS, Windows or Linux. A desktop app for building, deploying and operating LangGraph agents."
+>
+  <section class="section">
+    <div class="container-narrow head">
+      <span class="eyebrow">Download</span>
+      <h1>Jaroku is a desktop app. It runs on your machine.</h1>
+      <p class="lead">
+        Not a web app. Not a CLI. The server, the WebSocket relay and the Python runtime all live inside a
+        single Tauri window, so everything you build is local, your keys stay in a file only the local server
+        reads, and you don&rsquo;t need to point anything at the internet to work.
+      </p>
+    </div>
+  </section>
+
+  <section class="section-tight builds-section">
+    <div class="container">
+      <div class="builds">
+        {BUILDS.map((b) => (
+          <article class:list={["build card", { primary: b.os === "macos" }]}>
+            <div class="build-head">
+              <Icon name={b.icon} size={28} />
+              <div>
+                <h3>{b.label}</h3>
+                <p class="mono faint">{b.format}</p>
+              </div>
+            </div>
+            <div class="build-cta">
+              <DownloadButton
+                os={b.os}
+                variant={b.os === "macos" ? "accent" : "primary"}
+                label={`Download for ${b.label}`}
+              >
+                <Icon name="download" size={16} />
+              </DownloadButton>
+            </div>
+            <ul class="reqs">
+              {b.requirements.map((r) => <li><Icon name="check" size={13} /> {r}</li>)}
+            </ul>
+          </article>
+        ))}
+      </div>
+
+      <aside class="notice card" role="note">
+        <Icon name="clock" size={16} />
+        <p>
+          <strong>Downloads are inert in this pass.</strong> The buttons above are styled as they will be
+          on the day a build actually ships &mdash; the CDN URL is not yet decided, and this site refuses
+          to guess one. When the first build is public, one <code class="mono">href</code> changes and
+          every button on the site becomes live at once.
+        </p>
+      </aside>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="s-what">
+    <div class="container">
+      <div class="two-col">
+        <div>
+          <span class="eyebrow">What&rsquo;s in the download</span>
+          <h2 id="s-what">A single window. Three processes. Zero services to configure.</h2>
+          <p>
+            The Tauri shell hosts the React client. It launches the Node control plane on
+            <code class="mono">localhost</code> and the Python runtime as a subprocess when a run
+            starts. There&rsquo;s no separate database to install &mdash; the built-in
+            <code class="mono">node:sqlite</code> handles workspace state; Postgres is an option, not a
+            requirement, and the migration runner treats them the same way.
+          </p>
+          <ul class="dots">
+            <li><Icon name="check" size={16} /> First-run walks you through an optional Anthropic key.</li>
+            <li><Icon name="check" size={16} /> Deep links (<code class="mono">jaroku://</code>) are registered by the installer.</li>
+            <li><Icon name="check" size={16} /> The server binds <code class="mono">localhost</code> and refuses to move.</li>
+          </ul>
+        </div>
+        <aside class="card ident">
+          <div class="mono muted small">bundle metadata</div>
+          <ul class="k-list">
+            <li><span class="k">App id</span><span class="v mono">app.jaroku.desktop</span></li>
+            <li><span class="k">Version</span><span class="v mono">{SITE.version}</span></li>
+            <li><span class="k">Deep link</span><span class="v mono">{SITE.deepLinkScheme}://</span></li>
+            <li><span class="k">Category</span><span class="v">Developer Tool</span></li>
+            <li><span class="k">Signing</span><span class="v">Signed on macOS &amp; Windows for release builds</span></li>
+          </ul>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="s-first">
+    <div class="container">
+      <span class="eyebrow">The 60-second path</span>
+      <h2 id="s-first">Install, run the example agent on the free dry-run model.</h2>
+      <ol class="steps">
+        <li>
+          <span class="n">1</span>
+          <div>
+            <h4>Install</h4>
+            <p>Open the file for your OS. Jaroku launches into first-run setup.</p>
+          </div>
+        </li>
+        <li>
+          <span class="n">2</span>
+          <div>
+            <h4>Skip the key</h4>
+            <p>The dry-run provider needs no key. You can add one later from Settings.</p>
+          </div>
+        </li>
+        <li>
+          <span class="n">3</span>
+          <div>
+            <h4>Run the example</h4>
+            <p>
+              <code class="mono">runtime/agents/example_agent</code> ships with two dependency-free tools.
+              Click Run &mdash; the trace opens, the state diff opens, the cost stays at $0.00.
+            </p>
+          </div>
+        </li>
+        <li>
+          <span class="n">4</span>
+          <div>
+            <h4>Add a key when you&rsquo;re ready</h4>
+            <p>
+              Provide an Anthropic key for planning, generation, editing and the eval judge. Provider keys
+              never leave the local file.
+            </p>
+          </div>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="section-tight" aria-labelledby="s-src">
+    <div class="container-narrow src-inner">
+      <p class="muted">
+        Prefer to build from source? The repository is open. Read
+        <a href="/docs">Quick start</a> for the toolchain (Node 22+, Python 3.12+, uv).
+      </p>
+      <div class="cta-row">
+        <a class="btn btn-quiet" href={SITE.github} rel="noopener noreferrer" target="_blank">
+          <Icon name="git" size={14} /> GitHub
+          <Icon name="arrow-up-right" size={12} class="ext" />
+        </a>
+        <a class="btn btn-quiet" href="/changelog">
+          <Icon name="clock" size={14} /> Changelog
+        </a>
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .head { text-align: center; }
+  .head h1 { max-width: 22ch; margin-inline: auto; }
+  .head .lead { max-width: 62ch; margin: 12px auto 0; }
+
+  .builds-section .builds {
+    display: grid; gap: 16px; grid-template-columns: 1fr;
+  }
+  @media (min-width: 720px) { .builds-section .builds { grid-template-columns: repeat(3, 1fr); } }
+
+  .build { display: flex; flex-direction: column; padding: 24px; }
+  .build.primary { border-color: rgba(43, 92, 255, 0.35); box-shadow: 0 0 0 4px rgba(43, 92, 255, 0.06); }
+  .build-head { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
+  .build-head h3 { margin: 0; font-size: 20px; }
+  .build-head .faint { margin: 2px 0 0; font-size: 12px; }
+  .build-cta { display: flex; }
+  .build-cta a { flex: 1; }
+  .reqs { margin: 18px 0 0; padding: 0; list-style: none; }
+  .reqs li {
+    display: flex; align-items: baseline; gap: 8px;
+    padding: 6px 0; font-size: 13px; color: var(--muted);
+    border-top: 1px solid var(--hair);
+  }
+  .reqs li:first-child { border-top: 0; }
+  .reqs li svg { color: var(--faint); flex-shrink: 0; margin-top: 2px; }
+
+  .notice {
+    margin-top: 24px;
+    display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: start;
+    padding: 16px 20px;
+    background: var(--panel-2); border: 1px dashed var(--edge);
+  }
+  .notice svg { color: var(--muted); margin-top: 3px; }
+  .notice p { margin: 0; font-size: 13.5px; color: var(--ink-2); }
+
+  .two-col { display: grid; gap: 32px; grid-template-columns: 1fr; }
+  @media (min-width: 900px) { .two-col { grid-template-columns: 1.1fr 1fr; gap: 48px; } }
+
+  .ident { padding: 24px; }
+  .ident .small { font-size: 11.5px; }
+
+  .dots { padding: 0; margin: 18px 0 0; list-style: none; }
+  .dots li { display: flex; gap: 10px; padding: 8px 0; color: var(--ink-2); font-size: 14.5px; align-items: baseline; }
+  .dots li svg { color: var(--ok); flex-shrink: 0; margin-top: 3px; }
+
+  .k-list { padding: 0; margin: 12px 0 0; list-style: none; }
+  .k-list li {
+    display: grid; grid-template-columns: 100px 1fr; gap: 8px 16px;
+    padding: 12px 0; border-top: 1px solid var(--hair); align-items: baseline;
+  }
+  .k-list li:first-child { border-top: 0; }
+  .k-list .k { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .k-list .v { color: var(--ink); font-size: 13.5px; }
+
+  .steps { list-style: none; padding: 0; margin: 20px 0 0; display: grid; gap: 12px; grid-template-columns: 1fr; }
+  @media (min-width: 720px) { .steps { grid-template-columns: repeat(2, 1fr); } }
+  @media (min-width: 1024px) { .steps { grid-template-columns: repeat(4, 1fr); } }
+  .steps li {
+    display: grid; grid-template-columns: 32px 1fr; gap: 12px;
+    padding: 18px; background: var(--panel-2); border: 1px solid var(--hair); border-radius: var(--radius);
+  }
+  .steps .n {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; border-radius: 999px;
+    background: var(--ink); color: #fff; font-size: 12px; font-weight: 500;
+  }
+  .steps h4 { margin: 0 0 4px; font-size: 15px; }
+  .steps p { margin: 0; color: var(--muted); font-size: 13px; }
+
+  .src-inner { text-align: center; }
+  .cta-row { display: inline-flex; gap: 12px; margin-top: 12px; flex-wrap: wrap; justify-content: center; }
+  .cta-row .ext { color: var(--faint); }
+</style>

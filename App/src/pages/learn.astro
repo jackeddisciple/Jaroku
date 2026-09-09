@@ -1,0 +1,175 @@
+---
+import Base from "@layouts/Base.astro";
+import Icon from "@components/Icon.astro";
+import DownloadButton from "@components/DownloadButton.astro";
+
+// Learn is concepts, not reference. Three guides that anyone using an "agent framework" for
+// the first time needs to have straight before the product makes sense: what an agent IS in
+// Jaroku (a LangGraph), what a trace IS (a versioned NDJSON stream), and what deployment IS
+// (a subprocess in your Railway).
+//
+// TELLING YOU HONESTLY: these are essays, not tutorials with step-by-step commands. The
+// commands live in the README's Quick Start. Duplicating them here would create two truths.
+---
+<Base
+  title="Learn"
+  description="Guides and concepts. What an agent is in Jaroku. What a trace is. How deployment works."
+>
+  <section class="section">
+    <div class="container-narrow head">
+      <span class="eyebrow">Learn</span>
+      <h1>Three concepts you need to have straight.</h1>
+      <p class="lead">
+        These guides are the mental model &mdash; not the click-by-click. The product is built around
+        three ideas, and if you know what each of them <em>means</em> here, everything else in the app
+        maps to something you already understand.
+      </p>
+    </div>
+  </section>
+
+  <section class="section-tight guides">
+    <div class="container-narrow">
+
+      <article class="guide">
+        <a class="guide-anchor" id="agent" aria-hidden="true"></a>
+        <header class="g-head">
+          <span class="badge"><Icon name="layers" size={12} /> Guide 01</span>
+          <h2>What an agent is (here)</h2>
+          <p class="muted">A LangGraph. A file with three symbols. Nothing more.</p>
+        </header>
+        <div class="g-body">
+          <p>
+            An <strong>agent</strong> in Jaroku is a compiled LangGraph &mdash; a state machine of nodes
+            and edges, with tools attached &mdash; expressed as a single <code class="mono">agent.py</code>
+            that exposes three symbols and imports nothing from Jaroku. That constraint isn&rsquo;t a
+            style choice, it&rsquo;s the entire portability promise: whatever the model generates, you can
+            copy the folder out and run it under a different <code class="mono">langgraph run</code>
+            harness the day Jaroku is deprecated.
+          </p>
+          <p>
+            The three symbols are <code class="mono">TOOLS</code> (a list of <code class="mono">@tool</code>
+            decorated functions), <code class="mono">build_graph(llm)</code> which takes an
+            <em>already-configured</em> model and returns a compiled graph, and
+            <code class="mono">build_initial_state(user_input: str) -&gt; dict</code>. The validator
+            rejects a generated file that imports <code class="mono">langchain_anthropic</code> or any
+            other provider SDK &mdash; the model is passed in, and provider selection happens once, in
+            the runner, from <code class="mono">JAROKU_PROVIDER</code> and <code class="mono">JAROKU_MODEL</code>.
+          </p>
+          <p>
+            The reason this matters in daily use: switching providers is a dropdown, not a regeneration.
+            The evaluation dashboard runs the same agent on three providers at once and shows you the
+            spread. And the free dry-run model &mdash; the one that doesn&rsquo;t need a key &mdash;
+            walks your <code class="mono">TOOLS</code> list synthesising one call per tool, so every
+            tool function is exercised without a cent spent.
+          </p>
+          <p class="muted">
+            Related: <a href={`https://github.com/jackeddisciple/jaroku/blob/main/adr/ADR-005-generated-agent-contract.md`} target="_blank" rel="noopener noreferrer">ADR-005 &mdash; the generated agent contract</a>.
+          </p>
+        </div>
+      </article>
+
+      <hr class="rule" />
+
+      <article class="guide">
+        <a class="guide-anchor" id="trace" aria-hidden="true"></a>
+        <header class="g-head">
+          <span class="badge"><Icon name="trace" size={12} /> Guide 02</span>
+          <h2>What a trace is</h2>
+          <p class="muted">A versioned NDJSON stream. Every consumer in the product reads it.</p>
+        </header>
+        <div class="g-body">
+          <p>
+            When an agent runs, the runtime emits one JSON object per event to
+            <code class="mono">stdout</code>. Every event carries a schema version, a run id, a step id,
+            timestamps, and event-specific payload &mdash; a tool call, a state update, a step
+            complete, an error. The stream is frozen: shape changes get a <em>new</em> schema version;
+            the old version still parses. That means an old trace from six months ago still opens in
+            today&rsquo;s app.
+          </p>
+          <p>
+            The trace is the source of truth. The timeline renders it live. The state diff view reads
+            <code class="mono">state_before</code> and <code class="mono">state_after</code>. The cost
+            summary is <em>summed from the steps</em> &mdash; not from a summary field on the run &mdash;
+            which is why a crashed run still reports the money it spent, and why every step is
+            attributable. Nothing in the product has a private state that isn&rsquo;t backed by the trace.
+          </p>
+          <p>
+            One practical consequence: <em>unknown</em> is reported as unknown. If a model isn&rsquo;t
+            in the pricing table, its cost cell says so. If the LLM judge returns something the rubric
+            can&rsquo;t parse, the row is unscored. Jaroku will not synthesise a zero for you.
+          </p>
+        </div>
+      </article>
+
+      <hr class="rule" />
+
+      <article class="guide">
+        <a class="guide-anchor" id="deploy" aria-hidden="true"></a>
+        <header class="g-head">
+          <span class="badge"><Icon name="cloud" size={12} /> Guide 03</span>
+          <h2>How deployment works</h2>
+          <p class="muted">Into your own Railway account. Same runner as your desktop.</p>
+        </header>
+        <div class="g-body">
+          <p>
+            A deploy in Jaroku uploads the generated project to your Railway account &mdash; not to any
+            infrastructure we own. You install the Railway CLI, sign in, and the app calls
+            <code class="mono">railway up</code> under the hood after packaging the project into an image.
+            The image is a slim Python container that spawns the same <code class="mono">jaroku_runner</code>
+            subprocess your desktop spawns. Everything about how the runner behaves &mdash; the trace, the
+            cost math, the permission shield, pause and resume &mdash; is the same in the deployed image.
+          </p>
+          <p>
+            The deployed agent binds <code class="mono">0.0.0.0</code> on purpose, which is why the bearer
+            token isn&rsquo;t optional and why it is shown once, at the moment of deploy. The Cockpit tab in
+            the app is the operator surface for anything running in production: what&rsquo;s live, what
+            needs a confirmation, what a live agent has cost this week, and how to dispatch work to one.
+          </p>
+          <p class="muted">
+            Related: <a href={`https://github.com/jackeddisciple/jaroku/blob/main/adr/ADR-027-deploy-into-the-users-own-hosting-account.md`} target="_blank" rel="noopener noreferrer">ADR-027 &mdash; deploy into your own hosting account</a>.
+          </p>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <section class="section closer">
+    <div class="container-narrow closer-inner">
+      <h2>The rest is muscle memory.</h2>
+      <p class="lead">
+        Install the app and try the example agent on the dry-run model. Read the changelog for the shape
+        of the surface. Open an ADR when a decision seems opinionated &mdash; because it is, and the
+        reasoning is written down.
+      </p>
+      <div class="cta-row">
+        <DownloadButton variant="accent">
+          <Icon name="download" size={16} />
+        </DownloadButton>
+        <a class="btn btn-quiet" href="/docs">Documentation</a>
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .head { text-align: center; }
+  .head h1 { max-width: 24ch; margin-inline: auto; }
+  .head .lead { max-width: 62ch; margin: 12px auto 0; }
+
+  .guides { padding: 24px 0 40px; }
+  .guide { position: relative; }
+  .guide-anchor { position: absolute; top: -80px; }
+
+  .g-head { margin-bottom: 20px; }
+  .g-head h2 { margin: 12px 0 6px; font-size: 26px; }
+  .g-head .muted { font-size: 14.5px; }
+
+  .g-body p { color: var(--ink-2); font-size: 15.5px; line-height: 1.7; margin-bottom: 14px; }
+  .g-body p.muted { font-size: 13.5px; color: var(--muted); }
+  .g-body a { color: var(--accent); text-decoration: underline; text-decoration-thickness: 0.5px; text-underline-offset: 3px; }
+  .g-body code { background: var(--panel-2); border: 1px solid var(--hair); padding: 0 5px; border-radius: 4px; font-size: 0.9em; }
+
+  .closer-inner { text-align: center; }
+  .cta-row { display: inline-flex; gap: 12px; margin-top: 16px; flex-wrap: wrap; justify-content: center; }
+</style>

@@ -1,0 +1,157 @@
+---
+import Legal from "@layouts/Legal.astro";
+import Icon from "@components/Icon.astro";
+import { SITE } from "@data/site";
+// The wording, addresses and timelines below come from ../SECURITY.md. Keep this page and
+// that file in step — if you're changing one, you're likely changing both.
+---
+<Legal
+  title="Security"
+  description="Reporting a vulnerability, scope, known limitations, and hardening the deployment you run. Drawn from SECURITY.md."
+  intro="Jaroku runs generated code, holds provider API keys, and stores traces whose payloads contain whatever an agent touched. A vulnerability here is not abstract, and reports are treated accordingly."
+>
+  <h2>Reporting a vulnerability</h2>
+  <p>
+    <strong>Do not open a public GitHub issue, pull request or discussion for a security problem.</strong>
+    A public report is an exploit notice for everyone running the affected version before there is a
+    fix for them to install.
+  </p>
+  <table>
+    <thead><tr><th>Channel</th><th>How</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>Email (preferred)</td>
+        <td>
+          <a href={`mailto:${SITE.securityEmail}?subject=%5BSECURITY%5D%20Jaroku%3A%20`}>
+            {SITE.securityEmail}
+          </a>
+          &mdash; subject line prefixed <code class="mono">[SECURITY] Jaroku:</code>
+        </td>
+      </tr>
+      <tr>
+        <td>GitHub</td>
+        <td>
+          <a href={SITE.githubAdvisories} rel="noopener noreferrer" target="_blank">
+            Private vulnerability reporting <Icon name="arrow-up-right" size={11} />
+          </a>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+  <p>
+    If you believe you have found a live compromise of a running instance rather than a flaw in the
+    code (active exfiltration, a leaked key in the wild), write <code class="mono">ACTIVE INCIDENT</code>
+    in the subject line and include the time window and what you observed.
+  </p>
+
+  <h2>What to include</h2>
+  <ol>
+    <li>A one-sentence summary of the flaw and its impact: what an attacker gains, and as whom.</li>
+    <li>Affected component and version &mdash; release tag or commit SHA, plus file paths.</li>
+    <li>Reproduction steps precise enough to follow from a clean <code class="mono">git clone</code>.</li>
+    <li>A proof of concept &mdash; a script, a <code class="mono">curl</code> invocation, or a minimal patch to a test.</li>
+    <li>An impact assessment: cross-tenant read or write, credential disclosure, RCE, privilege escalation.</li>
+    <li>Any mitigation you know of.</li>
+    <li>How you would like to be credited, or that you would prefer not to be.</li>
+  </ol>
+  <p class="muted">Redact real secrets from logs and screenshots before attaching them.</p>
+
+  <h2>What happens next</h2>
+  <p>
+    This project is maintained by one person, so the timelines below are commitments about
+    <em>communication</em>, not a support contract.
+  </p>
+  <table>
+    <thead><tr><th>Stage</th><th>Target</th></tr></thead>
+    <tbody>
+      <tr><td>Acknowledgement that the report arrived</td><td>Within 48 hours</td></tr>
+      <tr><td>Initial triage: reproduced or not, severity, scope</td><td>Within 5 business days</td></tr>
+      <tr><td>Status update while work is ongoing</td><td>At least every 7 days</td></tr>
+      <tr><td>Fix or documented mitigation, critical &amp; high</td><td>Target 30 days from triage</td></tr>
+      <tr><td>Fix or documented mitigation, medium &amp; low</td><td>Target 90 days, or the next release</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Scope</h2>
+  <h3>In scope</h3>
+  <ul>
+    <li>The Node control plane: HTTP surface, WebSocket relay, migration runner, repositories.</li>
+    <li>Authentication, membership and tenancy &mdash; OIDC token verification, ws-ticket exchange, origin check, capability matrix, row-level security.</li>
+    <li>The Python runtime: runner, interceptor, stdout guard, checkpointed debug driver.</li>
+    <li>Reviewed connectors, in particular Postgres&rsquo; read-only guarantees, Gmail&rsquo;s drafts-only behaviour, and SQL injection in generated tool code.</li>
+    <li>The MCP bridge &mdash; anything that lets a third-party MCP server exceed the grant in an agent&rsquo;s manifest or reach a credential value.</li>
+    <li>Credential handling &mdash; any path by which a key, token or ticket reaches a log line, a database column, a generated project, a build log, or a browser.</li>
+    <li>The build and fix pipelines, deploys, the React client (XSS, token handling), and the supply chain.</li>
+  </ul>
+  <h3>Out of scope</h3>
+  <ul>
+    <li>The hosting platforms themselves (Railway, your OIDC provider, GitHub).</li>
+    <li>Third-party MCP servers &mdash; treated as untrusted by design. A way for one to <em>exceed</em> its grant is in scope.</li>
+    <li>Findings that require physical access to the host or a compromised developer machine.</li>
+    <li>Social engineering or attacks on the maintainer.</li>
+    <li>Automated scanner output with no demonstrated impact; version fingerprinting; best-practice advice with no attack behind it.</li>
+    <li>Denial of service by volume against a local instance.</li>
+    <li>Anything reachable only because an operator ignored a warning the software prints at boot (<code class="mono">JAROKU_DEV_AUTH=1</code>, <code class="mono">JAROKU_SERVE_PUBLIC=1</code>).</li>
+  </ul>
+
+  <h2>Known limitations that are not findings</h2>
+  <p>
+    These are documented and deliberate. A report that restates one of them will be closed with a
+    pointer here. A report that <em>breaks past</em> one, or that shows the stated boundary is not
+    where the code actually draws it, is very much wanted.
+  </p>
+  <ul>
+    <li><strong>Model-written Python executes on the control plane.</strong> Validation imports the staged project and graph introspection spawns a Python module. The sandbox for this is planned; until it lands, this server is not safe to point at strangers.</li>
+    <li><strong>No rate limiting or volumetric protection.</strong> Body cap on HTTP routes and bounded waits on JWKS fetch, nothing else.</li>
+    <li><strong>No security headers, HTTP CORS, HSTS or CSP.</strong> Planned. The CSP is also the real mitigation for the client token living in <code class="mono">localStorage</code>.</li>
+    <li><strong>XSS defeats the auth model.</strong> A concrete XSS <em>vector</em> is in scope; the general observation is not.</li>
+    <li><strong>A compromised OIDC issuer is trusted.</strong> That is the trust implied by choosing an issuer.</li>
+    <li><strong>Membership revocation has a bounded staleness window</strong> of thirty seconds across replicas. Exact on the replica that performed it.</li>
+    <li><strong>Prompt injection is not solved.</strong> An agent&rsquo;s blast radius is bounded by its grants; that is the mitigation.</li>
+    <li><strong>The server binds localhost and should not be placed on a network.</strong></li>
+    <li><strong>A deployed agent binds <code class="mono">0.0.0.0</code> on purpose</strong>, which is why its bearer token is not optional.</li>
+  </ul>
+
+  <h2>Coordinated disclosure</h2>
+  <p>
+    Please hold public disclosure until a fix has shipped, or <strong>90 days</strong> from
+    acknowledgement, whichever comes first. If a fix is going to take longer than 90 days, you will
+    be told why before day 90 and asked whether you are willing to extend. If a vulnerability is
+    already being exploited, that clock does not apply.
+  </p>
+
+  <h2>Safe harbour</h2>
+  <p>
+    Good-faith security research on your own instance is authorised, and no legal action will be
+    pursued over it, provided that you: test only against instances you own; avoid privacy
+    violations, data destruction, and any degradation of a service others rely on; access only the
+    minimum data needed to prove the finding; report promptly and privately; and give the disclosure
+    window a chance to run.
+  </p>
+
+  <h2>Recognition</h2>
+  <p>
+    There is <strong>no paid bug bounty.</strong> This is an open-source project with no security
+    budget, and saying so plainly is fairer than leaving it implied. What is offered instead: credit
+    in the advisory and in <a href="/changelog">CHANGELOG</a>, a named acknowledgement in the release
+    notes, and public confirmation of the timeline (when you reported, when it was fixed).
+  </p>
+
+  <h2>Hardening the deployment you run</h2>
+  <ul>
+    <li><strong>Keep it on localhost.</strong> The server binds localhost for a reason.</li>
+    <li><strong>Never set <code class="mono">JAROKU_DEV_AUTH=1</code></strong> outside development.</li>
+    <li><strong>Never set <code class="mono">JAROKU_SERVE_PUBLIC=1</code></strong> unless you intend an unauthenticated agent endpoint on your provider key.</li>
+    <li><strong>Set <code class="mono">NODE_ENV=production</code></strong> for anything that is not a laptop.</li>
+    <li><strong>Keep <code class="mono">runtime/.env</code> at <code class="mono">chmod 600</code></strong> and out of version control.</li>
+    <li><strong>Scope every provider and connector key to the minimum it needs</strong>; grant agents the narrowest MCP grant that works.</li>
+    <li><strong>Rotate the deployed agent&rsquo;s bearer token</strong> if it was ever shown on a shared screen.</li>
+    <li><strong>Read an MCP server&rsquo;s tools before granting them.</strong> Jaroku badges them as unreviewed because nobody here has reviewed them; you are the reviewer.</li>
+    <li><strong>Rotate any key that appeared in a terminal, a screenshot or a bug report,</strong> including ones you believe were redacted.</li>
+  </ul>
+
+  <p class="muted">
+    Questions about this policy, as opposed to a vulnerability report, are also welcome at
+    <a href={`mailto:${SITE.securityEmail}`}>{SITE.securityEmail}</a>.
+  </p>
+</Legal>

@@ -1,0 +1,23 @@
+{
+  "name": "jaroku-landing",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Marketing site for Jaroku (jaroku.dev). Static Astro build.",
+  "scripts": {
+    "dev": "astro dev --host 127.0.0.1 --port 4321",
+    "build": "astro build",
+    "preview": "astro preview --host 127.0.0.1 --port 4321",
+    "check": "astro check",
+    "changelog:build": "node scripts/build-changelog.mjs"
+  },
+  "dependencies": {
+    "astro": "^5.18.2",
+    "@astrojs/mdx": "^4.3.14",
+    "@astrojs/sitemap": "^3.7.4",
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "@types/three": "^0.185.4"
+  }
+}

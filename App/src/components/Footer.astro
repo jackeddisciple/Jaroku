@@ -1,0 +1,104 @@
+---
+import Logo from "./Logo.astro";
+import Icon from "./Icon.astro";
+import { PRIMARY_NAV, RESOURCES_NAV, LEGAL_NAV, SITE } from "@data/site";
+const year = new Date().getFullYear();
+---
+
+<footer class="site-footer">
+  <div class="container-wide">
+    <div class="grid-footer">
+      <div class="col-brand">
+        <a href="/" class="brand" aria-label="Jaroku — home">
+          <Logo size={22} />
+          <span>Jaroku</span>
+        </a>
+        <p class="muted brand-line">
+          A workbench for LangGraph agents. Desktop, local-first, portable by design.
+        </p>
+        <p class="mono faint">v{SITE.version}</p>
+      </div>
+
+      <nav class="col" aria-label="Primary">
+        <h4>Product</h4>
+        <ul>
+          {PRIMARY_NAV.map((i) => <li><a href={i.href}>{i.label}</a></li>)}
+        </ul>
+      </nav>
+
+      <nav class="col" aria-label="Resources">
+        <h4>Resources</h4>
+        <ul>
+          {RESOURCES_NAV.map((i) => <li><a href={i.href}>{i.label}</a></li>)}
+        </ul>
+      </nav>
+
+      <nav class="col" aria-label="Company">
+        <h4>Legal</h4>
+        <ul>
+          {LEGAL_NAV.map((i) => <li><a href={i.href}>{i.label}</a></li>)}
+        </ul>
+        <h4 class="second">Connect</h4>
+        <ul>
+          <li>
+            <a href={SITE.x} rel="noopener noreferrer" target="_blank">
+              <Icon name="twitter" size={14} /> X
+              <Icon name="arrow-up-right" size={12} class="ext" />
+            </a>
+          </li>
+        </ul>
+      </nav>
+    </div>
+
+    <div class="bottom">
+      <p class="faint">© {year} Jaroku. Built to be copied out.</p>
+      <p class="faint">
+        <a href="/security">Security</a>
+        <span aria-hidden="true"> · </span>
+        <a href={`mailto:${SITE.securityEmail}`}>{SITE.securityEmail}</a>
+      </p>
+    </div>
+  </div>
+</footer>
+
+<style>
+  .site-footer {
+    margin-top: 64px;
+    padding: 56px 0 32px;
+    border-top: 1px solid var(--hair);
+    background: var(--bg-tint);
+  }
+  .grid-footer {
+    display: grid; gap: 32px;
+    grid-template-columns: 1fr;
+  }
+  @media (min-width: 720px) { .grid-footer { grid-template-columns: 1.4fr 1fr 1fr 1fr; } }
+
+  .brand {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-weight: 600; color: var(--ink);
+  }
+  .brand-line { max-width: 34ch; margin-top: 10px; }
+  .col h4 {
+    margin: 0 0 12px;
+    font-size: 11px; font-weight: 500; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--faint);
+  }
+  .col h4.second { margin-top: 24px; }
+  .col ul { list-style: none; padding: 0; margin: 0; }
+  .col li { padding: 4px 0; }
+  .col a {
+    display: inline-flex; align-items: center; gap: 4px;
+    color: var(--ink-2); font-size: 14px;
+  }
+  .col a:hover { color: var(--accent); }
+  .col a .ext { color: var(--faint); }
+
+  .bottom {
+    margin-top: 40px; padding-top: 20px;
+    border-top: 1px solid var(--hair);
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    flex-wrap: wrap;
+    font-size: 12.5px;
+  }
+</style>

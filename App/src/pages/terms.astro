@@ -1,0 +1,101 @@
+---
+import Legal from "@layouts/Legal.astro";
+import { SITE } from "@data/site";
+---
+<Legal
+  title="Terms of Service"
+  description="The terms that govern your use of Jaroku."
+  intro="These terms are a plain-language reflection of how Jaroku actually works. If any part of them contradicts what the software does, the software is right and this page is a bug — please tell us."
+>
+  <h2>1. What Jaroku is</h2>
+  <p>
+    Jaroku is a desktop application for building, deploying and operating LangGraph agents. It is
+    distributed as software you install on a computer you control. Nothing about running it requires
+    an account with us; certain features (billing, sync, deployment orchestration) do.
+  </p>
+
+  <h2>2. Your account</h2>
+  <p>
+    You may create an account to use paid tiers or team features. You are responsible for keeping your
+    credentials secure and for what happens under your account. If you believe your account has been
+    accessed by somebody else, email <a href={`mailto:${SITE.contactEmail}`}>{SITE.contactEmail}</a>.
+  </p>
+  <p>
+    We will terminate the account of anybody using Jaroku to violate the law, to generate content that
+    is unlawful in the jurisdiction they use it from, or to abuse other users. Where possible we tell
+    you first; where we can&rsquo;t, we&rsquo;ll tell you afterwards.
+  </p>
+
+  <h2>3. Your content and your agents</h2>
+  <p>
+    Everything you build in Jaroku belongs to you. Every generated agent is a plain LangGraph project
+    that imports nothing from us &mdash; if you cancel your subscription, delete your account, or the
+    company disappears, the folder you generated last week still runs on any LangGraph-compatible host.
+    That&rsquo;s a promise the software enforces, not one this page invents.
+  </p>
+  <p>
+    Traces, evaluation records, and audit logs are your data. Retention is per-tier and honest about
+    what it is: 7 days on Free, 90 days on Pro, 365 days on Team.
+  </p>
+
+  <h2>4. Provider keys and inference costs</h2>
+  <p>
+    On the Free tier you must supply your own provider API key. Inference does not run through us and
+    we do not see the requests or the responses. On Pro and Team we route inference through our
+    infrastructure at your option, using a monthly credit that&rsquo;s included in the tier price;
+    overage settles at cost + 15%. Costs are recorded per-step in the trace and are summed by the app;
+    a crashed run still reports what it spent.
+  </p>
+
+  <h2>5. Fair use and rate limits</h2>
+  <p>
+    We do not currently rate-limit the desktop client (which binds to localhost anyway). We do
+    rate-limit any account-scoped API we operate &mdash; billing, sync, deployment orchestration
+    &mdash; and reserve the right to lower a limit if a specific pattern of use is harming other users
+    or costing us more than the tier price. This is a last resort, not a first move.
+  </p>
+
+  <h2>6. Deployments to your own infrastructure</h2>
+  <p>
+    Deployments land in your Railway account. We orchestrate the deploy; we do not host the container.
+    If your account is disabled, your provider key is rejected, or your Railway bill goes unpaid, the
+    deployment stops working &mdash; and Jaroku will tell you what it saw, not silently retry into
+    someone else&rsquo;s infrastructure.
+  </p>
+
+  <h2>7. Warranty</h2>
+  <p>
+    Jaroku is provided <em>as is</em>. To the fullest extent permitted by law, we disclaim any implied
+    warranty of merchantability, fitness for a particular purpose, or non-infringement. Anything an
+    agent does with a tool it has been granted is your responsibility &mdash; the software helps you
+    scope those grants narrowly, and every high-impact tool call stops to ask before it runs, but the
+    decision to grant is yours.
+  </p>
+
+  <h2>8. Liability</h2>
+  <p>
+    To the fullest extent permitted by law, our aggregate liability arising from your use of Jaroku is
+    capped at the amount you paid us in the twelve months before the claim arose. We are not liable
+    for indirect, incidental, special, consequential or exemplary damages, including lost profits,
+    even where advised of the possibility.
+  </p>
+
+  <h2>9. Changes to these terms</h2>
+  <p>
+    We may update these terms. When we do, we&rsquo;ll change the &ldquo;current as of&rdquo; date at
+    the top, list what changed in the release notes, and give material changes at least 30 days&rsquo;
+    notice before they take effect for existing accounts.
+  </p>
+
+  <h2>10. Governing law</h2>
+  <p>
+    These terms are governed by the laws applicable at the maintainer&rsquo;s primary residence, without
+    reference to conflict-of-laws principles. This is a small, honest project; if we have a
+    disagreement, email first &mdash; almost every one is a misunderstanding that resolves in a paragraph.
+  </p>
+
+  <h2>Contact</h2>
+  <p>
+    Questions about these terms: <a href={`mailto:${SITE.contactEmail}`}>{SITE.contactEmail}</a>.
+  </p>
+</Legal>
