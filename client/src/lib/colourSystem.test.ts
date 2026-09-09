@@ -130,13 +130,23 @@ console.log("\nevery token in the specification's tables, transcribed from the P
   check("the deleted families stay deleted", gone.every((t) => !(t in SPEC_TOKENS)),
     gone.filter((t) => t in SPEC_TOKENS).join(", "));
 
-  // AND THE SIDEBAR IS DRAWN FROM §01 RATHER THAN FROM VALUES OF ITS OWN. It is still a plane —
-  // `surfaceSystem.test.ts` holds it one step under the canvas — but the three surfaces and the
-  // border are §01's and §03's, which is what stops a fifth neutral appearing the first time
-  // somebody wants the column a shade different.
+  // AND THE SIDEBAR IS DRAWN FROM §01 RATHER THAN FROM VALUES OF ITS OWN, which is what stops a
+  // fifth neutral appearing the first time somebody wants the column a shade different.
   check("the sidebar plane is §01's own ladder",
-    eq(SIDEBAR.base, CANVAS.subtle) && eq(SIDEBAR.hover, CANVAS.hover) &&
+    eq(SIDEBAR.base, CANVAS.canvas) && eq(SIDEBAR.hover, CANVAS.hover) &&
     eq(SIDEBAR.active, CANVAS.active) && eq(SIDEBAR.border, BORDER.default));
+  // AND ITS GROUND IS THE WORKSPACE'S OWN, which is a claim worth pinning because it looks like a
+  // mistake. A sidebar the same colour as the thing beside it is what this product wants NOW that
+  // the window carries `NSVisualEffectMaterial.sidebar`: the two are told apart by one of them
+  // being translucent, not by one of them being darker. Painting the column down a step "to make
+  // it read as a region" is the regression this catches — it would put a grey panel back under a
+  // material whose whole job is to avoid one.
+  check("...and it is the same ground the workspace stands on", eq(SIDEBAR.base, CANVAS.canvas));
+  // The states still descend from it, so a pointed-at row is ten levels under the plane rather
+  // than four. Raising the ground made the hover MORE legible, not less.
+  check("...with hover and active still below it",
+    Number.parseInt(CANVAS.hover.slice(1, 3), 16) < Number.parseInt(SIDEBAR.base.slice(1, 3), 16) &&
+    Number.parseInt(CANVAS.active.slice(1, 3), 16) < Number.parseInt(CANVAS.hover.slice(1, 3), 16));
 }
 
 console.log("\n...and the stylesheet publishes exactly that set");
@@ -171,7 +181,7 @@ console.log("\n...and the Tailwind config, which is the third copy");
     // The sidebar's four are ALIASES now — the plane is drawn from §01 and §03 rather than from a
     // family of its own — so what has to be true is that each utility IS the §01 token it stands
     // for. A `bg-sidebar` that has drifted a shade off `bg-void` is a fifth neutral nobody decided.
-    sidebar: "--color-bg-subtle",
+    sidebar: "--color-bg-canvas",
     "sidebar-hover": "--color-bg-hover",
     "sidebar-active": "--color-bg-active",
     "sidebar-border": "--color-border-default",

@@ -30,7 +30,12 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "image-png"] }
+# `macos-private-api` IS NOT A DEPENDENCY, it is a feature of the crate already here, and it was
+# not added by hand: the CLI turns it on from `macOSPrivateApi` in tauri.conf.json. It buys exactly
+# one thing — a transparent window — which is what lets `NSVisualEffectMaterial.sidebar` be seen at
+# all. See window.rs. Apple's review has never objected to it; it is the same API every app with a
+# vibrant sidebar uses.
+tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-png"] }
 # The sidecar mechanism. It is used from Rust only: the capability file grants the webview no
 # shell permission at all, so nothing the frontend can say reaches a process spawn. That is the
 # same posture the relay takes with its command matrix — a capability nobody granted is refused.

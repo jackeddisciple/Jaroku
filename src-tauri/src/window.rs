@@ -78,6 +78,14 @@ pub fn open(app: &AppHandle, ws_url: &str) -> Result<(), Box<dyn std::error::Err
         // after four seconds. A shell whose only path to a visible window runs through the bundle
         // is a shell that has no way to report that the bundle is what failed.
         .visible(false)
+        // JAROKU IS A LIGHT-THEME APPLICATION AND THE WINDOW HAS TO SAY SO, which matters for
+        // exactly one reason and it is not the page: `NSVisualEffectMaterial.sidebar` has a light
+        // variant and a dark one, and it picks between them from the WINDOW's appearance rather
+        // than from anything CSS can reach. Left to inherit, a person running macOS in dark mode
+        // would get the dark material behind a light page — a column that goes muddy under
+        // off-white text, on a product whose palette has no dark mode at all. `color-scheme: light`
+        // in index.css says the same thing to the webview; this says it to AppKit.
+        .theme(Some(tauri::Theme::Light))
         .initialization_script(&host_config(ws_url));
 
     // MACOS ONLY, AND NOT BY PREFERENCE — `title_bar_style` and `hidden_title` are compiled only
@@ -85,10 +93,38 @@ pub fn open(app: &AppHandle, ws_url: &str) -> Result<(), Box<dyn std::error::Err
     // targets `release.yml` uploads. The other platforms keep their ordinary title bar; the
     // client's reservation for the traffic lights is keyed off the host bridge rather than off the
     // platform, so a Windows window simply has a chrome row with nothing reserved on its left.
+    // THE MATERIAL IS THE WINDOW'S, NOT THE PAGE'S. `Effect::Sidebar` is
+    // `NSVisualEffectMaterial.sidebar` — the material Finder and Mail put behind their own columns
+    // — and it sits BEHIND the webview, blurred by the window server rather than by CSS. That is
+    // the whole reason it is done here: `backdrop-filter` in the page can only blur what the page
+    // has already painted, and what sits behind the sidebar there is one flat colour, so it blurs
+    // a solid rectangle into an identical one. This blurs the desktop.
+    //
+    // `transparent` is what lets any of it through, and it is why `macOSPrivateApi` is set in
+    // tauri.conf.json — Tauri turns the `macos-private-api` feature on from that flag. On its own
+    // it changes nothing visible: the page paints over the whole viewport, so the material stays
+    // behind an opaque sheet until something deliberately opts out of it.
+    //
+    // AND EXACTLY ONE SCREEN DOES, WHICH IS THE SAFETY PROPERTY. The script below sets a FLAG
+    // rather than a style; the client turns transparency on only where a sidebar is actually
+    // rendered, and only when it sees that flag. Sign-in, first-run, the splash and account
+    // onboarding never become transparent, so a region nobody remembered to paint cannot show the
+    // desktop through it. Windows and Linux never see the flag and keep the opaque column.
     #[cfg(target_os = "macos")]
     let builder = builder
         .title_bar_style(tauri::TitleBarStyle::Overlay)
-        .hidden_title(true);
+        .hidden_title(true)
+        .transparent(true)
+        .effects(tauri::utils::config::WindowEffectsConfig {
+            effects: vec![tauri::window::Effect::Sidebar],
+            // `Active` rather than following the window's focus. A column that went flat the moment
+            // you looked at your terminal would change material every time you alt-tabbed back,
+            // which is motion nobody asked for on the one surface that is always on screen.
+            state: Some(tauri::window::EffectState::Active),
+            radius: None,
+            color: None,
+        })
+        .initialization_script(VIBRANCY_FLAG);
 
     builder.build()?;
     Ok(())
@@ -266,6 +302,22 @@ pub fn set_window_title(app: AppHandle, name: Option<String>) {
 /// could break out of. That is belt-and-braces rather than a real risk — the number came from
 /// `TcpListener` — but this string is executed as script in the application's own context, and
 /// "the input is trusted" is the sentence that precedes most injection bugs.
+/// What the page is told when the window is carrying the native material.
+///
+/// A FLAG RATHER THAN A STYLE, and that difference is the whole safety argument. If this script set
+/// `background: transparent` itself it would do so on every screen the webview ever shows —
+/// including the four that render before the shell exists — and any one of those that does not
+/// paint its own background would show the desktop through it. Instead the client reads this and
+/// opts IN, on the one screen that has a sidebar. See `[data-vibrancy]` in `index.css`.
+///
+/// IT STAYS A GLOBAL AND DOES NOT TOUCH THE DOM, which is the half that makes the paragraph above
+/// true. Setting `documentElement.dataset` here would apply on every page load — sign-in included —
+/// and the opt-in would be a fiction: the CSS gate would already be open before the shell existed.
+/// The client sets the attribute, from the one render path that has a sidebar in it, and takes it
+/// off again when that path unmounts. See `App.tsx`.
+#[cfg(target_os = "macos")]
+const VIBRANCY_FLAG: &str = "window.__JAROKU_VIBRANCY__ = true;";
+
 fn host_config(ws_url: &str) -> String {
     let url = serde_json::Value::String(ws_url.to_string());
     format!("window.__JAROKU_CONFIG__ = Object.freeze({{ wsUrl: {url} }});")

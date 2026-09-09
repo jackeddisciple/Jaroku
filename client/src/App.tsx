@@ -97,7 +97,10 @@ function usePaneFloor(
 
 function PaneDivider() {
   return (
-    <PanelResizeHandle className="group relative w-[5px] shrink-0 cursor-col-resize">
+    // `bg-bg` for the same reason the workspace panel carries it: this five-pixel strip sits
+    // between the sidebar and the workspace, and under `[data-vibrancy]` the plane behind it is
+    // transparent. Unpainted, it would be a five-pixel slot of desktop down the middle.
+    <PanelResizeHandle className="group relative w-[5px] shrink-0 cursor-col-resize bg-bg">
       <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-hair transition-colors duration-fast group-hover:bg-grip" />
       {/* A GRIP, revealed on approach. A colour shift on a one-pixel line is not discoverable —
           you have to already be looking at it to see it change. Two pixels by sixteen at the
@@ -106,6 +109,35 @@ function PaneDivider() {
       <span className="pointer-events-none absolute left-1/2 top-1/2 h-4 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-transparent transition-colors duration-fast group-hover:bg-chrome" />
     </PanelResizeHandle>
   );
+}
+
+/**
+ * Opts this screen into the window's native material, and is the entire client half of it.
+ *
+ * WHY A COMPONENT RATHER THAN AN EFFECT IN `App`. `App` returns early five times — first-run, the
+ * splash, sign-in, the name screen, account onboarding — and a hook cannot sit behind any of them,
+ * so an effect up there would run on all six screens and the gate would be open on the five that
+ * have no sidebar. Mounting is the condition: this renders inside the shell, so it exists exactly
+ * when the shell does and the attribute comes off again the moment it does not.
+ *
+ * WHAT THE ATTRIBUTE COSTS IS THE WHOLE VIEWPORT'S BACKGROUND — `index.css` makes `body` and both
+ * shell planes transparent under it so the material behind the webview can reach the sidebar. That
+ * is safe here and nowhere else: everything in this tree that is not the column paints itself. On
+ * a screen that did not, the desktop would show through it.
+ *
+ * `__JAROKU_VIBRANCY__` is set by the desktop shell on macOS and by nothing else, so a browser, a
+ * Windows window and a Linux one all skip this and keep the opaque column they have today.
+ */
+function VibrancyPlane() {
+  useEffect(() => {
+    if (!(window as { __JAROKU_VIBRANCY__?: boolean }).__JAROKU_VIBRANCY__) return;
+    const root = document.documentElement;
+    root.dataset.vibrancy = "sidebar";
+    return () => {
+      delete root.dataset.vibrancy;
+    };
+  }, []);
+  return null;
 }
 
 export function App() {
@@ -353,8 +385,9 @@ export function App() {
     // names vanished entirely, run rows were cut mid-word and a horizontal scrollbar appeared
     // inside a vertical list. The sidebar's floor is stated in PIXELS and converted against the
     // width this group actually has — see lib/paneFloor.
-    <div className="h-full min-w-[900px] overflow-x-auto bg-bg">
-      <div ref={setShell} className="flex h-full flex-col overflow-hidden bg-bg">
+    <div className="shell-plane h-full min-w-[900px] overflow-x-auto bg-bg">
+      <div ref={setShell} className="shell-plane flex h-full flex-col overflow-hidden bg-bg">
+        <VibrancyPlane />
         {/* WHY THE WORKSPACE CANNOT START ANYTHING, when that is the case. Directly under the top
             bar and above every pane, because it is not a setting somebody goes looking for: it is
             the reason the last thing they pressed was refused, and until now the only place that
@@ -371,10 +404,19 @@ export function App() {
         {/* §5.1s "Skip setup" left somebody in the app with nothing set up. Persistent, with no
             dismiss, because the state it describes does not resolve on its own and there is no
             other surface that mentions it. Renders nothing for everybody who did not skip. */}
-        <FinishSetupBanner />
-        <SignInSwapPrompt />
-        <AdminModeBanner />
-        <EnforcementStrip />
+        {/* THE BANNER STACK IS PAINTED AS A GROUP, and that is about the native material rather
+            than about the banners. Under `[data-vibrancy]` the two planes above this are
+            transparent so the window's own material can reach the sidebar, which means every
+            region that is NOT the sidebar has to paint itself or the desktop shows through it.
+            Three of these four carry a background of their own and `SignInSwapPrompt` does not;
+            one opaque wrapper covers the case rather than four edits and a rule to remember.
+            It renders as nothing when they all do — an empty flex child with no height. */}
+        <div className="shrink-0 bg-bg">
+          <FinishSetupBanner />
+          <SignInSwapPrompt />
+          <AdminModeBanner />
+          <EnforcementStrip />
+        </div>
 
         {/* TWO NESTED GROUPS RATHER THAN ONE, WHICH IS WHAT §2 COSTS.
             The outer group is [sidebar | everything else], and the inner one inside it is the
@@ -435,7 +477,11 @@ export function App() {
               </button>
             </div>
           )}
-          <Panel id="workspace" order={2} className="flex min-h-0 flex-col">
+          {/* `bg-bg` here rather than only on the plane above, because under `[data-vibrancy]` that
+              plane is transparent so the window's material can reach the sidebar. This is the
+              workspace's own ground, and it is the same colour it was inheriting — nothing moves
+              when the material is absent. */}
+          <Panel id="workspace" order={2} className="flex min-h-0 flex-col bg-bg">
             {/* THE TOP BAR STARTS WHERE THE SIDEBAR ENDS. It spanned the whole window, which put a
                 44px strip of chrome above the sidebar and stopped that column reaching the top of
                 the frame — and on macOS the traffic lights then sat on the bar rather than on the

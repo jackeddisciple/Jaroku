@@ -116,30 +116,62 @@
        Every value is here so it can be tuned in one place. `--sidebar-material-grain` is the
        exception that is not a number: its strength is the `opacity` inside the SVG, because a CSS
        variable cannot reach inside a `url()`. */
-    /* Light falls across the WHOLE column rather than banding across its top. `100%` rather than a
-       pixel depth: this is light from the window's top edge, so it should stretch with the window
-       instead of ending at a line 260px down that a tall sidebar would show as a seam. */
-    --sidebar-material-highlight: rgba(255, 255, 255, 0.22);
+    /* Light falling across the column, and it is now spent almost entirely on the case where there
+       is NO material behind the window — Windows, Linux, a browser — because there the column and
+       the workspace are the same colour and this plus the 1px seam is the whole of what separates
+       them. Where the material IS present it barely registers, which is correct: a real surface
+       does not also need a painted gradient telling you it is one, and a strong one would be the
+       "obvious gradient" this is meant to avoid.
+
+       IT WAS 0.22 AND IT IS 0.10, because at 0.22 the top of the column sat lighter than the
+       workspace while the foot sat at the base — a vertical fade the eye reads as the column
+       getting darker downwards, which is the exact complaint this pass is answering. */
+    --sidebar-material-highlight: rgba(255, 255, 255, 0.1);
     --sidebar-material-highlight-depth: 100%;
     /* The one pixel where the material meets the top of the window. A real surface catches the
        light at the edge it turns; this is that, and it is the single most "native" part of the
        effect for the least ink. */
     --sidebar-material-edge: rgba(255, 255, 255, 0.7);
-    /* THE data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url%28%23g%29' opacity='0.045'/%3E%3C/svg%3E DARKENS AS WELL AS TEXTURES, AND THE BUDGET FOR THAT IS FIXED BY THE HOVER FILL.
+    /* THE GRAIN DARKENS AS WELL AS TEXTURES, AND THE BUDGET FOR THAT IS FIXED BY THE HOVER FILL.
        Measured over the tile: it spreads pixels about four levels and pulls the mean down ~1.25.
        `overlay` and `soft-light` blends were tried to get the texture without the tone shift and
        both erase it outright — 1 and 0 levels of spread — because a low-alpha grain on a near-white
        ground has nothing to work with in either. So the shift is real and it is spent deliberately.
 
-       WHAT IT MAY NOT DO IS CROSS `--color-bg-hover` (#ECECEA, 236). The column's ground is 240 and
-       the grain takes it to ~238.75; a hover fill DARKER than the surface it sits on is the whole
-       of how this palette says "you are pointing at this", and a material that dragged the surface
-       under 236 would invert that at the bottom of the column. An earlier draft carried a bottom
-       shade as well and did exactly that — it landed the last 220px at ~232, under the hover — which
-       is why there is no shade token here. Light only lightens; nothing in this material darkens
-       the plane past its own token. */
+       WHAT IT MAY NOT DO IS CROSS `--color-bg-hover` (#ECECEA, 236). The column's ground is 246 now
+       and the grain takes it to ~244.75; a hover fill DARKER than the surface it sits on is the
+       whole of how this palette says "you are pointing at this", and a material that dragged the
+       surface under 236 would invert that. An earlier draft carried a bottom shade as well and did
+       exactly that — it landed the last 220px at ~232, under the hover — which is why there is no
+       shade token here. Light only lightens; nothing in this material darkens the plane past its
+       own token. */
     --sidebar-material-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url%28%23g%29' opacity='0.045'/%3E%3C/svg%3E");
     --sidebar-material-grain-size: 140px;
+    /* THE TINT THE NATIVE MATERIAL IS SEEN THROUGH, and the only token here that does nothing
+       without the window. `window.rs` puts `NSVisualEffectMaterial.sidebar` behind the webview and
+       flags the page; where that flag is present the column stops painting an opaque colour and
+       paints this instead, so a little under half of what you see is the desktop, blurred by the
+       window server.
+
+       THE TINT IS THE CANVAS TONE, WHICH IS ALSO THE COLUMN'S GROUND AND THE WORKSPACE'S. All three
+       are `--color-bg-canvas` now, deliberately: the sidebar is not a darker region that also
+       happens to be translucent, it is the same surface as the workspace with the desktop coming
+       through it. Anything darker here and the column reads as "gone grey", which is the outcome
+       the brief rules out by name — and it is what a `--color-bg-subtle` ground did.
+
+       0.58 IS THE DIAL AND IT WAS WALKED DOWN TO IT. Two earlier passes sat at 0.76 and 0.62 and
+       both looked too dark, but the alpha was only ever half the cause: the column also stood on a
+       ground six levels under the workspace, and the WINDOW had no appearance pinned — so on a
+       machine in dark mode AppKit handed back the DARK variant of the material and no amount of
+       tinting was going to fix that. With the ground raised and `theme(Light)` set in window.rs,
+       more of the material can be allowed through rather than less. What comes through is colour,
+       not picture: `NSVisualEffectMaterial.sidebar` is desaturated and heavily blurred by the window
+       server, so a blue wallpaper cools the column and a warm one warms it without any of it
+       resolving into shapes.
+
+       If the influence is invisible, lower this. If the wallpaper starts to read as content rather
+       than as tint, raise it. Nothing else in this file needs to move. */
+    --sidebar-material-tint: rgba(246, 246, 244, 0.58);
   }
   html,
   body,
@@ -281,6 +313,37 @@
     background-size: var(--sidebar-material-grain-size) var(--sidebar-material-grain-size), 100% 100%;
     background-repeat: repeat, no-repeat;
     box-shadow: inset 0 1px 0 var(--sidebar-material-edge);
+  }
+
+  /* ── The native material, where the window is carrying one ──────────────────────────────────
+     EVERYTHING BELOW IS GATED ON A FLAG THE SHELL SETS, and the gate is the safety property rather
+     than a nicety. `window.rs` sets `data-vibrancy` only on macOS and only when it has actually
+     asked for `Effect::Sidebar`; without it every rule here is inert and the app renders exactly as
+     it does today, opaque, on Windows, on Linux, and in a browser. There is no second code path to
+     keep working — there is this one, and its absence.
+
+     THE BLUR IS NOT HERE AND THAT IS DELIBERATE. `backdrop-filter` was the obvious reach and it is
+     the wrong tool twice over: in the page there is nothing behind the column but a flat colour, and
+     under the flag there is nothing behind it at all — the blur is being done by the window server,
+     on the desktop, at a quality and a cost CSS cannot match. The same goes for saturation: the
+     `sidebar` material is already desaturated, which is what stops a red wallpaper tinting the
+     column pink. Adding a filter on top would be a second opinion about both.
+
+     WHY THE PLANES GO TRANSPARENT. The material sits BEHIND the webview, so it can only be seen
+     through a page that has stopped painting over it — and the two shell planes and `body` cover
+     the whole viewport. They are the only three things released, and everything that is not the
+     sidebar paints itself instead: the workspace panel, the resize strip and the banner stack all
+     carry `bg-bg` in App.tsx. Nothing else in the client renders under this flag; the four screens
+     that come before the shell never set it. */
+  :root[data-vibrancy="sidebar"] body,
+  :root[data-vibrancy="sidebar"] .shell-plane {
+    background-color: transparent;
+  }
+  /* The column itself, which is the one thing allowed to let the material through. The specificity
+     here is doing real work: `bg-sidebar` is a Tailwind utility and utilities are emitted after
+     this block, so an equal-specificity rule would lose and the column would stay opaque. */
+  :root[data-vibrancy="sidebar"] .sidebar-material {
+    background-color: var(--sidebar-material-tint);
   }
 
   /* ── Graph View canvas ──────────────────────────────────────────────────────

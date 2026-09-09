@@ -30,12 +30,14 @@ export default {
         // same surface, so this is the pure white §01 reserves for popovers and dialogs.
         elevated: "#FFFFFF", // --color-bg-elevated — elevated panels, popovers and dialogs
         active: "#ECECEA", // --color-bg-hover — hover, and the fill under a selected row
-        // THE SIDEBAR IS STILL ITS OWN PLANE AND IT IS §01'S NOW. It had four tokens of its own and
+        // THE SIDEBAR IS NOT A SHADE ANY MORE, IT IS A MATERIAL. It had four tokens of its own and
         // a cool-grey secondary palette to strike them from; new-theme.pdf has neither, so these
-        // are aliases — the sidebar sits one step UNDER the canvas, as it did, and the cool cast is
-        // gone. The names stay because eighty call sites say them and `bg-sidebar` says something
-        // `bg-void` does not: that this surface is the column, not merely a shade.
-        sidebar: "#F0F0EE", // --color-bg-subtle
+        // became aliases of §01 — and the base has now walked one further step, onto the canvas
+        // itself. The column and the workspace are painted the same colour; what tells them apart
+        // is that the window puts `NSVisualEffectMaterial.sidebar` behind one of them. The names
+        // stay because eighty call sites say them and `bg-sidebar` says something `bg-bg` does not:
+        // that this surface is the column, and the column is what the material reaches.
+        sidebar: "#F6F6F4", // --color-bg-canvas — the SAME ground the workspace stands on
         "sidebar-hover": "#ECECEA", // --color-bg-hover
         "sidebar-active": "#E5E5E1", // --color-bg-active
         "sidebar-border": "#DCDCD8", // --color-border-default

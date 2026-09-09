@@ -103,8 +103,20 @@ export const SEMANTIC = {
  * losing the ability to say "the sidebar is a plane" in the palette at all.
  */
 export const SIDEBAR = {
-  /** Sidebar base — §01's subtle, one step under the canvas. */
-  base: CANVAS.subtle,
+  /**
+   * Sidebar base — §01's CANVAS, the same value the workspace beside it is painted in.
+   *
+   * IT WAS A STEP DARKER AND THAT IS THE CHANGE. `CANVAS.subtle` put the column six levels under
+   * the workspace, which is how a flat panel says "I am a different region" — and once the window
+   * carries a real material it is the wrong tool twice: the difference is already being made by
+   * translucency, and a darker ground under it reads as the column having gone grey rather than
+   * having gone soft. Both surfaces start at the same colour now, and what separates them is that
+   * one of them lets the desktop through. See `--sidebar-material-tint` in index.css.
+   *
+   * The hover and active steps below are unchanged and are still §01's, so a pointed-at row is ten
+   * levels under this rather than four — more contrast than it had, not less.
+   */
+  base: CANVAS.canvas,
   /** Hovered navigation item. */
   hover: CANVAS.hover,
   /** Selected navigation item. */

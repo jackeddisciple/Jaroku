@@ -454,12 +454,24 @@ console.log("\n§12: the rules that are checkable across every file");
 
   // "Keep the main workspace lighter and more open than the sidebar." Which is a numeric claim, and
   // the one rule in §12 that a palette edit could silently reverse.
+  //
+  // AND IT IS NOW AN EQUALITY RATHER THAN AN INEQUALITY, which is a deliberate departure from the
+  // sentence above rather than a drift away from it. §12 is describing how to separate two regions
+  // with COLOUR, because colour was the only tool a flat panel had. The window carries
+  // `NSVisualEffectMaterial.sidebar` now: the column is separated by being translucent, and the
+  // desktop tints it. Keeping the old step as well was the failure this replaces — the material
+  // darkened an already-darker ground and the column read as grey, which is the one result the
+  // material exists to avoid.
+  //
+  // THE RULE THAT SURVIVES IS "NOT DARKER", and it is worth keeping in that direction: a column
+  // painted BELOW the workspace is the regression, and a column painted above it would float. What
+  // §12 was protecting — that the workspace never reads as the recessed one — still holds.
   const lightness = (hex: string): number => {
     const [r, g, b] = channels(hex).split(", ").map(Number) as [number, number, number];
     return 0.2126 * r + 0.7152 * g + 0.0722 * b;
   };
-  check("the main canvas is lighter than the sidebar plane",
-    lightness(CANVAS.canvas) > lightness(SIDEBAR.base),
+  check("the sidebar plane is the workspace's own ground, not a darker one",
+    lightness(CANVAS.canvas) === lightness(SIDEBAR.base),
     `${lightness(CANVAS.canvas).toFixed(0)} vs ${lightness(SIDEBAR.base).toFixed(0)}`);
 
   // "Agent cards are E0 by default; use E1 for interaction/hover" and "normal cards should usually
