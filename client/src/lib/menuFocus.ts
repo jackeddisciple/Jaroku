@@ -40,12 +40,22 @@ const MENU_ITEM = '[role="menuitem"], [role="menuitemradio"], [role="menuitemche
  * already marks its trigger that way for assistive technology; reusing that is one source of truth
  * rather than a ref that can silently drift onto the wrong element.
  *
+ * THE TRIGGER CAN BE PASSED SEPARATELY, which is what a portalled panel needs. `AgentRowMenu`
+ * renders its panel into `document.body` to escape the scroller that was clipping it — see
+ * `anchoredMenu.ts` — so the panel and the button that opens it are no longer in one subtree, and
+ * the `aria-haspopup` lookup above has nothing to find. Every other menu still passes one element
+ * and keeps the lookup.
+ *
  * FOCUS IS RESTORED ONLY IF IT IS STILL INSIDE THE MENU. Closing by clicking somewhere else should
  * leave focus where the person put it — yanking it back to the trigger would fight them. It is only
  * when the thing they were focused on is being unmounted that focus has nowhere to go and this has
  * to answer for it.
  */
-export function useMenuFocus(open: boolean, container: React.RefObject<HTMLElement | null>): void {
+export function useMenuFocus(
+  open: boolean,
+  container: React.RefObject<HTMLElement | null>,
+  trigger?: React.RefObject<HTMLElement | null>,
+): void {
   const wasOpen = useRef(false);
 
   useEffect(() => {
@@ -63,11 +73,12 @@ export function useMenuFocus(open: boolean, container: React.RefObject<HTMLEleme
       // Closing. Only rescue focus if it is about to be destroyed with the panel — see above.
       const active = document.activeElement;
       if (active instanceof HTMLElement && root.contains(active)) {
-        root.querySelector<HTMLElement>('[aria-haspopup="menu"]')?.focus({ preventScroll: true });
+        (trigger?.current ?? root.querySelector<HTMLElement>('[aria-haspopup="menu"]'))
+          ?.focus({ preventScroll: true });
       }
     }
     wasOpen.current = open;
-  }, [open, container]);
+  }, [open, container, trigger]);
 
   // ── Arrow keys ────────────────────────────────────────────────────────────────────────────────
   // A ROVING FOCUS, NOT A SELECTION MODEL. `role="menu"` tells assistive technology these items are

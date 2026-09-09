@@ -21,6 +21,7 @@
     "test:icons": "tsx src/components/icons.test.ts",
     "test:dead-controls": "tsx src/components/deadControls.test.ts",
     "test:menu-keys": "tsx src/components/menuKeys.test.ts",
+    "test:menu-clip": "tsx src/components/menuClip.test.ts",
     "test:graph-icons": "tsx src/components/graphIcons.test.ts",
     "test:composer-bar": "tsx src/lib/composerBar.test.ts",
     "test:connector-deck": "tsx src/lib/connectorDeck.test.ts",

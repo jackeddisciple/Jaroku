@@ -4,6 +4,7 @@
 // separated by spacing and a thin accent on the active one — never boxed.
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { orderedRuns, useTraceStore } from "../store/traceStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import type { AgentSummary, RunSummary, RunStatus } from "../types.ts";
@@ -37,6 +38,7 @@ import { canGoBack, canGoForward, useHistoryStore } from "../store/historyStore.
 import { hasHostWindow } from "../lib/windowStage.ts";
 import { useAvatar } from "../lib/avatar.ts";
 import { useMenuFocus } from "../lib/menuFocus.ts";
+import { useAnchoredMenu } from "../lib/anchoredMenu.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { SearchIcon, SparklesIcon } from "./panelIcons.tsx";
 
@@ -160,11 +162,16 @@ function RunStatusCapsule({ status }: { status: RunStatus }) {
 function RunOverflow({ run, agentId }: { run: RunSummary; agentId: string }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  // Portalled for the same reason as `AgentRowMenu` — run rows nest under agent rows, so this menu
+  // opens from inside the same scroller and was clipped by the same `overflow`.
+  const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
     const away = (e: MouseEvent): void => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (ref.current?.contains(t) || panelRef.current?.contains(t)) return;
+      setOpen(false);
     };
     const key = (e: KeyboardEvent): void => { if (e.key === "Escape") setOpen(false); };
     document.addEventListener("mousedown", away);
@@ -177,7 +184,8 @@ function RunOverflow({ run, agentId }: { run: RunSummary; agentId: string }) {
 
   // See lib/menuFocus.ts — the panel is rendered BEFORE its trigger, so without this the
   // keyboard steps straight over the menu it just opened, and Escape drops focus to <body>.
-  useMenuFocus(open, ref);
+  useMenuFocus(open, panelRef, ref);
+  useAnchoredMenu(open, ref, panelRef);
 
   return (
     <div ref={ref} className="relative shrink-0">
@@ -193,11 +201,12 @@ function RunOverflow({ run, agentId }: { run: RunSummary; agentId: string }) {
       >
         <Icon.agents.more size={ICON.sm} />
       </button>
-      {open && (
+      {open && createPortal(
         <div
+          ref={panelRef}
           role="menu"
           aria-label="Run actions"
-          className="absolute right-0 top-full z-30 mt-1 w-40 origin-top animate-menu-in overflow-hidden rounded-control border border-sidebar-border bg-panel py-1 shadow-pop motion-reduce:animate-none"
+          className="fixed left-0 top-0 z-50 w-40 origin-top animate-menu-in overflow-hidden rounded-control border border-sidebar-border bg-panel py-1 shadow-pop motion-reduce:animate-none"
         >
           <button
             role="menuitem"
@@ -220,7 +229,8 @@ function RunOverflow({ run, agentId }: { run: RunSummary; agentId: string }) {
             <Icon.cockpit.refresh size={ICON.sm} />
             <span className="min-w-0 flex-1 truncate">Run again</span>
           </button>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
@@ -506,12 +516,21 @@ function AgentRowMenu({ agent }: { agent: AgentSummary }) {
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(agent.name);
   const ref = useRef<HTMLDivElement>(null);
+  // The panel is portalled out of the list, so it needs a ref of its own: `ref` no longer contains
+  // it, and every listener below that used to ask one element now has to ask both.
+  const panelRef = useRef<HTMLDivElement>(null);
   const pinned = useUiStore((st) => st.pinnedAgents.includes(agent.agent_id));
 
   useEffect(() => {
     if (!open) return;
     const away = (e: MouseEvent): void => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      // BOTH, OR THE MENU CANNOT BE CLICKED. Once the panel is portalled it is no longer inside
+      // `ref`, so a press on one of its own items counted as a click outside: the menu closed on
+      // `mousedown` and the item it was closing over never received the `click`. Every item in it
+      // was dead for exactly as long as the portal existed without this line.
+      const t = e.target as Node;
+      if (ref.current?.contains(t) || panelRef.current?.contains(t)) return;
+      setOpen(false);
     };
     const key = (e: KeyboardEvent): void => { if (e.key === "Escape") setOpen(false); };
     document.addEventListener("mousedown", away);
@@ -523,8 +542,11 @@ function AgentRowMenu({ agent }: { agent: AgentSummary }) {
   }, [open]);
 
   // See lib/menuFocus.ts — the panel renders before its trigger, so without this the keyboard
-  // steps over the menu it just opened.
-  useMenuFocus(open, ref);
+  // steps over the menu it just opened. The items live in the portal and the button stays in the
+  // row, which is why this one names both.
+  useMenuFocus(open, panelRef, ref);
+  // ...and lib/anchoredMenu.ts, which puts the portalled panel back where the row expects it.
+  useAnchoredMenu(open, ref, panelRef);
 
   // CLOSING RESETS THE TWO SUB-STATES. A menu reopened on a half-typed delete confirmation, or on
   // a rename field holding a name somebody abandoned, is a menu that remembers a decision they
@@ -547,16 +569,31 @@ function AgentRowMenu({ agent }: { agent: AgentSummary }) {
         aria-expanded={open}
         title={`Actions for ${agent.name}`}
         aria-label={`Actions for ${agent.name}`}
-        className="flex h-6 w-6 items-center justify-center rounded-control text-faint opacity-0 transition-[color,opacity] duration-fast group-hover:opacity-100 hover:bg-sidebar-hover hover:text-ink focus-visible:opacity-100 focus-visible:outline-none focus-visible:shadow-focusring"
+        // VISIBLE WHILE OPEN, which the portal made necessary. The panel used to be a child of the
+        // row, so moving the pointer onto it kept the row hovered and this button shown; now that
+        // it is in `document.body` the row un-hovers the moment somebody reaches for the menu, and
+        // the trigger faded out from under its own open panel. `RunOverflow` above has always
+        // spelled it this way.
+        className={`flex h-6 w-6 items-center justify-center rounded-control text-faint transition-[color,opacity] duration-fast hover:bg-sidebar-hover hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring ${
+          open ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+        }`}
       >
         <Icon.agents.rowMore size={ICON.sm} />
       </button>
 
-      {open && (
+      {/* INTO `document.body`, NOT INTO THE ROW — see lib/anchoredMenu.ts. This is the only menu in
+          the application that opens from inside a scroller, and an `overflow` ancestor clips its
+          absolutely-positioned descendants no matter what `z-index` they carry.
+          `top-0 left-0` IS THE STARTING POINT, NOT THE POSITION. `useAnchoredMenu` overwrites both
+          in a layout effect — before paint, so nothing is ever seen in the corner — and it has to
+          be after mount because choosing between opening down and opening up means measuring a
+          panel that has been laid out. */}
+      {open && createPortal(
         <div
+          ref={panelRef}
           role="menu"
           aria-label={`Actions for ${agent.name}`}
-          className="absolute right-0 top-full z-30 mt-1 min-w-[210px] origin-top animate-menu-in overflow-hidden rounded-card border border-sidebar-border bg-elevated p-1 shadow-floating motion-reduce:animate-none"
+          className="fixed left-0 top-0 z-50 min-w-[210px] origin-top animate-menu-in overflow-hidden rounded-card border border-sidebar-border bg-elevated p-1 shadow-floating motion-reduce:animate-none"
         >
           {renaming ? (
             // IN PLACE, NOT IN A DIALOG. A rename is one short string and the row it belongs to is
@@ -642,7 +679,8 @@ function AgentRowMenu({ agent }: { agent: AgentSummary }) {
               </button>
             </>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

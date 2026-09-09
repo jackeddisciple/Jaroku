@@ -1348,6 +1348,15 @@ jobs:
           # two components already handled their own arrows and an earlier draft of this suite
           # failed them for not borrowing the shared hook. What it really catches is the sixth menu.
           npm run test:menu-keys
+          # AND THAT A MENU OPENING FROM INSIDE THE AGENT LIST ESCAPES IT, which two did not. A
+          # panel drawn `position: absolute` inside a row is clipped by any ancestor carrying an
+          # `overflow` — `z-index` orders what is painted, `overflow` decides what there is to
+          # paint — so both row menus were one scroller away from being invisible the whole time.
+          # The Pinned shelf's height cap supplied the scroller and cut the menu down to nothing;
+          # the identical clip was already sitting on the bottom rows of Recents. The suite walks
+          # out from `AgentTreeRow` rather than naming the two, because what it is really for is
+          # the THIRD menu somebody puts on a row without knowing this is a rule.
+          npm run test:menu-clip
           # AND WHICH MARK A TOOL FILE GETS, which is a table of regexes and is therefore an
           # ORDERING — one that looks obviously right in any arrangement and typechecks in all of
           # them. The mapper runs on every tool path including the bespoke ones a model names, so
