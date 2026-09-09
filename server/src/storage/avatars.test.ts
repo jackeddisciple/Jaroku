@@ -139,6 +139,36 @@ async function googleChecks(): Promise<void> {
   check(await fetchGoogleAvatar("https://lh3.googleusercontent.com/a/x", notImage) === null,
     "...and so is a response Google served that is not one of the three formats");
 
+  // REDIRECTS, WHICH THE FIRST DRAFT GOT WRONG IN BOTH DIRECTIONS. `redirect: "error"` refused them
+  // outright, which quietly imports nothing for every account whose picture URL happens to hop;
+  // `follow` would have let fetch chase one to an internal address before this code saw the host.
+  const hops = (to: string): typeof fetch => {
+    let first = true;
+    return (async (url: string | URL) => {
+      reached = String(url);
+      if (first) { first = false; return new Response("", { status: 302, headers: { location: to } }); }
+      return new Response(PNG, { status: 200 });
+    }) as unknown as typeof fetch;
+  };
+  check(await fetchGoogleAvatar("https://lh3.googleusercontent.com/a/x", hops("https://lh4.googleusercontent.com/b")) !== null,
+    "a redirect WITHIN googleusercontent.com is followed rather than refused");
+
+  reached = null;
+  check(await fetchGoogleAvatar("https://lh3.googleusercontent.com/a/x", hops("http://127.0.0.1:4317/admin")) === null,
+    "a redirect to an internal address is refused");
+  check(reached === "https://lh3.googleusercontent.com/a/x",
+    "...and the internal address was never requested — the hop is checked before it is taken");
+
+  reached = null;
+  check(await fetchGoogleAvatar("https://lh3.googleusercontent.com/a/x", hops("https://evil.example/x")) === null,
+    "a redirect off the allowlist is refused too");
+  check(reached === "https://lh3.googleusercontent.com/a/x", "...and likewise never requested");
+
+  // A relative Location resolves against the original, which keeps it on the allowlist rather than
+  // failing to parse — the case that would otherwise look like a refusal for the wrong reason.
+  check(await fetchGoogleAvatar("https://lh3.googleusercontent.com/a/x", hops("/b/y")) !== null,
+    "a relative redirect resolves against the original and stays allowed");
+
   const huge: typeof fetch = (async () =>
     new Response(PNG, { status: 200, headers: { "content-length": String(AVATAR_MAX_BYTES + 1) } })) as unknown as typeof fetch;
   check(await fetchGoogleAvatar("https://lh3.googleusercontent.com/a/x", huge) === null,

@@ -241,6 +241,25 @@ export default {
           "35%": { backgroundColor: "rgba(29, 29, 27, 0.12)" },
           "100%": { backgroundColor: "rgba(29, 29, 27, 0)" },
         },
+        // A MENU ARRIVING, and it is its own keyframe rather than `slide-in` because the two are
+        // different events. `slide-in` is a trace step landing in a list: it travels, because the
+        // row genuinely came from somewhere. A menu does not travel — it belongs to the control you
+        // just pressed and it should read as unfolding FROM it, which is a short scale and a fade
+        // anchored by `origin-top` / `origin-bottom` at the call site.
+        //
+        // 4px AND 0.98 ARE DELIBERATELY BARELY ANYTHING. A menu is opened to be read, so the motion
+        // has to be finished before the eye arrives; anything longer or further turns a click into
+        // a wait. It is the shortest duration in the file for that reason.
+        "menu-in": {
+          "0%": { opacity: "0", transform: "translateY(-4px) scale(0.98)" },
+          "100%": { opacity: "1", transform: "translateY(0) scale(1)" },
+        },
+        // The same, for a menu that opens UPWARD — the account row is the last thing in the column,
+        // so its menu grows out of the top of the control rather than the bottom.
+        "menu-in-up": {
+          "0%": { opacity: "0", transform: "translateY(4px) scale(0.98)" },
+          "100%": { opacity: "1", transform: "translateY(0) scale(1)" },
+        },
         "check-in": {
           "0%": { opacity: "0", transform: "scale(0.4)" },
           "60%": { opacity: "1", transform: "scale(1.15)" },
@@ -307,6 +326,8 @@ export default {
         rise: "rise 320ms cubic-bezier(0.2, 0, 0, 1) backwards",
         breathe: "breathe 4.2s ease-in-out infinite",
         "pulse-node": "pulse-node 2.4s ease-in-out infinite",
+        "menu-in": "menu-in 120ms cubic-bezier(0.2, 0, 0, 1)",
+        "menu-in-up": "menu-in-up 120ms cubic-bezier(0.2, 0, 0, 1)",
         "check-in": "check-in 180ms cubic-bezier(0.2, 0, 0, 1)",
         "stream-pulse": "stream-pulse 1.4s ease-in-out infinite",
         // 400ms rather than the spec's 200: at 200 the wash is gone before a smooth scroll has

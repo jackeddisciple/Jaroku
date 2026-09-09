@@ -814,6 +814,14 @@ async function exchangeTicket(
         id: user.id,
         email: user.email,
         displayName: user.display_name,
+        // BOTH OF THESE WERE MISSING AND THE TYPES DID NOT CATCH IT. `/v1/auth/session` has two
+        // branches — a bearer token refreshing a session, and a ticket being exchanged for one —
+        // and only the first was updated when `username` and `avatar_key` arrived. The client types
+        // both responses as `SessionUser`, so the omission was invisible at compile time and showed
+        // up as a footer with no picture and the wrong label for the first few seconds after every
+        // sign-in, self-healing on the socket's own `fetchSession`. A window is still a bug.
+        username: user.username,
+        hasAvatar: user.avatar_key !== null,
         onboarded: user.onboarded_at !== null,
         onboardingStep: user.onboarding_step,
         isAdmin: isAdminUser(user.id),

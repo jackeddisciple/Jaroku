@@ -36,6 +36,7 @@ import { goBack, goForward } from "../lib/navHistory.ts";
 import { canGoBack, canGoForward, useHistoryStore } from "../store/historyStore.ts";
 import { hasHostWindow } from "../lib/windowStage.ts";
 import { loadAvatar } from "../lib/avatar.ts";
+import { useMenuFocus } from "../lib/menuFocus.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { SearchIcon, SparklesIcon } from "./panelIcons.tsx";
 
@@ -174,6 +175,10 @@ function RunOverflow({ run, agentId }: { run: RunSummary; agentId: string }) {
     };
   }, [open]);
 
+  // See lib/menuFocus.ts — the panel is rendered BEFORE its trigger, so without this the
+  // keyboard steps straight over the menu it just opened, and Escape drops focus to <body>.
+  useMenuFocus(open, ref);
+
   return (
     <div ref={ref} className="relative shrink-0">
       <button
@@ -192,7 +197,7 @@ function RunOverflow({ run, agentId }: { run: RunSummary; agentId: string }) {
         <div
           role="menu"
           aria-label="Run actions"
-          className="absolute right-0 top-full z-30 mt-1 w-40 overflow-hidden rounded-control border border-sidebar-border bg-panel py-1 shadow-pop"
+          className="absolute right-0 top-full z-30 mt-1 w-40 origin-top animate-menu-in overflow-hidden rounded-control border border-sidebar-border bg-panel py-1 shadow-pop motion-reduce:animate-none"
         >
           <button
             role="menuitem"
@@ -754,6 +759,10 @@ function AccountRow() {
     };
   }, [open]);
 
+  // See lib/menuFocus.ts — the panel is rendered BEFORE its trigger, so without this the
+  // keyboard steps straight over the menu it just opened, and Escape drops focus to <body>.
+  useMenuFocus(open, ref);
+
   // Before the session lands there is no account to name. An empty row is quieter than a
   // placeholder that flashes into somebody else's initial.
   if (!user) return <div className="h-8" />;
@@ -774,7 +783,7 @@ function AccountRow() {
         <div
           role="menu"
           aria-label="Account"
-          className="absolute bottom-full left-0 z-30 mb-1 w-full overflow-hidden rounded-control border border-sidebar-border bg-panel py-1 shadow-pop"
+          className="absolute bottom-full left-0 z-30 mb-1 w-full origin-bottom animate-menu-in-up overflow-hidden rounded-control border border-sidebar-border bg-panel py-1 shadow-pop motion-reduce:animate-none"
         >
           <button role="menuitem" onClick={choose(() => openWorkspacePanel("account"))} className={ACCOUNT_MENU_ROW}>
             <Icon.workspace.settings size={ICON.md} />
@@ -935,6 +944,10 @@ function FilterMenu({
     };
   }, [open]);
 
+  // See lib/menuFocus.ts — the panel is rendered BEFORE its trigger, so without this the
+  // keyboard steps straight over the menu it just opened, and Escape drops focus to <body>.
+  useMenuFocus(open, ref);
+
   const entries: { id: Filter; label: string; count?: number }[] = [
     { id: "all", label: "All" },
     { id: "running", label: "Running", count: counts.running },
@@ -969,7 +982,7 @@ function FilterMenu({
         )}
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-30 mt-1 min-w-[170px] animate-slide-in rounded-card border border-sidebar-border bg-elevated p-1 shadow-floating motion-reduce:animate-none">
+        <div className="absolute right-0 top-full z-30 mt-1 min-w-[170px] origin-top animate-menu-in rounded-card border border-sidebar-border bg-elevated p-1 shadow-floating motion-reduce:animate-none">
           {entries.map((e) => (
             <button
               key={e.id}

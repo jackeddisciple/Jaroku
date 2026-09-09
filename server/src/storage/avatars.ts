@@ -103,10 +103,36 @@ export async function fetchGoogleAvatar(
   try {
     // Five seconds, because this is in front of a person waiting to be signed in. If Google is
     // slow, they get their session and no picture, which is the right trade every time.
-    const res = await fetchImpl(parsed.toString(), {
-      redirect: "error",
+    //
+    // `manual` RATHER THAN `error` OR `follow`, AND THE FIRST DRAFT HAD IT WRONG. `error` was the
+    // safe-looking choice and it silently defeats the feature: Google's picture URLs redirect often
+    // enough that a large share of accounts would import nothing, with no error anywhere to say
+    // why. `follow` is the opposite failure — fetch would chase a redirect to 127.0.0.1 and make
+    // the request before this code ever saw the new host, which is the SSRF the allowlist exists to
+    // prevent. `manual` hands back the 3xx unfollowed so the `Location` can be put through the same
+    // host check as the original, and then fetched deliberately.
+    //
+    // ONE HOP, NOT A LOOP. A redirect chain has no natural bound and this runs in front of somebody
+    // waiting to sign in; one hop covers what Google actually does and cannot become a cycle.
+    let res = await fetchImpl(parsed.toString(), {
+      redirect: "manual",
       signal: AbortSignal.timeout(5000),
     });
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get("location");
+      if (!location) return null;
+      let hop: URL;
+      try {
+        // Resolved against the original, because a `Location` may be relative.
+        hop = new URL(location, parsed);
+      } catch {
+        return null;
+      }
+      if (hop.protocol !== "https:") return null;
+      const hopHost = hop.hostname.toLowerCase();
+      if (hopHost !== "googleusercontent.com" && !hopHost.endsWith(".googleusercontent.com")) return null;
+      res = await fetchImpl(hop.toString(), { redirect: "manual", signal: AbortSignal.timeout(5000) });
+    }
     if (!res.ok) return null;
     const declared = Number(res.headers.get("content-length") ?? "");
     if (Number.isFinite(declared) && declared > AVATAR_MAX_BYTES) return null;
