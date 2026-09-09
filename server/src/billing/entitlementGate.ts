@@ -173,6 +173,13 @@ export const COMMAND_ENTITLEMENT: Record<string, EntitlementKind | typeof NO_ENT
   archiveAgent: NO_ENTITLEMENT,
   restoreAgent: NO_ENTITLEMENT,
   renameAgent: NO_ENTITLEMENT,
+  // AND DELETING ONE IS THE LAST COMMAND THAT SHOULD EVER BE TIER-GATED. The agent COUNT is what a
+  // tier limits, so this is the direction that relieves a limit rather than testing one — a
+  // workspace at its ceiling deletes an agent to get under it, and a plan that refused would have
+  // locked somebody inside the very limit they were trying to satisfy. It is the strictest command
+  // in the role matrix (`workspace:manage`, owner only) and the loosest here, which is not a
+  // contradiction: who may do it and what it costs are different questions.
+  deleteAgent: NO_ENTITLEMENT,
   // Cosmetic, and bounded by the palette. Nothing to meter.
   setAgentEmoji: NO_ENTITLEMENT,
   // Cosmetic too, and bounded the same way: a category is a label on the row. Nothing to count, so

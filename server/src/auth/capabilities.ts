@@ -563,6 +563,19 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   archiveAgent: "agent:write",
   restoreAgent: "agent:write",
   renameAgent: "agent:write",
+  /**
+   * And deleting one, which is NOT on that rung — the paragraph above already said why before this
+   * command existed: archiving is reversible and destroys nothing, so it is the same authority as
+   * editing. This destroys the agent's runs, traces, versions, threads and its whole prefix in the
+   * object store, and there is no `restoreAgent` on the other side of it.
+   *
+   * `workspace:manage` IS THE WORKSPACE-SHAPED AUTHORITY that paragraph reserved for it, and it is
+   * held by `owner` alone — not by `admin`. That is the strict reading and it is the deliberate one
+   * for a first release: a gate that turns out too tight is one line to loosen, and an agent that
+   * turns out to have been deleted by somebody who should not have been able to is not recoverable
+   * by anything. The agent-level table files it under `admin` for the same reason.
+   */
+  deleteAgent: "workspace:manage",
   // §8.2: the EXISTING capability. Re-marking an agent is a smaller act than renaming one.
   setAgentEmoji: "agent:write",
   // §6's category, on the same rung and for the same reason: changing what an agent is called and
@@ -1084,6 +1097,11 @@ export const COMMAND_AGENT_CAPABILITY: Record<string, AgentCapability> = {
   archiveAgent: "edit",
   restoreAgent: "edit",
   renameAgent: "edit",
+  // ...and deleting is not editing. `admin` is the top of this vocabulary and the only rung that
+  // fits an act with nothing on the other side of it — see the workspace table, which gates the
+  // same command at `workspace:manage`. Both apply: the relay checks the workspace capability and
+  // then resolves the agent-level one, so this is the floor rather than an alternative to it.
+  deleteAgent: "admin",
   setAgentEmoji: "edit",
   // The same narrowing the three above take: what an agent is called and what it is for are both
   // facts about the agent, and deciding them is what editing is.

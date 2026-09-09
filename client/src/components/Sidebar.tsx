@@ -31,6 +31,7 @@ import { Truncate } from "./Truncate.tsx";
 import { identityTitle } from "./AgentIdentityLine.tsx";
 import { AgentEmoji, EMOJI_SIZE } from "./AgentEmoji.tsx";
 import { EmptyState } from "./EmptyState.tsx";
+import { Capable } from "./Capable.tsx";
 import { keyHint } from "../lib/modKey.ts";
 import { startNewAgent } from "../lib/newAgent.ts";
 import { goBack, goForward } from "../lib/navHistory.ts";
@@ -671,11 +672,21 @@ function AgentRowMenu({ agent }: { agent: AgentSummary }) {
                 <Icon.agents.configure size={ICON.sm} />
                 <span className="min-w-0 flex-1 truncate">Configure agent</span>
               </button>
-              <div className="my-1 h-px bg-sidebar-border" role="separator" />
-              <button role="menuitem" onClick={() => setConfirming(true)} className={`${ACCOUNT_MENU_ROW} text-err`}>
-                <Icon.agents.delete size={ICON.sm} />
-                <span className="min-w-0 flex-1 truncate">Delete</span>
-              </button>
+              {/* HIDDEN RATHER THAN REFUSED. Deleting an agent is gated at `workspace:manage` — the
+                  owner alone — and at `admin` on the agent itself; without this, everybody else
+                  would see the item, press it, type an agent's slug to confirm, and only then be
+                  told no. `Capable` asks the same two questions the relay asks, in the same order,
+                  from the copy of the matrix `test:permission-ui` holds to the server's.
+
+                  THE SEPARATOR GOES WITH IT, because a divider above nothing is a line at the
+                  bottom of a menu that says something was removed. */}
+              <Capable cmd="deleteAgent" agentId={agent.agent_id}>
+                <div className="my-1 h-px bg-sidebar-border" role="separator" />
+                <button role="menuitem" onClick={() => setConfirming(true)} className={`${ACCOUNT_MENU_ROW} text-err`}>
+                  <Icon.agents.delete size={ICON.sm} />
+                  <span className="min-w-0 flex-1 truncate">Delete</span>
+                </button>
+              </Capable>
             </>
           )}
         </div>,

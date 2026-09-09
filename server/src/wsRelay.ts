@@ -228,17 +228,6 @@ export type RenameAgentCommand = { cmd: "renameAgent"; agentId: string; name: st
  */
 export type DeleteAgentCommand = { cmd: "deleteAgent"; agentId: string; confirm: string };
 /**
- * `git worktree add` on the repository this agent is linked to.
- *
- * A CHECKOUT, NOT A COPY. The point is a real working tree of the agent's own branch that an editor
- * can open and git can see — so it is the linked repo's branch on disk, not a snapshot of
- * `runtime/agents/<slug>`, which is generated output and belongs to the model.
- *
- * REFUSED WHEN THERE IS NO LINK, and the client greys the row for the same reason: there is no
- * repository to make a worktree of, and inventing one would be creating a repo nobody asked for.
- */
-export type CreateWorktreeCommand = { cmd: "createWorktree"; agentId: string };
-/**
  * The agent's identity mark, changed by whoever may already rename it.
  *
  * ON THE EXISTING AGENT COMMAND CHANNEL, UNDER THE EXISTING CAPABILITY — §8.2 asks for exactly
@@ -334,7 +323,6 @@ export type AgentCommand =
   | RestoreAgentCommand
   | RenameAgentCommand
   | DeleteAgentCommand
-  | CreateWorktreeCommand
   | ForkAgentCommand
   | RestoreAgentVersionCommand
   | SetAgentToolsCommand
@@ -345,7 +333,7 @@ export type AgentCommand =
 const AGENT_COMMANDS = new Set([
   "archiveAgent", "restoreAgent", "renameAgent", "forkAgent", "restoreAgentVersion",
   "setAgentTools", "setAgentEmoji", "setAgentCategory", "createDraftAgent",
-  "deleteAgent", "createWorktree",
+  "deleteAgent",
 ]);
 
 /**
@@ -3271,7 +3259,7 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   // an answer that had already come and gone somewhere else. The channel has an error shape for
   // exactly this, the same reason the thread and github commands are classified here.
   archiveAgent: "agents", restoreAgent: "agents", renameAgent: "agents", setAgentTools: "agents",
-  deleteAgent: "agents", createWorktree: "agents",
+  deleteAgent: "agents",
   setAgentEmoji: "agents",
   setAgentCategory: "agents",
   createDraftAgent: "agents",

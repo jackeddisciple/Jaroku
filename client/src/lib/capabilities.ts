@@ -136,6 +136,12 @@ export const COMMAND_CAPABILITY: Record<string, string> = {
   archiveAgent: "agent:write",
   restoreAgent: "agent:write",
   renameAgent: "agent:write",
+  // Deleting is not on that rung. Archiving is reversible and destroys nothing; this destroys the
+  // agent's runs, traces, versions, threads and its prefix in the object store, with no restore on
+  // the other side — so it takes the workspace-shaped authority, held by `owner` alone. See the
+  // server's copy, which carries the full reasoning; this one exists so the row can grey the item
+  // rather than let somebody type an agent's slug and then be refused.
+  deleteAgent: "workspace:manage",
   // §8.2: the EXISTING capability. Re-marking an agent is a smaller act than renaming one.
   setAgentEmoji: "agent:write",
   // §6's category, on the same rung: what an agent is called and what it is for is one authority,
@@ -525,6 +531,9 @@ export const COMMAND_AGENT_CAPABILITY: Record<string, AgentCapability> = {
   archiveAgent: "edit",
   restoreAgent: "edit",
   renameAgent: "edit",
+  // `admin`, the top of this vocabulary — the only rung that fits an act with nothing on the other
+  // side of it. Both gates apply on the server, so this is a floor rather than an alternative.
+  deleteAgent: "admin",
   setAgentEmoji: "edit",
   setAgentCategory: "edit",
   setAgentTools: "edit",
