@@ -433,6 +433,19 @@
     background-color: var(--sidebar-material-runs);
   }
 
+  /* ── The sidebar, opening and closing ────────────────────────────────────────────────────────
+     `react-resizable-panels` sizes its panels with an inline `flex-grow`, so that is the property
+     a collapse has to animate — there is no width to transition. The class is applied to the GROUP
+     for the length of the movement and nowhere else: the same inline value is rewritten on every
+     pointer move while somebody drags the divider, and a permanent transition here would make the
+     column trail the pointer and coast to a stop after it. See `App.tsx`'s `sidebarMoving`.
+
+     THE HANDLE IS EXCLUDED. It is a fixed five pixels and unmounts when the sidebar closes; giving
+     it a grow transition would animate a width it does not have. */
+  .panels-moving > [data-panel] {
+    transition: flex-grow 220ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
   /* ── Graph View canvas ──────────────────────────────────────────────────────
      n8n-style: flat, with a faint dot grid (drawn by React Flow's Background). Restraint plus
      precise organization reads as premium — no glow, no gradient, no grain. It was near-black

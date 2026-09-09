@@ -18,6 +18,7 @@ import { useDeployStore } from "../store/deployStore.ts";
 import { sendCancelDeploy, sendSetOwnKeyForPlatform } from "../lib/socket.ts";
 import { isDeployInFlight } from "../types.ts";
 import { useCanRun } from "../lib/useCapability.ts";
+import { hasHostWindow } from "../lib/windowStage.ts";
 import { fmtPercent } from "../lib/format.ts";
 import { ProviderMark, BRAND_COLOR } from "../lib/icons.tsx";
 import { ICON, TYPE } from "../lib/tokens.ts";
@@ -239,10 +240,25 @@ export function TopBar() {
   // ...and the agent as well, because the title bar's Deploy button acts on the agent that is open
   // rather than on the workspace. Somebody with deploy on one agent and not another has to see it
   // appear and disappear as they move between them, which is the whole point of a per-agent grant.
+  const sidebarHidden = useUiStore((s) => s.sidebarHidden);
   const canDeploy = useCanRun("deploy", agent?.agent_id);
+  /**
+   * How far in this row has to start when the sidebar is hidden.
+   *
+   * WITH THE SIDEBAR SHOWING THIS IS NOTHING, because the sidebar's own first row is what sits
+   * under the traffic lights and carries the toggle. Hide it and this becomes the top-left of the
+   * window: `App` floats the lights' reservation and the show-sidebar button over this row, and
+   * without an inset the first thing in the bar renders underneath them.
+   *
+   * ONE NUMBER IN ONE PLACE would be better than this matching a literal in `App`, and it cannot be
+   * — the reservation is a Tailwind class on an element in another file. What holds them together
+   * is that both are derived from the same two facts: 76px of traffic lights under the desktop
+   * shell, and a 28px button. Change either and both move.
+   */
+  const inset = sidebarHidden ? (hasHostWindow() ? "pl-[112px]" : "pl-[44px]") : "px-4";
 
   return (
-    <div className="flex h-11 shrink-0 items-center gap-3 border-b border-hair px-4">
+    <div className={`flex h-11 shrink-0 items-center gap-3 border-b border-hair pr-4 ${inset}`}>
       {/* THE LEFT CLUSTER IS GONE, and what it said is said better one column over. The mark, the
           active agent's name, its status dot and the breadcrumb all sat here — four facts about the
           agent, in a bar that now begins where the sidebar ends. The sidebar names the agent it has

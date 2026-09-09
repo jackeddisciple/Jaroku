@@ -32,6 +32,7 @@ import { identityTitle } from "./AgentIdentityLine.tsx";
 import { AgentEmoji, EMOJI_SIZE } from "./AgentEmoji.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import { Capable } from "./Capable.tsx";
+import { Collapse } from "./Collapse.tsx";
 import { keyHint } from "../lib/modKey.ts";
 import { startNewAgent } from "../lib/newAgent.ts";
 import { goBack, goForward } from "../lib/navHistory.ts";
@@ -837,7 +838,7 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
         <AgentRowMenu agent={agent} />
       </div>
 
-      {open && hasRuns && (
+      <Collapse open={open && hasRuns}>
         <div className="flex flex-col">
           {shown.map((r) => (
             // Indented to the twisty's width, so a run reads as belonging to the row above it.
@@ -857,7 +858,7 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
             </button>
           )}
         </div>
-      )}
+      </Collapse>
     </>
   );
 }
@@ -1358,13 +1359,13 @@ export function Sidebar() {
               bottom of the window. Past the cap it scrolls, so the shelf stays a shelf however many
               things somebody puts on it. In `vh` rather than `%` because a percentage height
               resolves against a parent that is `auto` here, which is to say it does not. */}
-          {pinnedOpen && (
+          <Collapse open={pinnedOpen}>
             <div className="flex max-h-[38vh] flex-col overflow-y-auto overflow-x-hidden px-1.5">
               {pinnedVisible.map((a) => (
                 <AgentTreeRow key={a.agent_id} agent={a} runs={runsByAgent.get(a.agent_id) ?? []} />
               ))}
             </div>
-          )}
+          </Collapse>
         </div>
       )}
 
@@ -1396,8 +1397,12 @@ export function Sidebar() {
 
         {/* `overflow-x-hidden` RATHER THAN NOTHING: a row that runs out of room truncates, and a
             truncation ends in an ellipsis rather than in a horizontal scrollbar nobody looks for. */}
-        {recentsOpen && (
-          <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-1.5 pb-2">
+        {/* THE FLEXIBLE ONE — `flex-1 min-h-0` goes on the Collapse rather than on the scroller, so
+            the track it animates is measured against the height flex handed the section. Closed, the
+            box keeps that height and the row inside goes to nothing, which is what stops the account
+            row walking up the column every time somebody folds the list away. */}
+        <Collapse open={recentsOpen} className="min-h-0 min-w-0 flex-1">
+          <div className="h-full min-h-0 min-w-0 overflow-y-auto overflow-x-hidden px-1.5 pb-2">
             {recents.length === 0 ? (
               <EmptyState
                 size="inline"
@@ -1428,7 +1433,7 @@ export function Sidebar() {
               </button>
             )}
           </div>
-        )}
+        </Collapse>
       </div>
 
       {/* Bottom-anchored: who is signed in. */}

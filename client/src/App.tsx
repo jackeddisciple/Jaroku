@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelHandle } from "react-resizable-panels";
 import { Sidebar } from "./components/Sidebar.tsx";
 import { RightPanel } from "./components/RightPanel.tsx";
 import { StatusBar } from "./components/StatusBar.tsx";
@@ -163,6 +163,17 @@ export function App() {
   const navView = useUiStore((s) => s.navView);
   // Chrome, not navigation — see uiStore. The destination stays selected while it is hidden.
   const sidebarHidden = useUiStore((s) => s.sidebarHidden);
+  const sidebarPanel = useRef<ImperativePanelHandle>(null);
+  /**
+   * Whether a collapse is in flight, and why the transition is not simply always on.
+   *
+   * THE GROUP WRITES `flex-grow` ON EVERY POINTER MOVE WHILE SOMEBODY DRAGS THE DIVIDER. A
+   * permanent `transition: flex-grow` would therefore animate the drag itself — the column would
+   * lag a few hundred milliseconds behind the pointer and settle after it stopped, which is the
+   * one place in this layout where a transition is unambiguously wrong. So it is armed only for
+   * the two moments it belongs to, and disarmed as soon as they are over.
+   */
+  const [sidebarMoving, setSidebarMoving] = useState(false);
 
   // First run. Everything below is the normal app once `phase` is "complete", which it is for
   // every session after the first — see components/onboarding/useOnboarding.ts.
@@ -171,6 +182,34 @@ export function App() {
   // The trail the Back and Forward arrows walk. Mounted once, here, because it watches the two
   // fields that make a place and there must be exactly one recorder — see lib/navHistory.
   useNavigationHistory();
+
+  /**
+   * The store decides, the panel follows.
+   *
+   * `sidebarHidden` STAYS THE ONE SOURCE OF TRUTH. `collapsible` gives the group a collapsed state
+   * of its own that `autoSaveId` then persists, so on the next launch there are two answers to
+   * "is the sidebar showing" and they can disagree. Driving the panel FROM the store on every
+   * change — including the first — means the group is reconciled to the store at mount rather than
+   * the other way round, and the toggle in the sidebar remains the only thing that decides.
+   *
+   * NO ANIMATION ON THAT FIRST RUN. Reconciling at mount is a correction, not a gesture; playing it
+   * would mean every launch with a hidden sidebar opened on a column sliding shut.
+   */
+  const sidebarSettled = useRef(false);
+  useEffect(() => {
+    const panel = sidebarPanel.current;
+    if (!panel) return;
+    const first = !sidebarSettled.current;
+    sidebarSettled.current = true;
+    if (!first) setSidebarMoving(true);
+    if (sidebarHidden) panel.collapse();
+    else panel.expand();
+    if (first) return;
+    // Disarmed a frame past the end rather than exactly on it: the class has to outlive the
+    // transition it is enabling, or removing it mid-flight snaps the column to its final width.
+    const done = setTimeout(() => setSidebarMoving(false), 260);
+    return () => clearTimeout(done);
+  }, [sidebarHidden]);
 
   // The MACHINE's first run, which is a different question from the person's — see §1.3, and the
   // gate below where it is spent. Both selectors read the same store; `firstRunOnScreen` is what
@@ -439,49 +478,84 @@ export function App() {
             window was 1600, and localStorage grew another entry — remembered per window size,
             which is not what remembering a layout means. An `id` is compared before the
             constraints ever are, so the key is now the panel rather than its arithmetic. */}
-        <PanelGroup direction="horizontal" autoSaveId="jaroku-layout-v4" className="flex-1 min-h-0">
-          {mountSidebar && !sidebarHidden && (
+        <PanelGroup
+          direction="horizontal"
+          autoSaveId="jaroku-layout-v4"
+          className={`flex-1 min-h-0 ${sidebarMoving ? "panels-moving" : ""}`}
+        >
+          {mountSidebar && (
             <>
               {/* `minSize` IS A MEASURED PIXEL FLOOR, not a share of the window. 16% is 307px
                   at 1920 and 164px at 1024 — one rule expressing two different requirements, and
-                  the narrow one is the one nobody is looking at while writing it. */}
-              <Panel id="sidebar" defaultSize={20} minSize={sidebarMin} maxSize={SIDEBAR_MAX_PCT} order={1}>
-                <div className="h-full animate-panel-in motion-reduce:animate-none">
+                  the narrow one is the one nobody is looking at while writing it.
+
+                  MOUNTED WHETHER OR NOT IT IS SHOWN, which is what makes hiding it a MOVEMENT. It
+                  used to be `{!sidebarHidden && <Panel>}`: React removed the panel and the group
+                  redistributed its width in a single frame, so a column three hundred pixels wide
+                  vanished between two frames and the workspace snapped sideways to fill the hole.
+                  There is no animation to add to an unmount — the element is already gone. So the
+                  panel stays, `collapsible` takes it to zero, and the effect above drives it.
+
+                  `inert` WHILE COLLAPSED. A zero-width panel still contains every button in the
+                  sidebar, and clipped is not the same as unreachable: without this, Tab would walk
+                  the keyboard through a column nobody can see. */}
+              <Panel
+                id="sidebar"
+                ref={sidebarPanel}
+                collapsible
+                collapsedSize={0}
+                defaultSize={20}
+                minSize={sidebarMin}
+                maxSize={SIDEBAR_MAX_PCT}
+                order={1}
+              >
+                <div className="h-full overflow-hidden" inert={sidebarHidden}>
                   <Sidebar />
                 </div>
               </Panel>
-              <PaneDivider />
+              {/* The handle goes with it. Left in place it would be a five-pixel grip against the
+                  window's left edge, resizing a column that is not there. */}
+              {!sidebarHidden && <PaneDivider />}
             </>
-          )}
-          {/* THE WAY BACK, and it exists because the control that hides the sidebar lives INSIDE
-              the sidebar. Without this, pressing it once removes the only thing that could undo it
-              — which is the trap this codebase's disabled-state discipline is about, one step
-              further out: not a control that does nothing, but one that removes itself.
-
-              It takes the space the traffic lights need under the desktop shell, for the same
-              reason `SidebarChrome` does — with the sidebar gone, this strip is what sits under
-              them, and it carries the drag region so the window can still be moved by its top
-              edge. */}
-          {mountSidebar && sidebarHidden && (
-            <div
-              data-tauri-drag-region
-              className={`flex h-11 shrink-0 items-center bg-sidebar ${hasHostWindow() ? "pl-[76px]" : "pl-2"}`}
-            >
-              <button
-                onClick={() => useUiStore.getState().toggleSidebar()}
-                title="Show the sidebar"
-                aria-label="Show the sidebar"
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-sidebar-hover hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
-              >
-                <Icon.nav.sidebarToggle size={ICON.sm} />
-              </button>
-            </div>
           )}
           {/* `bg-bg` here rather than only on the plane above, because under `[data-vibrancy]` that
               plane is transparent so the window's material can reach the sidebar. This is the
               workspace's own ground, and it is the same colour it was inheriting — nothing moves
               when the material is absent. */}
-          <Panel id="workspace" order={2} className="flex min-h-0 flex-col bg-bg">
+          <Panel id="workspace" order={2} className="relative flex min-h-0 flex-col bg-bg">
+            {/* THE WAY BACK, and it exists because the control that hides the sidebar lives INSIDE
+                the sidebar. Without this, pressing it once removes the only thing that could undo
+                it — the trap this codebase's disabled-state discipline is about, one step further
+                out: not a control that does nothing, but one that removes itself.
+
+                AN OVERLAY, NOT A COLUMN, AND THAT WAS THE BUG. This used to be a sibling of the
+                panel inside the horizontal group, so it was a flex item: `pl-[76px]` for the
+                traffic lights plus a 28px button made a hundred-pixel strip that took its width
+                out of the workspace for as long as the sidebar was hidden. Hiding the sidebar is
+                supposed to give that space to the middle; instead it handed back everything except
+                a hundred pixels, and the panel never reached the window's left edge.
+
+                Absolute, it takes no width at all. `TopBar` insets its own first row by the same
+                amount so nothing is rendered underneath it, and everything below that row — which
+                is the part somebody hid the sidebar to make bigger — is full width.
+
+                It keeps `data-tauri-drag-region` because with the sidebar gone this is what sits
+                under the traffic lights, and the window still has to be draggable by its top edge. */}
+            {mountSidebar && sidebarHidden && (
+              <div
+                data-tauri-drag-region
+                className={`absolute left-0 top-0 z-20 flex h-11 items-center ${hasHostWindow() ? "pl-[76px]" : "pl-2"}`}
+              >
+                <button
+                  onClick={() => useUiStore.getState().toggleSidebar()}
+                  title="Show the sidebar"
+                  aria-label="Show the sidebar"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-sidebar-hover hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+                >
+                  <Icon.nav.sidebarToggle size={ICON.sm} />
+                </button>
+              </div>
+            )}
             {/* THE TOP BAR STARTS WHERE THE SIDEBAR ENDS. It spanned the whole window, which put a
                 44px strip of chrome above the sidebar and stopped that column reaching the top of
                 the frame — and on macOS the traffic lights then sat on the bar rather than on the

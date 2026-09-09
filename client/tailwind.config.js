@@ -163,9 +163,23 @@ export default {
       transitionDuration: {
         fast: "120ms",
         base: "180ms",
+        // Opening and closing something — a menu, a section, the sidebar itself. Long enough to be
+        // a movement rather than a frame change, short enough that nobody waits on it.
+        collapse: "220ms",
       },
       transitionTimingFunction: {
         state: "cubic-bezier(0.2, 0, 0, 1)",
+        /**
+         * The curve for anything that OPENS.
+         *
+         * `state` IS THE WRONG SHAPE FOR THIS AND THAT IS WHY THERE ARE TWO. Its second control
+         * point sits at x=0, so it covers most of the distance almost immediately and then crawls
+         * to a stop — which is right for a colour settling into place and reads as a POP on
+         * anything that moves or changes size: the eye sees the arrival, not the travel. This one
+         * spends its time in the middle of the movement instead, so a menu appears to glide out of
+         * its trigger rather than to snap into existence a few pixels away from it.
+         */
+        smooth: "cubic-bezier(0.32, 0.72, 0, 1)",
       },
       // Type. Both halves of this block are a transcription of src/lib/typeScale.ts, which is the
       // file that holds typography.pdf's table — and `typeScale.test.ts` compares the two rather
@@ -247,17 +261,21 @@ export default {
         // just pressed and it should read as unfolding FROM it, which is a short scale and a fade
         // anchored by `origin-top` / `origin-bottom` at the call site.
         //
-        // 4px AND 0.98 ARE DELIBERATELY BARELY ANYTHING. A menu is opened to be read, so the motion
-        // has to be finished before the eye arrives; anything longer or further turns a click into
-        // a wait. It is the shortest duration in the file for that reason.
+        // THIS USED TO BE 4px, 0.98 AND 120ms ON THE `state` CURVE, argued for on the grounds that a
+        // menu is opened to be READ, so the motion should be over before the eye arrives. In
+        // practice that combination did not read as fast — it read as a POP, because `state` spends
+        // almost none of its time travelling and 120ms of a 4px move is a frame or two of blur
+        // followed by an arrival. Slightly further, half again as long, and on a curve that is
+        // actually in motion for its duration: the menu now appears to come out of the control that
+        // opened it, which is the thing the movement was for.
         "menu-in": {
-          "0%": { opacity: "0", transform: "translateY(-4px) scale(0.98)" },
+          "0%": { opacity: "0", transform: "translateY(-6px) scale(0.97)" },
           "100%": { opacity: "1", transform: "translateY(0) scale(1)" },
         },
         // The same, for a menu that opens UPWARD — the account row is the last thing in the column,
         // so its menu grows out of the top of the control rather than the bottom.
         "menu-in-up": {
-          "0%": { opacity: "0", transform: "translateY(4px) scale(0.98)" },
+          "0%": { opacity: "0", transform: "translateY(6px) scale(0.97)" },
           "100%": { opacity: "1", transform: "translateY(0) scale(1)" },
         },
         "check-in": {
@@ -326,8 +344,8 @@ export default {
         rise: "rise 320ms cubic-bezier(0.2, 0, 0, 1) backwards",
         breathe: "breathe 4.2s ease-in-out infinite",
         "pulse-node": "pulse-node 2.4s ease-in-out infinite",
-        "menu-in": "menu-in 120ms cubic-bezier(0.2, 0, 0, 1)",
-        "menu-in-up": "menu-in-up 120ms cubic-bezier(0.2, 0, 0, 1)",
+        "menu-in": "menu-in 200ms cubic-bezier(0.32, 0.72, 0, 1)",
+        "menu-in-up": "menu-in-up 200ms cubic-bezier(0.32, 0.72, 0, 1)",
         "check-in": "check-in 180ms cubic-bezier(0.2, 0, 0, 1)",
         "stream-pulse": "stream-pulse 1.4s ease-in-out infinite",
         // 400ms rather than the spec's 200: at 200 the wash is gone before a smooth scroll has
