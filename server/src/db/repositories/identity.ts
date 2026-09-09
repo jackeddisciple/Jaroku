@@ -23,6 +23,15 @@ export interface User {
   external_id: string;
   email: string;
   display_name: string | null;
+  /**
+   * What the sidebar's footer calls this person, or null if they have not chosen one.
+   *
+   * SEPARATE FROM `display_name` ON PURPOSE — see migration 070. That one is who they are and is
+   * what a workspace is named after; this one is a label they picked for the one row they look at
+   * all day, and the two are allowed to be unrelated. Null is the ordinary state for every account
+   * older than the column, and the footer falls back to the display name and then the address.
+   */
+  username: string | null;
   created_at: string;
   deleted_at: string | null;
   /**
@@ -74,7 +83,7 @@ export interface User {
  * of forgetting is not a crash — it is a `User` with `undefined` where a boolean should be, which
  * reads as `false` at every call site and is wrong silently.
  */
-const USER_COLUMNS = `id, external_id, email, display_name, created_at, deleted_at, onboarded_at,
+const USER_COLUMNS = `id, external_id, email, display_name, username, created_at, deleted_at, onboarded_at,
        email_verified, auth_provider, marketing_emails_opt_in, onboarding_started_at, onboarding_step`;
 
 /** The row as a driver hands it back, before the two columns that need normalising are. */
@@ -340,13 +349,20 @@ export class IdentityRepository {
   async updateProfile(
     _ctx: AnyContext,
     userId: string,
-    input: { displayName?: string; marketingEmailsOptIn?: boolean },
+    input: { displayName?: string; username?: string | null; marketingEmailsOptIn?: boolean },
   ): Promise<User | undefined> {
     const sets: string[] = [];
     const params: unknown[] = [];
     if (input.displayName !== undefined) {
       sets.push("display_name = ?");
       params.push(input.displayName);
+    }
+    // `null` CLEARS IT, which is why the check is `!== undefined` rather than a truthiness test:
+    // "I no longer want a username" and "I did not mention the username" are different requests,
+    // and only the second should leave the column alone.
+    if (input.username !== undefined) {
+      sets.push("username = ?");
+      params.push(input.username);
     }
     if (input.marketingEmailsOptIn !== undefined) {
       sets.push("marketing_emails_opt_in = ?");
@@ -494,6 +510,12 @@ export class IdentityRepository {
         external_id: input.externalId,
         email: input.email,
         display_name: input.displayName?.trim() || null,
+        // NOT DERIVED FROM ANYTHING, and that is the whole point of the field. A username is the
+        // one label a person chooses for themselves; seeding it from the email's local part or
+        // from a slug of the display name would hand them a choice already made, which is how
+        // "adarshhchoudhary20" ends up in the footer forever because nobody realised they could
+        // change it. Null renders the display name, which is the honest fallback.
+        username: null,
         created_at: nowIso(),
         deleted_at: null,
         onboarded_at: null,

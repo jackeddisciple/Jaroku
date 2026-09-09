@@ -26,7 +26,6 @@ import { useInboxStore } from "../store/inboxStore.ts";
 import { useWorkStore, workBadgeCount } from "../store/workStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher.tsx";
-import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { identityTitle } from "./AgentIdentityLine.tsx";
 import { AgentEmoji, EMOJI_SIZE } from "./AgentEmoji.tsx";
@@ -674,14 +673,43 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
  * It is also the door to the workspace panel, because that is what somebody clicking their own name
  * is reaching for.
  */
+/**
+ * The person's mark in the footer: their picture when there is one, their initial when there is not.
+ *
+ * A COMPONENT RATHER THAN A `<span>` INLINE, and it is deliberately extracted before it needs to be.
+ * The next pass gives this an image — from the Google `picture` claim on sign-in, or from an upload
+ * the person crops in settings — and the difference between "the footer draws a letter" and "the
+ * footer draws whatever identifies you" should be one file, not a rewrite of the row around it. The
+ * geometry, the radius and the fallback all live here so the image slots into a shape that already
+ * exists.
+ *
+ * THE INITIAL IS THE FALLBACK AND IT IS NOT A PLACEHOLDER TO BE ASHAMED OF: it is what every
+ * account has on the day it is made, it is stable, and it is what the member list already draws.
+ */
+function Avatar({ name }: { name: string | null | undefined }) {
+  return (
+    <span
+      aria-hidden
+      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-control bg-sidebar-active text-tiny text-ink"
+    >
+      {(name ?? "?").trim().charAt(0).toUpperCase()}
+    </span>
+  );
+}
+
 function AccountRow() {
   const user = useSessionStore((s) => s.user);
-  const workspaces = useSessionStore((s) => s.workspaces);
-  const workspaceId = useSessionStore((s) => s.workspaceId);
   const openWorkspacePanel = useUiStore((s) => s.openWorkspacePanel);
   const setProviderPanel = useUiStore((s) => s.setProviderPanel);
-  const workspace = workspaces.find((w) => w.id === workspaceId);
   const name = user?.displayName || user?.email;
+  /**
+   * WHAT THE FOOTER CALLS THEM, in the order the person themselves would expect.
+   *
+   * The username is a label they chose for exactly this row, so it wins when it exists. Everything
+   * below it is a fallback: the display name is who they are, and the address is what is left when
+   * an account has neither — which is every account older than migration 070 until they pick one.
+   */
+  const label = user?.username || name;
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -729,64 +757,52 @@ function AccountRow() {
           className="absolute bottom-full left-0 z-30 mb-1 w-full overflow-hidden rounded-control border border-sidebar-border bg-panel py-1 shadow-pop"
         >
           <button role="menuitem" onClick={choose(() => openWorkspacePanel("account"))} className={ACCOUNT_MENU_ROW}>
-            <Icon.workspace.settings size={ICON.lg} />
+            <Icon.workspace.settings size={ICON.md} />
             <span className="min-w-0 flex-1 truncate">Account &amp; workspace</span>
           </button>
           <button role="menuitem" onClick={choose(() => setProviderPanel(true))} className={ACCOUNT_MENU_ROW}>
-            <Icon.nav.providerKeys size={ICON.lg} />
+            <Icon.nav.providerKeys size={ICON.md} />
             <span className="min-w-0 flex-1 truncate">Provider keys</span>
           </button>
           <AdminModeToggle />
+          {/* THE PLAN IS NOT HERE AND NOT ON THE ROW. It was a `Free` chip beside the name, which
+              put a fact about the WORKSPACE'S BILLING on a row whose subject is a human being, and
+              made three things out of what should read as one name. It is not relocated into this
+              menu either: "Account & workspace" above already opens the surface that owns billing,
+              and a second, shallower copy of the same fact is how two places to read a plan end up
+              disagreeing. */}
+          {/* SIGN OUT, LAST AND SEPARATED. It was its own control beside the name, on the argument
+              that ending a session is irreversible-feeling and a menu row is easy to hit by
+              mistake — which is a real risk and is answered better by a divider and last place
+              than by leaving a permanent one-click exit on the row. What the old arrangement cost
+              was the row itself: a name, a chip and two buttons, where the whole point of the
+              footer is to say who you are. */}
+          <div className="my-1 h-px bg-sidebar-border" role="separator" />
+          <button role="menuitem" onClick={choose(signOut)} className={ACCOUNT_MENU_ROW}>
+            <Icon.auth.signOut size={ICON.md} />
+            <span className="min-w-0 flex-1 truncate">Sign out</span>
+          </button>
         </div>
       )}
 
-      {/* TWO CONTROLS, NOT ONE BUTTON WITH A SECOND INSIDE IT. Nesting is invalid markup and the
-          browser's own recovery from it is to flatten — which is how a "sign out" glyph inside a
-          row ends up firing the row's own click as well. */}
-      <div className="flex items-center gap-1">
-        <button
-          onClick={() => setOpen((v) => !v)}
-          aria-haspopup="menu"
-          aria-expanded={open}
-          title={name}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-control px-2 py-1.5 text-left transition-colors hover:bg-sidebar-hover active:bg-sidebar-active focus-visible:outline-none focus-visible:shadow-focusring"
-        >
-          {/* The first letter of whoever is actually here, uppercased. */}
-          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-control bg-sidebar-active text-tiny text-ink">
-            {(name ?? "?").trim().charAt(0).toUpperCase()}
-          </span>
-          <Truncate className="min-w-0 flex-1 text-label text-ink" title={name}>{name}</Truncate>
-          {/* Only when the session carries one. A chip is a claim about what the workspace is
-              paying, and inventing a default for it is how the hardcoded `Free` got there in the
-              first place.
-
-              `sm` IS ALREADY THE SMALLEST CHIP — 11px against the name's 13 — so what made this
-              read as the row's equal was `caps`, which uppercases AND adds tracking. Dropping it
-              is the change; a fourth chip size would have put a hardcoded pixel value at a call
-              site, which `test:type-scale` refuses for good reason. */}
-          {workspace?.plan?.label && (
-            <Chip size="sm" tone="faint" className="shrink-0">{workspace.plan.label}</Chip>
-          )}
-          {/* SMALLER THAN THE NAME IT BELONGS TO, both of these. The plan and the disclosure are
-              qualifiers on a row whose subject is a person; at the row's own size they read as
-              three equal things rather than as a name with two notes after it. */}
-          <span className="shrink-0 text-faint">
-            {open ? <Icon.workspace.switcherOpen size={ICON.sm} /> : <Icon.workspace.switcherClosed size={ICON.sm} />}
-          </span>
-        </button>
-        {/* SIGN OUT LIVES WITH THE PERSON, and stays OUT of the menu above it. Ending a session is
-            the one irreversible-feeling thing here, and a list you open to change a setting is the
-            wrong place to put it — it is its own control, beside the name, where a mis-aimed click
-            on a menu row cannot reach it. */}
-        <button
-          onClick={signOut}
-          title="Sign out"
-          aria-label="Sign out"
-          className="shrink-0 rounded-control p-1.5 text-faint transition-colors hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
-        >
-          <Icon.auth.signOut size={ICON.lg} />
-        </button>
-      </div>
+      {/* ONE CONTROL, AND ONE SUBJECT. The row was a button with a chip and a second button beside
+          it; it is a picture, a name and a disclosure now — press it and everything else is in the
+          menu. Nothing is nested, which is what the two-control arrangement was avoiding: the
+          sign-out glyph that used to sit here would have fired the row's own click as well. */}
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={label}
+        className="flex w-full min-w-0 items-center gap-2 rounded-control px-2 py-1.5 text-left transition-colors hover:bg-sidebar-hover active:bg-sidebar-active focus-visible:outline-none focus-visible:shadow-focusring"
+      >
+        <Avatar name={label} />
+        {/* THE USERNAME IF THEY CHOSE ONE, and their name if they did not. See `label` above. */}
+        <Truncate className="min-w-0 flex-1 text-label text-ink" title={label}>{label}</Truncate>
+        <span className="shrink-0 text-faint">
+          {open ? <Icon.workspace.switcherOpen size={ICON.sm} /> : <Icon.workspace.switcherClosed size={ICON.sm} />}
+        </span>
+      </button>
     </div>
   );
 }

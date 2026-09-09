@@ -1,0 +1,25 @@
+-- 070_user_username — the name a person is CALLED, beside the name they ARE.
+--
+-- TWO NAME COLUMNS IS THE POINT, NOT A DUPLICATION. `display_name` answers "who is this person" and
+-- is what a workspace is named after, what an invitation is addressed to, and what a member list
+-- reads. `username` answers one much narrower question — what the sidebar's footer says — and it is
+-- the person's own choice of how to be labelled in the one place they look at all day. They are
+-- allowed to be completely unrelated: "Adarsh Choudhary" and "sumu" are both correct at once.
+--
+-- IT IS NOT A HANDLE AND HAS NO UNIQUE INDEX, WHICH IS A DECISION AND NOT AN OVERSIGHT. A unique
+-- username is a different feature: it needs an availability check as somebody types, a taken-state
+-- on the form, a reserved list so nobody registers `admin` or `support`, and a story for what
+-- happens to old links when it changes. All of that is worth building the day a username addresses
+-- something — an @mention, a profile URL, a share target. Today it addresses nothing; it is a label
+-- on one row of one column, and two people may both choose `adarsh` without anything breaking.
+-- Adding the index later is an expand-only migration; removing one nobody needed would not be.
+--
+-- NULLABLE, AND THE FALLBACK IS THE FEATURE. Every account that exists predates this column, and a
+-- DEFAULT here would have to invent something — the email's local part, the display name, a slug —
+-- for a field whose entire purpose is that the person chose it. NULL means "they have not chosen
+-- one", which the footer already knows how to render: it falls back to the display name and then to
+-- the address, exactly as it did before this column existed. `db/expandContract.ts` also refuses
+-- `ADD COLUMN ... NOT NULL` without a default, because the version still serving does not name this
+-- column in its INSERTs — so nullable is what a rolling deploy requires as well as what the product
+-- wants.
+ALTER TABLE users ADD COLUMN username TEXT;

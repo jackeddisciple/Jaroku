@@ -26,6 +26,15 @@ export interface ProfileUser extends SessionUser {
 export interface ProfilePatch {
   /** 1-100 characters, trimmed. Emoji allowed — see the server's own note on why nothing is stripped. */
   name?: string;
+  /**
+   * What the sidebar's footer should call them. 0-30 characters, trimmed.
+   *
+   * `""` CLEARS IT rather than being refused, which is the one place this differs from `name`.
+   * Everybody must be called something; nobody has to have a username, and the footer falls back to
+   * the display name when there is none — so an emptied field is a request to remove it and not a
+   * validation failure. See the server's `profileHandler`.
+   */
+  username?: string;
   /** §3.4's checkbox. Strictly a boolean; the server refuses anything else. */
   marketingEmailsOptIn?: boolean;
 }

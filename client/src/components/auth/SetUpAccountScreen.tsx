@@ -27,9 +27,12 @@ import { Checkbox, FormError, PrimaryButton, TextField } from "./controls.tsx";
 
 /** §3.4: "Name is 1-100 chars, trimmed, non-empty." The server holds the same number. */
 const NAME_MAX = 100;
+/** Mirrors `USERNAME_MAX` in the server's `auth/session.ts`. See there for why it is far shorter. */
+const USERNAME_MAX = 30;
 
 export function SetUpAccountScreen() {
   const [name, setName] = useState("");
+  const [username, setUsername] = useState("");
   const [optIn, setOptIn] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +45,9 @@ export function SetUpAccountScreen() {
     setBusy(true);
     setError(null);
     try {
-      const user = await updateProfile({ name: trimmed, marketingEmailsOptIn: optIn });
+      // The username goes up even when it is blank, and blank CLEARS it rather than failing —
+      // this field is optional and skipping it is a real answer. See `ProfilePatch.username`.
+      const user = await updateProfile({ name: trimmed, username: username.trim(), marketingEmailsOptIn: optIn });
       // THE STORE IS UPDATED FROM THE SERVER'S ANSWER, not from what was typed. The server trims,
       // bounds and may refuse — so believing the local value would mean the app rendering a name
       // one character longer than the one that was actually saved, which is the sort of difference
@@ -78,6 +83,28 @@ export function SetUpAccountScreen() {
           />
           <p className="text-caption leading-[1.5] text-muted">
             Displayed in your workspace and on things you share with teammates.
+          </p>
+        </div>
+
+        {/* THE SECOND NAME, AND THE COPY HAS TO EARN IT. Two name fields on one screen is a screen
+            people abandon unless each one says what it is FOR — so the question is about where it
+            appears rather than about what it is, and the field is plainly optional. Nobody is
+            blocked by it: `submit` only requires the name above. */}
+        <div className="flex flex-col gap-3">
+          <p className="text-label leading-[1.5] text-ink">
+            Pick a username <span className="text-muted">(optional)</span>
+          </p>
+          <TextField
+            value={username}
+            onChange={setUsername}
+            placeholder="Anything you like"
+            ariaLabel="Your username"
+            disabled={busy}
+            maxLength={USERNAME_MAX}
+            name="username"
+          />
+          <p className="text-caption leading-[1.5] text-muted">
+            Shown at the bottom of your sidebar. Only you see it, and you can change it any time.
           </p>
         </div>
 

@@ -94,6 +94,8 @@ export interface SessionView {
     id: string;
     email: string;
     displayName: string | null;
+    /** What the sidebar's footer calls them, or null if they have not chosen one. Migration 070. */
+    username: string | null;
     /**
      * Whether this PERSON has been shown the product before.
      *
@@ -340,6 +342,7 @@ function sessionHandler(deps: SessionDeps): Handler {
         id: provisioned.user.id,
         email: provisioned.user.email,
         displayName: provisioned.user.display_name,
+        username: provisioned.user.username,
         // A boolean, not the timestamp. The client's only question is whether to show the
         // flow; WHEN somebody onboarded is for whoever reads the funnel, and a date on the
         // wire is a date somebody eventually renders.
@@ -447,6 +450,16 @@ function onboardingRestartHandler(deps: SessionDeps): Handler {
 export const DISPLAY_NAME_MAX = 100;
 
 /**
+ * How long a username may be, and it is deliberately far shorter than a display name.
+ *
+ * A display name has to hold anybody's real name, which is why 100 — see `profile.test.ts` on why
+ * that field refuses almost nothing. This one is a label on a 220px sidebar row: past about thirty
+ * characters it cannot be read there anyway, and the truncation would make the choice pointless.
+ * The refusal is honest at the point of typing rather than a silent ellipsis later.
+ */
+export const USERNAME_MAX = 30;
+
+/**
  * The only thing a display name may not contain.
  *
  * WRITTEN AS ESCAPES RATHER THAN AS A LITERAL RANGE, deliberately. The first version of this line
@@ -488,8 +501,8 @@ function profileHandler(deps: SessionDeps): Handler {
     // A verified token for somebody with no row: a session against an account deleted mid-flight.
     if (!user) throw forbidden("this account no longer exists");
 
-    const body = await req.json<{ name?: unknown; marketingEmailsOptIn?: unknown }>();
-    const patch: { displayName?: string; marketingEmailsOptIn?: boolean } = {};
+    const body = await req.json<{ name?: unknown; username?: unknown; marketingEmailsOptIn?: unknown }>();
+    const patch: { displayName?: string; username?: string | null; marketingEmailsOptIn?: boolean } = {};
 
     if (body.name !== undefined) {
       if (typeof body.name !== "string") throw badRequest("a name is a string");
@@ -502,6 +515,25 @@ function profileHandler(deps: SessionDeps): Handler {
       // filter and why zero-width characters are not in it.
       if (CONTROL_CHARACTERS.test(name)) throw badRequest("a name cannot contain control characters");
       patch.displayName = name;
+    }
+
+    // THE SAME LATITUDE THE NAME GETS, for the same reason: a username is a person's own choice of
+    // label, and a field that refuses "李伟" or "ada🏳️‍🌈" while looking like hygiene is a field that
+    // has told somebody they do not exist. Control characters are the only shape refused, exactly as
+    // above — they are never typed on purpose and they break a single-line row.
+    //
+    // EMPTY MEANS "CLEAR IT" RATHER THAN BEING AN ERROR, which is the one place this differs from
+    // the name. Everybody must be called something; nobody has to have a username, and the footer
+    // falls back to the display name when there is none. Sending `""` is how the settings field
+    // says "remove it" without needing a second route.
+    if (body.username !== undefined) {
+      if (body.username !== null && typeof body.username !== "string") {
+        throw badRequest("a username is a string");
+      }
+      const raw = typeof body.username === "string" ? body.username.trim() : "";
+      if (raw.length > USERNAME_MAX) throw badRequest(`a username is at most ${USERNAME_MAX} characters`);
+      if (CONTROL_CHARACTERS.test(raw)) throw badRequest("a username cannot contain control characters");
+      patch.username = raw.length === 0 ? null : raw;
     }
 
     if (body.marketingEmailsOptIn !== undefined) {
@@ -535,6 +567,7 @@ function profileHandler(deps: SessionDeps): Handler {
           id: updated.id,
           email: updated.email,
           displayName: updated.display_name,
+          username: updated.username,
           onboarded: updated.onboarded_at !== null,
           onboardingStep: updated.onboarding_step,
           marketingEmailsOptIn: updated.marketing_emails_opt_in,

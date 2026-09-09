@@ -84,6 +84,15 @@ export interface SessionUser {
   email: string;
   displayName: string | null;
   /**
+   * What the sidebar's footer calls them, or null if they have not chosen one.
+   *
+   * A SECOND NAME AND NOT A DUPLICATE OF THE FIRST. `displayName` is who they are — it names their
+   * workspace and addresses their invitations. This is a label they picked for the one row they
+   * look at all day, and the two are allowed to be unrelated. Null is the ordinary state for every
+   * account older than migration 070; `AccountRow` falls back to the display name, then the email.
+   */
+  username: string | null;
+  /**
    * Whether this PERSON has finished first-run onboarding.
    *
    * From the server, because "is this user new" and "is this browser new" are different

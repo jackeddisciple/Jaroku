@@ -14,6 +14,10 @@
 // second time through.
 
 import { useState } from "react";
+import { updateProfile } from "../lib/profile.ts";
+import { SignInFailure } from "../lib/signIn.ts";
+import { TextField } from "./auth/controls.tsx";
+import { secondaryBtn } from "./buttons.ts";
 import { useAccountOnboardingStore } from "../store/accountOnboardingStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
@@ -51,6 +55,7 @@ export function AccountSection() {
               name should not happen and describes how it self-heals if one does; showing the gap
               is what makes that state visible rather than a row that looks like a rendering bug. */}
           <Row label="Name" value={user?.displayName ?? "—"} />
+          <UsernameRow />
         </dl>
       </section>
 
@@ -82,6 +87,97 @@ export function AccountSection() {
     </div>
   );
 }
+
+/**
+ * The one field on this surface somebody can CHANGE, which is why it is a component and not a `Row`.
+ *
+ * IT EDITS IN PLACE RATHER THAN OPENING A DIALOG. A username is a single short string with no
+ * confirmation worth asking for and nothing that breaks when it changes — a modal for it would be
+ * more ceremony than the change deserves. The row reads as the others until you press Change.
+ *
+ * EMPTY IS A VALID ANSWER AND SAVES AS "NONE". The server treats `""` as a clear rather than a
+ * refusal (see `profileHandler`), which is what lets somebody undo a username without a second
+ * control to do it with — and the footer falls straight back to their name.
+ */
+function UsernameRow() {
+  const user = useSessionStore((s) => s.user);
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const save = async (): Promise<void> => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await updateProfile({ username: value.trim() });
+      useSessionStore.getState().setUser(updated);
+      setEditing(false);
+    } catch (err) {
+      setError(err instanceof SignInFailure ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!editing) {
+    return (
+      <div className="flex items-baseline gap-3">
+        <dt className="w-[110px] shrink-0 text-caption text-muted">Username</dt>
+        <dd className="flex min-w-0 flex-1 items-baseline gap-2">
+          <span className="min-w-0 break-all text-label text-ink">{user?.username ?? "—"}</span>
+          <button
+            type="button"
+            onClick={() => { setValue(user?.username ?? ""); setError(null); setEditing(true); }}
+            className="shrink-0 text-caption text-muted underline underline-offset-2 transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+          >
+            Change
+          </button>
+        </dd>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-baseline gap-3">
+      <dt className="w-[110px] shrink-0 text-caption text-muted">Username</dt>
+      <dd className="flex min-w-0 flex-1 flex-col gap-2">
+        <TextField
+          value={value}
+          onChange={setValue}
+          placeholder="Anything you like"
+          ariaLabel="Your username"
+          autoFocus
+          disabled={busy}
+          maxLength={USERNAME_MAX}
+          invalid={error !== null}
+          name="username"
+        />
+        {error && <p className="text-caption text-err">{error}</p>}
+        <p className="text-caption leading-[1.5] text-muted">
+          Shown at the bottom of your sidebar. Leave it empty to go back to your name.
+        </p>
+        <div className="flex gap-2">
+          <button type="button" onClick={() => void save()} disabled={busy} className={secondaryBtn}>
+            {busy ? "Saving…" : "Save"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setEditing(false)}
+            disabled={busy}
+            className="text-caption text-muted underline underline-offset-2 transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+          >
+            Cancel
+          </button>
+        </div>
+      </dd>
+    </div>
+  );
+}
+
+/** Mirrors `USERNAME_MAX` in the server's `auth/session.ts`. */
+const USERNAME_MAX = 30;
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
