@@ -116,11 +116,20 @@ export const useBuildStore = create<BuildState>((set) => ({
   setAgents: (agents) =>
     set((s) => ({
       agents,
-      // Keep a selection if it still exists; otherwise fall back to the newest agent.
+      // Keep a selection if it still exists; otherwise SELECT NOTHING.
+      //
+      // IT USED TO FALL BACK TO `agents[0]`, THE NEWEST ONE, and that is a selection nobody made.
+      // The list arrives on every connect, so opening the app put you inside whichever agent
+      // happened to be newest — its panes, its files, its runs — with that row lit in the sidebar
+      // as though you had chosen it. `New` is the destination a session starts on, and a fallback
+      // that quietly overrides it is the sidebar answering "where am I" with somewhere you have
+      // never been.
+      //
+      // `null` is a state the column already draws: no agent row is selected and `New` is current.
       activeAgentId:
         s.activeAgentId && agents.some((a) => a.agent_id === s.activeAgentId)
           ? s.activeAgentId
-          : (agents[0]?.agent_id ?? null),
+          : null,
     })),
 
   selectAgent: (activeAgentId) => set({ activeAgentId }),

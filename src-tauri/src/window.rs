@@ -86,6 +86,18 @@ pub fn open(app: &AppHandle, ws_url: &str) -> Result<(), Box<dyn std::error::Err
         // off-white text, on a product whose palette has no dark mode at all. `color-scheme: light`
         // in index.css says the same thing to the webview; this says it to AppKit.
         .theme(Some(tauri::Theme::Light))
+        // THE LIGHTS COME DOWN TO THE ROW, RATHER THAN THE ROW GOING UP TO THE LIGHTS. With
+        // `TitleBarStyle::Overlay` macOS keeps the three buttons where a 28pt title bar would have
+        // put them — centred about 14pt down — while `SidebarChrome` is a 44px row of 28px controls
+        // centred at 22. Eight points apart, on the one row where two different toolkits' controls
+        // sit side by side, which is exactly where the eye reads a misalignment.
+        //
+        // Moving them is the smaller change of the two: the alternative is shortening the row or
+        // pushing its contents up, which moves Jaroku's own chrome to accommodate three buttons it
+        // does not own. `(20, 16)` keeps the horizontal inset macOS itself uses — the reservation
+        // in `SidebarChrome` is `pl-[76px]`, which is that inset plus the three buttons — and puts
+        // their centres on 22 with the back and forward controls beside them.
+        .traffic_light_position(tauri::LogicalPosition::new(20.0, 16.0))
         .initialization_script(&host_config(ws_url));
 
     // MACOS ONLY, AND NOT BY PREFERENCE — `title_bar_style` and `hidden_title` are compiled only

@@ -16,7 +16,7 @@ import { selectAgent, selectRun } from "../lib/selection.ts";
 import {
   sendLoadHistory, sendLoadRun, sendOpenGithubPr, sendRun, signOut,
 } from "../lib/socket.ts";
-import { ICON, SURFACE } from "../lib/tokens.ts";
+import { ICON } from "../lib/tokens.ts";
 import { quietBtn, secondaryBtn } from "./buttons.ts";
 import { AlertTriangleIcon } from "./panelIcons.tsx";
 import { useUiStore, type NavDestination } from "../store/uiStore.ts";
@@ -449,10 +449,12 @@ function NavList() {
             {badge > 0 && (
               <span
                 title={badgeTitle}
+                // A CLASS RATHER THAN AN INLINE STYLE, so the material can reach it. An inline
+                // `background` wins over every stylesheet rule there is, which left this badge the
+                // one opaque patch in the column that could not be softened with the rest.
                 className={`shrink-0 rounded-xs px-1 text-tiny leading-[15px] tabular-nums ${
-                  id === "threads" ? "text-run" : "text-ink"
+                  id === "threads" ? "text-run" : "bg-chrome text-ink"
                 }`}
-                style={id === "threads" ? undefined : { background: SURFACE.chrome }}
               >
                 {badge}
               </span>
@@ -918,7 +920,10 @@ function FilterMenu({
           filtering || open ? "bg-sidebar-active text-accent" : "text-muted hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink"
         }`}
       >
-        <Icon.agents.filter size={ICON.lg} />
+        {/* `md`, NOT `lg`. The ladder's top rung is for a NAVIGATION row — a mark that anchors a
+            line you scan a column for — and this is a control sitting beside an 11px section
+            label, where 18px read as the loudest thing in the header. */}
+        <Icon.agents.filter size={ICON.md} />
         {filtering && current?.count != null && (
           <span className="text-tiny tabular-nums">{current.count}</span>
         )}

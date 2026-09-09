@@ -185,6 +185,17 @@
        rather than as a selection. */
     --sidebar-material-hover: rgba(29, 29, 27, 0.04);
     --sidebar-material-active: rgba(29, 29, 27, 0.07);
+    /* THE CAPSULES, FOR THE SAME REASON AND ONE LEVEL DOWN. The Inbox count, the plan chip and every
+       filled `Chip` in the column stand on `--color-bg-active`/`--color-bg-hover`, which are opaque:
+       three small fixed patches on a surface that moves with the desktop, each reading heavier than
+       the material around it. A veil at the hover's own weight keeps them legible and lets the
+       material through, so they sit ON the column rather than on top of it. */
+    --sidebar-material-chip: rgba(29, 29, 27, 0.05);
+    /* The runs capsule keeps its pink and loses its opacity. `#FCE7F3` is a light fill on a painted
+       panel and a bright one on a material — it was the loudest thing in a column of grey text. At
+       this alpha the hue survives, the capsule stops competing with the agent's name, and the mark
+       and figure on it are unchanged. */
+    --sidebar-material-runs: rgba(219, 39, 119, 0.09);
   }
   html,
   body,
@@ -377,6 +388,17 @@
   :root[data-vibrancy="sidebar"] .bg-sidebar-active,
   :root[data-vibrancy="sidebar"] .active\:bg-sidebar-active:active {
     background-color: var(--sidebar-material-active);
+  }
+  /* The capsules, scoped INSIDE the column. `.bg-chrome` and `.bg-active` are used all over the
+     workspace too, and the flag sits on the document — so these are qualified by
+     `.sidebar-material` rather than left to match everywhere the attribute is set. The workspace is
+     opaque and its chips are correct as they are. */
+  :root[data-vibrancy="sidebar"] .sidebar-material .bg-chrome,
+  :root[data-vibrancy="sidebar"] .sidebar-material .bg-active {
+    background-color: var(--sidebar-material-chip);
+  }
+  :root[data-vibrancy="sidebar"] .sidebar-material .bg-runssoft {
+    background-color: var(--sidebar-material-runs);
   }
 
   /* ── Graph View canvas ──────────────────────────────────────────────────────
