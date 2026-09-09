@@ -37,7 +37,7 @@ import { INPUT_KEY_PREFIX, useUiStore } from "../store/uiStore.ts";
 // sides only reach each other from inside a function, never at module scope.
 import { openThread } from "./threadNav.ts";
 import {
-  fetchSession, fetchTicket, socketUrl, storeToken, storeWorkspace, storedToken, storedWorkspace,
+  fetchSession, fetchTicket, signedOutReason, socketUrl, storeToken, storeWorkspace, storedToken, storedWorkspace,
   type AuthFailure,
 } from "./auth.ts";
 import type {
@@ -730,7 +730,11 @@ async function connect(): Promise<void> {
     if (revertSwitch(failure.message)) return;
     if (!failure.retryable) {
       // 401 or 403. The token is bad, or this account may not be here. Stop.
-      useSessionStore.getState().signOut(failure.message);
+      //
+      // AND WHAT THE PERSON IS TOLD IS NOT WHAT THE SERVER SAID. `sessionStore.message` is printed
+      // on the sign-in card, so this line used to put the verifier's internals in front of whoever
+      // was trying to sign in — see `signedOutReason`, which is where the two audiences are split.
+      useSessionStore.getState().signOut(signedOutReason(failure));
       return;
     }
     useSessionStore.getState().setStatus("connecting", failure.message);

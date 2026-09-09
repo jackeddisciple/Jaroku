@@ -184,6 +184,37 @@ export class AuthFailure extends Error {
 }
 
 /**
+ * What to TELL SOMEBODY when their stored session is refused, as opposed to what the server said.
+ *
+ * THE SIGN-IN CARD RENDERED THE VERIFIER'S OWN SENTENCE. `startSocket` signed out with
+ * `failure.message` verbatim, and `sessionStore.message` is what `SignInScreen` prints above the
+ * buttons — so a person whose token could not be verified was shown
+ *
+ *   no signing key with kid "jaroku-b0985073" at http://127.0.0.1:4317/v1/auth/jwks.json
+ *
+ * which names an internal key id, an internal endpoint and a loopback address, and tells the reader
+ * nothing they can act on. It is not a rare shape either: that message is what `jwks.ts` throws
+ * whenever a token outlives the key that signed it, which is every session in existence the moment
+ * `JAROKU_AUTH_SIGNING_KEY` is rotated or a replica comes up holding a different one.
+ *
+ * THE RULE IS ABOUT THE STATUS, NOT ABOUT THE STRING, and that is what makes this a fix rather than
+ * a patch over one sentence. A 401 means the credential this device is holding is no longer good —
+ * expired, revoked, malformed, or signed by a key that has gone — and the useful thing to say is
+ * the same in all four cases, because the useful thing to DO is the same in all four cases. Which
+ * means no future server-side auth message can reach the card either, including ones nobody has
+ * written yet. A 403 is a different fact: the credential is fine and the door is not open, so the
+ * server's own words are worth keeping.
+ *
+ * The raw text is not thrown away — it goes to the console, where whoever is debugging a rotation
+ * at two in the morning needs it and the person signing in does not.
+ */
+export function signedOutReason(failure: AuthFailure): string {
+  if (failure.status === 403) return failure.message;
+  console.warn(`[jaroku] the stored session was refused (${failure.status}): ${failure.message}`);
+  return "your session has expired — please sign in again";
+}
+
+/**
  * Load the session out of whatever is storing it, before anything reads it.
  *
  * A NO-OP IN A BROWSER, where `localStorage` is already synchronous and there is nothing to

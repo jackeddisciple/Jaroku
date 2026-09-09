@@ -15,6 +15,7 @@ import {
   fetchSession,
   fetchTicket,
   localIssuerAvailable,
+  signedOutReason,
   socketUrl,
   storeToken,
   storeWorkspace,
@@ -209,6 +210,43 @@ console.log("\nthe socket URL");
   check(url.includes("ticket="), "the ticket goes in the query string — the only place a browser can put one");
   check(!url.includes("a+b/c="), "...percent-encoded, so a ticket cannot break out of the parameter");
   check(url.startsWith("ws"), "...on a ws:// URL");
+}
+
+console.log("\nwhat a refused session tells the person, as opposed to the developer");
+{
+  // THE SIGN-IN CARD PRINTS THIS STRING. `sessionStore.message` is rendered above the buttons, and
+  // `startSocket` used to fill it with `failure.message` — so the real screen a real user saw read
+  // `no signing key with kid "jaroku-b0985073" at http://127.0.0.1:4317/v1/auth/jwks.json`.
+  //
+  // THE ASSERTIONS ARE ABOUT ABSENCE, because that is the shape this can fail in again. It is not
+  // enough that today's four messages are handled: what has to hold is that NOTHING a 401 carries
+  // reaches the card, including messages nobody has written yet.
+  const refused = (message: string, status = 401): string =>
+    signedOutReason(new AuthFailure(message, status, false));
+
+  const leaky = [
+    'no signing key with kid "jaroku-b0985073" at http://127.0.0.1:4317/v1/auth/jwks.json',
+    "jwt expired at 1757397600",
+    "unexpected token in JWT header",
+    "issuer urn:jaroku:local is not trusted by this deployment",
+  ];
+  for (const raw of leaky) {
+    const shown = refused(raw);
+    check(shown !== raw, `a 401 saying "${raw.slice(0, 34)}…" is not repeated to the reader`);
+  }
+  // The specific leaks, named: a key id, an internal endpoint, a loopback address, the word JWT.
+  const shown = refused(leaky[0]!);
+  for (const secret of ["kid", "jwks", "127.0.0.1", "jaroku-b0985073"]) {
+    check(!shown.toLowerCase().includes(secret.toLowerCase()), `...and it names no ${secret}`);
+  }
+  check(/sign in again/i.test(shown), "...it says what to do instead");
+
+  // A 403 IS A DIFFERENT FACT AND KEEPS ITS WORDS. The credential is good and the door is not
+  // open — "you are no longer a member of any workspace" is exactly what somebody needs to read,
+  // and blanketing it into "sign in again" would send them round a loop that cannot help.
+  const forbidden = "you are no longer a member of any workspace";
+  check(signedOutReason(new AuthFailure(forbidden, 403, false)) === forbidden,
+    "a 403 still says what the server said — it is about access, not about the credential");
 }
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
