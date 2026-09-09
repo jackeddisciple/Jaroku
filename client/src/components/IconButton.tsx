@@ -78,6 +78,15 @@ export interface IconButtonProps {
    */
   stopPropagation?: boolean;
   className?: string;
+  /**
+   * An ARIA role, for the one case a plain button is not what this is.
+   *
+   * ADDED FOR MENUS. `FleetStrip` puts these inside a `role="menu"`, and a menu whose interactive
+   * children are plain buttons is a menu with no items — assistive technology announces it as
+   * empty and `useMenuFocus` has nothing to move between. Optional, and unset everywhere else:
+   * a button is a button until something says otherwise.
+   */
+  role?: string;
 }
 
 export function IconButton({
@@ -91,6 +100,7 @@ export function IconButton({
   size = ICON.sm,
   stopPropagation = false,
   className,
+  role,
 }: IconButtonProps) {
   const disabled = disabledReason !== null && disabledReason !== undefined;
   // A CHOSEN SEGMENT IS HELD DOWN, NOT ACCENTED. `active` is a toggle that is on and takes the
@@ -110,6 +120,7 @@ export function IconButton({
   return (
     <button
       type="button"
+      {...(role ? { role } : {})}
       // ONE STRING, TWO JOBS — the whole of I5. When the control is off, the tooltip becomes the
       // reason and the accessible name stays the action.
       title={disabled ? (disabledReason as string) : label}

@@ -22,6 +22,15 @@
 import { useEffect, useRef } from "react";
 
 /**
+ * What counts as an item to move between.
+ *
+ * ALL THREE VARIANTS, not just `menuitem`. A menu that picks one of several — the agent filter —
+ * is `menuitemradio`, and a menu of toggles would be `menuitemcheckbox`; both are items a person
+ * arrows through, and a selector that named only the plain one would silently skip a whole menu.
+ */
+const MENU_ITEM = '[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]';
+
+/**
  * Move focus into a menu when it opens, and back to its trigger when it closes.
  *
  * `container` must wrap BOTH the menu and its trigger — which the three call sites already do,
@@ -46,7 +55,7 @@ export function useMenuFocus(open: boolean, container: React.RefObject<HTMLEleme
     if (open && !wasOpen.current) {
       // Opening. The first item, because a menu opened from the keyboard should land on something
       // actionable rather than on the panel itself.
-      const first = root.querySelector<HTMLElement>('[role="menuitem"]');
+      const first = root.querySelector<HTMLElement>(MENU_ITEM);
       // `preventScroll` because these panels are inside a scrolling column, and focusing an item
       // near its bottom edge would otherwise jump the whole sidebar.
       first?.focus({ preventScroll: true });
@@ -79,7 +88,7 @@ export function useMenuFocus(open: boolean, container: React.RefObject<HTMLEleme
     const onKey = (e: KeyboardEvent): void => {
       const keys = ["ArrowDown", "ArrowUp", "Home", "End"];
       if (!keys.includes(e.key)) return;
-      const items = [...root.querySelectorAll<HTMLElement>('[role="menuitem"]')].filter(
+      const items = [...root.querySelectorAll<HTMLElement>(MENU_ITEM)].filter(
         // A disabled item is skipped rather than focused-and-inert, which is the difference between
         // a menu that feels responsive and one that appears to swallow a keypress.
         (el) => !el.hasAttribute("disabled") && el.getAttribute("aria-disabled") !== "true",

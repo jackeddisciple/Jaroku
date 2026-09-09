@@ -35,7 +35,7 @@ import { startNewAgent } from "../lib/newAgent.ts";
 import { goBack, goForward } from "../lib/navHistory.ts";
 import { canGoBack, canGoForward, useHistoryStore } from "../store/historyStore.ts";
 import { hasHostWindow } from "../lib/windowStage.ts";
-import { loadAvatar } from "../lib/avatar.ts";
+import { useAvatar } from "../lib/avatar.ts";
 import { useMenuFocus } from "../lib/menuFocus.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { SearchIcon, SparklesIcon } from "./panelIcons.tsx";
@@ -693,19 +693,11 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
  * account has on the day it is made, it is stable, and it is what the member list already draws.
  */
 function Avatar({ name }: { name: string | null | undefined }) {
-  const hasAvatar = useSessionStore((s) => s.user?.hasAvatar ?? false);
-  const [url, setUrl] = useState<string | null>(null);
-
   // FETCHED, NOT SRC'D. See lib/avatar.ts — the route needs a bearer token, which an `<img src>`
-  // cannot carry. `loadAvatar` is cached and reference-counted, so mounting this in two places
-  // makes one request. The `live` flag is the ordinary guard against a resolve landing after the
-  // component has gone.
-  useEffect(() => {
-    if (!hasAvatar) { setUrl(null); return; }
-    let live = true;
-    void loadAvatar().then((next) => { if (live) setUrl(next); });
-    return () => { live = false; };
-  }, [hasAvatar]);
+  // cannot carry. The hook is shared with the settings row, which is what keeps the two in step:
+  // this used to be its own effect keyed on `hasAvatar`, and replacing a picture leaves that
+  // `true` → `true`, so the footer went on rendering a blob the upload had already revoked.
+  const url = useAvatar(useSessionStore((s) => s.user?.hasAvatar ?? false));
 
   return (
     <span
@@ -957,7 +949,16 @@ function FilterMenu({
   ];
   // Only when there is something in it. An Archived entry on a workspace that has never archived
   // anything leads to an empty state, which is the same noise an empty section is in Threads.
-  if (counts.archived > 0) entries.push({ id: "archived", label: "Archived", count: counts.archived });
+  // ARCHIVED IS LISTED WHEN THERE ARE ANY **OR WHEN IT IS THE ONE YOU ARE ON**, and the second
+  // half is the bug this had. The entry existed only while the count was above zero — so
+  // un-archiving the last archived agent while looking at that filter took the entry out from
+  // under the active selection: `current` became undefined, the trigger's title AND its
+  // `aria-label` read "Filtered: undefined", and the menu no longer contained the row you were
+  // standing on. Keeping it while selected shows an honest `Archived 0` and leaves the way out
+  // visible, which is better than silently resetting somebody's filter for them.
+  if (counts.archived > 0 || filter === "archived") {
+    entries.push({ id: "archived", label: "Archived", count: counts.archived });
+  }
 
   const current = entries.find((e) => e.id === filter);
   const filtering = filter !== "all";
@@ -982,10 +983,24 @@ function FilterMenu({
         )}
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-30 mt-1 min-w-[170px] origin-top animate-menu-in rounded-card border border-sidebar-border bg-elevated p-1 shadow-floating motion-reduce:animate-none">
+        // A MENU WITH NO ROLE AT ALL, WHICH IS WHY `test:menu-keys` NEVER SAW IT. The panel was a
+        // bare `<div>` of buttons: the suite scans for `role="menu"`, so the one sidebar dropdown
+        // that never declared itself was the one it could not check — and `useMenuFocus` found no
+        // items in it either, so the arrow keys it was wired for did nothing.
+        //
+        // `menuitemradio` RATHER THAN `menuitem`, because this is a single-select: exactly one
+        // filter is in force and the others are not. `aria-checked` is what says which, and it is
+        // the difference between a screen reader announcing "Running" and "Running, checked".
+        <div
+          role="menu"
+          aria-label="Filter agents"
+          className="absolute right-0 top-full z-30 mt-1 min-w-[170px] origin-top animate-menu-in rounded-card border border-sidebar-border bg-elevated p-1 shadow-floating motion-reduce:animate-none"
+        >
           {entries.map((e) => (
             <button
               key={e.id}
+              role="menuitemradio"
+              aria-checked={filter === e.id}
               onClick={() => {
                 setFilter(e.id);
                 setOpen(false);

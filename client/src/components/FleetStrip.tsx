@@ -162,6 +162,10 @@ function CardMenu({ card }: { card: FleetCardView }) {
 
       {open && (
         <div
+          // ITS BUTTONS ARE `menuitem` NOW. This declared `role="menu"` and contained none — a menu
+          // with no items, which assistive technology announces as exactly that, and which left
+          // `useMenuFocus` with nothing to move between. The facts above them stay unmarked: they
+          // are content inside the menu, not things you can choose.
           role="menu"
           className="absolute right-0 top-full z-30 mt-1 w-[240px] rounded-card border border-edge bg-elevated p-1 shadow-floating"
         >
@@ -197,6 +201,7 @@ function CardMenu({ card }: { card: FleetCardView }) {
             <IconButton
               icon={Icon.fleet.logs}
               label={logs ? "Hide logs" : "Show logs"}
+              role="menuitem"
               onClick={() => setLogs((v) => !v)}
             />
 
@@ -208,6 +213,7 @@ function CardMenu({ card }: { card: FleetCardView }) {
               <IconButton
                 icon={Icon.fleet.reconnect}
                 label={DESTRUCTIVE.reconnect.label}
+                role="menuitem"
                 onClick={() => { setOpen(false); setConfirming("reconnect"); }}
               />
             </Capable>
@@ -219,6 +225,7 @@ function CardMenu({ card }: { card: FleetCardView }) {
                   icon={Icon.fleet.kill}
                   label={DESTRUCTIVE.kill.label}
                   danger
+                  role="menuitem"
                   onClick={() => { setOpen(false); setConfirming("kill"); }}
                 />
               </>

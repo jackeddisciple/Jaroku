@@ -15,12 +15,34 @@
 // the document goes away — so a session that changed its avatar a dozen times without revoking
 // would hold a dozen images for the life of the tab.
 
+import { useEffect, useState } from "react";
+
 import { apiBase, storedToken } from "./auth.ts";
 
 /** The blob URL for the current avatar, or null when there is none — see `loadAvatar`. */
 let current: { url: string; token: string } | null = null;
 /** In-flight fetch, so two consumers mounting in the same tick make one request. */
 let pending: Promise<string | null> | null = null;
+
+/**
+ * Who to tell when the picture changes, and the bug that made this necessary.
+ *
+ * REPLACING A PICTURE IS INVISIBLE TO `hasAvatar`. Both consumers keyed their fetch on that
+ * boolean, which is correct for "got one" and "lost one" and WRONG for "swapped one": uploading a
+ * new picture leaves it `true` → `true`, so nothing re-rendered — while `uploadAvatar` had already
+ * called `forget()` and revoked the object URL the sidebar was still holding. The footer showed a
+ * dead blob until the next reload, and only after the one action most likely to make somebody look
+ * at it.
+ *
+ * A COUNTER RATHER THAN AN EVENT PAYLOAD. Subscribers do not need to know what changed — there is
+ * one picture — only that what they hold is stale. `useAvatar` below turns that into a re-fetch.
+ */
+let version = 0;
+const listeners = new Set<() => void>();
+function changed(): void {
+  version++;
+  for (const l of listeners) l();
+}
 
 /**
  * The current avatar as an object URL, fetching it at most once per session.
@@ -47,7 +69,12 @@ export async function loadAvatar(): Promise<string | null> {
       if (!res.ok) return null;
       const blob = await res.blob();
       if (blob.size === 0) return null;
-      forget();
+      // REVOKED DIRECTLY RATHER THAN THROUGH `forget()`, which would notify — and the only
+      // listeners are the effects that called this, so telling them the picture changed while
+      // handing them the new one is a wasted render at best and a loop at worst. `forget` means
+      // "somebody changed the picture"; this is just this function tidying up after itself.
+      if (current) URL.revokeObjectURL(current.url);
+      current = null;
       const url = URL.createObjectURL(blob);
       current = { url, token };
       return url;
@@ -70,6 +97,35 @@ export async function loadAvatar(): Promise<string | null> {
 export function forget(): void {
   if (current) URL.revokeObjectURL(current.url);
   current = null;
+  changed();
+}
+
+/**
+ * The current picture as an object URL, kept fresh.
+ *
+ * ONE HOOK FOR BOTH CONSUMERS. The sidebar footer and the settings row had the same effect written
+ * out twice — and the duplicate is what let them drift, because only one of them knew to refetch
+ * after an upload. This is the behaviour in one place: fetch when there is one to fetch, refetch
+ * when it changes underneath, and drop it when there is none.
+ */
+export function useAvatar(hasAvatar: boolean): string | null {
+  const [url, setUrl] = useState<string | null>(null);
+  const [tick, setTick] = useState(version);
+
+  useEffect(() => {
+    const onChange = (): void => setTick(version);
+    listeners.add(onChange);
+    return () => { listeners.delete(onChange); };
+  }, []);
+
+  useEffect(() => {
+    if (!hasAvatar) { setUrl(null); return; }
+    let live = true;
+    void loadAvatar().then((next) => { if (live) setUrl(next); });
+    return () => { live = false; };
+  }, [hasAvatar, tick]);
+
+  return url;
 }
 
 /** Upload new bytes. The caller has already cropped; this only carries them. */

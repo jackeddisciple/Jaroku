@@ -33,10 +33,27 @@ const HERE = fileURLToPath(new URL(".", import.meta.url));
 const SRC = `${HERE}..`;
 const read = (path: string): string => readFileSync(`${SRC}/${path}`, "utf8");
 
+/**
+ * The source with its comments blanked out.
+ *
+ * THIS SUITE HAS NOW BEEN FOOLED BY ITS OWN PROSE TWICE — first by the paragraph in `menuFocus.ts`
+ * explaining that focus is not an `aria-activedescendant`, then by the one in `IconButton.tsx`
+ * explaining why that component accepts a role at all. Both mention the exact string being scanned
+ * for. A file that TALKS about menus is not a file that HAS one, and the difference is the thing a
+ * source scan is worst at unless it is told.
+ *
+ * The same treatment `colourSystem.test.ts` applies for the same reason, blanking rather than
+ * deleting so any line number a failure reports still points at the right line.
+ */
+const withoutComments = (text: string): string =>
+  text
+    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "))
+    .replace(/(^|[^:])\/\/[^\n]*/g, (m, p1: string) => p1 + " ".repeat(m.length - p1.length));
+
 const SOURCES = readdirSync(SRC, { recursive: true })
   .map((e) => String(e).replace(/\\/g, "/"))
   .filter((p) => /\.tsx$/.test(p) && !p.endsWith(".test.tsx"))
-  .map((path) => ({ path, text: read(path) }));
+  .map((path) => ({ path, text: withoutComments(read(path)) }));
 
 console.log("\nevery component that declares a menu also drives one");
 {
@@ -53,6 +70,12 @@ console.log("\nevery component that declares a menu also drives one");
     // items; whether it borrows that or writes it is not this suite's business.
     const driven = /useMenuFocus\(/.test(f.text) || (/ArrowDown/.test(f.text) && /\.focus\(/.test(f.text));
     check(`${f.path} drives its menu from the keyboard`, driven);
+    // A MENU WITH NO ITEMS IS THE OTHER WAY TO FAIL THIS, and `FleetStrip` did: it declared the
+    // role and every interactive child was a plain button, so assistive technology announced an
+    // empty menu and the hook had nothing to move between. Any of the three item roles counts —
+    // the agent filter is single-select, so its options are `menuitemradio`.
+    check(`${f.path} contains items to move between`,
+      /role="menuitem(radio|checkbox)?"/.test(f.text));
     // Escape was already handled everywhere; asserted so a new menu does not arrive without it.
     check(`${f.path} closes on Escape`, /"Escape"/.test(f.text));
     // And the click-away, which is the mouse half of the same "a menu is dismissible" promise.
@@ -62,7 +85,11 @@ console.log("\nevery component that declares a menu also drives one");
 
 console.log("\n...and the hook actually implements what the role promises");
 {
-  const hook = read("lib/menuFocus.ts");
+  const hook = withoutComments(read("lib/menuFocus.ts"));
+  // The selector has to know all three item roles, or a single-select menu is invisible to it.
+  for (const role of ["menuitem", "menuitemradio", "menuitemcheckbox"]) {
+    check(`it moves between ${role}s`, hook.includes(`[role="${role}"]`));
+  }
   for (const key of ["ArrowDown", "ArrowUp", "Home", "End"]) {
     check(`it moves on ${key}`, hook.includes(`"${key}"`));
   }
@@ -74,8 +101,7 @@ console.log("\n...and the hook actually implements what the role promises");
   // STRIPPED OF COMMENTS FIRST, because this file's own paragraph explaining that there is no
   // virtual cursor contains the very string it is looking for — the check passed on the code and
   // failed on the prose describing it.
-  const code = hook.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
-  check("focus is the cursor, not an aria-activedescendant", !/aria-activedescendant/.test(code));
+  check("focus is the cursor, not an aria-activedescendant", !/aria-activedescendant/.test(hook));
   // The two halves of the original bug, asserted directly.
   check("it focuses the first item when a menu opens", /role="menuitem"/.test(hook) && /first\?\.focus/.test(hook));
   check("...and returns focus to the trigger when one closes", /aria-haspopup="menu"/.test(hook));

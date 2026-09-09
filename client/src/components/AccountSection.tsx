@@ -19,8 +19,8 @@ import { SignInFailure } from "../lib/signIn.ts";
 import { TextField } from "./auth/controls.tsx";
 import { secondaryBtn } from "./buttons.ts";
 import { AvatarEditor } from "./AvatarEditor.tsx";
-import { loadAvatar, removeAvatar, uploadAvatar } from "../lib/avatar.ts";
-import { useEffect, useRef } from "react";
+import { removeAvatar, uploadAvatar, useAvatar } from "../lib/avatar.ts";
+import { useRef } from "react";
 import { useAccountOnboardingStore } from "../store/accountOnboardingStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
@@ -197,18 +197,11 @@ const USERNAME_MAX = 30;
 function PictureRow() {
   const user = useSessionStore((s) => s.user);
   const hasAvatar = user?.hasAvatar ?? false;
-  const [url, setUrl] = useState<string | null>(null);
+  const url = useAvatar(hasAvatar);
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (!hasAvatar) { setUrl(null); return; }
-    let live = true;
-    void loadAvatar().then((next) => { if (live) setUrl(next); });
-    return () => { live = false; };
-  }, [hasAvatar]);
 
   const saved = async (blob: Blob): Promise<void> => {
     await uploadAvatar(blob);
@@ -216,9 +209,10 @@ function PictureRow() {
     // The session carries `hasAvatar`, and the footer reads it — so the store is what has to be
     // told, not this component. `loadAvatar` was invalidated by `uploadAvatar`, so the effect
     // above refetches the new bytes.
+    // `uploadAvatar` already told every consumer the picture changed, so the hook refetches on
+    // its own; this only has to make sure the session says there IS one, for the first upload.
     const current = useSessionStore.getState().user;
-    if (current) useSessionStore.getState().setUser({ ...current, hasAvatar: true });
-    setUrl(await loadAvatar());
+    if (current && !current.hasAvatar) useSessionStore.getState().setUser({ ...current, hasAvatar: true });
   };
 
   const remove = async (): Promise<void> => {
@@ -229,7 +223,6 @@ function PictureRow() {
       await removeAvatar();
       const current = useSessionStore.getState().user;
       if (current) useSessionStore.getState().setUser({ ...current, hasAvatar: false });
-      setUrl(null);
     } catch (err) {
       setError((err as Error).message);
     } finally {
