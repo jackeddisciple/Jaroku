@@ -1,6 +1,6 @@
 // Design tokens — the single place the panel's visual language is decided.
 //
-// `palette.ts` holds colour_system.pdf's tokens: what colours exist. This is the layer above it:
+// `palette.ts` holds new-theme.pdf's tokens: what colours exist. This is the layer above it:
 // what they MEAN. Which surface is a card and which is the thing a card sits on, which single
 // colour is allowed to say "you are here", what a colour says when it is neither a surface nor a
 // status. Reviewed-vs-bespoke is the distinction the plan gate is organised around, and it was once
@@ -11,24 +11,26 @@
 // derived from it in this file rather than typed. That is the change: these used to be hex
 // literals, checked against the design section of a document by eye.
 //
-// THE WHOLE FILE WAS BUILT FOR A NEAR-BLACK PAGE and colour_system.pdf is a light system, so a
-// number of the arguments below are not merely re-valued but reversed — `GLOW` most of all, whose
-// entire premise was that a hovered card on `#0d0d0f` cannot get darker, only brighter. On
-// `#FBFBFA` the opposite is true. Where that has happened the old reasoning is stated and then
-// answered, because a comment arguing for the opposite of what the code does is worse than none.
+// THIS FILE HAS BEEN THROUGH TWO PALETTES AND KEPT ITS ARGUMENTS. The first was near-black, and a
+// light system reversed several of them outright — `GLOW` most of all, whose entire premise was that
+// a hovered card on `#0d0d0f` cannot get darker, only brighter. new-theme.pdf reverses nothing and
+// REMOVES: no Pale Mist, no cool sidebar plane, no Deep Harbor. What that costs this layer is the
+// one token everything interactive was hung on, so `INTERACTION` is where to start reading. Where
+// an argument has been answered rather than deleted it is stated first, because a comment arguing
+// for the opposite of what the code does is worse than none.
 //
 // They are exported as raw values rather than Tailwind classes because several consumers need them
 // as SVG stroke / inline style values, and a token that only exists as a class name can't be handed
 // to a canvas or an icon. The trace panel and the graph view said "not migrated onto this yet —
 // this file exists so they *can* be, in a later pass". This is that pass; both are on it.
 
-import { BORDER, CANVAS, DEEP_HARBOR, SEMANTIC, TEXT as INK, alpha } from "./palette.ts";
+import { BORDER, BRAND as BRAND_COLOUR, CANVAS, SEMANTIC, TEXT as INK, alpha } from "./palette.ts";
 import { ELEVATION_SPEC, RADIUS_SCALE } from "./surfaces.ts";
 
 /**
  * Category accents. Each answers "what kind of thing is this", never "how is it doing".
  *
- * FOUR HUES THE SPECIFICATION DOES NOT NAME, and §09 is where they are allowed to exist: "Agent
+ * FOUR HUES THE SPECIFICATION DOES NOT NAME, and §06 is where they are allowed to exist: "Agent
  * personality: 3D agent avatars may introduce additional personality colours; those belong to the
  * agent layer, not the global theme." A tool's provenance is exactly that layer — it says what an
  * agent is made of, and it appears on badges inside an agent's own card, never on the chrome.
@@ -36,13 +38,13 @@ import { ELEVATION_SPEC, RADIUS_SCALE } from "./surfaces.ts";
  * THE VALUES CHANGED AND THE MEANINGS DID NOT. Every one of these was tuned for a near-black page:
  * `#5eead4` teal, `#c084fc` violet, `#a5b4fc` periwinkle and `#f472b6` rose are all high-lightness
  * pastels, which is what a colour has to be to read on `#0d0d0f` — and every one of them is very
- * nearly invisible on `#FBFBFA`. So each has been re-struck at the saturation register §07's own
+ * nearly invisible on `#FAFAF9`. So each has been re-struck at the saturation register §04's own
  * four semantics sit in, keeping its hue identity and its argument.
  *
- * THEY ARE SPACED AGAINST §07 AS WELL AS AGAINST EACH OTHER, which is the constraint that decided
+ * THEY ARE SPACED AGAINST §04 AS WELL AS AGAINST EACH OTHER, which is the constraint that decided
  * the exact hues. `reviewed` is pushed to the cyan side so it cannot be read as `success` green;
  * `mcp` is pushed to the magenta side so it cannot be read as `danger` red. `state` and `bespoke`
- * are an indigo and a violet rather than two blues, because `warning` is now §07's blue and a badge
+ * are an indigo and a violet rather than two blues, because `warning` is now §04's blue and a badge
  * a user could mistake for a status is a badge that has stopped saying what kind of thing this is.
  */
 export const ACCENT = {
@@ -53,7 +55,7 @@ export const ACCENT = {
   /** Bespoke tools — about to be written by a model, for this agent only.
    *  Violet, deliberately NOT amber: amber is spoken for (see STATUS.pending) and a tool category
    *  wearing the running colour would collide with the one meaning it already has. Muted rather
-   *  than bright, because §09's last line is "no purple brand" — this is a badge on an agent's
+   *  than bright, because §06 says "no purple/blue brand accent" — this is a badge on an agent's
    *  card, and a saturated violet at any size larger than that starts to read as the product's. */
   bespoke: "#683D8C",
   /** State fields — the agent's shape rather than its capabilities.
@@ -75,12 +77,11 @@ export type AccentName = keyof typeof ACCENT;
 /**
  * The interaction accent. One colour, four jobs, and nothing else.
  *
- * The palette above spends four accents on *categories* and had none at all on interaction:
- * selection, active tabs, links and focus were carried by a three percent lightness shift from
- * `bg` to `active` plus, on some rows, a 2px off-white bar. Which meant "which session am I in"
- * was the hardest question the sidebar answered, and a focus ring was a grey ring on a grey
- * control on a near-black page. Spending colour on what a thing *is* and none on what you are
- * *doing* is backwards for an app somebody drives with a keyboard.
+ * An earlier palette spent four accents on *categories* and had none at all on interaction:
+ * selection, active tabs, links and focus were carried by a three percent lightness shift plus, on
+ * some rows, a 2px bar. Which meant "which session am I in" was the hardest question the sidebar
+ * answered, and a focus ring was a grey ring on a grey control. Spending colour on what a thing
+ * *is* and none on what you are *doing* is backwards for an app somebody drives with a keyboard.
  *
  * The four sanctioned uses, and there is no fifth:
  *   1. the active/selected row or tab
@@ -88,31 +89,34 @@ export type AccentName = keyof typeof ACCENT;
  *   3. links
  *   4. focus rings
  *
- * Never decorative. Never a category. A Harbor badge on a non-interactive label is precisely what
- * makes an accent unusable for selection later, because the eye stops reading it as "this one".
+ * IT IS CHARCOAL NOW, WHICH IS THE WHOLE OF THIS PASS IN ONE TOKEN. It was Deep Harbor, a near-navy
+ * struck for exactly this job, and new-theme.pdf deletes it: §05 writes NONE against `--color-brand`
+ * and §06 spells out what to do instead — "No purple/blue brand accent: Jaroku should not look like
+ * a purple SaaS dashboard. Use charcoal and neutral contrast for primary actions."
  *
- * DEEP HARBOR, WHICH IS §04'S JOB DESCRIPTION ALMOST WORD FOR WORD: "active icons, important
- * interaction foregrounds, links, selected controls". It replaces a periwinkle blue that was
- * chosen for a near-black page, and §09 is emphatic about the restraint that has to come with it —
- * "remains rare and intentional", "Not every button or heading" — which is the same rule the four
- * sanctioned uses above already were.
+ * SO THE ACCENT IS §05's `brand-strong`, WHICH IS §02's INK. That is not a token pointed at nothing:
+ * a filled charcoal button on `#FAFAF9` is the strongest contrast this palette can make, and it is
+ * the same charcoal as the heading above it by design rather than by accident. What the accent
+ * cannot do any more is separate itself from ink by HUE — so where a call site used to read
+ * `active ? "text-accent" : "text-ink"`, the difference has to be carried by the row's fill, its
+ * 2px bar or a step down to `muted` on everything that is not selected. §06's own phrase for this
+ * is "neutral contrast", and two of those call sites were rewritten in this pass rather than left
+ * as ternaries with the same value on both arms.
  *
- * `soft` is the accent at an alpha rather than §04's `deep-harbor-soft`, and the two are not
- * interchangeable. The soft token is an opaque tinted BACKGROUND for a panel; this is a
- * translucent fill that has to sit correctly on whichever of four surfaces it lands on.
+ * There is no `hover` and no `tint`. Deep Harbor had a darker step to move to and an opaque wash to
+ * sit behind a panel; charcoal has neither, because §02's ladder runs the other way — every neutral
+ * below ink is LIGHTER, and a link that faded on hover would be saying the opposite of what a hover
+ * says. A charcoal control answers the pointer with its underline, its fill opacity or its surface,
+ * all of which the call sites already had.
  */
 export const INTERACTION = {
-  accent: DEEP_HARBOR.base,
-  /** The hover, for a link or a control answering the pointer. */
-  hover: DEEP_HARBOR.hover,
-  /** §04's opaque tint, for a container that is Harbor-flavoured rather than Harbor-coloured. */
-  tint: DEEP_HARBOR.soft,
-  /** The same hue at the alpha a fill or a ring wants, where the solid colour would shout. */
-  soft: alpha(DEEP_HARBOR.base, 0.16),
+  accent: BRAND_COLOUR.strong,
+  /** The same value at the alpha a fill or a ring wants, where the solid colour would shout. */
+  soft: alpha(BRAND_COLOUR.strong, 0.16),
 } as const;
 
-/** §07's four, under the names this app already calls them. These answer "how is it doing", never
- *  "what kind of thing is this" — and §09 forbids spending any of them on decoration, because a
+/** §04's four, under the names this app already calls them. These answer "how is it doing", never
+ *  "what kind of thing is this" — and §06 spends them only where their meaning is useful, because a
  *  colour used decoratively stops being readable as a state. */
 export const STATUS = {
   ok: SEMANTIC.success,
@@ -139,17 +143,17 @@ export const STATUS = {
    * amber at a glance in a row that may contain both. And it is never the ONLY signal: §10
    * requires a word or a mark beside it, which is why Fast also carries "⚠".
    *
-   * AND IT IS §07's BLUE NOW, NOT AN ORANGE, which is the one place this file departs from the
-   * paragraph above rather than merely re-valuing it. §07 supplies four semantics and this app has
-   * five meanings; amber is the contested one, because §07 describes its amber as "credential
-   * warnings, attention and caution" — this token's job — while §09 says the semantics "retain
+   * AND IT IS §04's BLUE NOW, NOT AN ORANGE, which is the one place this file departs from the
+   * paragraph above rather than merely re-valuing it. §04 supplies four semantics and this app has
+   * five meanings; amber is the contested one, because §04 describes its amber as "credential
+   * warnings, attention and caution" — this token's job — while §06 says the semantics are
    * functional meaning", and in this product amber has always meant IN FLIGHT. Forty-eight call
    * sites, a node glow and a stream pulse say so against this one's two.
    *
-   * So `pending` keeps amber and this takes §07's `info`, which it fits better than the wording
+   * So `pending` keeps amber and this takes §04's `info`, which it fits better than the wording
    * suggests: "informational states and neutral system guidance" is exactly what a supported mode
-   * somebody deliberately turned on is. Blue was free — the interaction accent is Deep Harbor, a
-   * near-navy, and nothing else in the product claims a mid blue.
+   * somebody deliberately turned on is. Blue was free — the interaction accent was a near-navy then
+   * and is charcoal now, and nothing else in the product claims a mid blue either way.
    */
   warn: SEMANTIC.info,
   /** Decided-but-not-notable: superseded, discarded, undone. Recedes rather than signals. */
@@ -216,7 +220,7 @@ export const SURFACE = {
    * It used to be the BRIGHTEST neutral, for the same reason and in the opposite direction.
    */
   grip: BORDER.strong,
-  /** Hairline dividers and connector lines — §06s `border-subtle`, the quietest boundary. */
+  /** Hairline dividers and connector lines — §03's `border-subtle`, the quietest boundary. */
   hair: BORDER.subtle,
   /** The page the shell floats on — §01s `bg-subtle`, one step under the canvas. */
   void: CANVAS.subtle,
@@ -239,7 +243,7 @@ export const SURFACE = {
  * THE RAMP RUNS THE OTHER WAY NOW. It descended from a light grey into the page, because on
  * near-black the first segment had to be the brightest to be seen at all. Here it climbs from ink
  * towards the page: the largest share is the darkest step, and the tail fades towards the surface
- * it sits on. Struck from §05's own ink ladder rather than from a fresh set of greys, so a share
+ * it sits on. Struck from §02's own ink ladder rather than from a fresh set of greys, so a share
  * bar and the caption naming it are the same family of neutral.
  */
 export const SHARE_RAMP = ["#62625F", "#7C7C78", "#90908C", "#A8A8A3", "#C1C1BB"] as const;
@@ -248,10 +252,10 @@ export const SHARE_RAMP = ["#62625F", "#7C7C78", "#90908C", "#A8A8A3", "#C1C1BB"
 export const SHARE_ORDER = ["anthropic", "openai", "google", "together", "groq"] as const;
 
 /**
- * §05's ink, under this app's names for it.
+ * §02's ink, under this app's names for it.
  *
  * `ink` is charcoal rather than pure black, the same way it was off-white rather than pure white
- * before — the reason is unchanged and only the direction of it moved. §08 gives the same value a
+ * before — the reason is unchanged and only the direction of it moved. §05 gives the same value a
  * second name, `brand-strong`, "charcoal for primary high-contrast actions", which is why a filled
  * primary button is `bg-ink text-bg`: the app's one loud control is its ink turned inside out.
  */
@@ -260,11 +264,11 @@ export const TEXT = {
   muted: INK.secondary,
   faint: INK.muted,
   /**
-   * §05's fourth step, and it is a STATE rather than a fourth level of emphasis.
+   * §02's fourth step, and it is a STATE rather than a fourth level of emphasis.
    *
    * New here. The dark palette had three inks and expressed "unavailable" as `opacity-40` on
    * whatever the control already was, which on a near-black page is indistinguishable from a
-   * fourth grey. §05 names the colour, so a disabled control can say so in the palette's own terms
+   * fourth grey. §02 names the colour, so a disabled control can say so in the palette's own terms
    * rather than by being faded — and a faded control inside a faded panel compounds, which is how
    * a disabled row ends up less legible than the empty space beside it.
    */
@@ -377,7 +381,7 @@ export const BRAND = {
  * and the one the type ladder cannot answer on its own: a timestamp and an agent name can sit on
  * the same rung and must not read the same way.
  *
- * THE THREE INKS ARE §05'S AND UI-4 NAMES THEM ITSELF — "primary #1D1D1B, secondary #62625F, muted
+ * THE THREE INKS ARE §02'S AND UI-4 NAMES THEM ITSELF — "primary #1D1D1B, secondary #62625F, muted
  * #90908C" — which is why this is a mapping rather than a decision. The two specifications were
  * written apart and agree exactly, so a level is spendable without anybody inventing a fourth grey.
  *
@@ -446,7 +450,7 @@ export type RadiusName = keyof typeof RADIUS;
 //
 // Each level is a hairline plus a shadow, never a shadow alone, and the reason has flipped without
 // the rule changing. On a near-black background a soft shadow was nearly invisible and the 1px edge
-// catching light at the top of the box did the separating. On `#F7F7F5` the shadow is the half that
+// catching light at the top of the box did the separating. On `#F6F6F4` the shadow is the half that
 // works and the hairline is the half that would otherwise read as a drawn rectangle. §12 says the
 // same thing as an instruction — "use surfaces and borders before shadows" — and adds the sentence
 // that decides what these values are: "avoid dark, wide or decorative shadows."
@@ -460,7 +464,7 @@ export type RadiusName = keyof typeof RADIUS;
 //
 // THE TINT IS INK AND THE SPECIFICATION WRITES BLACK. §06 spells `rgba(0,0,0,0.03)`; these are its
 // offsets, blurs and alphas exactly, struck from `#1D1D1B` — a neutral-warm page casts a
-// neutral-warm shadow, and pure black under `#FBFBFA` goes grey-blue. At three to ten percent the
+// neutral-warm shadow, and pure black under `#FAFAF9` goes grey-blue. At three to ten percent the
 // two are indistinguishable except in the one way that matters.
 //
 // Exported as ready-to-use CSS strings rather than as parts, because half of the consumers are
@@ -528,9 +532,12 @@ export const ELEVATION_BORDER = {
  *
  * The accent, because a focus ring is one of the four things the accent is for. It was a neutral
  * grey once — #3a3a44 with a grey halo — which on a grey control on a near-black page was very
- * nearly nothing, and "where am I" is the one question a keyboard user asks constantly. The same
- * sentence is true here with the greys the other way up, which is why it stays the accent: Deep
- * Harbor against `#FBFBFA` is the strongest contrast the palette can make without using a status.
+ * nearly nothing, and "where am I" is the one question a keyboard user asks constantly.
+ *
+ * IT IS A NEUTRAL AGAIN AND IT IS NOT THAT MISTAKE. The failure then was a MID grey on a mid-grey
+ * control: no contrast, whichever way up the page was. §05's charcoal against `#FAFAF9` is the
+ * strongest contrast this palette can make without spending a status colour, which is the same
+ * reason the accent itself is charcoal — see INTERACTION.
  */
 export const FOCUS_RING = `0 0 0 1px ${INTERACTION.accent}, 0 0 0 4px ${INTERACTION.soft}`;
 
@@ -542,20 +549,21 @@ export const FOCUS_RING = `0 0 0 1px ${INTERACTION.accent}, 0 0 0 4px ${INTERACT
  *
  * IT USED TO BE CALLED LIFT BY LIGHT, and the reasoning was sound for the page it was written for:
  * on `#0d0d0f` a hovered card cannot get meaningfully darker, so it can only get brighter at its
- * edge — a border that brightens and a soft off-white bloom around it. On `#FBFBFA` that is exactly
+ * edge — a border that brightens and a soft off-white bloom around it. On `#FAFAF9` that is exactly
  * backwards. There is no brighter; a card under the pointer has nowhere to go but down, so the
- * border deepens to §06's strongest and the bloom is ink at a low alpha. The name is the only thing
+ * border deepens to §03's strongest and the bloom is ink at a low alpha. The name is the only thing
  * that had to change, and it changed because a token called GLOW that draws a shadow is a token
  * whose next reader will use it wrong.
  *
- * Both values are neutral, deliberately. §07 reserves hue for status and §09 reserves Deep Harbor
- * for interaction that MEANS something; "you are hovering this" is neither — it is the surface
- * acknowledging a pointer. Shade without hue is the only way to say it that does not spend a
- * colour.
+ * Both values are neutral, deliberately, and as of this palette they are neutral in a system whose
+ * accent is neutral too. §04 reserves hue for status and there is no longer anything else that
+ * could have been reached for; "you are hovering this" was never a candidate for it anyway — it is
+ * the surface acknowledging a pointer. Shade without hue is the only way to say it that does not
+ * spend a colour.
  */
 export const GLOW = {
   /**
-   * An interactive card under the pointer, or reached by Tab. The border deepens to §06's
+   * An interactive card under the pointer, or reached by Tab. The border deepens to §03's
    * strongest and the card lifts to E1.
    *
    * IT WAS A BORDER PLUS A 32px BLOOM, and §12 rules the bloom out in five words: "avoid dark, wide

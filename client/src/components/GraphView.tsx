@@ -116,12 +116,17 @@ const EDGE = SURFACE.grip;
 const EDGE_DASH = TEXT.disabled;
 const SEL = INTERACTION.accent; // selection accent (left bar only) — the app's, not the canvas's own
 const AMBER = STATUS.pending; // running/active accent (left bar only)
-const PULSE = INTERACTION.hover; // transient click micro-interaction highlight
+// Transient click micro-interaction highlight. It was the accent's HOVER step — Deep Harbor had a
+// darker one to move to — and the accent is charcoal now, which has nothing below it: §02's ladder
+// runs the other way and every neutral under ink is lighter. So the pulse is the accent itself,
+// which is what it was a shade of, and the two alphas below carry the falloff the darker step used
+// to. On a light canvas an ink particle is more legible than the near-navy one was, not less.
+const PULSE = INTERACTION.accent;
 // The particle's halo, and the softer one on the edge it runs along. Two alphas of the pulse
 // colour rather than two literals: the halo has to move when the accent does, and it was the one
 // place a Harbor particle could still be trailing periwinkle.
-const PULSE_GLOW_STRONG = alpha(INTERACTION.hover, 0.9);
-const PULSE_GLOW = alpha(INTERACTION.hover, 0.65);
+const PULSE_GLOW_STRONG = alpha(INTERACTION.accent, 0.9);
+const PULSE_GLOW = alpha(INTERACTION.accent, 0.65);
 // What the minimap dims OUTSIDE the viewport rectangle. The canvas at an alpha rather than ink:
 // a dark wash on a light minimap inverts its meaning, making the part you are looking at the part
 // that reads as switched off.

@@ -2194,7 +2194,7 @@ export function BuildPane({
               // AND IT RESTS FLAT IN THE PANE. It carried E1 there, which UI-4 §12 rules out —
               // "normal cards should usually be border-led, not shadow-led" — and §07 reserves E1
               // for interaction, which is what the standalone composer's `shadow-glow` already is:
-              // a border deepened to §06's strongest plus that one sanctioned step. So the two arms
+              // a border deepened to §03's strongest plus that one sanctioned step. So the two arms
               // are now a state and its absence rather than two levels of depth.
               : `rounded-lg border border-edge bg-panel p-4 pb-3 transition-shadow duration-fast
                  focus-within:shadow-focusring ${standalone ? "shadow-glow" : ""}`

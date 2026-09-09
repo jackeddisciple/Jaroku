@@ -65,7 +65,7 @@ export interface AuthPageInput {
 /**
  * The stylesheet, as one constant so its digest can be computed.
  *
- * LIGHT, BECAUSE THE APPLICATION IS. `#F7F7F5` is the canvas, `#FFFFFF` the elevated surface,
+ * LIGHT, BECAUSE THE APPLICATION IS. `#F6F6F4` is the canvas, `#FFFFFF` the elevated surface,
  * `#DCDCD8` the border an input or a card gets, `#1D1D1B` the ink — every one of them the value
  * `client/src/lib/palette.ts` holds, so this page and the screen it hands back to are the same
  * product rather than two.
@@ -78,7 +78,7 @@ const STYLE = `
   :root { color-scheme: light }
   * { box-sizing: border-box }
   body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px;
-         background:#F7F7F5; color:#1D1D1B;
+         background:#F6F6F4; color:#1D1D1B;
          font:400 14px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
          background-image:radial-gradient(rgba(29,29,27,0.05) 1px,transparent 1px); background-size:24px 24px }
   main { width:100%; max-width:420px; padding:40px 32px 32px; text-align:center;
@@ -91,7 +91,7 @@ const STYLE = `
      most important thing on the page in exactly the case somebody is reading it. It was a blue
      underlined link in a quiet grey line at the bottom, which is where a footnote goes. */
   .action { display:block; margin:28px 0 0; padding:12px 16px; border-radius:10px;
-            background:#1D1D1B; color:#FBFBFA; font-size:13px; font-weight:500; text-decoration:none }
+            background:#1D1D1B; color:#FAFAF9; font-size:13px; font-weight:500; text-decoration:none }
   .action:hover { background:#333330 }
   .action:focus-visible { outline:2px solid #1D1D1B; outline-offset:2px }
   .quiet { margin-top:14px; color:#90908C; font-size:12px }

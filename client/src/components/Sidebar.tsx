@@ -261,7 +261,13 @@ function RunRow({ run, runs, agentId }: { run: RunSummary; runs: RunSummary[]; a
         {run.parent_run_id && (
           <span className="shrink-0 text-faint" title="branch"><Icon.agents.fork size={ICON.xs} /></span>
         )}
-        <span className={`shrink-0 text-caption tabular-nums ${active ? "text-accent" : "text-ink"}`}>
+        {/* THE SELECTED RUN IS SAID BY THE ROW, NOT BY THE FIGURE. This was
+            `active ? "text-accent" : "text-ink"`, and it worked while the accent was a near-navy;
+            new-theme.pdf's accent is §05's charcoal, which is `ink` — the same value on both arms.
+            The row already carries `bg-sidebar-active` and a 2px bar, which is how every other
+            selected thing in the product says so, and dimming the unselected run numbers to buy a
+            third signal would cost the column the one figure people scan it for. */}
+        <span className="shrink-0 text-caption tabular-nums text-ink">
           Run #{runNumber(runs, run)}
         </span>
         {/* THE TIME, THEN WHAT IT COST YOU — a duration when it worked, the reason when it did not.
@@ -508,8 +514,18 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
         // and 28px was the height of the single-line row it replaced: the two lines met in the
         // middle with nothing between them and nothing above or below. 44px is the pair plus the
         // air that makes them read as one row rather than as two cramped ones.
-        className="group flex h-11 w-full items-center gap-1 rounded-control pr-1 transition-colors duration-fast hover:bg-sidebar-hover"
+        //
+        // AND IT SAYS WHICH AGENT IS SELECTED THE WAY EVERY OTHER ROW IN THIS COLUMN DOES. It did
+        // not: the only mark was the name in `text-accent`, which worked while the accent was a
+        // near-navy and says nothing at all now that new-theme.pdf's accent is §05's charcoal — the
+        // same value the name already had. A fill and a 2px bar are what the run rows under this
+        // one and the five destinations above it use, so this is the pattern arriving somewhere it
+        // was missing rather than a new one, and it survives an accent that is a neutral.
+        className={`group relative flex h-11 w-full items-center gap-1 rounded-control pr-1 transition-colors duration-fast ${
+          selected ? "bg-sidebar-active" : "hover:bg-sidebar-hover"
+        }`}
       >
+        {selected && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-accent" aria-hidden />}
         {/* THE TWISTY AND THE NAME ARE TWO CONTROLS, because they do two things: one opens the
             agent's runs, the other selects the agent into the three panes. Nesting a button inside
             a button is invalid markup and makes the inner one unreachable by keyboard. */}
@@ -538,7 +554,10 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
               name gets the first to itself — at 13px semibold it is the thing the eye lands on
               when scanning a column of agents. */}
           <span className="flex min-w-0 flex-1 flex-col leading-tight">
-            <Truncate className={`text-label ${selected ? "text-accent" : "text-ink"}`} title={agent.name}>
+            {/* Ink whether or not it is the selected one — see the run row above for why the
+                ternary that used to be here had the same value on both arms, and why the fill and
+                the bar are what say "this one". A name is content; content does not dim. */}
+            <Truncate className="text-label text-ink" title={agent.name}>
               {agent.name}
             </Truncate>
             <span className="flex min-w-0 items-center gap-1.5 text-tiny text-faint">

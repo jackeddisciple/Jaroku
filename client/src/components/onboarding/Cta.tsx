@@ -34,7 +34,7 @@ interface CtaProps {
   className?: string;
 }
 
-/** The decision the screen exists to ask. One per screen, filled — §08's charcoal, canvas on ink. */
+/** The decision the screen exists to ask. One per screen, filled — §05's charcoal, canvas on ink. */
 export function PrimaryCta({ children, onClick, autoFocus, kbd, title, className = "" }: CtaProps) {
   return (
     <button

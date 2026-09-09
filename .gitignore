@@ -58,6 +58,11 @@ typography.pdf
 # every line above is, and the reason it is not globbed to `*.pdf` is unchanged: a blanket rule
 # would also swallow a PDF somebody meant to ship.
 UI-4.pdf
+# A sixth, and it SUPERSEDES `colour_system.pdf` rather than joining it: the palette that replaced
+# the one above arrived named after the change rather than after the system. Both lines stay —
+# the old file is still on disks that have it, and an ignore rule for a spec nobody has any more
+# costs nothing, where dropping it would put a private document one `git add -A` away.
+new-theme.pdf
 
 # Cygwin drops one of these beside the repo when a bash process faults on Windows. It is a core
 # dump with a stack trace in it, not source, and it reappears whenever the shell falls over.

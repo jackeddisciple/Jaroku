@@ -1,18 +1,26 @@
-// colour_system.pdf, as data — the one place the specification's own tokens are written down.
+// new-theme.pdf, as data — the one place the specification's own tokens are written down.
 //
-// The specification is LOCKED and it is a LIGHT system. Everything above this file used to be built
-// on a near-black one: `#0d0d0f` surfaces, off-white ink, shadows at 40% black, and a `GLOW` token
-// whose entire argument was that a hovered card on a near-black page cannot get darker, only
-// brighter. All of that is inverted here, and the reasoning that went with it is rewritten rather
-// than deleted — a comment that argues for the opposite of what the code does is worse than none.
+// THE SPECIFICATION IS NEUTRAL-FIRST AND IT IS SMALLER THAN THE ONE BEFORE IT. The previous system
+// was a light one too, so this is not the inversion that pass was; what it is is a NARROWING. Three
+// whole families are struck out — the Pale Mist secondary palette, the cool-grey sidebar plane
+// drawn from it, and Deep Harbor, the one coloured interaction accent — and §05 replaces all three
+// with a sentence: "No separate coloured brand accent. Jaroku's brand is the neutral/off-white
+// system itself." §06 says the same thing as an instruction, twice: "No purple/blue brand accent:
+// Jaroku should not look like a purple SaaS dashboard. Use charcoal and neutral contrast for
+// primary actions."
 //
-// THE SPECIFICATION'S NAMES ARE KEPT VERBATIM, including `--color-` and including the ones this
-// product does not have a use for. Two reasons. The first is that §09's rules are written in these
-// names ("sidebar uses Pale Mist family (#E9EEEF base); main canvas remains #F7F7F5"), so a review
-// against the PDF has to be able to find them. The second is that `index.css` publishes exactly
-// this set as custom properties, for the three consumers a Tailwind class cannot reach — React
-// Flow's own chrome, cmdk's group headings, and the scroll masks — and a variable named after the
-// app rather than after the specification is a variable nobody can check.
+// SO THE REASONING THAT ARGUED FOR THOSE FAMILIES IS REWRITTEN RATHER THAN DELETED, the same way
+// the dark system's was when this file was first written. A comment that argues for a colour the
+// file no longer has is worse than none, and the arguments were good ones — the sidebar plane in
+// particular was a real decision, and what replaces it has to be a decision too rather than an
+// absence somebody fills in later.
+//
+// THE SPECIFICATION'S NAMES ARE KEPT VERBATIM, including `--color-`. Two reasons. The first is that
+// §06's rules are written in these names ("use #E6E6E2 for the very muted row dividers"), so a
+// review against the PDF has to be able to find them. The second is that `index.css` publishes
+// exactly this set as custom properties, for the three consumers a Tailwind class cannot reach —
+// React Flow's own chrome, cmdk's group headings, and the scroll masks — and a variable named after
+// the app rather than after the specification is a variable nobody can check.
 //
 // TOKENS.TS IS THE LAYER ABOVE THIS ONE. This file says what colours exist; `tokens.ts` says what
 // they MEAN — which surface is a card, which one is the thing a card sits on, which single colour
@@ -20,82 +28,21 @@
 
 /** §01. The neutral ladder every surface stands on, lightest-sitting-on-darkest. */
 export const CANVAS = {
-  /** Main application canvas. */
-  canvas: "#F7F7F5",
-  /** Cards and standard content surfaces. */
-  surface: "#FBFBFA",
+  /** Main application background. */
+  canvas: "#F6F6F4",
+  /** Cards and standard surfaces. */
+  surface: "#FAFAF9",
   /** Elevated panels, popovers and dialogs. */
   elevated: "#FFFFFF",
   /** Subtle containers and secondary areas. */
-  subtle: "#F1F1EF",
-  /** Neutral hover where no palette tint is needed. */
+  subtle: "#F0F0EE",
+  /** Hover state for neutral surfaces. */
   hover: "#ECECEA",
-  /** Neutral pressed/selected state outside palette surfaces. */
+  /** Pressed/selected neutral state. */
   active: "#E5E5E1",
 } as const;
 
-/**
- * §02. The sidebar is its own structural plane, and that is a decision rather than a shade.
- *
- * "It should visibly differ from the main content without becoming dark or dashboard-like. It has
- * no outer shadow and no outer radius; a quiet border separates it from the main workspace."
- *
- * Which is why these are four tokens of their own rather than four of §01's: the sidebar's hover is
- * a cool grey and the content area's is a warm one, and a single `hover` token would make the
- * sidebar warm the first time somebody reused it.
- */
-export const SIDEBAR = {
-  /** Sidebar base. */
-  base: "#E9EEEF",
-  /** Hovered navigation item. */
-  hover: "#DEE6E8",
-  /** Selected navigation item. */
-  active: "#D3DDE0",
-  /** Sidebar/content separation. */
-  border: "#D2DCDD",
-} as const;
-
-/**
- * §03. Pale Mist — surfaces, selection and atmosphere.
- *
- * The reference colour is `400` (#C0C8CA) and §03 is explicit that it "is used selectively; lighter
- * derived steps carry most of the UI". `100`, `200` and `300` are the same values §02 names for the
- * sidebar, deliberately: the sidebar IS the Pale Mist family, and writing the numbers twice is what
- * lets a future surface join that family without copying the sidebar's tokens.
- */
-export const PALE_MIST = {
-  /** Very subtle cool surface. */
-  50: "#F3F6F6",
-  /** Sidebar base / cool surface family. */
-  100: "#E9EEEF",
-  /** Hover state. */
-  200: "#DEE6E8",
-  /** Active/selected state. */
-  300: "#D3DDE0",
-  /** Reference Palette 04 colour. */
-  400: "#C0C8CA",
-} as const;
-
-/**
- * §04. Deep Harbor — interaction, emphasis and identity.
- *
- * "Use it rarely for active icons, important secondary actions, links, selected-control foregrounds
- * and occasional Agent Details/avatar environments." §09 repeats the restraint twice more: Deep
- * Harbor "remains rare and intentional", and "Not every button or heading."
- *
- * This is the app's one interaction accent — see INTERACTION in tokens.ts for the four jobs it is
- * allowed to do and why there is no fifth.
- */
-export const DEEP_HARBOR = {
-  /** Primary secondary accent. */
-  base: "#2B4851",
-  /** Stronger hover/pressed accent. */
-  hover: "#24404A",
-  /** Very subtle Harbor-tinted background. */
-  soft: "#E8EFF0",
-} as const;
-
-/** §05. Four steps of ink, and the fourth is a state rather than a level of emphasis. */
+/** §02. Four steps of ink, and the fourth is a state rather than a level of emphasis. */
 export const TEXT = {
   /** Primary headings, names and important content. */
   primary: "#1D1D1B",
@@ -107,22 +54,24 @@ export const TEXT = {
   disabled: "#B5B5B0",
 } as const;
 
-/** §06. Three weights of boundary, chosen by how much the boundary is meant to be noticed. */
+/** §03. Three weights of boundary, chosen by how much the boundary is meant to be noticed. */
 export const BORDER = {
-  /** Very muted row/card dividers. */
+  /** Default row/card dividers; intentionally very quiet. §06 names this value twice. */
   subtle: "#E6E6E2",
-  /** Inputs, cards and standard boundaries. */
+  /** Inputs, cards and standard component boundaries. */
   default: "#DCDCD8",
-  /** Focused/important boundaries. */
+  /** Focused/important boundaries when more definition is required. */
   strong: "#C9C9C4",
 } as const;
 
 /**
- * §07. The four that mean something.
+ * §04. The four that mean something.
  *
- * §09: "Semantic colours: green, amber, red and blue retain functional meaning and are not replaced
- * by the secondary palette." They are the one part of this palette that may never be spent on
- * decoration, because a colour used decoratively stops being readable as a state.
+ * §06: "Semantic colours are functional: green, amber, red and blue appear only when their meaning
+ * is useful. Keep them muted rather than neon." They are the one part of this palette that may
+ * never be spent on decoration, because a colour used decoratively stops being readable as a state
+ * — and in a system with no brand accent left they are the only saturated colours on screen, which
+ * makes that rule matter more here than it did before, not less.
  */
 export const SEMANTIC = {
   /** Live, healthy, resolved and successful states. */
@@ -136,20 +85,50 @@ export const SEMANTIC = {
 } as const;
 
 /**
- * THE RUNS CAPSULE, AND IT EXTENDS A LOCKED SPECIFICATION — say so rather than bury it.
+ * THE SIDEBAR PLANE, DRAWN FROM §01 RATHER THAN FROM A FAMILY OF ITS OWN.
  *
- * `colour_system.pdf` names four semantic colours and no pink. This pair was asked for explicitly,
- * with these values, for one thing: the count of runs an agent has, on its sidebar row. It is
- * DELIBERATELY NOT in `SEMANTIC` above, because §09 says those four "may never be spent on
- * decoration" — a run count is a quantity, not a state, and filing it beside success/danger would
- * be the exact dilution that rule protects against.
+ * The previous specification gave the sidebar four tokens and a secondary palette to strike them
+ * from, on the argument that it "should visibly differ from the main content without becoming dark
+ * or dashboard-like" and that a shared `hover` would make the sidebar warm the first time somebody
+ * reused it. The first half of that argument survives and the second no longer applies: there is
+ * one neutral family now, so there is no cool hover for a warm one to drift into.
+ *
+ * WHAT IS KEPT IS THE STRUCTURE. The sidebar is still its own plane and it is still one step UNDER
+ * the canvas — `surfaceSystem.test.ts` asserts that numerically, because it is the one rule a
+ * palette edit could silently reverse — so the column reads as the thing the workspace sits beside
+ * rather than as a card floating on it. What is gone is the cool cast.
+ *
+ * These are aliases, not new values: four of §01's six under the names eighty call sites already
+ * say. The alternative was rewriting `bg-sidebar` to `bg-void` in twenty files to gain nothing, and
+ * losing the ability to say "the sidebar is a plane" in the palette at all.
+ */
+export const SIDEBAR = {
+  /** Sidebar base — §01's subtle, one step under the canvas. */
+  base: CANVAS.subtle,
+  /** Hovered navigation item. */
+  hover: CANVAS.hover,
+  /** Selected navigation item. */
+  active: CANVAS.active,
+  /** Sidebar/content separation — §03's default boundary. */
+  border: BORDER.default,
+} as const;
+
+/**
+ * THE RUNS CAPSULE, AND IT EXTENDS THE SPECIFICATION — say so rather than bury it.
+ *
+ * `new-theme.pdf` names four semantic colours and no pink. This pair was asked for explicitly, with
+ * these values, for one thing: the count of runs an agent has, on its sidebar row. It is
+ * DELIBERATELY NOT in `SEMANTIC` above, because §06 says those four appear "only when their meaning
+ * is useful" — a run count is a quantity, not a state, and filing it beside success/danger would be
+ * the exact dilution that rule protects against.
  *
  * IT LIVES HERE RATHER THAN AS A HEX AT THE CALL SITE for the reason this whole module exists:
  * `test:colour-system` fails any source file that carries a colour of its own, and it is right to.
  * A palette entry is reviewable and moves in one place; nine hex literals in nine components are
  * what that suite was written after.
  *
- * The PDF is now behind the code by this one pair. Nothing automated can notice that — the suite
+ * IT SURVIVED THIS PASS ON PURPOSE and it is the only thing that did which the document does not
+ * name. The PDF is behind the code by this one pair. Nothing automated can notice that — the suite
  * checks the four files against each other, not against the document — so it is written down here.
  */
 export const RUNS = {
@@ -160,24 +139,24 @@ export const RUNS = {
 } as const;
 
 /**
- * §08. There is no brand colour, and that is the brand.
+ * §05. There is no brand colour, and that is the brand.
  *
- * "No single coloured brand accent; Jaroku remains neutral/off-white." So `brand` has no value —
- * the specification writes NONE in the table — and the two things it would have been used for are
- * named separately: charcoal carries a primary high-contrast action, Deep Harbor is the secondary
- * accent and explicitly "not the primary brand colour".
+ * "No separate coloured brand accent. Jaroku's brand is the neutral/off-white system itself." So
+ * `base` has no value — the specification writes NONE in the table — and the one thing it would
+ * have been used for is named separately: "Use charcoal for primary high-contrast actions when
+ * needed."
  *
- * `strong` is the same value as `TEXT.primary` on purpose. A filled charcoal button is ink turned
- * inside out, and the two moving apart would make a primary action a slightly different black from
- * the heading above it.
+ * `strong` is the same value as `TEXT.primary` on purpose, and the specification writes it out
+ * twice for that reason. A filled charcoal button is ink turned inside out, and the two moving
+ * apart would make a primary action a slightly different black from the heading above it. It is
+ * also, as of this pass, the app's INTERACTION accent — see INTERACTION in tokens.ts for what
+ * replaced Deep Harbor and why one charcoal is enough.
  */
 export const BRAND = {
-  /** No single coloured brand accent; Jaroku remains neutral/off-white. */
+  /** No separate coloured brand accent; Jaroku's brand is the neutral system itself. */
   base: null,
-  /** Charcoal for primary high-contrast actions. */
+  /** Charcoal for primary high-contrast actions when needed. */
   strong: "#1D1D1B",
-  /** Deep Harbor is the secondary accent, not the primary brand colour. */
-  secondary: "#2B4851",
 } as const;
 
 /**
@@ -186,7 +165,11 @@ export const BRAND = {
  * This is what `index.css` publishes as custom properties and what `colourSystem.test.ts` checks
  * the stylesheet and the Tailwind config against. `--color-brand` is deliberately absent rather
  * than empty: a variable that resolves to nothing is a variable somebody will use by accident,
- * and §08's point is that there is nothing there to use.
+ * and §05's point is that there is nothing there to use.
+ *
+ * THE SIDEBAR HAS NO TOKENS HERE ANY MORE, and that is the shape of this change rather than an
+ * oversight. Its four values are §01's, and publishing them a second time under a second set of
+ * names is how two tokens that are meant to be the same colour stop being it.
  */
 export const SPEC_TOKENS: Readonly<Record<string, string>> = {
   "--color-bg-canvas": CANVAS.canvas,
@@ -195,21 +178,6 @@ export const SPEC_TOKENS: Readonly<Record<string, string>> = {
   "--color-bg-subtle": CANVAS.subtle,
   "--color-bg-hover": CANVAS.hover,
   "--color-bg-active": CANVAS.active,
-
-  "--color-sidebar": SIDEBAR.base,
-  "--color-sidebar-hover": SIDEBAR.hover,
-  "--color-sidebar-active": SIDEBAR.active,
-  "--color-sidebar-border": SIDEBAR.border,
-
-  "--color-pale-mist-50": PALE_MIST[50],
-  "--color-pale-mist-100": PALE_MIST[100],
-  "--color-pale-mist-200": PALE_MIST[200],
-  "--color-pale-mist-300": PALE_MIST[300],
-  "--color-pale-mist-400": PALE_MIST[400],
-
-  "--color-deep-harbor": DEEP_HARBOR.base,
-  "--color-deep-harbor-hover": DEEP_HARBOR.hover,
-  "--color-deep-harbor-soft": DEEP_HARBOR.soft,
 
   "--color-text-primary": TEXT.primary,
   "--color-text-secondary": TEXT.secondary,
@@ -229,25 +197,29 @@ export const SPEC_TOKENS: Readonly<Record<string, string>> = {
   "--color-info": SEMANTIC.info,
 
   "--color-brand-strong": BRAND.strong,
-  "--color-brand-secondary": BRAND.secondary,
 } as const;
 
 /**
- * §09's proportion, as a number something can check.
+ * §06's proportion, as a number something can check.
  *
- * "Neutral-first: roughly 75–85% of the interface remains neutral. Pale Mist supplies the cool
- * atmospheric layer; Deep Harbor remains rare and intentional."
+ * "Neutral-first: approximately 85–90% of the interface should remain neutral. Colour should
+ * communicate meaning rather than decorate the UI."
  *
- * The floor rather than the band, because being MORE neutral than 85% is not a violation of
+ * The floor rather than the band, because being MORE neutral than 90% is not a violation of
  * neutral-first — it is the same instruction followed further. What the number guards is the drift
  * downwards, one reasonable-looking coloured call site at a time.
  *
+ * IT MOVED 75 → 85 WITH THIS PALETTE, which is the arithmetic consequence of deleting the accent
+ * rather than a new ambition: the previous band was 75–85% with Pale Mist supplying "the cool
+ * atmospheric layer", and there is no atmospheric layer now. Everything that is not a status, a
+ * category badge or a run count is a grey.
+ *
  * `colourSystem.test.ts` counts this in CALL SITES rather than in tokens. Counting tokens was the
  * first attempt and it reported 45%, which says nothing: the palette has one canvas token covering
- * a whole screen and five Pale Mist steps that mostly do not appear. A class census is a fair proxy
- * for area in an app whose surfaces are all painted by classes.
+ * a whole screen and steps that mostly do not appear. A class census is a fair proxy for area in an
+ * app whose surfaces are all painted by classes.
  */
-export const NEUTRAL_SHARE_FLOOR = 0.75;
+export const NEUTRAL_SHARE_FLOOR = 0.85;
 
 /** Hex to `r, g, b`, for the few places that need the channels — a scrim, a glow, a ring. */
 export const channels = (hex: string): string => {

@@ -7,7 +7,7 @@
 // bar sat visibly heavier than the icons either side of it.
 import { ICON, TEXT } from "./tokens.ts";
 
-// The grey a brand mark falls back to when it is not the active/chosen/connected thing. §05's
+// The grey a brand mark falls back to when it is not the active/chosen/connected thing. §02's
 // supporting-text step, so an unbranded provider row reads at the same weight as the words beside
 // it — it was a hex copy of the old palette's `muted`, which stayed dark when the palette did not.
 const MUTED = TEXT.muted;

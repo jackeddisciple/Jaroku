@@ -25,10 +25,19 @@
   read as a specification rather than as an offer.
 -->
 <style>
+  /* new-theme.pdf, as the six variables this page actually spends. It was still the near-black
+     system the desktop app came off — `#0d0d0f` behind `#e4e4e7`, with a periwinkle accent — which
+     made the first Jaroku surface a visitor sees the one page that did not look like Jaroku. These
+     are `client/src/lib/palette.ts`'s values under this page's own names; nothing here can import
+     that file, so the agreement is a copy and this comment is the only thing holding it.
+
+     THERE IS NO `--accent`. §05 writes NONE against `--color-brand` and §06 says what to do instead:
+     "Use charcoal and neutral contrast for primary actions." The one call to action on the page is
+     ink turned inside out, which is the same control the app fills its send button with. */
   :root {
-    color-scheme: dark;
-    --bg: #0d0d0f; --panel: #18181b; --edge: #2a2a30; --hair: #1e1e22;
-    --ink: #e4e4e7; --muted: #71717a; --faint: #52525b; --accent: #6b8afd;
+    color-scheme: light;
+    --bg: #F6F6F4; --panel: #FAFAF9; --edge: #DCDCD8; --hair: #E6E6E2;
+    --ink: #1D1D1B; --muted: #62625F; --faint: #90908C;
   }
   * { box-sizing: border-box; }
   body {
@@ -47,7 +56,9 @@
     padding: 24px; background: var(--panel); border: 1px solid var(--edge);
     border-radius: 14px; display: flex; flex-direction: column;
   }
-  .tier.mid { border-color: rgba(107, 138, 253, 0.45); }
+  /* The recommended tier, said in contrast rather than in hue — ink at an alpha, one step past
+     `--edge`, because the palette has no accent to spend and §06 would not spend one here anyway. */
+  .tier.mid { border-color: rgba(29, 29, 27, 0.32); }
   .name { font-size: 13px; font-weight: 600; }
   .price { margin: 8px 0 2px; font-size: 30px; font-weight: 600; letter-spacing: -0.01em; }
   .price span { font-size: 13px; font-weight: 400; color: var(--faint); }
@@ -61,7 +72,9 @@
     font-size: 13px; font-weight: 500; text-decoration: none;
     background: var(--ink); color: var(--bg);
   }
-  .cta:hover { background: #d4d4d8; }
+  /* A charcoal fill has nothing darker to move to — every neutral under ink is lighter — so the
+     hover is opacity, which is what the app's own filled control does. */
+  .cta:hover { opacity: 0.9; }
   .cta.quiet { background: transparent; color: var(--ink); border: 1px solid var(--edge); }
   .cta.quiet:hover { background: var(--hair); }
 

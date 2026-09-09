@@ -27,7 +27,7 @@
 @tailwind utilities;
 
 @layer base {
-  /* colour_system.pdf's own tokens, under the specification's own names.
+  /* new-theme.pdf's own tokens, under the specification's own names.
      `src/lib/palette.ts` is where they are decided; `colourSystem.test.ts` compares this block to
      it token by token, so a value edited in one place and not the other fails rather than ships.
 
@@ -39,50 +39,37 @@
      read is the fix, and naming it after the specification rather than after the app is what lets
      somebody check it against the PDF.
 
-     §08 HAS NO `--color-brand`, DELIBERATELY. The specification writes NONE in that row: "no single
-     coloured brand accent; Jaroku remains neutral/off-white". A variable resolving to nothing is a
-     variable somebody uses by accident, so the absence is the token. */
+     §05 HAS NO `--color-brand`, DELIBERATELY. The specification writes NONE in that row: "No
+     separate coloured brand accent. Jaroku's brand is the neutral/off-white system itself." A
+     variable resolving to nothing is a variable somebody uses by accident, so the absence is the
+     token.
+
+     AND THERE ARE NO `--color-sidebar*` TOKENS ANY MORE. The sidebar is still its own plane and it
+     is drawn from §01 — see SIDEBAR in src/lib/palette.ts. Publishing its four values a second time
+     under a second set of names is how two tokens meant to be the same colour stop being it. */
   :root {
     color-scheme: light;
 
     /* §01 Canvas & Surfaces */
-    --color-bg-canvas: #f7f7f5;
-    --color-bg-surface: #fbfbfa;
+    --color-bg-canvas: #f6f6f4;
+    --color-bg-surface: #fafaf9;
     --color-bg-elevated: #ffffff;
-    --color-bg-subtle: #f1f1ef;
+    --color-bg-subtle: #f0f0ee;
     --color-bg-hover: #ececea;
     --color-bg-active: #e5e5e1;
 
-    /* §02 Sidebar Plane */
-    --color-sidebar: #e9eeef;
-    --color-sidebar-hover: #dee6e8;
-    --color-sidebar-active: #d3dde0;
-    --color-sidebar-border: #d2dcdd;
-
-    /* §03 Pale Mist Secondary Palette */
-    --color-pale-mist-50: #f3f6f6;
-    --color-pale-mist-100: #e9eeef;
-    --color-pale-mist-200: #dee6e8;
-    --color-pale-mist-300: #d3dde0;
-    --color-pale-mist-400: #c0c8ca;
-
-    /* §04 Deep Harbor Secondary Accent */
-    --color-deep-harbor: #2b4851;
-    --color-deep-harbor-hover: #24404a;
-    --color-deep-harbor-soft: #e8eff0;
-
-    /* §05 Text */
+    /* §02 Text */
     --color-text-primary: #1d1d1b;
     --color-text-secondary: #62625f;
     --color-text-muted: #90908c;
     --color-text-disabled: #b5b5b0;
 
-    /* §06 Borders & Dividers */
+    /* §03 Borders & Dividers */
     --color-border-subtle: #e6e6e2;
     --color-border-default: #dcdcd8;
     --color-border-strong: #c9c9c4;
 
-    /* §07 Semantic Colours */
+    /* §04 Semantic Colours */
     /* The runs capsule — a quantity, not a state. See lib/palette.ts's RUNS. */
     --color-runs-soft: #fce7f3;
     --color-runs-ink: #db2777;
@@ -91,9 +78,9 @@
     --color-danger: #c94a43;
     --color-info: #4b78b8;
 
-    /* §08 Brand Direction */
+    /* §05 Brand Direction — charcoal for primary high-contrast actions, and the app's one
+       interaction accent as of this palette. See INTERACTION in src/lib/tokens.ts. */
     --color-brand-strong: #1d1d1b;
-    --color-brand-secondary: #2b4851;
 
     /* UI-4 §04 Radius Scale — nine rungs, published for the same reason the colours above are:
        React Flow draws its own chrome and the canvas-drawn surfaces take a number rather than a
@@ -154,7 +141,7 @@
   }
   /* The thumb answers the pointer, like every other control. Ten pixels of permanently-lit chrome
      on each of forty regions is a real share of a 280px sidebar, and a thumb that never responds
-     reads as a painted stripe rather than as something you can grab. §06's strongest boundary,
+     reads as a painted stripe rather than as something you can grab. §03's strongest boundary,
      which is what `grip` is — the end of the greyscale before ink. */
   ::-webkit-scrollbar-thumb:hover {
     background: var(--color-border-strong);
@@ -270,7 +257,7 @@
      canvas itself at an alpha rather than ink — a dark wash here would invert the minimap's
      meaning and make the part you are looking at the part that reads as switched off. */
   .react-flow__minimap-mask {
-    fill: rgba(241, 241, 239, 0.72);
+    fill: rgba(240, 240, 238, 0.72);
   }
   .react-flow__edge.animated .react-flow__edge-path {
     stroke-dasharray: 6 5;

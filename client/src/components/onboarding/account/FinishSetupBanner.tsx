@@ -40,8 +40,12 @@ export function FinishSetupBanner() {
       <button
         type="button"
         onClick={resume}
+        // THE HOVER IS A SURFACE, NOT A SHADE. It was `hover:text-accent` over `text-ink`, which
+        // said something while the accent was a near-navy and says nothing now that it is §05's
+        // charcoal — the same value the label already sits at. `hover:bg-active` is what every
+        // other control in the app answers a pointer with, and the arrow below still moves.
         className="group inline-flex items-center gap-1.5 rounded-control px-1.5 py-0.5 text-caption
-          font-medium text-ink outline-none transition-colors duration-fast hover:text-accent
+          font-medium text-ink outline-none transition-colors duration-fast hover:bg-active
           focus-visible:shadow-focusring"
       >
         Finish setting up

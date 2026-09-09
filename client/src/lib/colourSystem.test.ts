@@ -1,4 +1,4 @@
-// The palette, held to colour_system.pdf.
+// The palette, held to new-theme.pdf.
 //
 // The specification is LOCKED, so drift is the only interesting failure — nobody disagrees with it
 // on purpose. What happens instead is that one of the four places these values live gets edited and
@@ -12,13 +12,20 @@
 // table compared against itself passes just as happily with a token deleted, and every assertion
 // here would then be checking that the code agrees with the code.
 //
-// THE OTHER HALF IS THE INVERSION, and it is the half worth having. This client was built on a
-// near-black system: nine hex literals in GraphView, four in the Inbox, a `#52525b` in the glyphs,
-// a shiki theme that writes its own background into the markup. Every one of those is invisible to
-// a palette change — they do not fail, they simply stay dark while everything around them goes
-// light. So the rules below are mostly about ABSENCE: no source file carries a colour of its own
-// unless it is a third-party brand mark, no dark-era value survives anywhere, and the one component
-// that could quietly keep its own theme is checked by name.
+// THE OTHER HALF IS THE ABSENCES, and it is the half worth having. This suite was written after a
+// migration off a near-black system left forty-eight hex literals behind — nine in GraphView, four
+// in the Inbox, a `#52525b` in the glyphs, a shiki theme that writes its own background into the
+// markup. Every one of those is invisible to a palette change: they do not fail, they simply stay
+// the colour they were while everything around them moves. So the rules below are mostly about what
+// must NOT be there — no source file carrying a colour of its own unless it is a third-party brand
+// mark, no dark-era value anywhere, and the one component that could quietly keep its own theme
+// checked by name.
+//
+// THIS PALETTE NARROWED THE ONE BEFORE IT, so the dead list has grown by a family. Pale Mist, the
+// cool-grey sidebar plane struck from it and Deep Harbor were all real tokens a month ago, which
+// makes them exactly the kind of value that survives in a component nobody reopened — a `#2B4851`
+// left in an SVG stroke is a near-navy mark on a page with no navy anywhere else, and nothing but
+// a list would say so.
 //
 //   npm run test:colour-system
 
@@ -29,9 +36,7 @@ import {
   BORDER,
   BRAND,
   CANVAS,
-  DEEP_HARBOR,
   NEUTRAL_SHARE_FLOOR,
-  PALE_MIST,
   SEMANTIC,
   SIDEBAR,
   SPEC_TOKENS,
@@ -75,26 +80,14 @@ const eq = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase(
 
 console.log("\nevery token in the specification's tables, transcribed from the PDF");
 {
-  // §01 through §08, value by value, in the specification's own order.
+  // §01 through §05, value by value, in the specification's own order.
   const SPEC: Record<string, string> = {
-    "--color-bg-canvas": "#F7F7F5",
-    "--color-bg-surface": "#FBFBFA",
+    "--color-bg-canvas": "#F6F6F4",
+    "--color-bg-surface": "#FAFAF9",
     "--color-bg-elevated": "#FFFFFF",
-    "--color-bg-subtle": "#F1F1EF",
+    "--color-bg-subtle": "#F0F0EE",
     "--color-bg-hover": "#ECECEA",
     "--color-bg-active": "#E5E5E1",
-    "--color-sidebar": "#E9EEEF",
-    "--color-sidebar-hover": "#DEE6E8",
-    "--color-sidebar-active": "#D3DDE0",
-    "--color-sidebar-border": "#D2DCDD",
-    "--color-pale-mist-50": "#F3F6F6",
-    "--color-pale-mist-100": "#E9EEEF",
-    "--color-pale-mist-200": "#DEE6E8",
-    "--color-pale-mist-300": "#D3DDE0",
-    "--color-pale-mist-400": "#C0C8CA",
-    "--color-deep-harbor": "#2B4851",
-    "--color-deep-harbor-hover": "#24404A",
-    "--color-deep-harbor-soft": "#E8EFF0",
     "--color-text-primary": "#1D1D1B",
     "--color-text-secondary": "#62625F",
     "--color-text-muted": "#90908C",
@@ -107,12 +100,11 @@ console.log("\nevery token in the specification's tables, transcribed from the P
     "--color-danger": "#C94A43",
     "--color-info": "#4B78B8",
     "--color-brand-strong": "#1D1D1B",
-    "--color-brand-secondary": "#2B4851",
-    // THE ONE PAIR THIS TABLE HOLDS THAT colour_system.pdf DOES NOT, added deliberately and to be
+    // THE ONE PAIR THIS TABLE HOLDS THAT new-theme.pdf DOES NOT, added deliberately and to be
     // added to the document. The runs capsule on the sidebar's agent rows was specified with these
     // exact values; the alternative was two hex literals in a component, which is the failure the
-    // rest of this suite exists to prevent. Filed outside `SEMANTIC` on purpose — §09 reserves
-    // those four for state, and a run count is a quantity. See lib/palette.ts's `RUNS`.
+    // rest of this suite exists to prevent. Filed outside `SEMANTIC` on purpose — §06 spends those
+    // four only where their meaning is useful, and a run count is a quantity. See `RUNS`.
     "--color-runs-soft": "#FCE7F3",
     "--color-runs-ink": "#DB2777",
   };
@@ -124,15 +116,27 @@ console.log("\nevery token in the specification's tables, transcribed from the P
     Object.keys(SPEC_TOKENS).length === Object.keys(SPEC).length,
     Object.keys(SPEC_TOKENS).filter((k) => !(k in SPEC)).join(", "));
 
-  // §08 writes NONE in the `--color-brand` row. An absence is easy to lose to a helpful edit.
-  check("§08's brand colour is absent rather than empty", BRAND.base === null && !("--color-brand" in SPEC_TOKENS));
-  // §03's family and §02's plane share three values, which is what makes the sidebar Pale Mist
-  // rather than merely near it. If the two ever disagree the sidebar has left the family.
-  check("the sidebar IS the Pale Mist family", eq(SIDEBAR.base, PALE_MIST[100]) && eq(SIDEBAR.hover, PALE_MIST[200]) && eq(SIDEBAR.active, PALE_MIST[300]));
-  // §08 again: charcoal for a primary action is the same charcoal as a heading, or a filled
+  // §05 writes NONE in the `--color-brand` row. An absence is easy to lose to a helpful edit.
+  check("§05's brand colour is absent rather than empty", BRAND.base === null && !("--color-brand" in SPEC_TOKENS));
+  // §05 again: charcoal for a primary action is the same charcoal as a heading, or a filled
   // button is a slightly different black from the text above it.
-  check("§08's charcoal is §05's ink", eq(BRAND.strong, INK.primary));
-  check("...and §08's secondary is §04's Harbor", eq(BRAND.secondary, DEEP_HARBOR.base));
+  check("§05's charcoal is §02's ink", eq(BRAND.strong, INK.primary));
+
+  // THE THREE FAMILIES THIS PALETTE STRUCK OUT, asserted as absences because that is the only
+  // shape they can fail in now. `--color-brand-secondary` was Deep Harbor's second name and the
+  // sidebar had four tokens of its own; a helpful edit that puts either back is a second opinion
+  // about a colour §05 says does not exist.
+  const gone = ["--color-brand-secondary", "--color-deep-harbor", "--color-sidebar", "--color-pale-mist-100"];
+  check("the deleted families stay deleted", gone.every((t) => !(t in SPEC_TOKENS)),
+    gone.filter((t) => t in SPEC_TOKENS).join(", "));
+
+  // AND THE SIDEBAR IS DRAWN FROM §01 RATHER THAN FROM VALUES OF ITS OWN. It is still a plane —
+  // `surfaceSystem.test.ts` holds it one step under the canvas — but the three surfaces and the
+  // border are §01's and §03's, which is what stops a fifth neutral appearing the first time
+  // somebody wants the column a shade different.
+  check("the sidebar plane is §01's own ladder",
+    eq(SIDEBAR.base, CANVAS.subtle) && eq(SIDEBAR.hover, CANVAS.hover) &&
+    eq(SIDEBAR.active, CANVAS.active) && eq(SIDEBAR.border, BORDER.default));
 }
 
 console.log("\n...and the stylesheet publishes exactly that set");
@@ -164,10 +168,13 @@ console.log("\n...and the Tailwind config, which is the third copy");
     elevated: "--color-bg-elevated",
     active: "--color-bg-hover",
     chrome: "--color-bg-active",
-    sidebar: "--color-sidebar",
-    "sidebar-hover": "--color-sidebar-hover",
-    "sidebar-active": "--color-sidebar-active",
-    "sidebar-border": "--color-sidebar-border",
+    // The sidebar's four are ALIASES now — the plane is drawn from §01 and §03 rather than from a
+    // family of its own — so what has to be true is that each utility IS the §01 token it stands
+    // for. A `bg-sidebar` that has drifted a shade off `bg-void` is a fifth neutral nobody decided.
+    sidebar: "--color-bg-subtle",
+    "sidebar-hover": "--color-bg-hover",
+    "sidebar-active": "--color-bg-active",
+    "sidebar-border": "--color-border-default",
     ink: "--color-text-primary",
     muted: "--color-text-secondary",
     faint: "--color-text-muted",
@@ -175,9 +182,10 @@ console.log("\n...and the Tailwind config, which is the third copy");
     hair: "--color-border-subtle",
     edge: "--color-border-default",
     grip: "--color-border-strong",
-    accent: "--color-deep-harbor",
-    "accent-hover": "--color-deep-harbor-hover",
-    "accent-soft": "--color-deep-harbor-soft",
+    // §05's charcoal, which is also `ink`. Two names for one value, and the specification writes it
+    // twice for that reason: what a heading is made of and what a primary action is filled with are
+    // the same colour on purpose. See INTERACTION in tokens.ts.
+    accent: "--color-brand-strong",
     ok: "--color-success",
     err: "--color-danger",
     run: "--color-warning",
@@ -189,11 +197,12 @@ console.log("\n...and the Tailwind config, which is the third copy");
     const declared = config.match(new RegExp(`^\\s+${key}: "(#[0-9a-fA-F]{6})"`, "m"))?.[1];
     check(`${name} is ${token}`, eq(declared ?? "", SPEC_TOKENS[token]!), declared ?? "missing");
   }
-  // §03's five steps, which the sidebar's four are drawn from and which §09 hands the rest of the
-  // cool atmosphere to.
-  for (const step of [50, 100, 200, 300, 400] as const) {
-    const declared = config.match(new RegExp(`^\\s+${step}: "(#[0-9a-fA-F]{6})",`, "m"))?.[1];
-    check(`mist-${step} is Pale Mist ${step}`, eq(declared ?? "", PALE_MIST[step]), declared ?? "missing");
+  // AND THE UTILITIES THIS PALETTE DELETED ARE NOT STILL EMITTED. A Tailwind key outliving its
+  // token is the quietest failure available here: `bg-accent-soft` would keep compiling, keep
+  // rendering, and keep painting a Harbor wash on a page with no Harbor in it.
+  for (const key of ["mist", '"accent-hover"', '"accent-soft"'] as const) {
+    check(`${key.replace(/"/g, "")} is gone from the config`,
+      !new RegExp(`^\\s+${key}: [{"]`, "m").test(config));
   }
 }
 
@@ -206,9 +215,13 @@ console.log("\ntokens.ts says what the palette MEANS, and says it in the palette
   check("SURFACE.hair is the quietest border", eq(SURFACE.hair, BORDER.subtle));
   check("SURFACE.edge is the default border", eq(SURFACE.edge, BORDER.default));
   check("SURFACE.grip is the strongest", eq(SURFACE.grip, BORDER.strong));
-  check("TEXT.ink is §05's primary", eq(TEXT.ink, INK.primary));
-  check("TEXT.disabled is §05's fourth step", eq(TEXT.disabled, INK.disabled));
-  check("the interaction accent is Deep Harbor", eq(INTERACTION.accent, DEEP_HARBOR.base));
+  check("TEXT.ink is §02's primary", eq(TEXT.ink, INK.primary));
+  check("TEXT.disabled is §02's fourth step", eq(TEXT.disabled, INK.disabled));
+  // §06: "Use charcoal and neutral contrast for primary actions." The accent is §05's charcoal,
+  // which is the same value as `ink` — and the pair of them is the whole of the brand direction.
+  check("the interaction accent is §05's charcoal", eq(INTERACTION.accent, BRAND.strong));
+  check("...and it is the only thing INTERACTION carries besides its alpha",
+    Object.keys(INTERACTION).join(",") === "accent,soft", Object.keys(INTERACTION).join(", "));
 
   // §01's ladder must ASCEND in lightness from what the shell sits on to what floats above it. A
   // rung out of order still renders — it just makes a popover recede and a page come forward.
@@ -224,14 +237,14 @@ console.log("\ntokens.ts says what the palette MEANS, and says it in the palette
   check("the border ladder descends", borders.every((c, i) => i === 0 || lightness(c) < lightness(borders[i - 1]!)));
 }
 
-console.log("\n§07's four are spent on meaning and nothing else claims them");
+console.log("\n§04's four are spent on meaning and nothing else claims them");
 {
-  check("ok is §07's success", eq(STATUS.ok, SEMANTIC.success));
-  check("error is §07's danger", eq(STATUS.error, SEMANTIC.danger));
+  check("ok is §04's success", eq(STATUS.ok, SEMANTIC.success));
+  check("error is §04's danger", eq(STATUS.error, SEMANTIC.danger));
   // Amber means IN FLIGHT in this product — forty-eight call sites, a node glow and a stream
-  // pulse — which is why `pending` holds §07's amber and `warn` holds its blue. See STATUS.warn.
-  check("pending is §07's amber", eq(STATUS.pending, SEMANTIC.warning));
-  check("caution is §07's blue, not a second amber", eq(STATUS.warn, SEMANTIC.info));
+  // pulse — which is why `pending` holds §04's amber and `warn` holds its blue. See STATUS.warn.
+  check("pending is §04's amber", eq(STATUS.pending, SEMANTIC.warning));
+  check("caution is §04's blue, not a second amber", eq(STATUS.warn, SEMANTIC.info));
 
   // The four category accents say WHAT KIND, the four semantics say HOW IT IS DOING, and the whole
   // system stops working the moment a badge can be mistaken for a state. Distance in RGB is a
@@ -259,43 +272,58 @@ console.log("\n§07's four are spent on meaning and nothing else claims them");
   }
   // 55 is where a difference stops being one somebody can rely on at badge size. It is not a
   // theoretical floor: the first draft of this palette put `ACCENT.state` at an indigo 42 from
-  // §07's info blue, which is a "what kind of thing is this" mark that reads as a status.
+  // §04's info blue, which is a "what kind of thing is this" mark that reads as a status.
+  //
+  // THE ACCENT IS IN THIS LIST AND IT IS CHARCOAL, which is the one entry that could look like a
+  // cheat: an ink is far from every hue by construction. It stays because the rule is about
+  // MEANING-BEARING colours rather than about hues, and the day somebody proposes a near-black
+  // category badge this is what says no.
   check("no two meaning-bearing colours are near-identical", closest.d > 55, `${closest.pair} are ${closest.d.toFixed(0)} apart`);
 }
 
-console.log("\n§09's neutral-first rule, counted where colour is actually spent");
+console.log("\n§06's neutral-first rule, counted where colour is actually spent");
 {
-  // §09: "roughly 75–85% of the interface remains neutral ... Deep Harbor remains rare and
-  // intentional", "Not every button or heading."
+  // §06: "Neutral-first: approximately 85–90% of the interface should remain neutral. Colour should
+  // communicate meaning rather than decorate the UI."
   //
   // COUNTED IN CALL SITES, NOT IN TOKENS. The first version of this check compared the palette's
   // own token counts and reported 45% — which says nothing at all, because the palette has one
-  // canvas token that covers a whole screen and five Pale Mist steps that mostly do not appear.
-  // Where colour is spent is the call sites, and a class census is a fair proxy for area in an app
-  // whose surfaces are all painted by classes.
+  // canvas token that covers a whole screen and steps that mostly do not appear. Where colour is
+  // spent is the call sites, and a class census is a fair proxy for area in an app whose surfaces
+  // are all painted by classes.
+  //
+  // THE ACCENT COUNTS AS NEUTRAL NOW, which is the arithmetic half of deleting Deep Harbor: charcoal
+  // is a grey, and forty call sites painting a send button and a selection bar in ink are not the
+  // interface being coloured. What is left outside the neutral bucket is exactly what §06 says
+  // colour is for — the four statuses, the category badges, and the one run count.
   const count = (re: RegExp): number =>
     SOURCES.reduce((n, f) => n + (f.text.match(re) ?? []).length, 0);
   const P = "(bg|text|border|ring|fill|stroke|divide|placeholder|shadow|from|to|via|decoration)";
-  const neutral = count(new RegExp(`\\b${P}-(void|bg|panel|elevated|active|chrome|hair|edge|grip|ink|muted|faint|disabled|sidebar|sidebar-hover|sidebar-active|sidebar-border|mist-[0-9]+)\\b`, "g"));
-  const accent = count(new RegExp(`\\b${P}-accent(-hover|-soft)?\\b`, "g"));
+  const neutral = count(new RegExp(`\\b${P}-(void|bg|panel|elevated|active|chrome|hair|edge|grip|ink|muted|faint|disabled|accent|sidebar|sidebar-hover|sidebar-active|sidebar-border)\\b`, "g"));
   const semantic = count(new RegExp(`\\b${P}-(ok|err|run|warn)\\b`, "g"));
   const category = count(new RegExp(`\\b${P}-(reviewed|bespoke|stateful)\\b`, "g"));
-  const total = neutral + accent + semantic + category;
+  const runs = count(new RegExp(`\\b${P}-(runssoft|runsink)\\b`, "g"));
+  const total = neutral + semantic + category + runs;
 
   const share = neutral / total;
   check(`at least ${Math.round(NEUTRAL_SHARE_FLOOR * 100)}% of coloured call sites are neutral`,
     share >= NEUTRAL_SHARE_FLOOR, `${Math.round(share * 100)}% of ${total}`);
-  // And the accent's own restraint, which §09 states twice and which is the rule that actually
-  // decays: an accent spreads one sanctioned-looking call site at a time.
-  check("Deep Harbor stays rare", accent / total <= 0.05, `${accent} of ${total}`);
+  // AND THE RULE THAT REPLACED "Deep Harbor stays rare", which this palette made unaskable by
+  // deleting the colour it was about. §06's other sentence is the one still worth guarding —
+  // "Colour should communicate meaning rather than decorate the UI" — so what is counted is
+  // whether anything OUTSIDE the four statuses has started spending hue. Categories and the run
+  // count are the two sanctioned exceptions and they are small; the failure this catches is either
+  // of them growing into a decorative palette.
+  check("hue outside the statuses stays incidental", (category + runs) / total <= 0.02,
+    `${category + runs} of ${total}`);
 }
 
-console.log("\nno dark-era value survives anywhere in the client");
+console.log("\nno superseded value survives anywhere in the client");
 {
   // THE ASSERTION THIS SUITE EXISTS FOR. A hex literal does not fail when the palette moves under
-  // it — it stays exactly as dark as it was while everything around it goes light, which is a bug
-  // that only a person looking at the screen can see. Each of these was in the client before this
-  // pass, in a file that had no idea it was part of a palette.
+  // it — it stays exactly the colour it was while everything around it moves, which is a bug that
+  // only a person looking at the screen can see. The first four rows were in the client when it
+  // came off a near-black system, in files that had no idea they were part of a palette.
   const DEAD = [
     "#08080a", "#0d0d0f", "#0e0e12", "#18181b", "#1e1e22", "#202024", "#232329", "#242429",
     "#26262b", "#2a2a30", "#34343c", "#3a3a3f", "#3a3a44", "#3f3f46", "#4c4c56", "#52525b",
@@ -303,6 +331,15 @@ console.log("\nno dark-era value survives anywhere in the client");
     "#a1a1aa", "#e4e4e7", "#6b8afd", "#8aa0ff", "#22c55e", "#ef4444", "#f59e0b", "#fb923c",
     "#fbbf24", "#5eead4", "#c084fc", "#a5b4fc", "#f472b6", "#182130", "#16221a", "#241f18",
     "#221826", "#7fa9db", "#79c48f", "#c99a52", "#a98cc4", "#a6b0ff", "#c3c7d1", "#7fa9d6",
+    // AND THE FAMILIES new-theme.pdf STRUCK OUT, which are the ones this list will actually catch
+    // next. They are not dark and they are not obviously wrong on the page — a `#2B4851` icon
+    // stroke reads as a slightly odd dark grey, and `#E9EEEF` behind a panel reads as a slightly
+    // cool one — which is exactly why a person reviewing screenshots would let them through. Deep
+    // Harbor and its two steps, Pale Mist's five, the sidebar's four, and the three §01 surfaces
+    // this palette moved by one step.
+    "#2b4851", "#24404a", "#e8eff0",
+    "#f3f6f6", "#e9eeef", "#dee6e8", "#d3dde0", "#c0c8ca", "#d2dcdd",
+    "#f7f7f5", "#fbfbfa", "#f1f1ef",
   ];
   // AND THE SAME VALUES AS CHANNELS, which is the half a hex scan misses entirely. A gradient, a
   // scrim and an SVG filter all take `rgba(...)`, and five of the six that survived the first pass
@@ -379,7 +416,7 @@ console.log("\nthe two surfaces that write their own colours past every rule abo
 console.log("\ndepth is struck from ink, at a light system's alphas");
 {
   // `rgba(0,0,0,0.4)` under a card is invisible on near-black and a bruise on off-white, and a
-  // pure-black shadow under #FBFBFA goes grey-blue rather than neutral-warm. Both halves matter,
+  // pure-black shadow under #FAFAF9 goes grey-blue rather than neutral-warm. Both halves matter,
   // and neither is visible in a diff that only changed a number.
   for (const [name, value] of Object.entries(ELEVATION)) {
     if (value === "none") continue;
@@ -392,7 +429,7 @@ console.log("\ndepth is struck from ink, at a light system's alphas");
   // be invisible on a white surface.
   check("GLOW.hover deepens rather than brightens", GLOW.hover.includes(BORDER.strong), GLOW.hover);
   check("GLOW.cta is ink at an alpha", GLOW.cta.includes(channels(INK.primary)), GLOW.cta);
-  check("the focus ring is the accent, not a grey", INTERACTION.soft === alpha(DEEP_HARBOR.base, 0.16));
+  check("the focus ring is the accent at an alpha", INTERACTION.soft === alpha(BRAND.strong, 0.16));
 }
 
 console.log("\nthe derived sets that have no specification row of their own");
@@ -411,7 +448,7 @@ console.log("\nthe derived sets that have no specification row of their own");
   check("the share ramp climbs from ink towards the page",
     SHARE_RAMP.every((c, i) => i === 0 || lightness(c) > lightness(SHARE_RAMP[i - 1]!)),
     SHARE_RAMP.join(" → "));
-  check("...and its darkest step is no darker than §05's supporting ink",
+  check("...and its darkest step is no darker than §02's supporting ink",
     lightness(SHARE_RAMP[0]!) >= lightness(INK.secondary));
 }
 

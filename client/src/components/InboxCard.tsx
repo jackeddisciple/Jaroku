@@ -45,7 +45,7 @@ import type { InboxItemView, InboxSeverity } from "../types.ts";
  * different reason. It used to be the hex written out, because this is not an MCP badge and a
  * reader following the import would arrive at a comment about third-party tools — but a hex is a
  * copy, and the palette moved under it: `#f472b6` was a rose on near-black and is a highlighter on
- * `#FBFBFA`. So the value is imported and the NAME stays local. The two share a colour because the
+ * `#FAFAF9`. So the value is imported and the NAME stays local. The two share a colour because the
  * palette has one rose, and §4.3 asked for the rose.
  */
 const ROSE = ACCENT.mcp;

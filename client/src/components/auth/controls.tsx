@@ -33,7 +33,7 @@ interface ButtonProps {
  * The decision the screen exists to ask. One per screen, filled, canvas on ink.
  *
  * CHARCOAL RATHER THAN THE ACCENT, which is the same choice `PrimaryCta` makes: the accent is a
- * selection colour and there is nothing selected on any of these screens. §08 names this exact
+ * selection colour and there is nothing selected on any of these screens. §05 names this exact
  * control — "charcoal for primary high-contrast actions" — and a filled ink button is the
  * highest-contrast thing that can be on the surface, which is what "this is the one thing to press"
  * should look like when it is the only thing to press. It was off-white text on near-black before

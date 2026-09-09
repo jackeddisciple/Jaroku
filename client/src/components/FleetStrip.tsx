@@ -84,7 +84,7 @@ function ConnectionDot({ card }: { card: FleetCardView }) {
     case "public":
       // §9's table: `STATUS.warn`, "and warn is the blue in this system, not an orange". A
       // supported mode somebody chose, not a fault — which is exactly what `tokens.ts` argues
-      // §07's `info` is for, at length, in the comment §9 tells you to read before reaching here.
+      // §04's `info` is for, at length, in the comment §9 tells you to read before reaching here.
       return slot(<StatusDot state="warn" icon={GlobeIcon} size={ICON.xs} />, CONNECTION_LABEL.public!);
     case "connected":
       // §9's table: "the quietest possible mark, or none. Healthy is not a thing to announce." So

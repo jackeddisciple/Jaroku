@@ -24,7 +24,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { COMPONENT, ELEVATION_SPEC, RADIUS_SCALE, RADIUS_TOKENS, SHADOW_RULES, SHAPE, SURFACE_HIERARCHY, TIER } from "./surfaces.ts";
-import { ATTENTION, ELEVATION, GLOW, RADIUS } from "./tokens.ts";
+import { ATTENTION, ELEVATION, FOCUS_RING, GLOW, RADIUS } from "./tokens.ts";
 import { CANVAS, SIDEBAR, TEXT as INK, channels } from "./palette.ts";
 
 let failures = 0;
@@ -269,7 +269,19 @@ console.log("\n§12: no dark, wide or decorative shadow anywhere");
   // a 64px spread at two percent is atmosphere, a 12px one at forty is a bruise. §06's own widest is
   // 32px at ten percent, so that is the ceiling — anything past it on EITHER axis is a shadow this
   // system does not have a level for.
+  //
+  // THE FOCUS RING IS NOT IN THE CENSUS, AND THAT EXCLUSION IS NEW RATHER THAN A LOOPHOLE. It is
+  // drawn with `box-shadow` because that is the only property that stacks two rings, but it is not
+  // a shadow: it says WHERE THE KEYBOARD IS, it has no elevation level, and its outer halo is 16%
+  // on purpose — the one mark on screen that has to win against whatever it lands on. It passed
+  // this rule until new-theme.pdf only because it was struck from Deep Harbor, so the ink-only
+  // regex never saw it; the accent is §05's charcoal now and the accidental scoping has to become a
+  // stated one. Everything the rule was actually written about — the four levels, both GLOWs and
+  // every `boxShadow` in the config — is still counted.
   const shadows = [...Object.values(ELEVATION), GLOW.hover, GLOW.cta, read("tailwind.config.js")]
+    .join("\n")
+    .split("\n")
+    .filter((line) => !/focusring/.test(line) && !line.includes(FOCUS_RING))
     .join("\n")
     .matchAll(/(\d+)px\s+(-?\d+px\s+)?rgba\(29, 29, 27,\s*([\d.]+)\)/g);
   const wide = [...shadows].filter((m) => Number(m[1]) > 32 || Number(m[3]) > 0.1).map((m) => m[0]);

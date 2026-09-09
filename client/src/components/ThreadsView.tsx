@@ -300,7 +300,7 @@ export function ThreadsView() {
                     with no cursor, so this length IS a total. */}
                 <SectionHeader name={section.label} count={section.threads.length} rule className="px-5 pb-1 pt-3" />
                 {/* §11's thread row: 0px radius, E0, and a #E6E6E2 divider — which is `hair`, the
-                    quietest boundary §06 has. It is on the GROUP rather than on the row, so the last
+                    quietest boundary §03 has. It is on the GROUP rather than on the row, so the last
                     row of a section does not draw a line into the header of the next one, and so a
                     row still owns no border of its own: §6.2's rule that a full border would make a
                     row a card is exactly why the line belongs to the list.

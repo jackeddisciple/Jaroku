@@ -62,7 +62,7 @@ function Field() {
           without it.
 
           IT WAS DRAWN IN OFF-WHITE, which is what a texture on a near-black page has to be — and
-          which is a texture nobody can see at all on `#F1F1EF`. Ink at the same alphas, so the
+          which is a texture nobody can see at all on `#F0F0EE`. Ink at the same alphas, so the
           field is the same depth arriving from the other end of the greyscale. */}
       <div
         className="absolute left-1/2 top-[-10%] h-[560px] w-[820px] -translate-x-1/2 animate-breathe motion-reduce:animate-none"
@@ -214,8 +214,14 @@ export function TextLink({
         if (onClick) onClick();
         else if (href) void openExternal(href);
       }}
-      className="rounded-xs underline decoration-accent/50 underline-offset-2 text-accent outline-none
-        transition-colors duration-fast hover:text-accent-hover hover:decoration-accent-hover
+      // THE HOVER IS THE UNDERLINE, NOT THE INK. This read `hover:text-accent-hover`, and the accent
+      // had a darker step to move to; new-theme.pdf's accent is §05's charcoal and there is nothing
+      // under it — every neutral below ink is lighter, so a link that changed colour on hover would
+      // be FADING, which says the opposite of what a hover says. So the ink holds and the rule
+      // beneath it goes from half strength to full, which is the oldest way a link has of answering
+      // a pointer.
+      className="rounded-xs underline decoration-accent/40 underline-offset-2 text-accent outline-none
+        transition-colors duration-fast hover:decoration-accent
         focus-visible:shadow-focusring"
     >
       {children}

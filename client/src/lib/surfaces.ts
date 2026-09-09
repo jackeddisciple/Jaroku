@@ -109,7 +109,7 @@ export const SHAPE = {
  * `rgba(0,0,0,0.03)`, `rgba(0,0,0,0.06)` and `rgba(0,0,0,0.10)`; the offsets, blurs and alphas below
  * are those exactly, and the colour is `#1D1D1B` rather than black. That is not a departure from
  * UI-4 so much as an application of the palette it sits on: a neutral-warm page casts a
- * neutral-warm shadow, and pure black under `#FBFBFA` goes grey-blue. `colourSystem.test.ts` has
+ * neutral-warm shadow, and pure black under `#FAFAF9` goes grey-blue. `colourSystem.test.ts` has
  * asserted "struck from ink" since the light palette landed, and at three to ten percent the two
  * are indistinguishable except in the one way that matters.
  *
