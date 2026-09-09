@@ -159,8 +159,9 @@
        through it. Anything darker here and the column reads as "gone grey", which is the outcome
        the brief rules out by name — and it is what a `--color-bg-subtle` ground did.
 
-       0.36 IS THE DIAL AND IT WAS WALKED DOWN TO IT. Earlier passes sat at 0.76, 0.62, 0.58 and
-       0.45, and
+       0.26 IS THE DIAL AND IT WAS WALKED DOWN TO IT, alongside the filter above — the two move
+       together, because the veil sets how milky the surface is and the compression sets how far a
+       dark backdrop can drag it. Earlier passes sat at 0.76, 0.62, 0.58, 0.45, 0.38 and
        the first two looked too dark — but the alpha was only ever half the cause. The column also
        stood on a ground six levels under the workspace, and the WINDOW had no appearance pinned, so
        on a machine in dark mode AppKit handed back the DARK variant of the material and no amount
@@ -190,8 +191,12 @@
        making the surface milky rather than making it bright.
 
        Read in order: compress the range, restore the colour, lift it, then milk it. */
-    --sidebar-material-filter: contrast(0.45) saturate(1.8) brightness(1.35);
-    --sidebar-material-tint: rgba(246, 246, 244, 0.38);
+    /* 0.38 CONTRAST RATHER THAN 0.45: the compression IS the floor, so opening the tint without
+       opening this would just let a dark backdrop back in. Lower compression, marginally more of
+       the environment's own range — and `saturate` goes up with it, because compressing further
+       costs more chroma and the colour is the half worth keeping. */
+    --sidebar-material-filter: contrast(0.38) saturate(2) brightness(1.38);
+    --sidebar-material-tint: rgba(246, 246, 244, 0.26);
     /* THE ROW STATES, AND THEY ONLY EXIST BECAUSE THE COLUMN IS TRANSLUCENT. `--color-bg-hover`
        and `--color-bg-active` are opaque, which is right on a painted panel and wrong on a
        material: a fixed `#ECECEA` sitting on a surface that tracks the desktop punches a solid

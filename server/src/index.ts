@@ -3055,9 +3055,25 @@ for (const route of sessionRoutes({
   // is a distinct operation from "replace this resource", and spelling it POST would mean the
   // method no longer says what the request does — which matters most on the routes an audit log is
   // reading back. See auth/session.ts.
+  //
+  // EXHAUSTIVE, WITH NO `else` CATCH-ALL, AND THAT IS THE WHOLE POINT OF THE SHAPE. This was
+  // `if GET … else if PATCH … else post`, and when the avatar routes arrived with PUT and DELETE
+  // they fell into that final `else` and were mounted as POST — silently, because the union in
+  // `sessionRoutes` had been widened to admit them and nothing here had to agree. The symptom was
+  // a browser refusing to send the upload at all: preflight answered `allow-methods: GET, POST`,
+  // so a PUT was never made and the failure surfaced as "Load failed" with no server log line to
+  // find. A default branch that guesses a method is worse than one that does not compile.
   if (route.method === "GET") router.get(route.path, route.handler);
+  else if (route.method === "POST") router.post(route.path, route.handler);
   else if (route.method === "PATCH") router.patch(route.path, route.handler);
-  else router.post(route.path, route.handler);
+  else if (route.method === "PUT") router.put(route.path, route.handler);
+  else if (route.method === "DELETE") router.del(route.path, route.handler);
+  else {
+    // `never` if the union above is fully covered. A sixth method added to `sessionRoutes` becomes
+    // a compile error here rather than another route quietly answering to POST.
+    const unreachable: never = route.method;
+    throw new Error(`unhandled session route method: ${String(unreachable)}`);
+  }
 }
 
 // BILLING'S TWO HTTP SURFACES, and neither could have been a socket command.
