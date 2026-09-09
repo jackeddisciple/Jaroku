@@ -94,10 +94,26 @@ pub fn open(app: &AppHandle, ws_url: &str) -> Result<(), Box<dyn std::error::Err
         //
         // Moving them is the smaller change of the two: the alternative is shortening the row or
         // pushing its contents up, which moves Jaroku's own chrome to accommodate three buttons it
-        // does not own. `(20, 16)` keeps the horizontal inset macOS itself uses — the reservation
-        // in `SidebarChrome` is `pl-[76px]`, which is that inset plus the three buttons — and puts
-        // their centres on 22 with the back and forward controls beside them.
-        .traffic_light_position(tauri::LogicalPosition::new(20.0, 16.0))
+        // does not own.
+        //
+        // THE `y` IS NEITHER THE BUTTON'S TOP NOR ITS CENTRE, WHICH IS WHY THIS WAS WRONG TWICE.
+        // `tao`'s `inset_traffic_lights` resizes the title-bar container to `buttonHeight + y`,
+        // anchors it to the top of the window, and leaves each button's offset INSIDE that
+        // container alone — so what `y` moves is the container, and the button follows it by an
+        // amount that depends on where AppKit had already placed it. Reading the source gives the
+        // shape of the relationship but not the constant.
+        //
+        // SO IT WAS MEASURED. Screenshotting the window's top-left corner and finding the close
+        // button's red pixels: at `y = 22` it occupied rows 26–53 of a 2× capture — 14pt tall, its
+        // centre 19.8pt from the top of the window. That fixes the relationship at
+        // `centre = y - 2.2`, and 16 and 22 were both guesses that landed 8.2 and 2.2 points high.
+        //
+        // 22 IS THE TARGET, ARITHMETICALLY: `SidebarChrome` is `h-11` (44px) with `items-center`,
+        // so everything in it centres on 22 — hence `24.2`. If that row's height changes, this
+        // moves with it, which is why the derivation is here and not just the number. `20` is the
+        // horizontal inset macOS itself uses, and `SidebarChrome`'s `pl-[76px]` reservation is that
+        // inset plus the three buttons and their spacing.
+        .traffic_light_position(tauri::LogicalPosition::new(20.0, 24.2))
         .initialization_script(&host_config(ws_url));
 
     // MACOS ONLY, AND NOT BY PREFERENCE — `title_bar_style` and `hidden_title` are compiled only

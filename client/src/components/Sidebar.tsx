@@ -325,7 +325,7 @@ function SidebarChrome() {
           back ? "text-ink hover:bg-sidebar-hover" : "cursor-default text-faint"
         }`}
       >
-        <Icon.nav.historyBack size={ICON.lg} />
+        <Icon.nav.historyBack size={ICON.md} />
       </button>
       <button
         onClick={goForward}
@@ -336,7 +336,7 @@ function SidebarChrome() {
           forward ? "text-ink hover:bg-sidebar-hover" : "cursor-default text-faint"
         }`}
       >
-        <Icon.nav.historyForward size={ICON.lg} />
+        <Icon.nav.historyForward size={ICON.md} />
       </button>
       <span className="flex-1" data-tauri-drag-region />
       {/* SEARCH IS ONE CONTROL FOR BOTH SEARCHES. The palette already carries "Go to agent…"
@@ -348,7 +348,7 @@ function SidebarChrome() {
         aria-label="Search agents and commands"
         className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
       >
-        <Icon.agents.search size={ICON.lg} />
+        <Icon.agents.search size={ICON.md} />
       </button>
       {/* THE LABEL NAMES THE ACTION, not the state — the `IconButton` contract, and the reason one
           mark serves both directions. */}
@@ -358,7 +358,7 @@ function SidebarChrome() {
         aria-label="Hide the sidebar"
         className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
       >
-        <Icon.nav.sidebarToggle size={ICON.lg} />
+        <Icon.nav.sidebarToggle size={ICON.md} />
       </button>
     </div>
   );
@@ -527,7 +527,11 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
           selected ? "bg-sidebar-active" : "hover:bg-sidebar-hover"
         }`}
       >
-        {selected && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-accent" aria-hidden />}
+        {/* NO SELECTION BAR HERE, AND IT WAS HERE FOR TWO COMMITS. It was added when the accent was
+            the only thing marking a selected agent and the row had no fill at all — but the accent
+            is §05's charcoal, so on a translucent column a 2px bar of it is a hard black stroke
+            against a soft material, which is the one thing in the column that does not belong to
+            it. The row's fill says "this one" now, and says it in the material's own terms. */}
         {/* THE TWISTY AND THE NAME ARE TWO CONTROLS, because they do two things: one opens the
             agent's runs, the other selects the agent into the three panes. Nesting a button inside
             a button is invalid markup and makes the inner one unreachable by keyboard. */}
