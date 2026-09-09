@@ -116,7 +116,20 @@ pub fn open(app: &AppHandle, ws_url: &str) -> Result<(), Box<dyn std::error::Err
         .hidden_title(true)
         .transparent(true)
         .effects(tauri::utils::config::WindowEffectsConfig {
-            effects: vec![tauri::window::Effect::Sidebar],
+            // `UnderWindowBackground`, NOT `Sidebar`, AND THE NAME IS MISLEADING ABOUT WHICH IS
+            // RIGHT HERE. `Sidebar` is `NSVisualEffectMaterial.sidebar`, which is what Finder puts
+            // behind its own column — and in a LIGHT appearance Apple tunes it to be almost
+            // achromatic. Photographed with no tint over it at all, over a dark window, it came
+            // back a flat light grey: the material was working and simply was not transmitting
+            // colour. That is correct for Finder, whose sidebar must stay legible under a system
+            // that is usually dark, and it is the opposite of what is wanted here.
+            //
+            // `UnderWindowBackground` is `NSVisualEffectMaterial.underWindowBackground` — the
+            // material AppKit uses for the plane a window's content sits on, and the one that
+            // actually carries the desktop's colour through. A blue wallpaper cools the column, a
+            // green one greens it, and none of it resolves into imagery because the window server
+            // is still blurring at the same radius.
+            effects: vec![tauri::window::Effect::UnderWindowBackground],
             // `Active` rather than following the window's focus. A column that went flat the moment
             // you looked at your terminal would change material every time you alt-tabbed back,
             // which is motion nobody asked for on the one surface that is always on screen.

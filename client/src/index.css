@@ -172,7 +172,19 @@
 
        If the influence is invisible, lower this. If the wallpaper starts to read as content rather
        than as tint, raise it. Nothing else in this file needs to move. */
-    --sidebar-material-tint: rgba(246, 246, 244, 0.36);
+    --sidebar-material-tint: transparent;
+    /* THE ROW STATES, AND THEY ONLY EXIST BECAUSE THE COLUMN IS TRANSLUCENT. `--color-bg-hover`
+       and `--color-bg-active` are opaque, which is right on a painted panel and wrong on a
+       material: a fixed `#ECECEA` sitting on a surface that tracks the desktop punches a solid
+       patch through it. Over a dark backdrop the material goes darker than the fill and the hovered
+       row reads as a white slab; over a light one the selected row reads as a grey one. Neither is
+       the state's fault — they are the only opaque things left in the column.
+       So both become veils rather than colours. They darken by a few percent of ink, the material
+       carries on underneath, and the states move WITH whatever is behind the window instead of
+       against it. Ink rather than white, because a lifting fill on a light material reads as a hole
+       rather than as a selection. */
+    --sidebar-material-hover: rgba(29, 29, 27, 0.04);
+    --sidebar-material-active: rgba(29, 29, 27, 0.07);
   }
   html,
   body,
@@ -345,6 +357,26 @@
      this block, so an equal-specificity rule would lose and the column would stay opaque. */
   :root[data-vibrancy="sidebar"] .sidebar-material {
     background-color: var(--sidebar-material-tint);
+    /* AND THE PAINTED LAYERS COME OFF, which is the fix rather than the tint being lowered again.
+       The grain is grey and the highlight is white: over an opaque column they are texture and
+       light, and over a MATERIAL they are two neutral veils sitting on the one thing that carries
+       the environment's colour. Every one of them desaturates it. A native sidebar paints nothing
+       over its vibrancy, and neither does this one. */
+    background-image: none;
+    box-shadow: none;
+  }
+  /* The row states, overridden where — and only where — the column is a material. The escaped
+     selectors are Tailwind's own compiled class names (`hover:bg-sidebar-hover` emits
+     `.hover\:bg-sidebar-hover:hover`), matched here at a higher specificity so these win without
+     touching a single call site. Off the material every one of these rules is inert and the opaque
+     palette values stand, which is correct: an opaque panel wants an opaque state. */
+  :root[data-vibrancy="sidebar"] .bg-sidebar-hover,
+  :root[data-vibrancy="sidebar"] .hover\:bg-sidebar-hover:hover {
+    background-color: var(--sidebar-material-hover);
+  }
+  :root[data-vibrancy="sidebar"] .bg-sidebar-active,
+  :root[data-vibrancy="sidebar"] .active\:bg-sidebar-active:active {
+    background-color: var(--sidebar-material-active);
   }
 
   /* ── Graph View canvas ──────────────────────────────────────────────────────
