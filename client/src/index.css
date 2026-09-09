@@ -159,19 +159,19 @@
        through it. Anything darker here and the column reads as "gone grey", which is the outcome
        the brief rules out by name — and it is what a `--color-bg-subtle` ground did.
 
-       0.58 IS THE DIAL AND IT WAS WALKED DOWN TO IT. Two earlier passes sat at 0.76 and 0.62 and
-       both looked too dark, but the alpha was only ever half the cause: the column also stood on a
-       ground six levels under the workspace, and the WINDOW had no appearance pinned — so on a
-       machine in dark mode AppKit handed back the DARK variant of the material and no amount of
-       tinting was going to fix that. With the ground raised and `theme(Light)` set in window.rs,
-       more of the material can be allowed through rather than less. What comes through is colour,
-       not picture: `NSVisualEffectMaterial.sidebar` is desaturated and heavily blurred by the window
-       server, so a blue wallpaper cools the column and a warm one warms it without any of it
-       resolving into shapes.
+       0.45 IS THE DIAL AND IT WAS WALKED DOWN TO IT. Earlier passes sat at 0.76, 0.62 and 0.58, and
+       the first two looked too dark — but the alpha was only ever half the cause. The column also
+       stood on a ground six levels under the workspace, and the WINDOW had no appearance pinned, so
+       on a machine in dark mode AppKit handed back the DARK variant of the material and no amount
+       of tinting was going to fix that. With the ground raised and `theme(Light)` set in window.rs
+       the alpha could come DOWN rather than up, which is the opposite of where the first two passes
+       were heading. What comes through is colour, not picture: `NSVisualEffectMaterial.sidebar` is
+       desaturated and heavily blurred by the window server, so a blue wallpaper cools the column and
+       a warm one warms it without any of it resolving into shapes.
 
        If the influence is invisible, lower this. If the wallpaper starts to read as content rather
        than as tint, raise it. Nothing else in this file needs to move. */
-    --sidebar-material-tint: rgba(246, 246, 244, 0.58);
+    --sidebar-material-tint: rgba(246, 246, 244, 0.45);
   }
   html,
   body,
