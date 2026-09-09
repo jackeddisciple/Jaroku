@@ -94,6 +94,52 @@
     --radius-xl: 20px;
     --radius-hero: 24px;
     --radius-pill: 999px;
+
+    /* ── The sidebar's material ────────────────────────────────────────────────
+       WHAT THIS IS NOT: it is not glass, and there is nothing behind it to blur. The sidebar sits
+       on the shell's `bg-bg`, which is one flat colour, so a `backdrop-filter` here would blur a
+       solid rectangle and produce a pixel-for-pixel identical rectangle — at the cost of putting
+       the whole column on its own composited layer. Real translucency needs the Tauri window made
+       transparent with an NSVisualEffectView behind it, which is a change to the window and to how
+       the shell paints, not a change to this file.
+
+       WHAT IT IS: the flat plane, given the two things a matte surface has and a filled rectangle
+       does not — light that falls from somewhere, and a texture that is not perfectly uniform. The
+       whole effect is under ten levels of luminance from top to bottom. It is meant to be felt at
+       a glance and to survive being stared at, which is the opposite of a glass panel.
+
+       THE CEILING IS THE CANVAS. `--sidebar-material-highlight` is capped so the sidebar's lightest
+       pixel stays under `--color-bg-canvas` (#F6F6F4): the column is a plane one step UNDER the
+       workspace, `surfaceSystem.test.ts` asserts exactly that, and a highlight that climbed past it
+       would invert the depth the palette spends a token on.
+
+       Every value is here so it can be tuned in one place. `--sidebar-material-grain` is the
+       exception that is not a number: its strength is the `opacity` inside the SVG, because a CSS
+       variable cannot reach inside a `url()`. */
+    /* Light falls across the WHOLE column rather than banding across its top. `100%` rather than a
+       pixel depth: this is light from the window's top edge, so it should stretch with the window
+       instead of ending at a line 260px down that a tall sidebar would show as a seam. */
+    --sidebar-material-highlight: rgba(255, 255, 255, 0.22);
+    --sidebar-material-highlight-depth: 100%;
+    /* The one pixel where the material meets the top of the window. A real surface catches the
+       light at the edge it turns; this is that, and it is the single most "native" part of the
+       effect for the least ink. */
+    --sidebar-material-edge: rgba(255, 255, 255, 0.7);
+    /* THE data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url%28%23g%29' opacity='0.045'/%3E%3C/svg%3E DARKENS AS WELL AS TEXTURES, AND THE BUDGET FOR THAT IS FIXED BY THE HOVER FILL.
+       Measured over the tile: it spreads pixels about four levels and pulls the mean down ~1.25.
+       `overlay` and `soft-light` blends were tried to get the texture without the tone shift and
+       both erase it outright — 1 and 0 levels of spread — because a low-alpha grain on a near-white
+       ground has nothing to work with in either. So the shift is real and it is spent deliberately.
+
+       WHAT IT MAY NOT DO IS CROSS `--color-bg-hover` (#ECECEA, 236). The column's ground is 240 and
+       the grain takes it to ~238.75; a hover fill DARKER than the surface it sits on is the whole
+       of how this palette says "you are pointing at this", and a material that dragged the surface
+       under 236 would invert that at the bottom of the column. An earlier draft carried a bottom
+       shade as well and did exactly that — it landed the last 220px at ~232, under the hover — which
+       is why there is no shade token here. Light only lightens; nothing in this material darkens
+       the plane past its own token. */
+    --sidebar-material-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url%28%23g%29' opacity='0.045'/%3E%3C/svg%3E");
+    --sidebar-material-grain-size: 140px;
   }
   html,
   body,
@@ -211,6 +257,30 @@
     letter-spacing: 0.05em;
     color: var(--color-text-muted);
     padding: 6px 12px 2px;
+  }
+
+  /* THE SIDEBAR'S MATERIAL, applied to the column's root in components/Sidebar.tsx.
+     See the token block above for what this is and — more importantly — what it deliberately is
+     not. Three background layers and one inset hairline, and no `backdrop-filter`.
+
+     IT SETS NO `background-color`, WHICH IS THE POINT. `bg-sidebar` still supplies the ground, so
+     the material is a layer ON the palette rather than a second opinion about it: the column's
+     colour still moves when §01 moves, and the census in `colourSystem.test.ts` still counts this
+     surface as the neutral it is. Setting a colour here would also lose a specificity fight with
+     Tailwind's utility layer, quietly, in whichever direction the build ordered them.
+
+     The grain is a background layer rather than a `::before`, so it can never paint over the
+     column's own content: a positioned pseudo-element with no z-index paints ABOVE static
+     siblings, which would put a haze on top of every label in the sidebar. A background layer
+     cannot do that by construction. It also costs no element, no stacking context and no
+     containing block. */
+  .sidebar-material {
+    background-image:
+      var(--sidebar-material-grain),
+      linear-gradient(to bottom, var(--sidebar-material-highlight), transparent var(--sidebar-material-highlight-depth));
+    background-size: var(--sidebar-material-grain-size) var(--sidebar-material-grain-size), 100% 100%;
+    background-repeat: repeat, no-repeat;
+    box-shadow: inset 0 1px 0 var(--sidebar-material-edge);
   }
 
   /* ── Graph View canvas ──────────────────────────────────────────────────────

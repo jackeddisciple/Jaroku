@@ -1044,7 +1044,7 @@ export function Sidebar() {
      * agents, and whoever is signed in — in that order, because that is the order they scope each
      * other in. Only the agents scroll; everything else is chrome and stays put.
      */
-    <div className="flex h-full flex-col bg-sidebar">
+    <div className="sidebar-material flex h-full flex-col bg-sidebar">
       <SidebarChrome />
       <WorkspaceSwitcher />
       <NavList />
