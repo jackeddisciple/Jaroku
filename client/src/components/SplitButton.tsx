@@ -19,6 +19,7 @@
 // would be the design saying they are the same weight of thing.
 
 import { useEffect, useRef, useState } from "react";
+import { useMenuFocus } from "../lib/menuFocus.ts";
 
 import { ICON } from "../lib/tokens.ts";
 import { AlertTriangleIcon } from "./panelIcons.tsx";
@@ -73,6 +74,11 @@ export function SplitButton({
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
+
+  // See lib/menuFocus.ts. This menu declared `role="menu"` and handled neither the arrow keys that
+  // role promises nor the focus that Escape destroys — the same omission the three sidebar menus
+  // had, found by `test:menu-keys` rather than by anybody noticing.
+  useMenuFocus(open, ref);
 
   const everyday = actions.filter((a) => !a.danger);
   const dangerous = actions.filter((a) => a.danger);

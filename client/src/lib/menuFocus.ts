@@ -59,4 +59,50 @@ export function useMenuFocus(open: boolean, container: React.RefObject<HTMLEleme
     }
     wasOpen.current = open;
   }, [open, container]);
+
+  // ── Arrow keys ────────────────────────────────────────────────────────────────────────────────
+  // A ROVING FOCUS, NOT A SELECTION MODEL. `role="menu"` tells assistive technology these items are
+  // a menu, and a menu is expected to move on Up/Down — Tab alone satisfies "reachable" and not
+  // "behaves like what it says it is". There is no `aria-activedescendant` and no virtual cursor:
+  // focus itself is the position, which is what makes Enter and Space work with no extra handling.
+  //
+  // IT WRAPS. Down from the last item goes to the first, because a menu is a ring rather than a
+  // list — six items and a dead end at the bottom is the shape people press past by accident.
+  //
+  // ONLY WHILE OPEN, and only for keys a menu owns. Everything else — Tab, Escape, a character —
+  // falls through untouched: Escape is already handled by each menu's own listener, and swallowing
+  // Tab here would trap focus in a panel that is not modal.
+  useEffect(() => {
+    const root = container.current;
+    if (!open || !root) return;
+
+    const onKey = (e: KeyboardEvent): void => {
+      const keys = ["ArrowDown", "ArrowUp", "Home", "End"];
+      if (!keys.includes(e.key)) return;
+      const items = [...root.querySelectorAll<HTMLElement>('[role="menuitem"]')].filter(
+        // A disabled item is skipped rather than focused-and-inert, which is the difference between
+        // a menu that feels responsive and one that appears to swallow a keypress.
+        (el) => !el.hasAttribute("disabled") && el.getAttribute("aria-disabled") !== "true",
+      );
+      if (items.length === 0) return;
+      // Only when the keyboard is actually IN the menu. Otherwise Up/Down belong to whatever the
+      // person is really focused on — a menu left open behind a focused list must not eat its keys.
+      const active = document.activeElement;
+      if (!(active instanceof HTMLElement) || !root.contains(active)) return;
+
+      e.preventDefault();
+      const at = items.indexOf(active);
+      const next =
+        e.key === "Home" ? 0
+        : e.key === "End" ? items.length - 1
+        // `at < 0` is focus on the panel rather than an item — the first Down should land on the
+        // first item, not the second.
+        : e.key === "ArrowDown" ? (at < 0 ? 0 : (at + 1) % items.length)
+        : (at <= 0 ? items.length - 1 : at - 1);
+      items[next]?.focus({ preventScroll: true });
+    };
+
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, container]);
 }

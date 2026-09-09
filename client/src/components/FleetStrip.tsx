@@ -21,6 +21,7 @@
 // warned about is how a control plane loses trust in one click."
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useMenuFocus } from "../lib/menuFocus.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 
 import { CONNECTION_LABEL, DESTRUCTIVE, FILTERS, OFFLINE } from "../lib/cockpitCopy.ts";
@@ -137,6 +138,10 @@ function CardMenu({ card }: { card: FleetCardView }) {
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
+
+  // See lib/menuFocus.ts — the fifth menu in the app to declare `role="menu"` and handle neither
+  // the arrow keys that role promises nor the focus Escape destroys. Found by `test:menu-keys`.
+  useMenuFocus(open, ref);
 
   return (
     <div ref={ref} className="relative z-20">

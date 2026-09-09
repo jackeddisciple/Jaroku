@@ -1340,6 +1340,14 @@ jobs:
           # principle was already written down twice in the client's own comments and neither
           # statement had a check behind it.
           npm run test:dead-controls
+          # EVERY MENU IS DRIVABLE FROM THE KEYBOARD, which five of them were not. Each renders its
+          # panel BEFORE its trigger — right for one that opens upward, and fatal for tab order,
+          # which is DOM order: opening a menu and pressing Tab stepped over every item in it, and
+          # they were reachable only backwards by Shift+Tab. Escape then unmounted the panel with
+          # focus inside, dropping it to <body>. The rule is BEHAVIOUR rather than implementation —
+          # two components already handled their own arrows and an earlier draft of this suite
+          # failed them for not borrowing the shared hook. What it really catches is the sixth menu.
+          npm run test:menu-keys
           # AND WHICH MARK A TOOL FILE GETS, which is a table of regexes and is therefore an
           # ORDERING — one that looks obviously right in any arrangement and typechecks in all of
           # them. The mapper runs on every tool path including the bespoke ones a model names, so
