@@ -93,6 +93,15 @@ export interface SessionUser {
    */
   username: string | null;
   /**
+   * Whether there is a picture to fetch — a boolean, not a URL and not the bytes.
+   *
+   * A BEARER TOKEN CANNOT RIDE ON AN `<img src>`, which is the whole reason this is not a URL. The
+   * avatar is fetched with the token this tab already holds and kept as a blob for the session; see
+   * `lib/avatar.ts`. A public URL would put a person's face on the open internet, and a signed one
+   * would make the avatar the only part of a session with its own expiry to get wrong.
+   */
+  hasAvatar: boolean;
+  /**
    * Whether this PERSON has finished first-run onboarding.
    *
    * From the server, because "is this user new" and "is this browser new" are different

@@ -36,6 +36,7 @@ import { INPUT_KEY_PREFIX, useUiStore } from "../store/uiStore.ts";
 // handler. `threadNav` imports this module for `sendLoadThread`; the cycle is fine because both
 // sides only reach each other from inside a function, never at module scope.
 import { openThread } from "./threadNav.ts";
+import { forget as forgetAvatar } from "./avatar.ts";
 import {
   fetchSession, fetchTicket, signedOutReason, socketUrl, storeToken, storeWorkspace, storedToken, storedWorkspace,
   type AuthFailure,
@@ -857,6 +858,9 @@ export function startSocket(): void {
  * change it.
  */
 export function signOut(): void {
+  // The previous person's face must not outlive their session — see lib/avatar.ts on why an
+  // object URL pins its blob until it is revoked.
+  forgetAvatar();
   stopSocket();
   // The same reasoning as a workspace switch: the rows in these stores belong to a workspace,
   // and the next person to sign in at this browser must not find them.

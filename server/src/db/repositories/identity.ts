@@ -32,6 +32,14 @@ export interface User {
    * older than the column, and the footer falls back to the display name and then the address.
    */
   username: string | null;
+  /**
+   * The object-store key holding this person's picture, or null when they have none.
+   *
+   * A KEY AND NOT AN IMAGE — see migration 071. `storage/avatars.ts` is the only module that
+   * spells the key; everything else passes this string around opaquely. Null renders the initial,
+   * which is what every account has on the day it is made.
+   */
+  avatar_key: string | null;
   created_at: string;
   deleted_at: string | null;
   /**
@@ -83,7 +91,7 @@ export interface User {
  * of forgetting is not a crash — it is a `User` with `undefined` where a boolean should be, which
  * reads as `false` at every call site and is wrong silently.
  */
-const USER_COLUMNS = `id, external_id, email, display_name, username, created_at, deleted_at, onboarded_at,
+const USER_COLUMNS = `id, external_id, email, display_name, username, avatar_key, created_at, deleted_at, onboarded_at,
        email_verified, auth_provider, marketing_emails_opt_in, onboarding_started_at, onboarding_step`;
 
 /** The row as a driver hands it back, before the two columns that need normalising are. */
@@ -349,7 +357,7 @@ export class IdentityRepository {
   async updateProfile(
     _ctx: AnyContext,
     userId: string,
-    input: { displayName?: string; username?: string | null; marketingEmailsOptIn?: boolean },
+    input: { displayName?: string; username?: string | null; avatarKey?: string | null; marketingEmailsOptIn?: boolean },
   ): Promise<User | undefined> {
     const sets: string[] = [];
     const params: unknown[] = [];
@@ -363,6 +371,12 @@ export class IdentityRepository {
     if (input.username !== undefined) {
       sets.push("username = ?");
       params.push(input.username);
+    }
+    // `null` CLEARS IT, same as the username above: "remove my picture" and "I did not mention
+    // my picture" are different requests and only the second leaves the column alone.
+    if (input.avatarKey !== undefined) {
+      sets.push("avatar_key = ?");
+      params.push(input.avatarKey);
     }
     if (input.marketingEmailsOptIn !== undefined) {
       sets.push("marketing_emails_opt_in = ?");
@@ -516,6 +530,10 @@ export class IdentityRepository {
         // "adarshhchoudhary20" ends up in the footer forever because nobody realised they could
         // change it. Null renders the display name, which is the honest fallback.
         username: null,
+        // No picture on day one. Google sign-in sets this a moment later when the account has a
+        // `picture` claim — see `session.ts` — and it stays null for everybody else until they
+        // upload one.
+        avatar_key: null,
         created_at: nowIso(),
         deleted_at: null,
         onboarded_at: null,

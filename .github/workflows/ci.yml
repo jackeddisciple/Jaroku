@@ -211,6 +211,15 @@ jobs:
           # a PATCH exists for — changing the marketing box must not clear a name by omitting it —
           # and the audit row, which records WHICH fields moved and never their values.
           npm run test:profile
+          # WHAT MAY BECOME SOMEBODY'S FACE. Two of its assertions are security properties rather
+          # than hygiene, which is why a four-function module has a suite at all. SVG is refused by
+          # CONTENT — it is the one image format that is also a document, and the avatar route
+          # serves back whatever was stored, so an SVG with a script in it under an image content
+          # type is a script on this origin. And the Google import is host-locked BEFORE the fetch:
+          # it takes a URL out of a verified token and hands it to `fetch` from inside the sign-in
+          # path, which is an SSRF primitive the moment that URL stops being what we assume. The
+          # refusals assert no request was made at all, not merely that the response was discarded.
+          npm run test:avatar
           # §7S LAST THREE ROUTES AND §5.3S RESUME. Its load-bearing assertion is that the step
           # only ever moves FORWARD — a property of the STATEMENT rather than of the handler, so
           # it needs the requests actually racing: two tabs on step 3 pressing Continue at once

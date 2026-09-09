@@ -149,6 +149,7 @@ import { diffShapes, readShape } from "./semanticDiff.ts";
 import { inSubdirectory, repoPrefix } from "./githubPush.ts";
 import { MANIFEST_FILE, buildManifest, manifestRefs } from "./mcpManifest.ts";
 import type { McpImpact } from "./mcpStore.ts";
+import { fetchGoogleAvatar, putAvatar } from "./storage/avatars.ts";
 import { ObjectNotFound } from "./storage/objectStore.ts";
 import { openObjectStore } from "./storage/open.ts";
 import { resolveSigningKey } from "./storage/presign.ts";
@@ -3021,6 +3022,9 @@ for (const route of sessionRoutes({
   localIssuer,
   tickets: ticketStore,
   signIn: signInStore,
+  // What makes the three avatar routes exist. See `sessionRoutes` — an absent store means no
+  // routes rather than routes that fail.
+  objects,
   // Read per request rather than captured, so a deployment that adds a Google client or an email
   // provider starts offering it without a restart. See `SessionDeps.methods`.
   methods: {
@@ -3157,6 +3161,32 @@ if (googleConfig) {
         displayName: identity.displayName,
         provider: "google",
       });
+
+      // THE PICTURE, AND EVERY FAILURE HERE IS SILENT ON PURPOSE. A person is signed in by the line
+      // above; this is a nicety that happens to need the network, and there is no outcome where
+      // "Google's CDN was slow" should mean "you cannot get into Jaroku". `fetchGoogleAvatar`
+      // returns null rather than throwing for a 404, a timeout, an oversized file, a redirect or a
+      // host that is not Google's, and the `catch` covers the store being unreachable.
+      //
+      // ONLY WHEN THERE IS NOT ONE ALREADY. Google's `picture` arrives on EVERY sign-in, and
+      // re-importing it each time would overwrite a picture somebody deliberately uploaded — every
+      // time they signed in, silently, with no way to keep their own. The import is for accounts
+      // that have no avatar yet; after that the person owns it.
+      if (identity.pictureUrl) {
+        try {
+          const sys = systemContext(context.requestId);
+          const existing = await identityRepo.userById(sys, userId);
+          if (existing && existing.avatar_key === null) {
+            const bytes = await fetchGoogleAvatar(identity.pictureUrl);
+            if (bytes) {
+              const key = await putAvatar(objects, userId, bytes);
+              await identityRepo.updateProfile(sys, userId, { avatarKey: key });
+            }
+          }
+        } catch (err) {
+          console.warn(`[auth] could not import a Google picture for ${userId}: ${(err as Error).message}`);
+        }
+      }
       return { userId };
     },
     audit: async (action, detail) => {

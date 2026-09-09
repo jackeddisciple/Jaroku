@@ -35,6 +35,7 @@ import { startNewAgent } from "../lib/newAgent.ts";
 import { goBack, goForward } from "../lib/navHistory.ts";
 import { canGoBack, canGoForward, useHistoryStore } from "../store/historyStore.ts";
 import { hasHostWindow } from "../lib/windowStage.ts";
+import { loadAvatar } from "../lib/avatar.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { SearchIcon, SparklesIcon } from "./panelIcons.tsx";
 
@@ -687,12 +688,31 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
  * account has on the day it is made, it is stable, and it is what the member list already draws.
  */
 function Avatar({ name }: { name: string | null | undefined }) {
+  const hasAvatar = useSessionStore((s) => s.user?.hasAvatar ?? false);
+  const [url, setUrl] = useState<string | null>(null);
+
+  // FETCHED, NOT SRC'D. See lib/avatar.ts — the route needs a bearer token, which an `<img src>`
+  // cannot carry. `loadAvatar` is cached and reference-counted, so mounting this in two places
+  // makes one request. The `live` flag is the ordinary guard against a resolve landing after the
+  // component has gone.
+  useEffect(() => {
+    if (!hasAvatar) { setUrl(null); return; }
+    let live = true;
+    void loadAvatar().then((next) => { if (live) setUrl(next); });
+    return () => { live = false; };
+  }, [hasAvatar]);
+
   return (
     <span
       aria-hidden
-      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-control bg-sidebar-active text-tiny text-ink"
+      className="flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded-control bg-sidebar-active text-tiny text-ink"
     >
-      {(name ?? "?").trim().charAt(0).toUpperCase()}
+      {/* THE INITIAL IS NOT A SPINNER. While the picture is being fetched — and forever, for
+          somebody who has none — this is what shows, and it is the same mark the member list
+          draws. A blank square that fills in a moment later reads as a bug on every launch. */}
+      {url
+        ? <img src={url} alt="" className="h-full w-full object-cover" />
+        : (name ?? "?").trim().charAt(0).toUpperCase()}
     </span>
   );
 }

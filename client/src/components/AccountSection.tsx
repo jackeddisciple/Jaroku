@@ -18,6 +18,9 @@ import { updateProfile } from "../lib/profile.ts";
 import { SignInFailure } from "../lib/signIn.ts";
 import { TextField } from "./auth/controls.tsx";
 import { secondaryBtn } from "./buttons.ts";
+import { AvatarEditor } from "./AvatarEditor.tsx";
+import { loadAvatar, removeAvatar, uploadAvatar } from "../lib/avatar.ts";
+import { useEffect, useRef } from "react";
 import { useAccountOnboardingStore } from "../store/accountOnboardingStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
@@ -56,6 +59,7 @@ export function AccountSection() {
               is what makes that state visible rather than a row that looks like a rendering bug. */}
           <Row label="Name" value={user?.displayName ?? "—"} />
           <UsernameRow />
+          <PictureRow />
         </dl>
       </section>
 
@@ -178,6 +182,113 @@ function UsernameRow() {
 
 /** Mirrors `USERNAME_MAX` in the server's `auth/session.ts`. */
 const USERNAME_MAX = 30;
+
+/**
+ * The picture: what it is now, and the two things that can be done about it.
+ *
+ * THE FILE INPUT IS HIDDEN BEHIND A BUTTON, which is the ordinary way to do this and worth a line
+ * because the alternative looks simpler and is not: a bare `<input type="file">` cannot be styled
+ * to match anything, differs on every platform, and says "Choose File / no file selected" in the
+ * middle of a settings panel.
+ *
+ * PICKING A FILE OPENS THE EDITOR RATHER THAN UPLOADING. Nobody's photo is already a square, so an
+ * upload with no crop step is an upload that centre-crops somebody's face by accident.
+ */
+function PictureRow() {
+  const user = useSessionStore((s) => s.user);
+  const hasAvatar = user?.hasAvatar ?? false;
+  const [url, setUrl] = useState<string | null>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!hasAvatar) { setUrl(null); return; }
+    let live = true;
+    void loadAvatar().then((next) => { if (live) setUrl(next); });
+    return () => { live = false; };
+  }, [hasAvatar]);
+
+  const saved = async (blob: Blob): Promise<void> => {
+    await uploadAvatar(blob);
+    setFile(null);
+    // The session carries `hasAvatar`, and the footer reads it — so the store is what has to be
+    // told, not this component. `loadAvatar` was invalidated by `uploadAvatar`, so the effect
+    // above refetches the new bytes.
+    const current = useSessionStore.getState().user;
+    if (current) useSessionStore.getState().setUser({ ...current, hasAvatar: true });
+    setUrl(await loadAvatar());
+  };
+
+  const remove = async (): Promise<void> => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await removeAvatar();
+      const current = useSessionStore.getState().user;
+      if (current) useSessionStore.getState().setUser({ ...current, hasAvatar: false });
+      setUrl(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (file) {
+    return (
+      <div className="flex items-start gap-3">
+        <dt className="w-[110px] shrink-0 pt-1 text-caption text-muted">Picture</dt>
+        <dd className="min-w-0 flex-1">
+          <AvatarEditor file={file} onCancel={() => setFile(null)} onSave={saved} />
+        </dd>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-3">
+      <dt className="w-[110px] shrink-0 text-caption text-muted">Picture</dt>
+      <dd className="flex min-w-0 flex-1 items-center gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-chrome text-label text-ink">
+          {url
+            ? <img src={url} alt="" className="h-full w-full object-cover" />
+            : (user?.username || user?.displayName || user?.email || "?").trim().charAt(0).toUpperCase()}
+        </span>
+        <input
+          ref={input}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          className="hidden"
+          onChange={(e) => {
+            const picked = e.target.files?.[0] ?? null;
+            setError(null);
+            setFile(picked);
+            // CLEARED SO THE SAME FILE CAN BE PICKED TWICE. Without this, choosing a photo,
+            // cancelling, and choosing the same photo again fires no `change` event at all.
+            e.target.value = "";
+          }}
+        />
+        <button type="button" onClick={() => input.current?.click()} disabled={busy} className={secondaryBtn}>
+          {hasAvatar ? "Change" : "Upload"}
+        </button>
+        {hasAvatar && (
+          <button
+            type="button"
+            onClick={() => void remove()}
+            disabled={busy}
+            className="text-caption text-muted underline underline-offset-2 transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+          >
+            Remove
+          </button>
+        )}
+        {error && <span className="text-caption text-err">{error}</span>}
+      </dd>
+    </div>
+  );
+}
 
 function Row({ label, value }: { label: string; value: string }) {
   return (

@@ -29,6 +29,9 @@ import type { AuthConfig } from "./config.ts";
 import type { TicketStore } from "./tickets.ts";
 import { hashSecret, type SignInStore } from "./signIn.ts";
 import type { ContextResolver } from "./resolve.ts";
+import type { ObjectStore } from "../storage/objectStore.ts";
+import { avatarKey, putAvatar, sniffImage } from "../storage/avatars.ts";
+import { ObjectNotFound } from "../storage/objectStore.ts";
 
 export interface SessionDeps {
   config: AuthConfig;
@@ -60,6 +63,12 @@ export interface SessionDeps {
    * fails open inside the supplier: a limiter that cannot answer must not be the reason nobody
    * can make a workspace. The boundary here is authentication, not the bucket.
    */
+  /**
+   * The object store, present wherever avatars are. Optional for the same reason `tickets` is:
+   * the suites that exercise one route should not have to construct every dependency of all of
+   * them, and an absent store makes the three avatar routes not exist rather than fail.
+   */
+  objects?: ObjectStore;
   limitWorkspaceCreate?: (userId: string) => Promise<number | null>;
   log?: (m: string) => void;
 }
@@ -96,6 +105,15 @@ export interface SessionView {
     displayName: string | null;
     /** What the sidebar's footer calls them, or null if they have not chosen one. Migration 070. */
     username: string | null;
+    /**
+     * Whether there is a picture to fetch — a boolean, not a URL and not the bytes.
+     *
+     * The client cannot put a bearer token on an `<img src>`, so it fetches `/v1/users/me/avatar`
+     * itself and holds a blob; this is what tells it whether that request is worth making. Sending
+     * the image here instead would put 300KB of base64 into every session response, on a payload
+     * that is read on every reconnect.
+     */
+    hasAvatar: boolean;
     /**
      * Whether this PERSON has been shown the product before.
      *
@@ -216,8 +234,8 @@ async function provision(
   }
 }
 
-export function sessionRoutes(deps: SessionDeps): { path: string; method: "GET" | "POST" | "PATCH"; handler: Handler }[] {
-  const routes: { path: string; method: "GET" | "POST" | "PATCH"; handler: Handler }[] = [
+export function sessionRoutes(deps: SessionDeps): { path: string; method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE"; handler: Handler }[] {
+  const routes: { path: string; method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE"; handler: Handler }[] = [
     { path: "/v1/auth/session", method: "POST", handler: sessionHandler(deps) },
   ];
   if (deps.tickets && deps.resolver) {
@@ -241,6 +259,12 @@ export function sessionRoutes(deps: SessionDeps): { path: string; method: "GET" 
   // this one field" is a distinct operation from "replace this resource": a settings screen that
   // changed only the marketing preference must not clear a display name by omitting it.
   routes.push({ path: "/v1/users/me", method: "PATCH", handler: profileHandler(deps) });
+  if (deps.objects) {
+    const objects = deps.objects;
+    routes.push({ path: "/v1/users/me/avatar", method: "GET", handler: avatarGetHandler(deps, objects) });
+    routes.push({ path: "/v1/users/me/avatar", method: "PUT", handler: avatarPutHandler(deps, objects) });
+    routes.push({ path: "/v1/users/me/avatar", method: "DELETE", handler: avatarDeleteHandler(deps, objects) });
+  }
   routes.push({ path: "/v1/auth/onboarded", method: "POST", handler: onboardedHandler(deps) });
   // §7's last three rows. All three are facts about a PERSON rather than about anything in a
   // workspace — which is why none of them is a socket command and why none takes a workspace id.
@@ -343,6 +367,7 @@ function sessionHandler(deps: SessionDeps): Handler {
         email: provisioned.user.email,
         displayName: provisioned.user.display_name,
         username: provisioned.user.username,
+        hasAvatar: provisioned.user.avatar_key !== null,
         // A boolean, not the timestamp. The client's only question is whether to show the
         // flow; WHEN somebody onboarded is for whoever reads the funnel, and a date on the
         // wire is a date somebody eventually renders.
@@ -493,6 +518,92 @@ const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/;
  * because there is no id to send. A route that accepted one would need a rule about who may edit
  * whom, and the only correct rule is "nobody".
  */
+/**
+ * The three avatar routes, and why the picture is not simply a URL in the session payload.
+ *
+ * A BEARER TOKEN CANNOT RIDE ON AN `<img src>`. The obvious design — put a URL on the user and let
+ * the browser fetch it — needs that URL to be either public or signed, and a public URL for a
+ * person's face is a person's face on the open internet. Signing works and the object route already
+ * does it, but it makes the avatar the one piece of a session that arrives by a different mechanism
+ * with its own expiry. So the client fetches these bytes with the token it already has and holds a
+ * blob for the session, which is one mechanism, no expiry to get wrong, and nothing readable
+ * without a credential.
+ *
+ * ALL THREE ARE SCOPED TO THE CALLER AND TAKE NO ID. There is no `/v1/users/:id/avatar`: the only
+ * account these can read or write is the one behind the token, so there is no authorisation
+ * decision to get wrong and no enumeration to worry about.
+ */
+function avatarGetHandler(deps: SessionDeps, objects: ObjectStore): Handler {
+  return async (req) => {
+    const auth = await authenticate(req, deps.verifier);
+    const sys = systemContext(req.requestId);
+    const user = await deps.identity.userByExternalId(sys, auth.subject);
+    if (!user) throw forbidden("this account no longer exists");
+    if (!user.avatar_key) throw notFound("no picture");
+    try {
+      const bytes = await objects.get(user.avatar_key);
+      return {
+        status: 200,
+        body: bytes,
+        headers: {
+          // Sniffed rather than remembered. The column holds a key, not a type, and the bytes are
+          // the only thing that actually knows — the same rule `putAvatar` validates by.
+          "content-type": sniffImage(bytes) ?? "application/octet-stream",
+          // A person's face, behind a bearer token: an intermediary must not keep a copy, and the
+          // client holds its own blob for the session anyway.
+          "cache-control": "private, no-store",
+          // Belt and braces against a stored image being interpreted as anything but an image.
+          "x-content-type-options": "nosniff",
+        },
+      };
+    } catch (err) {
+      // The row names a key the store does not have. That is a torn state rather than a 500 — the
+      // honest answer to "show me my picture" is that there is not one.
+      if (err instanceof ObjectNotFound) throw notFound("no picture");
+      throw err;
+    }
+  };
+}
+
+function avatarPutHandler(deps: SessionDeps, objects: ObjectStore): Handler {
+  return async (req) => {
+    const auth = await authenticate(req, deps.verifier);
+    const sys = systemContext(req.requestId);
+    const user = await deps.identity.userByExternalId(sys, auth.subject);
+    if (!user) throw forbidden("this account no longer exists");
+
+    let key: string;
+    try {
+      key = await putAvatar(objects, user.id, await req.buffer());
+    } catch (err) {
+      // `putAvatar` throws only for things the uploader can fix — empty, too large, not an image —
+      // and its messages are written to be shown. Anything else is a store failure and is a 500.
+      if (err instanceof ObjectNotFound) throw err;
+      throw badRequest((err as Error).message);
+    }
+    const updated = await deps.identity.updateProfile(sys, user.id, { avatarKey: key });
+    if (!updated) throw forbidden("this account no longer exists");
+    // NO IMAGE IN THE RESPONSE. The client already has the bytes it just sent; echoing them back
+    // would double the cost of an upload to say nothing new.
+    return { status: 200, body: { hasAvatar: true } };
+  };
+}
+
+function avatarDeleteHandler(deps: SessionDeps, objects: ObjectStore): Handler {
+  return async (req) => {
+    const auth = await authenticate(req, deps.verifier);
+    const sys = systemContext(req.requestId);
+    const user = await deps.identity.userByExternalId(sys, auth.subject);
+    if (!user) throw forbidden("this account no longer exists");
+    // THE COLUMN FIRST, THEN THE BYTES. If the delete fails between them the row already says
+    // there is no picture, which is the state the person asked for; the object is then garbage the
+    // lifecycle sweep collects. The other order leaves a row pointing at nothing.
+    await deps.identity.updateProfile(sys, user.id, { avatarKey: null });
+    await objects.delete(avatarKey(user.id));
+    return { status: 200, body: { hasAvatar: false } };
+  };
+}
+
 function profileHandler(deps: SessionDeps): Handler {
   return async (req) => {
     const auth = await authenticate(req, deps.verifier);
@@ -568,6 +679,7 @@ function profileHandler(deps: SessionDeps): Handler {
           email: updated.email,
           displayName: updated.display_name,
           username: updated.username,
+          hasAvatar: updated.avatar_key !== null,
           onboarded: updated.onboarded_at !== null,
           onboardingStep: updated.onboarding_step,
           marketingEmailsOptIn: updated.marketing_emails_opt_in,

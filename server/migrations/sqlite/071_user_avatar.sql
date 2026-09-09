@@ -1,0 +1,22 @@
+-- 071_user_avatar — where a person's picture lives, which is NOT in this column.
+--
+-- THE COLUMN HOLDS A KEY, NOT AN IMAGE. `avatar_key` is an object-store key like
+-- `users/<id>/avatar`; the bytes are in the same store agent versions and export archives already
+-- use — filesystem locally, S3 in a deployment — and `storage/avatars.ts` is the only thing that
+-- spells the key. A base64 image in this column was the obvious alternative and it is wrong in a
+-- way that only shows up later: a 40KB string on the users row is read by every session request,
+-- copied into every backup, and carried through every `SELECT *` in the identity repository, to
+-- serve a picture that changes about once a year.
+--
+-- NULLABLE, WITH THE FALLBACK AS THE FEATURE. Null means "no picture", which the footer already
+-- renders as the person's initial — the same mark the member list draws. Every account that exists
+-- predates this column, so null is also the honest state for all of them, and `expandContract.ts`
+-- refuses `ADD COLUMN ... NOT NULL` without a default anyway because the version still serving does
+-- not name this column in its INSERTs.
+--
+-- NOTHING CASCADES FROM HERE AND THAT IS DELIBERATE. Deleting a user does not delete the object,
+-- because a foreign key cannot reach into an object store — the lifecycle sweep in
+-- `lifecycle/` owns that, the same way it already owns a deleted agent's versions. A dangling key
+-- costs one wasted object; a `ON DELETE` clause that pretended to clean up would cost the belief
+-- that it had.
+ALTER TABLE users ADD COLUMN avatar_key TEXT;

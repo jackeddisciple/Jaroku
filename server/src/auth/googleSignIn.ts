@@ -198,6 +198,15 @@ export interface GoogleIdentity {
   email: string;
   /** Google's `name` claim, or the two halves joined. Null when the profile has none. */
   displayName: string | null;
+  /**
+   * Google's `picture` claim — a URL, not an image, and not yet fetched.
+   *
+   * READ HERE AND RESOLVED ELSEWHERE, deliberately. This module's job is to say who Google claims
+   * this person is; going out and downloading a file is a different concern with a different
+   * failure mode, and it belongs where a failure can be swallowed without taking the sign-in with
+   * it. See `storage/avatars.ts`'s `fetchGoogleAvatar` and the caller in `auth/session.ts`.
+   */
+  pictureUrl: string | null;
 }
 
 export class GoogleSignInError extends Error {
@@ -326,7 +335,21 @@ export async function verifyGoogleIdToken(
     subject,
     email,
     displayName: readName(claims),
+    pictureUrl: readPicture(claims),
   };
+}
+
+/**
+ * Google's `picture`, as a bounded string.
+ *
+ * NOT VALIDATED AS A URL HERE. `fetchGoogleAvatar` parses it, insists on https and refuses any host
+ * outside googleusercontent.com before it will fetch anything — and that check belongs next to the
+ * fetch it guards rather than two modules away from it, where a later caller could reach the string
+ * without passing it.
+ */
+function readPicture(claims: Record<string, unknown>): string | null {
+  const url = typeof claims.picture === "string" ? claims.picture.trim() : "";
+  return url ? url.slice(0, 2048) : null;
 }
 
 /** Google's `name`, or the two halves, or nothing. Trimmed and bounded like every display name. */

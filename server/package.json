@@ -87,6 +87,7 @@
     "test:sign-in": "tsx src/auth/signIn.test.ts",
     "test:link-identity": "tsx src/auth/linkIdentity.test.ts",
     "test:profile": "tsx src/auth/profile.test.ts",
+    "test:avatar": "tsx src/storage/avatars.test.ts",
     "test:onboarding": "tsx src/auth/onboarding.test.ts",
     "test:email": "tsx src/email/email.test.ts",
     "test:magic-link": "tsx src/http/magicLink.test.ts",
