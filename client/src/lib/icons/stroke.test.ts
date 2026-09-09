@@ -22,7 +22,7 @@ const files = readdirSync(DIR).filter((f) => f.endsWith(".tsx")).sort();
 const sources = new Map<string, string>(files.map((f) => [f, read(`${DIR}/${f}`)]));
 
 console.log("\nall 120 marks are present");
-check("120 generated components", files.length === 120, `${files.length}`);
+check("123 generated components", files.length === 123, `${files.length}`);
 
 console.log("\nno mark carries its own weight");
 {

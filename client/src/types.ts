@@ -1999,6 +1999,12 @@ export type ClientCommand =
   | { cmd: "archiveAgent"; agentId: string }
   | { cmd: "restoreAgent"; agentId: string }
   | { cmd: "renameAgent"; agentId: string; name: string }
+  /**
+   * Remove an agent for good. `confirm` is the slug, echoed back — the server refuses unless it
+   * matches the agent it is about to delete, so a command built against a row this tab has since
+   * replaced cannot delete a different one than was on screen.
+   */
+  | { cmd: "deleteAgent"; agentId: string; confirm: string }
   /** §8.5's picker. On the existing agent channel under the existing capability. */
   | { cmd: "setAgentEmoji"; agentId: string; emoji: string }
   // §6's category, edited afterwards. Any string — the presets are a vocabulary and the column is

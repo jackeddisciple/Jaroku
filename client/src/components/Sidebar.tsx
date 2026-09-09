@@ -14,7 +14,7 @@ import { RUN_PHASE } from "../lib/domainPhase.ts";
 import { PHASE_WORD, type Phase } from "../lib/statusPhase.ts";
 import { selectAgent, selectRun } from "../lib/selection.ts";
 import {
-  sendLoadHistory, sendLoadRun, sendOpenGithubPr, sendRun, signOut,
+  sendDeleteAgent, sendLoadHistory, sendLoadRun, sendOpenGithubPr, sendRenameAgent, sendRun, signOut,
 } from "../lib/socket.ts";
 import { ICON } from "../lib/tokens.ts";
 import { quietBtn, secondaryBtn } from "./buttons.ts";
@@ -411,16 +411,12 @@ function NavList() {
           newIsCurrent ? "text-accent" : "text-muted hover:text-ink"
         }`}
       >
-        {/* THE MARK GETS THE FILL, NOT THE ROW. `New` is the column's one button and the tile is
-            what says so — a small black square with a white plus, the size of the marks beside it,
-            so the row still scans as a row. Filling the whole row instead would make it a banner
-            and put a black bar across the top of a column of quiet text. */}
-        <span
-          aria-hidden
-          className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-xs bg-ink text-bg"
-        >
-          <Icon.nav.newAgent size={ICON.sm} />
-        </span>
+        {/* THE MARK CARRIES ITSELF NOW. This was a plain plus on a filled ink tile — the one solid
+            black object in a column of quiet grey text, which made `New` shout rather than lead,
+            and read as heavier still once the column became a translucent material. `AddSquareIcon`
+            is the same idea drawn rather than built: a plus already inside its square, at the same
+            stroke weight as every other mark in the column. */}
+        <Icon.nav.newAgent size={ICON.md} />
         <span className="min-w-0 flex-1 truncate text-label">New</span>
         {/* THE CHORD, ON APPROACH. A shortcut printed permanently is a second thing to read on a
             row with two words on it; one that appears when the pointer arrives is there exactly
@@ -486,6 +482,168 @@ const RUNS_AT_FIRST = 5;
  * nothing is the dead control this codebase has a suite about — and the absence of the twisty is
  * itself the answer to "has this ever run".
  */
+/**
+ * What you can do to an agent, at the end of its row.
+ *
+ * THE FIVE ARE NOT A LIST OF EVERYTHING — they are the things somebody reaches for while LOOKING AT
+ * the column rather than while working inside an agent. Pin and Rename change the row itself,
+ * Configure leaves for the surface that owns the agent's settings, and Delete removes it. Anything
+ * that needs the agent open belongs where the agent is open.
+ *
+ * DELETE ASKS FOR THE NAME. It is the one action here with no undo — `archiveAgent` has
+ * `restoreAgent`, this has nothing — so the row turns into a field and the button stays disabled
+ * until what is typed matches the slug. Two presses of a menu item should never be able to destroy
+ * an agent's history, and a confirm dialog that only asks "are you sure" is one press plus a reflex.
+ */
+function AgentRowMenu({ agent }: { agent: AgentSummary }) {
+  const [open, setOpen] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [typed, setTyped] = useState("");
+  const [renaming, setRenaming] = useState(false);
+  const [name, setName] = useState(agent.name);
+  const ref = useRef<HTMLDivElement>(null);
+  const pinned = useUiStore((st) => st.pinnedAgents.includes(agent.agent_id));
+
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent): void => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const key = (e: KeyboardEvent): void => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", key);
+    return () => {
+      document.removeEventListener("mousedown", away);
+      document.removeEventListener("keydown", key);
+    };
+  }, [open]);
+
+  // See lib/menuFocus.ts — the panel renders before its trigger, so without this the keyboard
+  // steps over the menu it just opened.
+  useMenuFocus(open, ref);
+
+  // CLOSING RESETS THE TWO SUB-STATES. A menu reopened on a half-typed delete confirmation, or on
+  // a rename field holding a name somebody abandoned, is a menu that remembers a decision they
+  // walked away from.
+  useEffect(() => {
+    if (open) return;
+    setConfirming(false);
+    setTyped("");
+    setRenaming(false);
+    setName(agent.name);
+  }, [open, agent.name]);
+
+  const choose = (run: () => void) => () => { setOpen(false); run(); };
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={`Actions for ${agent.name}`}
+        aria-label={`Actions for ${agent.name}`}
+        className="flex h-6 w-6 items-center justify-center rounded-control text-faint opacity-0 transition-[color,opacity] duration-fast group-hover:opacity-100 hover:bg-sidebar-hover hover:text-ink focus-visible:opacity-100 focus-visible:outline-none focus-visible:shadow-focusring"
+      >
+        <Icon.agents.rowMore size={ICON.sm} />
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          aria-label={`Actions for ${agent.name}`}
+          className="absolute right-0 top-full z-30 mt-1 min-w-[210px] origin-top animate-menu-in overflow-hidden rounded-card border border-sidebar-border bg-elevated p-1 shadow-floating motion-reduce:animate-none"
+        >
+          {renaming ? (
+            // IN PLACE, NOT IN A DIALOG. A rename is one short string and the row it belongs to is
+            // three pixels away; taking over the screen to ask for it would be more ceremony than
+            // the change deserves.
+            <form
+              className="flex flex-col gap-1 p-1"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const next = name.trim();
+                if (next && next !== agent.name) sendRenameAgent(agent.agent_id, next);
+                setOpen(false);
+              }}
+            >
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                autoFocus
+                aria-label="Agent name"
+                className="w-full rounded-input border border-edge bg-panel px-2 py-1 text-caption text-ink outline-none focus-visible:shadow-focusring"
+              />
+              <div className="flex gap-2 px-1 pb-0.5">
+                <button type="submit" className="text-tiny text-ink underline underline-offset-2">Rename</button>
+                <button type="button" onClick={() => setRenaming(false)} className="text-tiny text-muted underline underline-offset-2">Cancel</button>
+              </div>
+            </form>
+          ) : confirming ? (
+            <form
+              className="flex flex-col gap-1 p-1"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (typed.trim() !== agent.agent_id) return;
+                sendDeleteAgent(agent.agent_id, agent.agent_id);
+                setOpen(false);
+              }}
+            >
+              {/* THE SLUG, NOT THE NAME, and not a yes/no. A name can be anything including another
+                  agent's; the slug is what identifies this one, and typing it is the only part of
+                  this flow that requires having read which agent is about to go. */}
+              <p className="px-1 py-0.5 text-tiny leading-[1.5] text-muted">
+                This removes {agent.name}, its runs and its history. Type <span className="text-ink">{agent.agent_id}</span> to confirm.
+              </p>
+              <input
+                value={typed}
+                onChange={(e) => setTyped(e.target.value)}
+                autoFocus
+                aria-label={`Type ${agent.agent_id} to confirm deletion`}
+                className="w-full rounded-input border border-edge bg-panel px-2 py-1 text-caption text-ink outline-none focus-visible:shadow-focusring"
+              />
+              <div className="flex gap-2 px-1 pb-0.5">
+                <button
+                  type="submit"
+                  disabled={typed.trim() !== agent.agent_id}
+                  className="text-tiny text-err underline underline-offset-2 disabled:cursor-default disabled:text-disabled disabled:no-underline"
+                >
+                  Delete for good
+                </button>
+                <button type="button" onClick={() => setConfirming(false)} className="text-tiny text-muted underline underline-offset-2">Cancel</button>
+              </div>
+            </form>
+          ) : (
+            <>
+              <button role="menuitem" onClick={choose(() => useUiStore.getState().togglePinnedAgent(agent.agent_id))} className={ACCOUNT_MENU_ROW}>
+                <Icon.agents.pin size={ICON.sm} />
+                <span className="min-w-0 flex-1 truncate">{pinned ? "Unpin" : "Pin"}</span>
+              </button>
+              <button role="menuitem" onClick={() => setRenaming(true)} className={ACCOUNT_MENU_ROW}>
+                <Icon.agents.rename size={ICON.sm} />
+                <span className="min-w-0 flex-1 truncate">Rename</span>
+              </button>
+              <button
+                role="menuitem"
+                onClick={choose(() => { selectAgent(agent.agent_id); useUiStore.getState().openNav("agents"); })}
+                className={ACCOUNT_MENU_ROW}
+              >
+                <Icon.agents.configure size={ICON.sm} />
+                <span className="min-w-0 flex-1 truncate">Configure agent</span>
+              </button>
+              <div className="my-1 h-px bg-sidebar-border" role="separator" />
+              <button role="menuitem" onClick={() => setConfirming(true)} className={`${ACCOUNT_MENU_ROW} text-err`}>
+                <Icon.agents.delete size={ICON.sm} />
+                <span className="min-w-0 flex-1 truncate">Delete</span>
+              </button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[] }) {
   const [open, setOpen] = useState(false);
   const [all, setAll] = useState(false);
@@ -505,12 +663,10 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
   // Whether this agent has a repository behind it at all — which decides whether the control below
   // opens a pull request or opens the panel where one becomes possible.
   const linked = useGithubStore((st) => Boolean(st.views[agent.agent_id]?.link));
-  // WHETHER THE COUNT BESIDE THE NAME IS A TOTAL OR A WINDOW. `listRuns` takes a cap, so until the
-  // server says the history is complete this agent may have runs nobody has fetched — and a badge
-  // reading `5 Runs` on an agent with forty-seven is the wrong-count failure §13 names: "A missing
-  // count is fine. A wrong count is not." The figure stays (it is what the row is for) and the
-  // sentence on hover stops it being a claim about the total.
-  const historyComplete = useTraceStore((st) => st.historyComplete);
+  // THE RUN COUNT IS NO LONGER ON THIS ROW, so neither is the qualifier that made it honest. §13's
+  // rule — "a missing count is fine, a wrong count is not" — is satisfied by not making the claim:
+  // the subtree below lists the runs that have actually been fetched, and `Load older runs…` says
+  // the rest exist. See `AgentRowMenu`, which took the capsule's place.
 
 
 
@@ -622,19 +778,11 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
         {/* THE RUN COUNT, ALWAYS — `0 Runs` included. A badge that disappears at zero makes the
             one state somebody most wants to see at a glance, "this has never run", the only
             state with nothing to read. */}
-        <span
-          title={
-            historyComplete
-              ? `${runs.length} run${runs.length === 1 ? "" : "s"}`
-              : `${runs.length} run${runs.length === 1 ? "" : "s"} loaded — older runs have not been fetched`
-          }
-          className="flex shrink-0 items-center gap-1 rounded-full bg-runssoft px-2.5 py-1 text-tiny font-medium text-runsink"
-        >
-          <Icon.agents.runsBadge size={ICON.xs} />
-          {/* THE MARK AND THE FIGURE, AND NOTHING ELSE. `Runs` was a third element on a row that is
-              already two lines of words, and the play glyph beside a number says what it counts. */}
-          <span className="tabular-nums">{runs.length}</span>
-        </span>
+        {/* THE ROW'S OWN MENU, WHERE A RUNS CAPSULE USED TO BE. The capsule was a pink count on
+            every row of a column of grey text — the loudest thing in the sidebar, spent on a
+            number that is also the first line of the agent's own subtree the moment you open it.
+            What a row actually needs at its end is the things you can DO to it. */}
+        <AgentRowMenu agent={agent} />
       </div>
 
       {open && hasRuns && (

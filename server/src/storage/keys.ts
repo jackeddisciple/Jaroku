@@ -171,6 +171,26 @@ export function agentStagingKey(
   return `${agentStagingPrefix(workspaceId, agentId, stagingId)}${assertPath(path)}`;
 }
 
+/**
+ * A person's avatar, under the workspace their account calls home.
+ *
+ * UNDER A WORKSPACE, WHICH IS NOT WHERE IT WANTS TO BE. A face belongs to a PERSON, and a person
+ * can be in several workspaces — so on the merits this key would have no workspace in it at all.
+ * `assertKey` refuses that, and it is right to: the `ws/<uuid>/` prefix is what lets a presigned
+ * URL be checked with `workspaceIdFromKey(key) === ctx.workspaceId` and no database lookup, on a
+ * path that by definition has no context. An exemption for one prefix would be a hole in exactly
+ * that check, and the first cross-tenant bug through it would be worth more than this convenience.
+ *
+ * SO IT LIVES IN THE ACCOUNT'S DEFAULT WORKSPACE and the resolved key is STORED on the user row
+ * rather than recomputed. That matters: somebody's default workspace can change, and a key that
+ * was rebuilt from today's default would stop finding yesterday's object. The stored key keeps
+ * working until that workspace's objects are swept, at which point the column is stale and the
+ * footer falls back to an initial — which is the same graceful end every missing avatar has.
+ */
+export function userAvatarKey(workspaceId: string, userId: string): string {
+  return `${workspacePrefix(workspaceId)}users/${assertUuid(userId, "userId")}/avatar`;
+}
+
 /** A finished eval's CSV export. One object per eval run, named by it. */
 export function exportKey(workspaceId: string, evalRunId: string): string {
   return `${workspacePrefix(workspaceId)}exports/${assertUuid(evalRunId, "evalRunId")}.csv`;

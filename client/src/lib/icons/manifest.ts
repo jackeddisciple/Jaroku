@@ -58,7 +58,11 @@ export const MANIFEST = {
      * NOTHING PREMIUM IS INVOLVED. A filled black tile with a white plus is not a distinct icon to
      * be bought; it is this free stroke glyph on a background, which is CSS.
      */
-    newAgent: "PlusIcon",
+    // `AddSquareIcon` RATHER THAN A PLAIN PLUS ON A BLACK TILE. The tile was CSS — a filled ink
+    // square with a white plus — and it was the only solid black object in a column of quiet grey
+    // text, which made `New` shout rather than lead. The squared glyph carries the same "this makes
+    // something" idea in the same stroke weight as every other mark in the column.
+    newAgent: "AddSquareIcon",
   },
 
   // ── §5 Sidebar panel + §6 Workspace panel ─────────────────────────────────
@@ -101,6 +105,17 @@ export const MANIFEST = {
     fork: "GitForkIcon",
     more: "MoreHorizontalIcon",
     restore: "RestoreBinIcon",
+    // ── The sidebar row's overflow menu ────────────────────────────────────────────────────────
+    // A SECOND `more` AND IT IS NOT A DUPLICATE. `agents.more` is horizontal and sits on the
+    // AgentCard, where it is one of several marks in a row and reads with them; this one is
+    // vertical and sits at the END of a dense sidebar row, where a horizontal ellipsis reads as
+    // three more characters of the timestamp beside it. Same idea, two orientations, and which one
+    // is right is a property of the row rather than of the action.
+    rowMore: "EllipsisVerticalIcon",
+    pin: "PinIcon",
+    rename: "Edit03Icon",
+    configure: "Settings05Icon",
+    delete: "Delete01Icon",
     // §8.5's shuffle, and it is a SHUFFLE rather than one of the three refresh marks. D3 separated
     // those three by what they do — sync with an external system, re-fetch a local list, retry a
     // failed operation — and this is none of them: it re-runs the collision-avoiding assignment and
@@ -110,7 +125,6 @@ export const MANIFEST = {
      * The runs capsule's mark, on an agent's sidebar row. A count of runs is a count of times this
      * agent has been STARTED, so the mark is a play button rather than a clock or a list.
      */
-    runsBadge: "PlayCircle02Icon",
   },
 
   // ── §5/§6 Auth and onboarding ─────────────────────────────────────────────

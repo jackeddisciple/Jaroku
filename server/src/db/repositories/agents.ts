@@ -409,6 +409,33 @@ export class AgentRepository {
     return new Set(rows.map((r) => String(r["id"])));
   }
 
+  /**
+   * Remove an agent's row for good, and with it everything the schema hangs off it.
+   *
+   * ONE STATEMENT, BECAUSE THE SCHEMA ALREADY SAYS WHAT DEPENDS ON AN AGENT. Fourteen tables
+   * reference `agents` with `ON DELETE CASCADE` — versions, runs, secret refs, github links, CI
+   * config, shadow runs, PR comments, scan findings — and foreign keys are enforced on both
+   * drivers (`node:sqlite` enables them by default; Postgres always has). Writing the cascade out
+   * by hand here would be a second, worse copy of a list the database maintains, and the first
+   * table somebody added without adding to that copy would leak rows forever.
+   *
+   * NOT `deleted_at`, WHICH MEANS SOMETHING ELSE ENTIRELY. That column is the disk sweep's mark for
+   * "the directory this row mirrored has gone", and `upsertFromDisk` CLEARS IT every time the
+   * project is materialised again — so an agent "deleted" that way comes back on the next boot
+   * that writes its directory. A permanent delete has to take the row, and the caller has to take
+   * the directory, or the sweep simply re-creates both.
+   *
+   * Answers whether a row was actually removed, so a caller can tell "gone" from "never here"
+   * without a second query.
+   */
+  async purge(ctx: TenantContext, agentId: string): Promise<boolean> {
+    const res = await this.q(ctx).run(
+      `DELETE FROM agents WHERE workspace_id = ? AND id = ?`,
+      [ctx.workspaceId, agentId],
+    );
+    return (res?.changes ?? 0) > 0;
+  }
+
   async bySlug(ctx: TenantContext, slug: string): Promise<Agent | undefined> {
     const row = await this.q(ctx).get<Record<string, unknown>>(
       `SELECT ${COLUMNS} FROM agents WHERE workspace_id = ? AND slug = ? AND deleted_at IS NULL`,

@@ -91,18 +91,22 @@ console.log("\nevery count is a total");
     ["components/DatasetBuilder.tsx", "datasets.length"],
     ["components/GitHubPanel.tsx", "view.unpushed.length"],
   ];
-  // THE SIDEBAR'S RUNS COUNT IS NO LONGER A SECTION HEADER — it moved onto each agent's row as a
-  // capsule when runs stopped being a flat list and became a tree under the agent that produced
-  // them. The REQUIREMENT did not move: that list is still a window (`listRuns` takes a cap, and
-  // the column still has a "load older" control), so a bare figure would be a claim about a total
-  // nobody has. A capsule has no `count` prop to pass null to, so the figure stays and the sentence
-  // on hover carries the qualification — checked here rather than dropped, because dropping it is
-  // how the wrong count comes back.
+  // THE SIDEBAR STATES NO RUN COUNT AT ALL NOW, WHICH IS THE STRONGEST FORM OF THIS RULE. The count
+  // was a section header, then a capsule on each agent's row, and each time the requirement came
+  // with it: `listRuns` takes a cap and the column still has a "load older" control, so a bare
+  // figure was always a claim about a total nobody has — the capsule carried the qualification in
+  // its hover title. The capsule has now been replaced by the row's actions menu, so the claim is
+  // simply not made: the subtree lists the runs that were fetched and `Load older runs…` says the
+  // rest exist.
+  //
+  // ASSERTED AS AN ABSENCE RATHER THAN DELETED, because "there is no count" is a property worth
+  // keeping true. A figure put back on that row without its qualification is exactly the wrong
+  // count §13 forbids, and this is the line that would fail.
   {
     const text = read("src/components/Sidebar.tsx");
-    check("the sidebar's runs capsule says when its figure is only what is loaded",
-      /historyComplete/.test(text) && /older runs have not been fetched/.test(text),
-      "the capsule claims a total it cannot know");
+    check("the sidebar's agent row states no run total",
+      !/bg-runssoft/.test(text) && !/runs\.length\}<\/span>/.test(text),
+      "a run figure is back on the row — it must carry the loaded-vs-total qualification");
   }
 
   for (const [path, source] of COUNTED) {

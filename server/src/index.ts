@@ -126,7 +126,7 @@ import {
 import {
   OUTCOME_WINDOW, activityOf, driftOf, healthOf, missingCredentials, percentiles, runtimeOf,
 } from "./agentHealth.ts";
-import { IdentityRepository } from "./db/repositories/identity.ts";
+import { defaultWorkspace, IdentityRepository } from "./db/repositories/identity.ts";
 import { isMemberRole } from "./db/tenant.ts";
 import { resolveDevTenancy, type DevTenancy } from "./devTenancy.ts";
 import {
@@ -150,6 +150,7 @@ import { inSubdirectory, repoPrefix } from "./githubPush.ts";
 import { MANIFEST_FILE, buildManifest, manifestRefs } from "./mcpManifest.ts";
 import type { McpImpact } from "./mcpStore.ts";
 import { fetchGoogleAvatar, putAvatar } from "./storage/avatars.ts";
+import { agentPrefix } from "./storage/keys.ts";
 import { ObjectNotFound } from "./storage/objectStore.ts";
 import { openObjectStore } from "./storage/open.ts";
 import { resolveSigningKey } from "./storage/presign.ts";
@@ -2146,6 +2147,69 @@ async function setAgentArchived(ctx: TenantContext, agentId: string, archived: b
  * Bounded by the same `TITLE_MAX` a thread title is, and for the same reason: it is rendered in a
  * sidebar row, a chip and a snapshot, and one definition of "a storable name" beats three.
  */
+/**
+ * Remove an agent for good: the row and its cascade, its objects, and its directory.
+ *
+ * THE ORDER IS DELIBERATE AND THE DIRECTORY IS LAST FOR A REASON. `upsertFromDisk` re-creates a row
+ * for any project directory it finds, so a delete that took the row and left the directory would
+ * be undone by the next boot — the agent would come back, with a new id and no history, which is
+ * worse than not deleting it. Taking the directory last means a failure part-way leaves a row with
+ * no files (visible, fixable, honest) rather than files with no row (invisible, and about to be
+ * resurrected).
+ *
+ * IT REFUSES A LIVE DEPLOYMENT, exactly as archiving does. An agent serving a public URL is not
+ * something to delete out from under its own traffic, and "forget or cancel the deployment first"
+ * is the same sentence in both places because it is the same rule.
+ *
+ * THE CONFIRMATION IS THE SLUG, and it is checked here as well as in the client. Not as security —
+ * anybody who can send this command can send any string with it — but because a command built
+ * against a row the client has since replaced would otherwise delete a DIFFERENT agent than the
+ * person was looking at when they typed the name.
+ */
+async function deleteAgent(ctx: TenantContext, agentId: string, confirm: unknown): Promise<void> {
+  const slug = String(agentId ?? "");
+  const agent = (await agentRepo.list(ctx, { includeArchived: true })).find((a) => a.slug === slug);
+  if (!agent) {
+    refuseAgent(ctx, `no agent called ${slug} in this workspace`, slug);
+    return;
+  }
+  if (String(confirm ?? "") !== agent.slug) {
+    refuseAgent(ctx, `type ${agent.slug} to delete it — nothing was removed`, slug);
+    return;
+  }
+  const live = (await deployStore.currentByAgent(ctx)).get(agent.slug);
+  if (live && live.status === "live") {
+    refuseAgent(
+      ctx,
+      `${slug} is still serving at ${live.url ?? "a public URL"} — forget or cancel the deployment first`,
+      slug,
+    );
+    return;
+  }
+
+  if (!(await agentRepo.purge(ctx, agent.id))) {
+    refuseAgent(ctx, `${slug} was already gone`, slug);
+    return;
+  }
+  // Objects next. A failure here leaves orphaned bytes the lifecycle sweep collects, which costs
+  // storage and nothing else — so it must not stop the directory going.
+  try {
+    await objects.deletePrefix(agentPrefix(ctx.workspaceId, agent.id));
+  } catch (err) {
+    console.warn(`[agents] could not remove ${slug}'s objects: ${(err as Error).message}`);
+  }
+  // And the directory, without which the next `upsertFromDisk` brings the agent back.
+  try {
+    rmSync(join(agentsDir(RUNTIME_DIR), slug), { recursive: true, force: true });
+  } catch (err) {
+    console.warn(`[agents] could not remove ${slug}'s directory: ${(err as Error).message}`);
+  }
+  console.log(`[agents] ${slug} deleted permanently`);
+  await relay.broadcastAgents();
+  await relay.broadcastAgentGrid();
+  scheduleListRefresh(ctx);
+}
+
 async function renameAgent(ctx: TenantContext, agentId: string, name: unknown): Promise<void> {
   const slug = String(agentId ?? "");
   const next = typeof name === "string" ? name.trim().slice(0, TITLE_MAX).trim() : "";
@@ -3195,8 +3259,13 @@ if (googleConfig) {
           if (existing && existing.avatar_key === null) {
             const bytes = await fetchGoogleAvatar(identity.pictureUrl);
             if (bytes) {
-              const key = await putAvatar(objects, userId, bytes);
-              await identityRepo.updateProfile(sys, userId, { avatarKey: key });
+              // The same home workspace the upload route picks — see `userAvatarKey`.
+              const memberships = await identityRepo.workspacesForUser(sys, userId);
+              const home = defaultWorkspace(memberships) ?? memberships[0];
+              if (home) {
+                const key = await putAvatar(objects, home.id, userId, bytes);
+                await identityRepo.updateProfile(sys, userId, { avatarKey: key });
+              }
             }
           }
         } catch (err) {
@@ -6668,6 +6737,7 @@ async function handleAgentCommand(ctx: TenantContext, cmd: AgentCommand): Promis
     if (cmd.cmd === "archiveAgent") await setAgentArchived(ctx, cmd.agentId, true);
     else if (cmd.cmd === "restoreAgent") await setAgentArchived(ctx, cmd.agentId, false);
     else if (cmd.cmd === "renameAgent") await renameAgent(ctx, cmd.agentId, cmd.name);
+    else if (cmd.cmd === "deleteAgent") await deleteAgent(ctx, cmd.agentId, cmd.confirm);
     else if (cmd.cmd === "setAgentEmoji") await setAgentEmoji(ctx, cmd.agentId, cmd.emoji);
     else if (cmd.cmd === "setAgentCategory") await setAgentCategory(ctx, cmd.agentId, cmd.category);
     else if (cmd.cmd === "forkAgent") await forkAgent(ctx, cmd.agentId);

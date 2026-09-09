@@ -34,6 +34,9 @@ const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0]);
 const WEBP = Buffer.concat([Buffer.from("RIFF", "ascii"), Buffer.alloc(4), Buffer.from("WEBP", "ascii"), Buffer.alloc(4)]);
 const SVG = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>', "utf8");
 const GIF = Buffer.from("GIF89a", "ascii");
+/** Both must be real uuids — `userAvatarKey` asserts them, which is half of what it is for. */
+const WS = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+const USER = "11111111-2222-3333-4444-555555555555";
 
 /** Just enough store to see what `putAvatar` wrote, and to prove it wrote nothing when it refused. */
 function fakeStore(): ObjectStore & { written: Map<string, { body: Buffer; type?: string }> } {
@@ -67,29 +70,31 @@ console.log("\nwhat counts as an image, read from the bytes rather than from a h
 
 console.log("\nwhat may be stored");
 {
-  const key = avatarKey("11111111-2222-3333-4444-555555555555");
-  check(key === "users/11111111-2222-3333-4444-555555555555/avatar", "the key is one per user, not one per upload");
-  // NOT WORKSPACE-SCOPED, deliberately — a person can be in several and their face is the same in
-  // all of them. Asserted so a later workspace prefix has to be a decision rather than a reflex.
-  check(!key.startsWith("workspaces/"), "...and it is not under a workspace prefix");
+  const key = avatarKey(WS, "11111111-2222-3333-4444-555555555555");
+  check(key === `ws/${WS}/users/11111111-2222-3333-4444-555555555555/avatar`, "the key is one per user, not one per upload");
+  // WORKSPACE-SCOPED, WHICH IT DID NOT USED TO BE AND HAD TO BECOME. `assertKey` refuses any key
+  // that does not start `ws/<uuid>/`, because that prefix is how a presigned URL is checked with
+  // no database behind it — so an unscoped avatar key was rejected on every single upload. See
+  // `keys.ts`'s `userAvatarKey`.
+  check(key.startsWith(`ws/${WS}/`), "...under the workspace prefix every key must carry");
 
   void (async () => {
     const store = fakeStore();
-    const stored = await putAvatar(store, "u1", PNG);
-    check(stored === avatarKey("u1"), "a PNG is stored under the user's key");
+    const stored = await putAvatar(store, WS, USER, PNG);
+    check(stored === avatarKey(WS, USER), "a PNG is stored under the user's key");
     check(store.written.get(stored)?.type === "image/png", "...with the type the BYTES say, not the caller");
 
     for (const [name, bytes] of [["an SVG", SVG], ["a GIF", GIF], ["nothing", Buffer.alloc(0)]] as const) {
       const s2 = fakeStore();
       let threw = false;
-      try { await putAvatar(s2, "u2", bytes); } catch { threw = true; }
+      try { await putAvatar(s2, WS, USER, bytes); } catch { threw = true; }
       check(threw, `${name} is refused`);
       check(s2.written.size === 0, `...and ${name} left nothing behind in the store`);
     }
 
     const s3 = fakeStore();
     let tooBig = false;
-    try { await putAvatar(s3, "u3", Buffer.concat([PNG, Buffer.alloc(AVATAR_MAX_BYTES)])); } catch { tooBig = true; }
+    try { await putAvatar(s3, WS, USER, Buffer.concat([PNG, Buffer.alloc(AVATAR_MAX_BYTES)])); } catch { tooBig = true; }
     check(tooBig, "a picture over the cap is refused even though it IS a PNG");
     check(s3.written.size === 0, "...and it is refused before anything is written");
 

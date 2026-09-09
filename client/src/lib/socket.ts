@@ -1280,6 +1280,18 @@ export function sendRenameAgent(agentId: string, name: string): void {
   send({ cmd: "renameAgent", agentId, name });
 }
 
+/**
+ * Remove an agent and everything under it, for good.
+ *
+ * `confirm` IS THE SLUG THE PERSON TYPED, and it is sent rather than checked only here: the server
+ * compares it against the agent it is about to delete, so a command built against a row this tab
+ * has since replaced refuses instead of deleting a different agent than was on screen. Not a
+ * security check — this tab could send anything — a correctness one.
+ */
+export function sendDeleteAgent(agentId: string, confirm: string): void {
+  send({ cmd: "deleteAgent", agentId, confirm });
+}
+
 /** §8.5's picker. The server refuses anything outside the palette and warns on a duplicate. */
 export function sendSetAgentEmoji(agentId: string, emoji: string): void {
   send({ cmd: "setAgentEmoji", agentId, emoji });

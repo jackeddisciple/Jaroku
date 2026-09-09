@@ -13,6 +13,7 @@
 // security rather than about size: it is the one image format that is also a document.
 
 import type { ObjectStore } from "./objectStore.ts";
+import { userAvatarKey } from "./keys.ts";
 
 /**
  * The biggest picture that may be stored, AFTER the client has cropped it.
@@ -38,22 +39,20 @@ export function sniffImage(bytes: Buffer): string | null {
 }
 
 /**
- * Where a person's picture lives.
+ * Where a person's picture lives — see `keys.ts`'s `userAvatarKey` for why a workspace is in it.
+ *
+ * THIS FILE USED TO ASSEMBLE THE KEY ITSELF, as `users/<id>/avatar`, and every upload was refused
+ * by the store: `assertKey` requires `ws/<workspace uuid>/` on every key, because that prefix is
+ * how a presigned URL is checked without a database. Building keys by hand next to a module whose
+ * whole job is to build them is the mistake, not the prefix that caught it.
  *
  * ONE KEY PER USER, OVERWRITTEN IN PLACE, rather than a new key per upload. A versioned key would
  * need a cleanup pass to stop the store growing every time somebody re-crops their face, and the
- * only thing it would buy is a cache-busting URL — which the client gets from `avatar_key` changing
- * shape is not needed for, because the client fetches this with a bearer token and holds the blob
- * for the session rather than letting a browser cache own it.
- *
- * NOT UNDER A WORKSPACE PREFIX, and that is the one thing about this key worth arguing. Every other
- * object in this store is workspace-scoped because every other object BELONGS to a workspace and
- * `deletePrefix(workspace)` has to take it with it. A person is not in one workspace — they can be
- * in several, and their face is the same in all of them.
+ * only thing it would buy is a cache-busting URL — which is not needed here, because the client
+ * fetches with a bearer token and holds the blob for the session rather than letting a browser
+ * cache own it.
  */
-export function avatarKey(userId: string): string {
-  return `users/${userId}/avatar`;
-}
+export { userAvatarKey as avatarKey } from "./keys.ts";
 
 /**
  * Validate and store, returning the key. Throws a plain `Error` whose message is safe to show.
@@ -61,14 +60,19 @@ export function avatarKey(userId: string): string {
  * The caller decides what a failure means — the upload route turns it into a 400, and the Google
  * import swallows it, because a picture that would not import is not a reason to fail a sign-in.
  */
-export async function putAvatar(objects: ObjectStore, userId: string, bytes: Buffer): Promise<string> {
+export async function putAvatar(
+  objects: ObjectStore,
+  workspaceId: string,
+  userId: string,
+  bytes: Buffer,
+): Promise<string> {
   if (bytes.length === 0) throw new Error("that file is empty");
   if (bytes.length > AVATAR_MAX_BYTES) {
     throw new Error(`a picture is at most ${Math.floor(AVATAR_MAX_BYTES / 1024 / 1024)}MB`);
   }
   const type = sniffImage(bytes);
   if (!type) throw new Error("that file is not a PNG, JPEG or WebP image");
-  const key = avatarKey(userId);
+  const key = userAvatarKey(workspaceId, userId);
   await objects.put(key, bytes, { contentType: type });
   return key;
 }

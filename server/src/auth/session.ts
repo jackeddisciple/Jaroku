@@ -30,7 +30,7 @@ import type { TicketStore } from "./tickets.ts";
 import { hashSecret, type SignInStore } from "./signIn.ts";
 import type { ContextResolver } from "./resolve.ts";
 import type { ObjectStore } from "../storage/objectStore.ts";
-import { avatarKey, putAvatar, sniffImage } from "../storage/avatars.ts";
+import { putAvatar, sniffImage } from "../storage/avatars.ts";
 import { ObjectNotFound } from "../storage/objectStore.ts";
 
 export interface SessionDeps {
@@ -572,9 +572,17 @@ function avatarPutHandler(deps: SessionDeps, objects: ObjectStore): Handler {
     const user = await deps.identity.userByExternalId(sys, auth.subject);
     if (!user) throw forbidden("this account no longer exists");
 
+    // THE WORKSPACE THE KEY LIVES UNDER. See `keys.ts`'s `userAvatarKey`: a face belongs to a
+    // person and the store insists every key names a workspace, so the account's default one is
+    // what it gets. Somebody with no membership at all has nowhere to put a picture — which is
+    // the same state that already refuses them a session.
+    const memberships = await deps.identity.workspacesForUser(sys, user.id);
+    const home = defaultWorkspace(memberships) ?? memberships[0];
+    if (!home) throw forbidden("this account belongs to no workspace");
+
     let key: string;
     try {
-      key = await putAvatar(objects, user.id, await req.buffer());
+      key = await putAvatar(objects, home.id, user.id, await req.buffer());
     } catch (err) {
       // `putAvatar` throws only for things the uploader can fix — empty, too large, not an image —
       // and its messages are written to be shown. Anything else is a store failure and is a 500.
@@ -598,8 +606,13 @@ function avatarDeleteHandler(deps: SessionDeps, objects: ObjectStore): Handler {
     // THE COLUMN FIRST, THEN THE BYTES. If the delete fails between them the row already says
     // there is no picture, which is the state the person asked for; the object is then garbage the
     // lifecycle sweep collects. The other order leaves a row pointing at nothing.
+    //
+    // AND IT DELETES THE STORED KEY RATHER THAN A REBUILT ONE. A rebuilt key names today's default
+    // workspace, which is not necessarily the one the picture was written under — see
+    // `userAvatarKey`. Rebuilding would delete nothing and leave the real object behind.
+    const stored = user.avatar_key;
     await deps.identity.updateProfile(sys, user.id, { avatarKey: null });
-    await objects.delete(avatarKey(user.id));
+    if (stored) await objects.delete(stored);
     return { status: 200, body: { hasAvatar: false } };
   };
 }
