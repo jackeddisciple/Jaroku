@@ -15,15 +15,16 @@
 // everything' mode, and adding one later is a product decision, not an implementation shortcut."
 //
 // COLOUR IS NEVER THE ONLY SIGNAL (§10), and on the bar it is no signal at all: the shield draws
-// §04's info blue in every mode (2026-09-10) — deliberately NOT the amber used for in-flight, which
-// has exactly one meaning in this app and keeps it. Fast carries a different word and a caution
-// mark, so the state survives a monochrome screen and a colour-blind reader.
+// one blue in every mode (2026-09-10), §04's info a shade darker — see `SHIELD_BLUE` — and
+// deliberately NOT the amber used for in-flight, which has exactly one meaning in this app and
+// keeps it. Fast carries a different word and a caution mark, so the state survives a monochrome
+// screen and a colour-blind reader.
 
 import { useRef, useState } from "react";
 import { Icon } from "../../lib/icons/registry.ts";
 import { ControlButton } from "./ControlButton.tsx";
 import { Popover, PopoverNote, PopoverRow } from "./Popover.tsx";
-import { STATUS } from "../../lib/tokens.ts";
+import { SHIELD_BLUE, STATUS } from "../../lib/tokens.ts";
 import type { PermissionMode } from "../../store/composerSettingsStore.ts";
 
 /** §3.2's three, with its own descriptions. */
@@ -59,29 +60,32 @@ export function ShieldControl({
 
   return (
     <div className="relative shrink-0">
-      <ControlButton
-        buttonRef={triggerRef}
-        icon={Icon.composer.permissions}
-        // The word stays at every width the bar shows the shield — composerBar.ts's KEEPS_LABEL —
-        // and Fast carries a caution mark in it, because §10 requires the state to be carried by
-        // more than colour.
-        label={dense ? undefined : value === "fast" ? "Fast ⚠" : modeLabel(value)}
-        name={`Permission mode: ${modeLabel(value)}`}
-        title={
-          pinned
-            ? `Permission mode is pinned to ${modeLabel(value)} by a workspace policy`
-            : `Permission mode — ${MODES.find((m) => m.id === value)?.detail ?? modeLabel(value)}`
-        }
-        expanded={open}
-        // BLUE IN EVERY MODE, the glyph and the word — the product owner's call on 2026-09-10. It is
-        // the palette's one mid blue, §04's `info`, which the shield already wore for Fast; `!` so
-        // neither the bar's hover ink nor an open popover turns it grey or black. Fast is told apart
-        // by its word and its caution mark, which is what §10 asks of it anyway.
-        active={open}
-        disabled={disabled || pinned}
-        onClick={() => setOpen((v) => !v)}
-        className="!text-warn"
-      />
+      {/* BLUE IN EVERY MODE, the glyph and the word — the product owner's call on 2026-09-10, in
+          `SHIELD_BLUE`, a shade darker than §04's info. The colour is a derived value rather than a
+          class, so it rides on this box-less span and the button inherits it: `!text-current` so
+          neither the bar's hover ink nor an open popover turns it grey or black. Fast is told apart
+          by its word and its caution mark, which is what §10 asks of it anyway. */}
+      <span className="contents" style={{ color: SHIELD_BLUE }}>
+        <ControlButton
+          buttonRef={triggerRef}
+          icon={Icon.composer.permissions}
+          // The word stays at every width the bar shows the shield — composerBar.ts's KEEPS_LABEL —
+          // and Fast carries a caution mark in it, because §10 requires the state to be carried by
+          // more than colour.
+          label={dense ? undefined : value === "fast" ? "Fast ⚠" : modeLabel(value)}
+          name={`Permission mode: ${modeLabel(value)}`}
+          title={
+            pinned
+              ? `Permission mode is pinned to ${modeLabel(value)} by a workspace policy`
+              : `Permission mode — ${MODES.find((m) => m.id === value)?.detail ?? modeLabel(value)}`
+          }
+          expanded={open}
+          active={open}
+          disabled={disabled || pinned}
+          onClick={() => setOpen((v) => !v)}
+          className="!text-current"
+        />
+      </span>
       <Popover open={open} onClose={() => setOpen(false)} triggerRef={triggerRef} label="Permission mode" width={320}>
         {MODES.map((m) => {
           const blocked = m.id === "fast" && fastDisallowed;

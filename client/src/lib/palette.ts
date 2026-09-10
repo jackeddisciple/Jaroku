@@ -241,3 +241,13 @@ export const channels = (hex: string): string => {
 
 /** The same, at an alpha. Written out so a translucent accent is never a hex somebody guessed. */
 export const alpha = (hex: string, a: number): string => `rgba(${channels(hex)}, ${a})`;
+
+/**
+ * `hex` moved `t` of the way towards `toward`, as a hex. For the rare shade that has to stay tied to
+ * a palette value rather than become a new one somebody guessed — see `SHIELD_BLUE` in tokens.ts.
+ */
+export const mix = (hex: string, toward: string, t: number): string => {
+  const from = channels(hex).split(", ").map(Number);
+  const to = channels(toward).split(", ").map(Number);
+  return `#${from.map((v, i) => Math.round(v + (to[i]! - v) * t).toString(16).padStart(2, "0")).join("")}`;
+};

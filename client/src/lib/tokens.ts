@@ -24,7 +24,7 @@
 // to a canvas or an icon. The trace panel and the graph view said "not migrated onto this yet —
 // this file exists so they *can* be, in a later pass". This is that pass; both are on it.
 
-import { BORDER, BRAND as BRAND_COLOUR, CANVAS, SEMANTIC, TEXT as INK, alpha } from "./palette.ts";
+import { BORDER, BRAND as BRAND_COLOUR, CANVAS, SEMANTIC, TEXT as INK, alpha, mix } from "./palette.ts";
 import { ELEVATION_SPEC, RADIUS_SCALE } from "./surfaces.ts";
 
 /**
@@ -161,6 +161,14 @@ export const STATUS = {
 } as const;
 
 export type StatusName = keyof typeof STATUS;
+
+/**
+ * THE PERMISSION SHIELD'S BLUE: §04's info, a fifth of the way to ink. The product owner's call on
+ * 2026-09-10 — the shield wears blue in every mode, and the info blue itself read a shade light
+ * beside the bar's grey marks. Derived rather than written, so it moves when the info blue does and
+ * the palette gains no colour the specification does not name.
+ */
+export const SHIELD_BLUE = mix(SEMANTIC.info, INK.primary, 0.2);
 
 /**
  * Trace step types. The fourth category set, and it belongs here for the same reason the other
