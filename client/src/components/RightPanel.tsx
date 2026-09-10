@@ -4,6 +4,9 @@
 // Trace is the hero and the default. Code is NOT a tab here; it opens as an on-demand overlay
 // (CodeOverlay) from a diff-card row or Cmd+P. Clicking a trace step slides in Step Details
 // over this panel.
+//
+// CLOSED UNTIL THERE IS SOMETHING IN IT. Every launch starts with the panel collapsed and the rail
+// left at the window's edge, so the composer has the width; `useRightPanelFollow` is what opens it.
 
 import { useEffect, useRef } from "react";
 import { useTraceStore } from "../store/traceStore.ts";
@@ -102,29 +105,52 @@ function GithubBadge({ badge, syncing }: { badge: string; syncing: boolean }) {
   );
 }
 
-export function RightPanel() {
+/**
+ * Whether §6's detail has an agent to show.
+ *
+ * THE TAB IS ABSENT RATHER THAN DISABLED WHEN NOTHING IS OPEN, which is a deliberate exception to
+ * this product's state-what-is-true rule and worth saying why. That rule is about a control whose
+ * ACTION is refused — a Push button with nothing to push says so instead of vanishing. This is not
+ * a refused action, it is a view of an object that has not been chosen: an "Agent" tab standing
+ * permanently in the bar with nothing behind it would be a ninth tab that never does anything,
+ * and the door to it is the Agents grid rather than this row.
+ */
+function useAgentOpen(): boolean {
+  return useAgentGridStore((s) => s.openAgentId !== null);
+}
+
+/** The tab actually on screen: `code` is an overlay rather than a tab, and Agent needs an agent. */
+function useShownTab(): RightTab {
   const rightTab = useUiStore((s) => s.rightTab);
-  /**
-   * Whether §6's detail has an agent to show.
-   *
-   * THE TAB IS ABSENT RATHER THAN DISABLED WHEN NOTHING IS OPEN, which is a deliberate exception to
-   * this product's state-what-is-true rule and worth saying why. That rule is about a control whose
-   * ACTION is refused — a Push button with nothing to push says so instead of vanishing. This is not
-   * a refused action, it is a view of an object that has not been chosen: an "Agent" tab standing
-   * permanently in the bar with nothing behind it would be a ninth tab that never does anything,
-   * and the door to it is the Agents grid rather than this row.
-   */
-  const agentOpen = useAgentGridStore((s) => s.openAgentId !== null);
-  const tab = rightTab === "code" ? "trace" : rightTab === "agent" && !agentOpen ? "trace" : rightTab;
-  const setTab = useUiStore((s) => s.setRightTab);
+  const agentOpen = useAgentOpen();
+  return rightTab === "code" ? "trace" : rightTab === "agent" && !agentOpen ? "trace" : rightTab;
+}
+
+/**
+ * What the panel follows, and the moments it opens by itself.
+ *
+ * CALLED ONCE, FROM App, rather than inside the panel: the panel is not mounted during the first
+ * run's early steps, and a moment it was not mounted for is a moment it would miss.
+ *
+ * IT OPENS WHEN THERE IS SOMETHING IN IT, and only for work somebody is watching — a generation
+ * finishing, a run of the open agent starting, a deploy starting. A run of some other agent (the
+ * server's boot run, a colleague's) still turns the tab to its trace and leaves a closed panel closed.
+ */
+export function useRightPanelFollow(): void {
   const activeRunId = useTraceStore((s) => s.activeRunId);
   const prevRunId = useRef(activeRunId);
 
   // A new run starts -> show its trace. That is the moment the product is about.
   useEffect(() => {
-    if (activeRunId && activeRunId !== prevRunId.current) setTab("trace");
+    if (activeRunId && activeRunId !== prevRunId.current) {
+      const run = useTraceStore.getState().runs[activeRunId];
+      const watched = run?.status === "running" && run.agent_id === useBuildStore.getState().activeAgentId;
+      const ui = useUiStore.getState();
+      if (watched) ui.setRightTab("trace");
+      else ui.followRightTab("trace");
+    }
     prevRunId.current = activeRunId;
-  }, [activeRunId, setTab]);
+  }, [activeRunId]);
 
   // Same idiom for a deploy: a NEW one steals the tab, once. Diffed against a ref rather than
   // fired on every deploy message, so selecting an old deployment by hand does not yank the
@@ -133,9 +159,68 @@ export function RightPanel() {
   const deployRunning = useDeployStore((s) => s.deployments.some((d) => isDeployInFlight(d.status)));
   const prevDeployId = useRef(deployId);
   useEffect(() => {
-    if (deployId && deployId !== prevDeployId.current && deployRunning) setTab("deploy");
+    if (deployId && deployId !== prevDeployId.current && deployRunning) useUiStore.getState().setRightTab("deploy");
     prevDeployId.current = deployId;
-  }, [deployId, deployRunning, setTab]);
+  }, [deployId, deployRunning]);
+
+  // A finished generation has put an agent on disk, and its graph is the first thing this panel can
+  // show about it — so a closed panel opens on the Graph. An open one keeps its tab: whatever
+  // somebody chose to read while it generated is not taken away from them.
+  const genStatus = useBuildStore((s) => s.status);
+  const prevGenStatus = useRef(genStatus);
+  useEffect(() => {
+    if (prevGenStatus.current === "generating" && genStatus === "done") {
+      const ui = useUiStore.getState();
+      if (!ui.rightPanelOpen) ui.setRightTab("graph");
+    }
+    prevGenStatus.current = genStatus;
+  }, [genStatus]);
+}
+
+export function RightPanel() {
+  const tab = useShownTab();
+
+  // overflow-CLIP, not hidden. Step Details parks itself off the right edge when it is closed
+  // (`translate-x-full`), so 340px of this element's content sits past its right edge. `hidden`
+  // clips that from view but still makes this a scroll container — and a scroll container with
+  // no scrollbar is a trap. StepRow calls scrollIntoView when a step is selected; the browser
+  // found the phantom 340px scrollable and slid the whole column — tabs, header, trace — to the
+  // left, where it stayed, with nothing to scroll it back. `clip` renders identically and
+  // creates no scroll container at all, so there is nothing to scroll.
+  return (
+    <div className="relative flex h-full min-w-0 flex-col overflow-clip bg-bg">
+      <div className="flex-1 min-h-0">
+        {tab === "agent" ? <AgentDetail />
+          : tab === "graph" ? <GraphView />
+          : tab === "evals" ? <EvalsPanel />
+          : tab === "mcp" ? <McpPanel />
+          : tab === "connections" ? <div className="h-full overflow-y-auto px-4 py-3"><ConnectionsPanel /></div>
+          : tab === "deploy" ? <DeployPanel />
+          : tab === "secrets" ? <SecretsPanel />
+          : tab === "github" ? <GitHubPanel />
+          : tab === "usage" ? <UsagePanel />
+          : <TraceTimeline />}
+      </div>
+
+      {/* Step Details slides in over this panel when a step is expanded. */}
+      <StepDetailPanel />
+    </div>
+  );
+}
+
+/**
+ * The rail, which stays on screen while the panel is closed.
+ *
+ * OUTSIDE THE PANEL RATHER THAN INSIDE IT, and that is what makes closing it safe: a collapsed
+ * panel is zero pixels wide, and a rail that lived in it would go with it. A cell opens the panel
+ * on its tab; the cell that is already showing closes it again.
+ */
+export function RightPanelRail() {
+  const tab = useShownTab();
+  const open = useUiStore((s) => s.rightPanelOpen);
+  const setTab = useUiStore((s) => s.setRightTab);
+  const setOpen = useUiStore((s) => s.setRightPanelOpen);
+  const agentOpen = useAgentOpen();
 
   const secretsNeedAttention = useSecretsStore((s) => needsAttention(s.health));
 
@@ -177,104 +262,80 @@ export function RightPanel() {
 
   const visible = TABS.filter((t) => t.id !== "agent" || agentOpen);
 
-  // overflow-CLIP, not hidden. Step Details parks itself off the right edge when it is closed
-  // (`translate-x-full`), so 340px of this element's content sits past its right edge. `hidden`
-  // clips that from view but still makes this a scroll container — and a scroll container with
-  // no scrollbar is a trap. StepRow calls scrollIntoView when a step is selected; the browser
-  // found the phantom 340px scrollable and slid the whole column — tabs, header, trace — to the
-  // left, where it stayed, with nothing to scroll it back. `clip` renders identically and
-  // creates no scroll container at all, so there is nothing to scroll.
+  // A TABLIST, AND REACHABLE THE WAY ONE IS. Ten plain buttons meant ten Tab presses to cross the
+  // rail and no announcement of which one was chosen; the pattern is one stop for the whole set,
+  // arrows to move inside it. `roving` is the index Tab lands on — the selected cell, so returning
+  // to the rail returns you where you were.
   return (
-    <div className="flex h-full bg-bg">
-      <div className="relative flex min-w-0 flex-1 flex-col overflow-clip">
-        <div className="flex-1 min-h-0">
-          {tab === "agent" ? <AgentDetail />
-            : tab === "graph" ? <GraphView />
-            : tab === "evals" ? <EvalsPanel />
-            : tab === "mcp" ? <McpPanel />
-            : tab === "connections" ? <div className="h-full overflow-y-auto px-4 py-3"><ConnectionsPanel /></div>
-            : tab === "deploy" ? <DeployPanel />
-            : tab === "secrets" ? <SecretsPanel />
-            : tab === "github" ? <GitHubPanel />
-            : tab === "usage" ? <UsagePanel />
-            : <TraceTimeline />}
-        </div>
-
-        {/* Step Details slides in over this panel when a step is expanded. */}
-        <StepDetailPanel />
-      </div>
-
-      {/* A TABLIST, AND REACHABLE THE WAY ONE IS. Ten plain buttons meant ten Tab presses to cross
-          the rail and no announcement of which one was chosen; the pattern is one stop for the
-          whole set, arrows to move inside it. `roving` is the index Tab lands on — the selected
-          cell, so returning to the rail returns you where you were. */}
-      <div
-        role="tablist"
-        aria-label="Panel"
-        aria-orientation="vertical"
-        onKeyDown={(e) => {
-          const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
-          if (!step) return;
-          e.preventDefault();
-          const at = visible.findIndex((t) => t.id === tab);
-          const next = visible[(at + step + visible.length) % visible.length];
-          if (next) setTab(next.id);
-        }}
-        className="flex w-10 shrink-0 flex-col items-center gap-0.5 border-l border-hair py-2"
-      >
-        {visible.map((t) => {
-          const active = tab === t.id;
-          return (
-            <button
-              key={t.id}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              tabIndex={active ? 0 : -1}
-              ref={(el) => {
-                // Focus follows selection only while the rail already has it — an arrow press
-                // should move the focus ring with the choice, but a click from the trace pane
-                // must not yank focus out of what somebody was reading.
-                if (active && el && el.parentElement?.contains(document.activeElement)) el.focus();
-              }}
-              // The tooltip is not decoration here — it is the label. A glyph nobody can name is
-              // a worse control than the word it replaced, so every cell in this rail carries
-              // both a title for the pointer and a name for assistive tech.
-              title={t.label}
-              aria-label={t.label}
-              onClick={() => setTab(t.id)}
-              className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
-                active ? "bg-active text-accent" : "text-muted hover:bg-active/40 hover:text-ink"
-              }`}
-            >
-              {/* `lg`, MATCHING THE SIDEBAR'S DESTINATIONS. These two rails are the same kind of
-                  control on opposite edges of the window — a column of marks that each swap what
-                  fills the middle — and two of them at different sizes reads as one of them being
-                  a lesser version of the other. The cell grows with the mark so the padding around
-                  it is unchanged. */}
-              <t.Mark size={ICON.lg} />
-              {/* THE ONE BADGE IN THIS RAIL, and it is computable while the tab is locked — the
-                  health route answers in counts, without elevation, so somebody is not asked for a
-                  passcode to be told whether they need to care. Carries a title as well as a colour,
-                  because a coloured dot alone says nothing to a screen reader. */}
-              {/* Amber for anything in flight, the error tone for a stopped state. Diverged is NOT
-                  amber, deliberately: it is not something working, it is something waiting for a
-                  person, and wearing the running colour would make it read as progress. */}
-              {t.id === "github" && githubBadge ? (
-                <GithubBadge badge={githubBadge} syncing={githubBadge === "⟳"} />
-              ) : null}
-              {t.id === "secrets" && secretsNeedAttention ? (
-                <span
-                  title="A credential needs attention"
-                  aria-label="A credential needs attention"
-                  role="img"
-                  className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-run"
-                />
-              ) : null}
-            </button>
-          );
-        })}
-      </div>
+    <div
+      role="tablist"
+      aria-label="Panel"
+      aria-orientation="vertical"
+      onKeyDown={(e) => {
+        const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+        if (!step) return;
+        e.preventDefault();
+        const at = visible.findIndex((t) => t.id === tab);
+        const next = visible[(at + step + visible.length) % visible.length];
+        if (next) setTab(next.id);
+      }}
+      className="flex w-10 shrink-0 flex-col items-center gap-0.5 border-l border-hair bg-bg py-2"
+    >
+      {visible.map((t) => {
+        const active = tab === t.id;
+        // LIT ONLY WHILE THE PANEL SHOWS IT. A closed panel still has a tab in the store and nothing
+        // on screen, and a highlighted cell would say otherwise.
+        const shown = open && active;
+        return (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={shown}
+            tabIndex={active ? 0 : -1}
+            ref={(el) => {
+              // Focus follows selection only while the rail already has it — an arrow press
+              // should move the focus ring with the choice, but a click from the trace pane
+              // must not yank focus out of what somebody was reading.
+              if (active && el && el.parentElement?.contains(document.activeElement)) el.focus();
+            }}
+            // The tooltip is not decoration here — it is the label. A glyph nobody can name is
+            // a worse control than the word it replaced, so every cell in this rail carries
+            // both a title for the pointer and a name for assistive tech.
+            title={t.label}
+            aria-label={t.label}
+            onClick={() => (shown ? setOpen(false) : setTab(t.id))}
+            className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+              shown ? "bg-active text-accent" : "text-muted hover:bg-active/40 hover:text-ink"
+            }`}
+          >
+            {/* `lg`, MATCHING THE SIDEBAR'S DESTINATIONS. These two rails are the same kind of
+                control on opposite edges of the window — a column of marks that each swap what
+                fills the middle — and two of them at different sizes reads as one of them being
+                a lesser version of the other. The cell grows with the mark so the padding around
+                it is unchanged. */}
+            <t.Mark size={ICON.lg} />
+            {/* THE ONE BADGE IN THIS RAIL, and it is computable while the tab is locked — the
+                health route answers in counts, without elevation, so somebody is not asked for a
+                passcode to be told whether they need to care. Carries a title as well as a colour,
+                because a coloured dot alone says nothing to a screen reader. */}
+            {/* Amber for anything in flight, the error tone for a stopped state. Diverged is NOT
+                amber, deliberately: it is not something working, it is something waiting for a
+                person, and wearing the running colour would make it read as progress. */}
+            {t.id === "github" && githubBadge ? (
+              <GithubBadge badge={githubBadge} syncing={githubBadge === "⟳"} />
+            ) : null}
+            {t.id === "secrets" && secretsNeedAttention ? (
+              <span
+                title="A credential needs attention"
+                aria-label="A credential needs attention"
+                role="img"
+                className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-run"
+              />
+            ) : null}
+          </button>
+        );
+      })}
     </div>
   );
 }

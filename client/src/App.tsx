@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelHandle } from "react-resizable-panels";
 import { Sidebar } from "./components/Sidebar.tsx";
-import { RightPanel } from "./components/RightPanel.tsx";
+import { RightPanel, RightPanelRail, useRightPanelFollow } from "./components/RightPanel.tsx";
 import { StatusBar } from "./components/StatusBar.tsx";
 import { CommandPalette } from "./components/CommandPalette.tsx";
 import { TopBar } from "./components/TopBar.tsx";
@@ -178,6 +178,60 @@ export function App() {
   // First run. Everything below is the normal app once `phase` is "complete", which it is for
   // every session after the first — see components/onboarding/useOnboarding.ts.
   const { phase, mountSidebar, mountRightPanel } = useOnboarding();
+
+  // When the right panel opens by itself — see RightPanel.tsx. Here rather than in the panel, which
+  // is not mounted for the first run's early steps and would miss what happened during them.
+  useRightPanelFollow();
+  /**
+   * The right panel, driven the way the sidebar is: the store decides, the panel follows.
+   *
+   * `rightPanelOpen` starts false on every launch, so the group is reconciled to CLOSED at mount
+   * whatever `autoSaveId` restored — without an animation, because a correction at mount is not a
+   * gesture. The width it had is not lost: the library keeps it, and `expand()` goes back to it.
+   */
+  const rightPanelOpen = useUiStore((s) => s.rightPanelOpen);
+  const inspectorPanel = useRef<ImperativePanelHandle>(null);
+  const [inspectorMoving, setInspectorMoving] = useState(false);
+  const inspectorSettled = useRef(false);
+  useEffect(() => {
+    const panel = inspectorPanel.current;
+    if (!panel) {
+      // Not mounted yet — the first run's early steps. Its first reconciliation is a mount again.
+      inspectorSettled.current = false;
+      return;
+    }
+    // THE MOUNT IS NOT THIS EFFECT'S TO RECONCILE. The group computes its first layout a render
+    // after its panels register, so a `collapse()` here would find no layout to act on — it is
+    // done from the panel's first size report instead, below.
+    if (!inspectorSettled.current) {
+      inspectorSettled.current = true;
+      return;
+    }
+    setInspectorMoving(true);
+    if (rightPanelOpen) panel.expand();
+    else panel.collapse();
+    const done = setTimeout(() => setInspectorMoving(false), 260);
+    return () => clearTimeout(done);
+  }, [rightPanelOpen, mountRightPanel]);
+  /**
+   * The panel's own size reports, which are where the group and the store meet.
+   *
+   * THE FIRST ONE (no previous size) IS THE MOUNT'S — the earliest moment there is a layout to
+   * correct — and the store wins over whatever was restored. After that, the one change the store
+   * did not ask for is a drag below the floor, which the library answers by collapsing the panel
+   * itself; the store has to hear about that, or the rail would go on saying the panel is open.
+   */
+  const onInspectorResize = (size: number, prevSize: number | undefined): void => {
+    const panel = inspectorPanel.current;
+    if (!panel) return;
+    const open = useUiStore.getState().rightPanelOpen;
+    if (prevSize === undefined) {
+      if (open && size === 0) panel.expand();
+      else if (!open && size > 0) panel.collapse();
+    } else if (open && size === 0) {
+      useUiStore.getState().setRightPanelOpen(false);
+    }
+  };
 
   // The trail the Back and Forward arrows walk. Mounted once, here, because it watches the two
   // fields that make a place and there must be exactly one recorder — see lib/navHistory.
@@ -573,9 +627,17 @@ export function App() {
                 resize observer is never handed a zero-width container and its saved sizes survive
                 the round trip. It also drops out of the tab order, which is what stops the keyboard
                 reaching a composer nobody can see. */}
-            <div ref={setPanes} className="relative min-h-0 flex-1">
-              <div className={`absolute inset-0 ${navView ? "invisible" : ""}`}>
-                <PanelGroup direction="horizontal" autoSaveId="jaroku-panes-v1" className="h-full">
+            <div className="relative min-h-0 flex-1">
+              <div className={`absolute inset-0 flex ${navView ? "invisible" : ""}`}>
+                {/* THE GROUP IS WHAT IS MEASURED, not the row it sits in. The rail beside it is forty
+                    pixels of the same row, and a floor converted against the row would come out forty
+                    pixels short of the one it states. */}
+                <div ref={setPanes} className="h-full min-w-0 flex-1">
+                <PanelGroup
+                  direction="horizontal"
+                  autoSaveId="jaroku-panes-v1"
+                  className={`h-full ${inspectorMoving ? "panels-moving" : ""}`}
+                >
                   {/* `minSize` IS A MEASURED PIXEL FLOOR HERE TOO, for the reason the sidebar's is:
                       the composer's control bar is a row of 32px hit targets and 8px gaps that its
                       own rules forbid to wrap, and 30% of this group is 354px at 1440 and 192px at
@@ -597,15 +659,32 @@ export function App() {
                   </Panel>
                   {mountRightPanel && (
                     <>
-                      <PaneDivider />
-                      <Panel id="inspector" defaultSize={55} minSize={32} order={2}>
-                        <div className="h-full animate-panel-in motion-reduce:animate-none">
+                      {/* The handle goes with the panel, for the sidebar's reason: left in place it
+                          would be a grip against the rail, resizing a column that is not there. */}
+                      {rightPanelOpen && <PaneDivider />}
+                      {/* COLLAPSIBLE TO NOTHING, with the rail outside it — closing the panel gives its
+                          width to the composer and leaves the way back on screen. `inert` while
+                          closed, for the sidebar's reason: clipped is not the same as unreachable. */}
+                      <Panel
+                        id="inspector"
+                        ref={inspectorPanel}
+                        collapsible
+                        collapsedSize={0}
+                        defaultSize={55}
+                        minSize={32}
+                        order={2}
+                        onResize={onInspectorResize}
+                      >
+                        <div className="h-full animate-panel-in motion-reduce:animate-none" inert={!rightPanelOpen}>
                           <RightPanel />
                         </div>
                       </Panel>
                     </>
                   )}
                 </PanelGroup>
+                </div>
+                {/* The rail stays when the panel is closed. See RightPanelRail. */}
+                {mountRightPanel && <RightPanelRail />}
               </div>
               {navView && (
                 <div className="absolute inset-0 animate-panel-in motion-reduce:animate-none">

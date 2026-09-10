@@ -322,10 +322,21 @@ interface UiState {
   /** §4.7's `P`, on the selected thread's agent. */
   togglePinnedAgent: (agentId: string) => void;
 
-  // The right panel's active tab, lifted here so the palette / shortcuts can switch it while
-  // RightPanel's own auto-follow (generation → code, new run → trace) still writes the same field.
+  // The right panel's active tab, lifted here so the palette / shortcuts can switch it while the
+  // panel's own auto-follow (new run → trace, new deploy → deploy) still writes the same field.
   rightTab: RightTab;
+  /** Going TO a tab — a rail cell, the palette, a link somewhere else — so it opens the panel too. */
   setRightTab: (t: RightTab) => void;
+  /** The panel following something that happened elsewhere: the tab moves, the panel does not. */
+  followRightTab: (t: RightTab) => void;
+  /**
+   * Whether the right panel is open. Chrome, not navigation, and NOT PERSISTED for the reason
+   * `sidebarHidden` is not: every launch starts with it closed, the composer taking the width and
+   * the rail left at the window's edge. It opens when somebody asks for a tab, or when there is
+   * something in it to see — see `useRightPanelFollow`.
+   */
+  rightPanelOpen: boolean;
+  setRightPanelOpen: (open: boolean) => void;
 
   /**
    * Which agent's Access tab is on screen, or null.
@@ -564,7 +575,10 @@ export const useUiStore = create<UiState>((set) => ({
     }),
 
   rightTab: "trace",
-  setRightTab: (rightTab) => set({ rightTab }),
+  setRightTab: (rightTab) => set({ rightTab, rightPanelOpen: true }),
+  followRightTab: (rightTab) => set({ rightTab }),
+  rightPanelOpen: false,
+  setRightPanelOpen: (rightPanelOpen) => set({ rightPanelOpen }),
 
   accessAgentId: null,
   setAccessAgentId: (accessAgentId) => set({ accessAgentId }),
