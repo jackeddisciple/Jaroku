@@ -13,7 +13,7 @@
 // stays where they learned it. That is the whole argument, and it is why `sideOf` is a table
 // rather than a guess.
 //
-// THE BAR NEVER WRAPS. Below ~560px there is not room for eight controls, and the two ways out are
+// THE BAR NEVER WRAPS. Below ~620px there is not room for nine controls, and the two ways out are
 // a second row or an overflow menu. A second row would move the send button — the most-used
 // control in the product — to a position that depends on the window width, and would push the
 // textarea up as the window narrowed. So: an overflow menu, at a FIXED position (2), holding
@@ -110,10 +110,17 @@ export const OVERFLOW_INDEX = 1;
  * was the actual bug the first pass had.
  */
 export const BREAKPOINT = {
-  /** Below this, labelled controls drop their text and render icon-only. */
+  /** Below this, labelled controls drop their text and render icon-only — all but `KEEPS_LABEL`. */
   labels: 720,
-  /** Below this, the three collapsible controls move into the overflow menu. */
-  overflow: 560,
+  /**
+   * Below this, the collapsible controls move into the overflow menu.
+   *
+   * 620 SINCE THE SHIELD KEPT ITS WORD. Measured: the dense row with every control present — the
+   * connector deck at its widest and Test mode's promote — needs about 602px once "Smart" sits
+   * beside the shield, so at the old 560 it ran out of the bar. The rest is margin for a longer
+   * model name.
+   */
+  overflow: 620,
 } as const;
 
 export type Density = "full" | "dense" | "overflow";
@@ -125,9 +132,23 @@ export function densityFor(width: number): Density {
   return "full";
 }
 
-/** Whether a control shows its text label ("High", "Smart") or renders as a bare glyph. */
-export function showsLabel(density: Density): boolean {
-  return density === "full";
+/**
+ * The controls that keep their word at the dense width.
+ *
+ * THE PERMISSION MODE'S WORD IS ITS STATE. Effort's level is a detail its tooltip can carry; the
+ * shield is the same glyph whether an agent runs Strict, Smart or Fast, so without the word the
+ * policy it runs under is invisible — the product owner's call on 2026-09-10. Below the overflow
+ * breakpoint it collapses into the `⋯` menu, whose row names the mode anyway.
+ */
+const KEEPS_LABEL: ReadonlySet<ControlId> = new Set<ControlId>(["shield"]);
+
+/**
+ * Whether a control shows its text label ("High", "Smart") or renders as a bare glyph. Asked
+ * without a control, the answer for the bar in general: only at full width.
+ */
+export function showsLabel(density: Density, control?: ControlId): boolean {
+  if (density === "full") return true;
+  return density === "dense" && control !== undefined && KEEPS_LABEL.has(control);
 }
 
 export interface BarLayout {

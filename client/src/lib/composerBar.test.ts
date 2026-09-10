@@ -63,7 +63,7 @@ console.log("\n§12.1c — hiding a control does not move any other control");
     noDeck.left.join(",") === "add,effort,shield,promote", noDeck.left.join(","));
 }
 
-console.log("\n§12.1d — the bar never wraps; below ~560 the three settings go to overflow");
+console.log("\n§12.1d — the bar never wraps; below ~620 the settings go to overflow");
 {
   check("a wide composer is full", densityFor(900) === "full");
   check("just above the label breakpoint is still full", densityFor(BREAKPOINT.labels) === "full");
@@ -74,6 +74,11 @@ console.log("\n§12.1d — the bar never wraps; below ~560 the three settings go
 
   check("labels show only at full width",
     showsLabel("full") && !showsLabel("dense") && !showsLabel("overflow"));
+  // THE SHIELD KEEPS ITS WORD (2026-09-10): its glyph is the same in all three modes, so the word is
+  // the only thing on the bar that says which one is on.
+  check("the shield keeps its word at the dense width", showsLabel("dense", "shield"));
+  check("...and effort does not", !showsLabel("dense", "effort"));
+  check("...nor does anything once the settings have collapsed", !showsLabel("overflow", "shield"));
 
   const narrow = layoutBar(ALL, "overflow");
   check("effort, shield, connectors and promote are what collapse",

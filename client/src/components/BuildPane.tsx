@@ -2457,7 +2457,7 @@ export function BuildPane({
                 bar: (density: Density) => (
                   <ShieldControl
                     value={settings.permission_mode}
-                    dense={!showsLabel(density)}
+                    dense={!showsLabel(density, "shield")}
                     pinned={settings.permission_mode_pinned}
                     fastDisallowed={settings.fast_disallowed}
                     disabled={busy}

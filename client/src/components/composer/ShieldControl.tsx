@@ -62,8 +62,9 @@ export function ShieldControl({
       <ControlButton
         buttonRef={triggerRef}
         icon={Icon.composer.permissions}
-        // Fast keeps a caution mark even when the label is dropped below ~720px, because §10
-        // requires the state to be carried by more than colour and the word is what goes first.
+        // The word stays at every width the bar shows the shield — composerBar.ts's KEEPS_LABEL —
+        // and Fast carries a caution mark in it, because §10 requires the state to be carried by
+        // more than colour.
         label={dense ? undefined : value === "fast" ? "Fast ⚠" : modeLabel(value)}
         name={`Permission mode: ${modeLabel(value)}`}
         title={
