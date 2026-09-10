@@ -2207,7 +2207,18 @@ export function BuildPane({
             makes "the same composer state, re-parented" true rather than aspirational. */}
         {/* THE TRAY BEHIND THE COMPOSER: the agent it is working on, or "Choose agent" — see
             AgentTray. Not in the dialog: there the editor is the whole surface. */}
-        {!fullscreen && <AgentTray agent={agent} agents={agents} operating={operating} />}
+        {!fullscreen && (
+          <AgentTray
+            agent={agent}
+            agents={agents}
+            operating={operating}
+            // The connector picker, only while describing a new agent in Chat — the condition the
+            // chips above the composer had, because it is the same selection.
+            connectors={composerMode === "chat" && mode === "generate"
+              ? { options: CONNECTORS, selected, onToggle: toggle, disabled: busy }
+              : undefined}
+          />
+        )}
         <ComposerShell fullscreen={fullscreen} onClose={() => setFullscreen(false)} onSend={submit}>
         <div
           // ON THE GRID, AND IN CLASSES. It was `padding: "14px 16px 12px"` as an inline style —

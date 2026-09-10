@@ -205,6 +205,8 @@ export const MANIFEST = {
     connectors: "ConnectIcon",
     // The tray behind the composer — "Choose agent", or the agent it is working on.
     tray: "FolderClosedIcon",
+    // ...and the connector picker at the tray's left edge.
+    trayConnectors: "CableIcon",
   },
 
   // ── D8 · the composer's ⊕ menu, five sources ──────────────────────────────

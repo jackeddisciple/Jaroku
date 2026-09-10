@@ -13,6 +13,10 @@
 // pick: the tray is the context the composer works in, the way a project folder is. The agents
 // listed in its dropdown keep the agent mark.
 //
+// AT ITS LEFT EDGE, WHILE A NEW AGENT IS BEING DESCRIBED, the connector picker — see TrayConnectors.
+// The same selection the chips above the composer used to hold, which is why it appears exactly
+// when they did and nowhere else: an existing agent's connectors are part of the agent, not a pick.
+//
 // TWO STATES, AND THE TRAY IS HOW YOU MOVE BETWEEN THEM:
 //
 //   An agent is chosen — the tray names it. Hovering offers ×, which takes it out of the composer
@@ -40,6 +44,7 @@ import { useThreadStore } from "../../store/threadStore.ts";
 import { ChevronDownIcon, XIcon } from "../panelIcons.tsx";
 import { Truncate } from "../Truncate.tsx";
 import { Popover, PopoverNote, PopoverRow } from "./Popover.tsx";
+import { TrayConnectors, type TrayConnector } from "./TrayConnectors.tsx";
 
 /** How many agents the chooser offers before anybody types. The rest are a search away. */
 const RECENT_SHOWN = 2;
@@ -50,16 +55,31 @@ export function AgentTray({
   agent,
   agents,
   operating,
+  connectors,
 }: {
   /** The agent the composer is working on, if one is chosen. */
   agent: AgentSummary | undefined;
   /** Every agent in the workspace, for the chooser. */
   agents: readonly AgentSummary[];
   operating: boolean;
+  /** The connector picker, while a new agent is being described. See the header. */
+  connectors?: {
+    options: readonly TrayConnector[];
+    selected: readonly string[];
+    onToggle: (id: string) => void;
+    disabled?: boolean;
+  };
 }) {
+  // A little air before whatever follows, so two controls' hover fills never touch.
+  const picker = connectors && (
+    <span className="mr-2 inline-flex shrink-0">
+      <TrayConnectors {...connectors} />
+    </span>
+  );
   if (agent) {
     return (
       <Tray>
+        {picker}
         <span className="inline-flex shrink-0 text-muted" aria-hidden>
           <Icon.composer.tray size={ICON.sm} />
         </span>
@@ -85,6 +105,7 @@ export function AgentTray({
   if (operating) return null;
   return (
     <Tray>
+      {picker}
       <Chooser agents={agents} />
     </Tray>
   );

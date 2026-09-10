@@ -40,7 +40,9 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // on the AgentCard among other marks; this one is vertical and sits at the end of a dense sidebar
   // row, where a horizontal ellipsis reads as three more characters of the timestamp beside it.
   // 162 SINCE THE COMPOSER TRAY: `composer.tray`, the closed folder beside "Choose agent".
-  check("162 registry keys", entries.length === 162, `${entries.length}`);
+  // 163 WITH `composer.trayConnectors`, the tray's connector picker — `CableIcon`, a mark the right
+  // rail's Connections tab already draws, so the mark count below does not move.
+  check("163 registry keys", entries.length === 163, `${entries.length}`);
   const names = new Set(entries.map((e) => e.export));
   // 104 from icons_integration's appendix, plus D8's 13 — the composer glyphs that had to move
   // here when `@hugeicons/react` came out. See the note at the top of `registry.ts`.
