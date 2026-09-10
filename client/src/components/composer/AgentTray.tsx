@@ -1,13 +1,17 @@
 // The tray that stands up behind the composer and says which agent it is working on.
 //
-// The product owner's design, 2026-09-10: a darker, narrower box behind the card, showing 28px above
+// The product owner's design, 2026-09-10: a darker, narrower box behind the card, showing 32px above
 // it and running 16px on underneath (`-mb-4` against the `pb-4`), so the card overlaps its lower edge
-// and casts its shadow across it. It is `bg-chrome`, a step darker than the `bg-active` it started
-// on, which read as barely there against the page; the controls on it darken further when hovered
-// (`bg-grip` at 60%), the product owner's call — a tray that lightened under the pointer read as a
-// hole punched in it rather than a control pressed into it. Its own mark is a closed folder
-// (`composer.tray`), the product owner's pick: the tray is the context the composer works in, the
-// way a project folder is. The agents listed in its dropdown keep the agent mark.
+// and casts its shadow across it. 32px rather than the 28px it started at, so the 24px controls in it
+// have 4px of tray above and below them instead of nearly touching the card — and no more than that,
+// because a tray standing much taller stops reading as something behind the composer.
+//
+// It is `bg-chrome`, a step darker than the `bg-active` it started on, which read as barely there
+// against the page; the controls on it darken further when hovered (`bg-grip` at 60%), the product
+// owner's call — a tray that lightened under the pointer read as a hole punched in it rather than a
+// control pressed into it. Its own mark is a closed folder (`composer.tray`), the product owner's
+// pick: the tray is the context the composer works in, the way a project folder is. The agents
+// listed in its dropdown keep the agent mark.
 //
 // TWO STATES, AND THE TRAY IS HOW YOU MOVE BETWEEN THEM:
 //
@@ -89,7 +93,7 @@ export function AgentTray({
 function Tray({ children }: { children: React.ReactNode }) {
   return (
     <div className="group mx-4 -mb-4 rounded-t-xl bg-chrome px-3 pb-4 text-caption text-ink">
-      <div className="flex h-7 items-center gap-1.5">{children}</div>
+      <div className="flex h-8 items-center gap-1.5">{children}</div>
     </div>
   );
 }
