@@ -2204,6 +2204,20 @@ export function BuildPane({
             renders here at the bottom of the thread or inside the expanded dialog. Every piece of
             its state — draft, attachments, mode, model — is held above this line, which is what
             makes "the same composer state, re-parented" true rather than aspirational. */}
+        {/* THE TRAY BEHIND THE COMPOSER — the product owner's call on 2026-09-10. A darker, narrower
+            box that stands up behind the card and names what the composer is working on: the agent,
+            or "New agent" before there is one. The card overlaps its lower half (`-mb-5` against the
+            20px the extra `pb` carries), so it reads as something the composer sits in front of
+            rather than a row of its own, and the card's shadow falls across it. Not in the dialog:
+            there the editor is the whole surface. */}
+        {!fullscreen && (
+          <div className="mx-4 -mb-5 flex items-center gap-1.5 rounded-t-xl bg-active px-4 pb-8 pt-3 text-label font-normal text-ink">
+            <span className="inline-flex shrink-0 text-muted" aria-hidden>
+              <Icon.nav.agents size={ICON.sm} />
+            </span>
+            <Truncate>{agent?.name ?? "New agent"}</Truncate>
+          </div>
+        )}
         <ComposerShell fullscreen={fullscreen} onClose={() => setFullscreen(false)} onSend={submit}>
         <div
           // ON THE GRID, AND IN CLASSES. It was `padding: "14px 16px 12px"` as an inline style —
