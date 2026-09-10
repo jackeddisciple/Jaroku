@@ -135,8 +135,12 @@ export function ComposerBar({
       className={`flex flex-nowrap items-center gap-2 pt-1.5 ${className}`}
       style={{ minHeight: 40 }}
     >
-      {/* The input group in a row of its own, so it can pack tighter than the bar — see the header. */}
-      <div className="flex shrink-0 items-center gap-1">{left}</div>
+      {/* The input group in a row of its own, so it can pack tighter than the bar — see the header.
+          `-ml-2.5` HANGS THE FIRST HIT TARGET INTO THE CARD'S PADDING, so ⊕'s mark starts exactly
+          under the first letter of the text above it — the product owner's call on 2026-09-10.
+          Measured, not derived: the 16px glyph is inset 8px in its 32px box and the paperclip's ink
+          a further 3px in its own, while a letter's ink starts about 1px past the text's edge. */}
+      <div className="-ml-2.5 flex shrink-0 items-center gap-1">{left}</div>
       {/* The spacer. One element, absorbing the whole difference, so both groups stay packed
           against their own edge as controls come and go. */}
       <div className="min-w-2 flex-1" aria-hidden />
