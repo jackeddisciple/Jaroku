@@ -203,6 +203,8 @@ export const MANIFEST = {
     effort: "AiBrain02Icon",
     permissions: "ShieldEnergyIcon",
     connectors: "ConnectIcon",
+    // The tray behind the composer — "Choose agent", or the agent it is working on.
+    tray: "FolderClosedIcon",
   },
 
   // ── D8 · the composer's ⊕ menu, five sources ──────────────────────────────

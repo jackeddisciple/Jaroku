@@ -2,7 +2,9 @@
 //
 // The product owner's design, 2026-09-10: a darker, narrower box behind the card, showing 28px above
 // it and running 16px on underneath (`-mb-4` against the `pb-4`), so the card overlaps its lower edge
-// and casts its shadow across it.
+// and casts its shadow across it. Its own mark is a closed folder (`composer.tray`), the product
+// owner's pick: the tray is the context the composer works in, the way a project folder is. The
+// agents listed in its dropdown keep the agent mark.
 //
 // TWO STATES, AND THE TRAY IS HOW YOU MOVE BETWEEN THEM:
 //
@@ -52,7 +54,7 @@ export function AgentTray({
     return (
       <Tray>
         <span className="inline-flex shrink-0 text-muted" aria-hidden>
-          <Icon.nav.agents size={ICON.sm} />
+          <Icon.composer.tray size={ICON.sm} />
         </span>
         <Truncate>{agent.name}</Truncate>
         {!operating && (
@@ -125,7 +127,7 @@ function Chooser({ agents }: { agents: readonly AgentSummary[] }) {
           duration-fast hover:bg-chrome hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
       >
         <span className="inline-flex shrink-0" aria-hidden>
-          <Icon.nav.agents size={ICON.sm} />
+          <Icon.composer.tray size={ICON.sm} />
         </span>
         Choose agent
         <span className={`inline-flex transition-transform duration-fast ${open ? "rotate-180" : ""}`} aria-hidden>
