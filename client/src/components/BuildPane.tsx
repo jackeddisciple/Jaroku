@@ -81,8 +81,10 @@ import {
 import { useMcpStore, allMcpTools } from "../store/mcpStore.ts";
 import { useThreadStore } from "../store/threadStore.ts";
 import { firstUnresolvedTurnId } from "../lib/threadResume.ts";
-import { ACCENT, ICON, INTERACTION, STATUS, SURFACE, TEXT, TYPE } from "../lib/tokens.ts";
+import { ACCENT, BRAND, ICON, INTERACTION, STATUS, SURFACE, TEXT, TYPE } from "../lib/tokens.ts";
 import { JarokuGlyph, ProviderMark } from "../lib/icons.tsx";
+import { firstNameOf } from "../lib/accountOnboarding.ts";
+import { useSessionStore } from "../store/sessionStore.ts";
 import { useStreamedText } from "../lib/useStreamedText.ts";
 import { useVoiceInput } from "../lib/useVoiceInput.ts";
 import { VoiceWaveform } from "./VoiceWaveform.tsx";
@@ -843,6 +845,8 @@ export function BuildPane({
    * invisibly is a name and a face arriving on an agent for reasons nobody watching could explain.
    */
   const pendingIdentity = useAccountOnboardingStore((s) => s.firstAgentIdentity);
+  // Who the new-agent screen greets: a first name, or nobody — never an email address.
+  const firstName = useSessionStore((s) => firstNameOf(s.user?.displayName ?? null));
   const [prefilled, setPrefilled] = useState(false);
   useEffect(() => {
     if (prefilled || !pendingIdentity) return;
@@ -1881,20 +1885,18 @@ export function BuildPane({
         )}
         {turns.length === 0 && !emptySlot && !operating &&
           (mode === "generate" ? (
-            <EmptyState
-              icon={SparklesIcon}
-              title="Describe the agent you want"
-              // The worked example lives here now, where it can be read. It used to be inside the
-              // placeholder — twenty-two words wrapping to two lines in an empty input, which is
-              // what makes an empty field look pre-filled.
-              hint={
-                <>
-                  e.g. “a support agent that reads Gmail, looks up orders in Postgres, and drafts
-                  replies”. You’ll get a short plan first — its tools, state and graph — to approve
-                  or correct. Nothing is generated until you do.
-                </>
-              }
-            />
+            // THE NEW-AGENT SCREEN GREETS RATHER THAN INSTRUCTS. The mark, large and in the
+            // sidebar's grey so it sits behind the sentence rather than competing with it, and one
+            // question addressed to the person by their first name. Centred in the space above the
+            // composer the way the empty state it replaced was: the full height of the scroll area.
+            <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+              <span className="inline-flex text-sidebar-active" aria-hidden>
+                <JarokuGlyph size={BRAND.greeting} />
+              </span>
+              <h1 className="mt-6 text-display tracking-[-0.005em] text-ink">
+                {firstName ? `What are we cooking today, ${firstName}?` : "What are we cooking today?"}
+              </h1>
+            </div>
           ) : (
             <EmptyState
               icon={WrenchIcon}

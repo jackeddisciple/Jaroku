@@ -352,6 +352,11 @@ export const BRAND = {
   screen: 26,
   /** The first-run hero, and only there. */
   hero: 40,
+  /**
+   * The new-agent screen's greeting: the mark large and quiet, in the sidebar's grey, above one
+   * question. The one place it is set bigger than the hero, because there the mark IS the screen.
+   */
+  greeting: 72,
 } as const;
 
 // ── Type ────────────────────────────────────────────────────────────────────
