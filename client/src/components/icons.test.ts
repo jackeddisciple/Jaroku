@@ -38,18 +38,21 @@ console.log("\nthere is one stroke weight in this app, and it is not here");
 console.log("\nthe size ladder is unchanged — sizes are not weights");
 {
   // §2.3's five contexts. These survived the merge intact, because the reasoning behind them was
-  // never about stroke: a toolbar control is 20 and an action-row glyph is 16 because of what those
-  // rows are for.
-  check("a toolbar control is 20", GLYPH.toolbar === 20);
+  // never about stroke: an action-row glyph is 16 because of what those rows are for.
+  //
+  // THE TOOLBAR CAME DOWN FROM 20 TO 16, the product owner's call on 2026-09-10: in the narrower
+  // composer its glyphs outweighed the text beside them. So a composer control now draws at the
+  // action row's size, and the menu row is the one step above both.
+  check("a toolbar control is 16", GLYPH.toolbar === 16);
   check("an action row glyph is 16", GLYPH.action === 16);
   check("a metadata glyph is 14", GLYPH.meta === 14);
   check("a menu row is 18", GLYPH.menu === 18);
   check("an empty state is 32", GLYPH.empty === 32);
   // The ladder ascends. A context that reads as more subordinate than another must not be drawn
   // larger than it.
-  check("meta < action < menu < toolbar < empty",
-    GLYPH.meta < GLYPH.action && GLYPH.action < GLYPH.menu
-    && GLYPH.menu < GLYPH.toolbar && GLYPH.toolbar < GLYPH.empty);
+  check("meta < action = toolbar < menu < empty",
+    GLYPH.meta < GLYPH.action && GLYPH.action === GLYPH.toolbar
+    && GLYPH.toolbar < GLYPH.menu && GLYPH.menu < GLYPH.empty);
 }
 
 console.log("\nthe hit target does not follow the glyph down");

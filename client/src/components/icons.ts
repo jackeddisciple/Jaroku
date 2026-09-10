@@ -25,10 +25,11 @@
 //   `panelIcons.tsx`. I1. If that weight is ever wrong it is now wrong everywhere at once, which
 //   is the property worth having.
 //
-// THE SIZE LADDER STAYED. Sizes are not weights: `toolbar` is 20 and `action` is 16 because of what
-// those rows are for, and that reasoning survives the families merging. It is here rather than in
-// `lib/tokens.ts`'s `ICON` because these five steps describe the composer and the turn rows
-// specifically, and `ICON`'s four describe text-adjacent chrome.
+// THE SIZE LADDER STAYED. Sizes are not weights: `action` is 16 because of what those rows are for,
+// and that reasoning survives the families merging. `toolbar` was 20 beside it until the composer
+// narrowed and its glyphs began to outweigh the text next to them; it is 16 now, level with the
+// action row. It is here rather than in `lib/tokens.ts`'s `ICON` because these five steps describe
+// the composer and the turn rows specifically, and `ICON`'s four describe text-adjacent chrome.
 
 import { createElement } from "react";
 
@@ -40,8 +41,8 @@ import type { IconComponent } from "../lib/icons/registry.ts";
  * Sizes only. The stroke weight is `ICON.strokeWidth`, for every mark in the app — see the header.
  */
 export const GLYPH = {
-  /** The composer's bottom control bar. */
-  toolbar: 20,
+  /** The composer's bottom control bar — level with the action row since the composer narrowed. */
+  toolbar: 16,
   /** Under an assistant turn: copy, note, pin, regenerate, feedback. */
   action: 16,
   /** The response metadata row — subordinate to the small muted text it sits in. */
