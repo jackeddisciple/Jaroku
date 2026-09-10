@@ -162,7 +162,8 @@ export function ComposerShell({
   // named in surfaceSystem.test.ts as a decision rather than slipped past the rule. On a wrapper
   // rather than the card, because the standalone card's `shadow-glow` is a shadow too and an
   // element wears only one: on the card itself, one of the two would silently win.
-  if (!fullscreen) return <div className="rounded-lg shadow-floating">{children}</div>;
+  // THE WRAPPER TAKES THE CARD'S RADIUS, `xl`, or the shadow's corners would not follow the card's.
+  if (!fullscreen) return <div className="rounded-xl shadow-floating">{children}</div>;
   return (
     <FullscreenComposer open onClose={onClose} onSend={onSend} title="Compose">
       {children}

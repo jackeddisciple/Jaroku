@@ -2215,7 +2215,10 @@ export function BuildPane({
               //
               // AND NO RING WHEN SOMEBODY CLICKS IN, the same day's call: a black outline round the
               // whole card on every click read as an alarm, and the caret already says where focus is.
-              : `rounded-lg border border-edge bg-panel px-4 pb-2.5 pt-3.5 ${standalone ? "shadow-glow" : ""}`
+              //
+              // ON THE `xl` RUNG, §04's prominent surfaces — a step rounder than the `lg` cards around
+              // it, the product owner's call on 2026-09-10. `ComposerShell`'s wrapper matches it.
+              : `rounded-xl border border-edge bg-panel px-4 pb-2.5 pt-3.5 ${standalone ? "shadow-glow" : ""}`
           }
         >
           {/* WHAT THE TIER JUST REFUSED, above the input and inside the composer card.
