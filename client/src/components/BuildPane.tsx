@@ -750,43 +750,9 @@ function ModelSelector({
   );
 }
 
-/**
- * The one banner a workspace with no provider keys sees.
- *
- * A BANNER, NOT A MODAL, and the brief is specific about why: a modal on first run gets dismissed
- * reflexively, before it has been read, by somebody trying to get to the thing they came for. This
- * sits above the composer, says what is missing, and offers the one click that fixes it.
- *
- * Only when `loaded`. Before the first providers snapshot arrives, "no keys" and "we have not been
- * told yet" are indistinguishable, and rendering the first would flash a warning at somebody who
- * has three.
- */
-function NoProviderKeyBanner() {
-  const providers = useProviderStore((s) => s.providers);
-  const loaded = useProviderStore((s) => s.loaded);
-  const setRightTab = useUiStore((s) => s.setRightTab);
-  if (!loaded || providers.some((p) => p.configured)) return null;
-  return (
-    // NO BOX. This is already the app's best empty-state pattern — a mark, a muted sentence, and
-    // an action at the end of it — and it was wrapped in a bordered container, which turns prose
-    // in the flow into a banner you have to dismiss in your head before reading what is under it.
-    // Dropping the border is the entire difference between the two.
-    <div className="mb-2 flex items-center gap-2 px-0.5 text-tiny text-muted">
-      <span className="shrink-0 text-faint" aria-hidden><PlugIcon size={ICON.xs} /></span>
-      <span className="min-w-0 flex-1">
-        No provider key in this workspace yet — runs use the free dry-run model until you add one.
-      </span>
-      <button
-        type="button"
-        className="inline-flex shrink-0 items-center gap-1 font-medium text-ink underline-offset-2 hover:underline"
-        onClick={() => setRightTab("secrets")}
-      >
-        <Icon.composer.addKey size={GLYPH.meta} />
-        Add a key
-      </button>
-    </div>
-  );
-}
+// NO "NO PROVIDER KEY" BANNER ABOVE THE COMPOSER — the product owner's call on 2026-09-11. The
+// composer's model chip already says "Dry run (free)" when no provider key is configured, and its
+// menu carries the way out: "Add key" beside each provider and "Add a provider key…" under them all.
 
 export function BuildPane({
   /**
@@ -1956,7 +1922,6 @@ export function BuildPane({
           shield draw as their glyphs with the words in their tooltips — the bar's own narrow layout,
           chosen over a wider box. Nothing can overflow at this width, whatever is in the bar. */}
       <div className="mx-auto w-full max-w-[48rem] shrink-0 px-6 pb-4 pt-2">
-        <NoProviderKeyBanner />
         {/* NO NAME FIELD ABOVE THE COMPOSER — the product owner's call on 2026-09-11. A new agent
             takes its name from the description, or from onboarding, which still fills `name`; the
             connectors that shared the row are picked on the tray behind the composer now (see
