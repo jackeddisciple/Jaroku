@@ -16,11 +16,19 @@
 import { ICON } from "../../lib/tokens.ts";
 import { Icon, type IconComponent } from "../../lib/icons/registry.ts";
 
-const SUGGESTIONS: { sentence: string; Mark: IconComponent }[] = [
-  { sentence: "Plan an agent from an idea", Mark: Icon.emptyState.plan },
-  { sentence: "Build and modify your agent", Mark: Icon.emptyState.build },
-  { sentence: "Explain what your agent is doing", Mark: Icon.emptyState.explain },
-  { sentence: "Trace an agent execution", Mark: Icon.emptyState.trace },
+/**
+ * The four cards, in order.
+ *
+ * EACH MARK HAS ITS OWN COLOUR, and every one of them is a palette token rather than a value of its
+ * own: amber for Plan, the bespoke purple for Build, success green for Explain, danger red for Trace.
+ * A palette change moves them with everything else, and the colour suite's "no component carries its
+ * own palette" rule holds.
+ */
+const SUGGESTIONS: { sentence: string; Mark: IconComponent; tone: string }[] = [
+  { sentence: "Plan an agent from an idea", Mark: Icon.emptyState.plan, tone: "text-run" },
+  { sentence: "Build and modify your agent", Mark: Icon.emptyState.build, tone: "text-bespoke" },
+  { sentence: "Explain what your agent is doing", Mark: Icon.emptyState.explain, tone: "text-ok" },
+  { sentence: "Trace an agent execution", Mark: Icon.emptyState.trace, tone: "text-err" },
 ];
 
 /** The command a card inserts: the first word of its sentence. */
@@ -46,7 +54,7 @@ export function ComposerSuggestions({
         hidden ? "invisible" : ""
       } ${className}`}
     >
-      {SUGGESTIONS.map(({ sentence, Mark }) => (
+      {SUGGESTIONS.map(({ sentence, Mark, tone }) => (
         <button
           key={sentence}
           type="button"
@@ -58,10 +66,7 @@ export function ComposerSuggestions({
             outline-none transition-colors duration-fast hover:border-edge hover:bg-panel
             focus-visible:bg-panel focus-visible:shadow-focusring"
         >
-          <span
-            className="text-faint transition-colors duration-fast group-hover:text-ink group-focus-visible:text-ink"
-            aria-hidden
-          >
+          <span className={tone} aria-hidden>
             <Mark size={ICON.md} />
           </span>
           <span className="text-balance text-label leading-[1.4] text-muted transition-colors duration-fast group-hover:text-ink group-focus-visible:text-ink">
