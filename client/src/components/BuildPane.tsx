@@ -2208,11 +2208,11 @@ export function BuildPane({
           className={
             fullscreen
               ? "flex min-h-0 flex-1 flex-col bg-panel p-4 pb-3"
-              // AND IT RESTS FLAT IN THE PANE. It carried E1 there, which UI-4 §12 rules out —
-              // "normal cards should usually be border-led, not shadow-led" — and §07 reserves E1
-              // for interaction, which is what the standalone composer's `shadow-glow` already is:
-              // a border deepened to §03's strongest plus that one sanctioned step. So the two arms
-              // are now a state and its absence rather than two levels of depth.
+              // ITS LIFT IS NOT ITS OWN. In the pane the card is raised to E2 by `ComposerShell`'s
+              // wrapper, the height the dialog gives it — the product owner's call on 2026-09-10 —
+              // because the card's own shadow is spent on state: the focus ring, and the standalone
+              // composer's `shadow-glow`, a border deepened to §03's strongest plus §07's one
+              // sanctioned step.
               : `rounded-lg border border-edge bg-panel px-4 pb-2.5 pt-3.5 transition-shadow duration-fast
                  focus-within:shadow-focusring ${standalone ? "shadow-glow" : ""}`
           }

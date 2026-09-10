@@ -157,7 +157,12 @@ export function ComposerShell({
   onSend: () => void;
   children: React.ReactNode;
 }) {
-  if (!fullscreen) return <>{children}</>;
+  // IN THE FLOW IT IS LIFTED TO E2, the level the dialog's own surface gives it below, so the
+  // composer sits at one height wherever it renders — the product owner's call on 2026-09-10, and
+  // named in surfaceSystem.test.ts as a decision rather than slipped past the rule. On a wrapper
+  // rather than the card, because the card's focus ring is a shadow too and an element wears only
+  // one: on the card itself, the lift would vanish every time somebody clicked in to type.
+  if (!fullscreen) return <div className="rounded-lg shadow-floating">{children}</div>;
   return (
     <FullscreenComposer open onClose={onClose} onSend={onSend} title="Compose">
       {children}

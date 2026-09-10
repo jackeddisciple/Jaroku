@@ -232,14 +232,20 @@ console.log("\n§07: where each level is allowed to appear");
     "components/onboarding/OnboardingSurface.tsx",
   ]);
   /**
-   * THE ONE IN-FLOW SURFACE THAT RESTS LIFTED, AND IT IS A DECISION RATHER THAN A SLIP. The new-agent
-   * screen's four suggestion cards sit at E2 because they are the only things on an otherwise empty
-   * screen, and flat they read as part of the page instead of as something to press — the product
-   * owner's call on 2026-09-10. Named here, one file wide, so it stays an exception and does not
+   * THE IN-FLOW SURFACES THAT REST LIFTED, AND EACH IS A DECISION RATHER THAN A SLIP — the product
+   * owner's calls on 2026-09-10. Named here, one file wide, so they stay exceptions and do not
    * become the precedent every other card reaches for.
+   *
+   * The new-agent screen's four suggestion cards sit at E2 because they are the only things on an
+   * otherwise empty screen, and flat they read as part of the page instead of as something to press.
+   *
+   * The composer sits at E2 in the flow because it sits at E2 in its dialog: `ComposerShell` lifts
+   * it to the height the expanded editor's own surface gives it, so it is one surface at one height
+   * wherever it renders. The dialog in the same file floats by any reading of this rule anyway.
    */
   const LIFTED_BY_DECISION = new Set([
     "components/composer/ComposerSuggestions.tsx",
+    "components/composer/FullscreenComposer.tsx",
   ]);
   const misplaced: string[] = [];
   for (const { path, text } of CODE) {
