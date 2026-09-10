@@ -1373,6 +1373,10 @@ jobs:
           # reviewed a dozen times at one width. So the rules live in a pure module and the suite
           # holds them, rather than living in a class string nobody can assert against.
           npm run test:composer-bar
+          # WHICH AGENTS THE COMPOSER'S CHOOSER OFFERS FIRST: the two last worked in, by the same
+          # thread-activity rule the session picker and the server use. A pure rule, so a wrong
+          # order is a failing line here rather than the wrong two agents on somebody's screen.
+          npm run test:recent-agent
           # THE CONNECTOR DECK'S LAYOUT — §12.9: "1/2/3 render as tiles; 5 renders 3 tiles + +2;
           # a disabled connector renders grayscale and stays in the deck." Every clause has a
           # wrong answer that looks fine on the one workspace somebody tested with: three

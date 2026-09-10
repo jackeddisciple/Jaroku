@@ -24,6 +24,7 @@
     "test:menu-clip": "tsx src/components/menuClip.test.ts",
     "test:graph-icons": "tsx src/components/graphIcons.test.ts",
     "test:composer-bar": "tsx src/lib/composerBar.test.ts",
+    "test:recent-agent": "tsx src/lib/recentAgent.test.ts",
     "test:connector-deck": "tsx src/lib/connectorDeck.test.ts",
     "test:turn-metadata": "tsx src/lib/turnMetadata.test.ts",
     "test:rerun": "tsx src/lib/rerun.test.ts",
