@@ -1,4 +1,4 @@
-// The connector picker at the left edge of the tray behind the composer.
+// The connector picker at the right end of the tray behind the composer.
 //
 // The product owner's design, 2026-09-10, and it replaces the row of connector chips that sat above
 // the composer. Connectors here are the audited templates a NEW agent is generated with — the same
@@ -80,7 +80,9 @@ export function TrayConnectors({
         aria-expanded={open}
         aria-label={deck.present ? `Connectors: ${names}` : "Add connectors"}
         title={deck.present ? names : "Add connectors to the agent you describe"}
-        className="-ml-1.5 inline-flex h-6 items-center rounded-control px-1.5 text-muted transition-colors duration-fast
+        // `-mr-1.5`: at the tray's right end, the mark lines up with the tray's own padding rather
+        // than with the edge of its hover fill.
+        className="-mr-1.5 inline-flex h-6 items-center rounded-control px-1.5 text-muted transition-colors duration-fast
           hover:bg-grip/60 hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring
           disabled:cursor-not-allowed disabled:opacity-40"
       >
@@ -112,7 +114,9 @@ export function TrayConnectors({
           <Icon.composer.trayConnectors size={ICON.sm} />
         )}
       </button>
-      <Popover open={open} onClose={() => setOpen(false)} triggerRef={triggerRef} label="Connectors" width={0}>
+      {/* Right-aligned to the trigger, which sits at the tray's right end: a row opening leftwards
+          stays over the composer instead of running off past it. */}
+      <Popover open={open} onClose={() => setOpen(false)} triggerRef={triggerRef} label="Connectors" align="right" width={0}>
         <div ref={rowRef} onKeyDown={onRowKey} className="flex items-center gap-1.5">
           {options.map((o) => {
             const on = selected.includes(o.id);

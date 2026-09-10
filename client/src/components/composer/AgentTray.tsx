@@ -13,9 +13,11 @@
 // pick: the tray is the context the composer works in, the way a project folder is. The agents
 // listed in its dropdown keep the agent mark.
 //
-// AT ITS LEFT EDGE, WHILE A NEW AGENT IS BEING DESCRIBED, the connector picker — see TrayConnectors.
+// AT ITS RIGHT END, WHILE A NEW AGENT IS BEING DESCRIBED, the connector picker — see TrayConnectors.
 // The same selection the chips above the composer used to hold, which is why it appears exactly
 // when they did and nowhere else: an existing agent's connectors are part of the agent, not a pick.
+// At the far end rather than beside the agent, the product owner's call on 2026-09-11, so the two
+// read as separate things — what the composer works on, and what the new agent gets.
 //
 // TWO STATES, AND THE TRAY IS HOW YOU MOVE BETWEEN THEM:
 //
@@ -70,16 +72,15 @@ export function AgentTray({
     disabled?: boolean;
   };
 }) {
-  // A little air before whatever follows, so two controls' hover fills never touch.
+  // Pushed to the tray's right end by `ml-auto`, whatever the left holds.
   const picker = connectors && (
-    <span className="mr-2 inline-flex shrink-0">
+    <span className="ml-auto inline-flex shrink-0 pl-2">
       <TrayConnectors {...connectors} />
     </span>
   );
   if (agent) {
     return (
       <Tray>
-        {picker}
         <span className="inline-flex shrink-0 text-muted" aria-hidden>
           <Icon.composer.tray size={ICON.sm} />
         </span>
@@ -99,14 +100,15 @@ export function AgentTray({
             <XIcon size={ICON.xs} />
           </button>
         )}
+        {picker}
       </Tray>
     );
   }
   if (operating) return null;
   return (
     <Tray>
-      {picker}
       <Chooser agents={agents} />
+      {picker}
     </Tray>
   );
 }
