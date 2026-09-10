@@ -25,6 +25,7 @@ import {
 import { useEvalStore } from "../store/evalStore.ts";
 import { UpsellCard } from "./UpsellCard.tsx";
 import { composerMoment } from "../lib/composerMoment.ts";
+import { startNewAgent } from "../lib/newAgent.ts";
 import { classifyIntent, fixPrompt, routeLabel } from "../lib/intent.ts";
 // PART 3'S SECOND CLASSIFIER — two outcomes, its own module. See its header for why it is not an
 // extension of the table above it.
@@ -2205,17 +2206,40 @@ export function BuildPane({
             its state — draft, attachments, mode, model — is held above this line, which is what
             makes "the same composer state, re-parented" true rather than aspirational. */}
         {/* THE TRAY BEHIND THE COMPOSER — the product owner's call on 2026-09-10. A darker, narrower
-            box that stands up behind the card and names what the composer is working on: the agent,
-            or "New agent" before there is one. The card overlaps its lower half (`-mb-5` against the
-            20px the extra `pb` carries), so it reads as something the composer sits in front of
-            rather than a row of its own, and the card's shadow falls across it. Not in the dialog:
+            box that stands up behind the card and names the agent the composer is working on,
+            whichever one is selected in the workspace. With no agent there is nothing to name, and
+            no tray.
+
+            HOVERING IT OFFERS ×, which takes the agent out of the composer the way New does — the
+            same `startNewAgent` — so the next message plans a new agent. Not in an operate thread:
+            that conversation is bound to its deployed agent, and there is nothing to take out.
+
+            It shows 28px above the card and runs 16px on underneath (`-mb-4` against the `pb-4`),
+            so the card overlaps its lower edge and casts its shadow across it. Not in the dialog:
             there the editor is the whole surface. */}
-        {!fullscreen && (
-          <div className="mx-4 -mb-5 flex items-center gap-1.5 rounded-t-xl bg-active px-4 pb-8 pt-3 text-label font-normal text-ink">
-            <span className="inline-flex shrink-0 text-muted" aria-hidden>
-              <Icon.nav.agents size={ICON.sm} />
-            </span>
-            <Truncate>{agent?.name ?? "New agent"}</Truncate>
+        {!fullscreen && agent && (
+          <div className="group mx-4 -mb-4 rounded-t-xl bg-active px-3 pb-4 text-caption text-ink">
+            <div className="flex h-7 items-center gap-1.5">
+              <span className="inline-flex shrink-0 text-muted" aria-hidden>
+                <Icon.nav.agents size={ICON.sm} />
+              </span>
+              <Truncate>{agent.name}</Truncate>
+              {!operating && (
+                <button
+                  type="button"
+                  onClick={startNewAgent}
+                  aria-label={`Remove ${agent.name} from the composer`}
+                  title={`Remove ${agent.name} — the next message plans a new agent`}
+                  // Revealed by hovering the tray, and by keyboard focus, so it is never a control
+                  // that exists only for a pointer.
+                  className="inline-flex size-5 shrink-0 items-center justify-center rounded-control text-muted opacity-0
+                    transition-opacity duration-fast hover:bg-chrome hover:text-ink group-hover:opacity-100
+                    focus-visible:opacity-100 focus-visible:outline-none focus-visible:shadow-focusring"
+                >
+                  <XIcon size={ICON.xs} />
+                </button>
+              )}
+            </div>
           </div>
         )}
         <ComposerShell fullscreen={fullscreen} onClose={() => setFullscreen(false)} onSend={submit}>
