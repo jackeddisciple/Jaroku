@@ -97,9 +97,12 @@ export function TrayConnectors({
               </span>
             ))}
             {deck.overflow > 0 && (
+              // A PILL, AS WIDE AGAIN AS THE TUCK, and padded by it. It sits under the blob before
+              // it like the rest, and a plain circle lost its "+" behind that blob; this way the
+              // count is centred in the part that shows.
               <span
                 className="inline-flex shrink-0 items-center justify-center rounded-full bg-edge text-tiny text-muted ring-2 ring-chrome"
-                style={{ width: TRAY_BLOB, height: TRAY_BLOB, marginLeft: TUCK, position: "relative" }}
+                style={{ height: TRAY_BLOB, minWidth: TRAY_BLOB - TUCK, paddingLeft: -TUCK, paddingRight: 2, marginLeft: TUCK, position: "relative" }}
               >
                 +{deck.overflow}
               </span>
