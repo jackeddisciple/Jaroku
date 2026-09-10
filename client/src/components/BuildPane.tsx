@@ -93,14 +93,14 @@ import { VoiceWaveform } from "./VoiceWaveform.tsx";
 /**
  * Band 2's geometry, in the two numbers §3.1 gives it.
  *
- * The textarea is 14px at line-height 1.5, so one line is 21px. Twelve of those is the cap the
+ * The textarea is 13px on a 20px line, so one line is 20px. Twelve of those is the cap the
  * spec sets before the box stops growing and starts scrolling inside itself — which is the clause
  * that matters, because the alternative is a composer that eats the thread as somebody types.
  *
  * Named rather than written into the style object because the auto-grow effect and the style have
- * to agree about them, and two copies of 252 is how a box grows one line past where it scrolls.
+ * to agree about them, and two copies of 240 is how a box grows one line past where it scrolls.
  */
-const LINE_PX = 21;
+const LINE_PX = 20;
 const MAX_LINES = 12;
 
 // Mirrors runtime/tool_templates/catalog.json. The server validates the ids it receives
@@ -2361,11 +2361,11 @@ export function BuildPane({
               }}
               rows={1}
               placeholder={moment.placeholder}
-              // 14px, in a class. It is still deliberately off the 11/12/13 chrome ladder — this
-              // is the sentence the user writes and it should be the largest text on the screen —
-              // but a half-pixel size that exists once, as an inline style, is a value nobody can
-              // maintain or match.
-              className="block w-full resize-none bg-transparent text-body leading-[1.5] text-ink outline-none transition-opacity duration-base placeholder:text-muted focus-visible:shadow-focusring"
+              // 13px AT REGULAR WEIGHT, in classes — one step down from the 14px it was, the
+              // product owner's call on 2026-09-10. `text-label` is the rung and `font-normal`
+              // takes back the label's medium weight, because this is prose somebody writes rather
+              // than a label; `leading-5` keeps a line at the 20px `LINE_PX` is written in.
+              className="block w-full resize-none bg-transparent text-label font-normal leading-5 text-ink outline-none transition-opacity duration-base placeholder:text-muted focus-visible:shadow-focusring"
               style={{
                 minHeight: LINE_PX,
                 // In the dialog there is no 12-line cap — the box IS the editor, and it fills
