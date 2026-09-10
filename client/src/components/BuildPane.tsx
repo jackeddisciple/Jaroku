@@ -2647,14 +2647,22 @@ export function BuildPane({
                     aria-label={composerMode === "test" ? "Run the agent on this input" : "Send"}
                     title={composerMode === "test" ? "Run the agent on this input" : `Send (${keyHint("⌘↵")})`}
                     // The one ink-filled control on the screen, and the only one in this bar that
-                    // is not a glyph on open background. §3.2: the only change here is the
-                    // registry icon and the 32px hit target the rest of the bar now shares.
+                    // is not a glyph on open background.
+                    //
+                    // THE DISC IS SMALLER THAN THE BUTTON. It draws at 28px with a 14px arrow —
+                    // the product owner's call on 2026-09-10 — inside the same 32px hit target
+                    // the rest of the bar shares, so it got smaller to look at and not to hit.
                     className="flex shrink-0 items-center justify-center rounded-full transition-opacity
                       focus-visible:outline-none focus-visible:shadow-focusring
                       disabled:cursor-not-allowed disabled:opacity-30"
-                    style={{ width: HIT_TARGET, height: HIT_TARGET, background: TEXT.ink, color: SURFACE.bg }}
+                    style={{ width: HIT_TARGET, height: HIT_TARGET }}
                   >
-                    <Glyph icon={Icon.composer.send} size={GLYPH.toolbar} />
+                    <span
+                      className="flex items-center justify-center rounded-full"
+                      style={{ width: 28, height: 28, background: TEXT.ink, color: SURFACE.bg }}
+                    >
+                      <Glyph icon={Icon.composer.send} size={GLYPH.meta} />
+                    </span>
                   </button>
                 ),
               },
