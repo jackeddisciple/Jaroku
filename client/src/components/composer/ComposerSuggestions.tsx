@@ -77,14 +77,18 @@ export function ComposerSuggestions({
     // of the tab order and the accessibility tree once they have gone. `pointer-events-none` applies
     // at once, so a card that is still fading out cannot be clicked over what somebody just typed.
     <div
-      className={`w-full max-w-[40rem] transition-[opacity,transform,visibility] duration-collapse ease-smooth motion-reduce:transition-none ${
+      //
+      // AS WIDE AS THE COMPOSER AND NO WIDER. 45rem is the composer card's own width, so the row of
+      // cards and the box they start share both edges — the product owner's call on 2026-09-10, when
+      // the cards grew from a 40rem row.
+      className={`w-full max-w-[45rem] transition-[opacity,transform,visibility] duration-collapse ease-smooth motion-reduce:transition-none ${
         hidden ? "pointer-events-none invisible translate-y-1 opacity-0" : "visible translate-y-0 opacity-100"
       } ${className}`}
     >
       {/* FOUR ACROSS WHERE THERE IS ROOM, fewer where there is not. The columns are sized off the
           panel the cards sit in rather than off the window, because the middle panel's width moves
           with the sidebar and the right panel, and a viewport breakpoint would get that wrong. */}
-      <div key={round} className="grid grid-cols-[repeat(auto-fit,minmax(8.5rem,1fr))] gap-2">
+      <div key={round} className="grid grid-cols-[repeat(auto-fit,minmax(8.5rem,1fr))] gap-3">
         {SUGGESTIONS.map(({ sentence, Mark, tone }, i) => (
           <Reveal key={sentence} delay={i * 60} className="flex">
             <button
@@ -96,7 +100,7 @@ export function ComposerSuggestions({
               // decision, and named as an exception in surfaceSystem.test.ts rather than slipped past it.
               // The pointer brightens the face and deepens the border; the focus ring is how a keyboard
               // user sees where they are.
-              className="group flex w-full flex-col items-start gap-4 rounded-lg border border-hair bg-panel px-4 py-3.5 text-left
+              className="group flex w-full flex-col items-start gap-4 rounded-lg border border-hair bg-panel p-5 text-left
                 shadow-floating outline-none transition-colors duration-fast hover:border-edge hover:bg-elevated
                 focus-visible:bg-elevated focus-visible:shadow-focusring"
             >
