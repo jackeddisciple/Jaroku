@@ -2210,11 +2210,12 @@ export function BuildPane({
               ? "flex min-h-0 flex-1 flex-col bg-panel p-4 pb-3"
               // ITS LIFT IS NOT ITS OWN. In the pane the card is raised to E2 by `ComposerShell`'s
               // wrapper, the height the dialog gives it — the product owner's call on 2026-09-10 —
-              // because the card's own shadow is spent on state: the focus ring, and the standalone
-              // composer's `shadow-glow`, a border deepened to §03's strongest plus §07's one
-              // sanctioned step.
-              : `rounded-lg border border-edge bg-panel px-4 pb-2.5 pt-3.5 transition-shadow duration-fast
-                 focus-within:shadow-focusring ${standalone ? "shadow-glow" : ""}`
+              // because the card's own shadow is the standalone composer's `shadow-glow`, a border
+              // deepened to §03's strongest plus §07's one sanctioned step.
+              //
+              // AND NO RING WHEN SOMEBODY CLICKS IN, the same day's call: a black outline round the
+              // whole card on every click read as an alarm, and the caret already says where focus is.
+              : `rounded-lg border border-edge bg-panel px-4 pb-2.5 pt-3.5 ${standalone ? "shadow-glow" : ""}`
           }
         >
           {/* WHAT THE TIER JUST REFUSED, above the input and inside the composer card.
@@ -2365,7 +2366,10 @@ export function BuildPane({
               // product owner's call on 2026-09-10. `text-label` is the rung and `font-normal`
               // takes back the label's medium weight, because this is prose somebody writes rather
               // than a label; `leading-5` keeps a line at the 20px `LINE_PX` is written in.
-              className="block w-full resize-none bg-transparent text-label font-normal leading-5 text-ink outline-none transition-opacity duration-base placeholder:text-muted focus-visible:shadow-focusring"
+              //
+              // NO FOCUS RING, like the card around it (see there): a text field shows focus with its
+              // caret, and a ring round the text on every click read as a fault.
+              className="block w-full resize-none bg-transparent text-label font-normal leading-5 text-ink outline-none transition-opacity duration-base placeholder:text-muted"
               style={{
                 minHeight: LINE_PX,
                 // In the dialog there is no 12-line cap — the box IS the editor, and it fills
