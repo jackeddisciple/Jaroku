@@ -14,10 +14,10 @@
 // THREE MODES, AND THERE IS NO FOURTH. The spec is unusually direct: "There is no 'approve
 // everything' mode, and adding one later is a product decision, not an implementation shortcut."
 //
-// COLOUR IS NEVER THE ONLY SIGNAL (§10). Fast wears the warning tone — deliberately NOT the amber
-// used for in-flight, which has exactly one meaning in this app and keeps it — and it also carries
-// a different word and a caution mark, so the state survives a monochrome screen and a colour-blind
-// reader.
+// COLOUR IS NEVER THE ONLY SIGNAL (§10), and on the bar it is no signal at all: the shield draws
+// §04's info blue in every mode (2026-09-10) — deliberately NOT the amber used for in-flight, which
+// has exactly one meaning in this app and keeps it. Fast carries a different word and a caution
+// mark, so the state survives a monochrome screen and a colour-blind reader.
 
 import { useRef, useState } from "react";
 import { Icon } from "../../lib/icons/registry.ts";
@@ -73,15 +73,14 @@ export function ShieldControl({
             : `Permission mode — ${MODES.find((m) => m.id === value)?.detail ?? modeLabel(value)}`
         }
         expanded={open}
-        // AT REST IT IS THE BAR'S GREY IN EVERY MODE, never the ink of an engaged control — the
-        // product owner's call on 2026-09-10. The word already says which mode is on, and ink on
-        // top of it said the same thing twice; Fast still wears the warning tone below.
+        // BLUE IN EVERY MODE, the glyph and the word — the product owner's call on 2026-09-10. It is
+        // the palette's one mid blue, §04's `info`, which the shield already wore for Fast; `!` so
+        // neither the bar's hover ink nor an open popover turns it grey or black. Fast is told apart
+        // by its word and its caution mark, which is what §10 asks of it anyway.
         active={open}
         disabled={disabled || pinned}
         onClick={() => setOpen((v) => !v)}
-        // The warning token, NOT the amber this app reserves for in-flight. Keeping amber's single
-        // meaning intact is worth more than the two colours being slightly closer to each other.
-        className={value === "fast" && !pinned ? "!text-warn" : ""}
+        className="!text-warn"
       />
       <Popover open={open} onClose={() => setOpen(false)} triggerRef={triggerRef} label="Permission mode" width={320}>
         {MODES.map((m) => {
