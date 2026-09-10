@@ -3,11 +3,11 @@
 // The product owner's design, 2026-09-10: a darker, narrower box behind the card, showing 28px above
 // it and running 16px on underneath (`-mb-4` against the `pb-4`), so the card overlaps its lower edge
 // and casts its shadow across it. It is `bg-chrome`, a step darker than the `bg-active` it started
-// on, which read as barely there against the page; the controls on it light up to the card's own
-// `bg-panel` rather than darkening further, so hovering reads as lifting out of the tray. Its own
-// mark is a closed folder (`composer.tray`), the product owner's pick: the tray is the context the
-// composer works in, the way a project folder is. The agents listed in its dropdown keep the agent
-// mark.
+// on, which read as barely there against the page; the controls on it darken further when hovered
+// (`bg-grip` at 60%), the product owner's call — a tray that lightened under the pointer read as a
+// hole punched in it rather than a control pressed into it. Its own mark is a closed folder
+// (`composer.tray`), the product owner's pick: the tray is the context the composer works in, the
+// way a project folder is. The agents listed in its dropdown keep the agent mark.
 //
 // TWO STATES, AND THE TRAY IS HOW YOU MOVE BETWEEN THEM:
 //
@@ -69,7 +69,7 @@ export function AgentTray({
             // Revealed by hovering the tray, and by keyboard focus, so it is never a control that
             // exists only for a pointer.
             className="inline-flex size-5 shrink-0 items-center justify-center rounded-control text-muted opacity-0
-              transition-opacity duration-fast hover:bg-panel hover:text-ink group-hover:opacity-100
+              transition-opacity duration-fast hover:bg-grip/60 hover:text-ink group-hover:opacity-100
               focus-visible:opacity-100 focus-visible:outline-none focus-visible:shadow-focusring"
           >
             <XIcon size={ICON.xs} />
@@ -127,7 +127,7 @@ function Chooser({ agents }: { agents: readonly AgentSummary[] }) {
         aria-haspopup="menu"
         aria-expanded={open}
         className="-ml-1.5 inline-flex h-6 items-center gap-1.5 rounded-control px-1.5 text-muted transition-colors
-          duration-fast hover:bg-panel hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+          duration-fast hover:bg-grip/60 hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
       >
         <span className="inline-flex shrink-0" aria-hidden>
           <Icon.composer.tray size={ICON.sm} />
