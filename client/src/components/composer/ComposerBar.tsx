@@ -2,9 +2,14 @@
 //
 // §3.1 is unusually specific about this row and every clause of it is here: a single row at all
 // widths, a fixed left-to-right order, a flex spacer between the input group and the execution
-// group, 44px tall, 8px gaps within a group, a top hairline, and never a second row. `layoutBar`
-// in lib/composerBar.ts holds the part of that which is a rule rather than a style, so the rules
-// are checked by a suite instead of by resizing a window.
+// group, a top hairline, and never a second row. `layoutBar` in lib/composerBar.ts holds the part
+// of that which is a rule rather than a style, so the rules are checked by a suite instead of by
+// resizing a window.
+//
+// THE INPUT GROUP SITS TIGHTER THAN THE SPEC'S 8px. Its controls are 4px apart — the product
+// owner's call on 2026-09-10 — because they are glyphs in 32px boxes and 8px on top of that read as
+// four loose marks rather than one group. The execution group keeps 8px: the model chip and
+// Chat/Test are words, and words need the air.
 //
 // IT MEASURES ITSELF, NOT THE WINDOW. The breakpoints are about the box the controls have to fit
 // in, and in a three-panel app that box is nothing like the viewport: a 1400px window with both
@@ -128,7 +133,8 @@ export function ComposerBar({
       className={`flex flex-nowrap items-center gap-2 border-t border-hair pt-1.5 ${className}`}
       style={{ minHeight: 40 }}
     >
-      {left}
+      {/* The input group in a row of its own, so it can pack tighter than the bar — see the header. */}
+      <div className="flex shrink-0 items-center gap-1">{left}</div>
       {/* The spacer. One element, absorbing the whole difference, so both groups stay packed
           against their own edge as controls come and go. */}
       <div className="min-w-2 flex-1" aria-hidden />
