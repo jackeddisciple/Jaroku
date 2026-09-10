@@ -125,8 +125,8 @@ export function ComposerBar({
       // `flex` with a spacer, and NEVER `justify-between` — see lib/composerBar.ts's header for
       // the whole argument. `flex-nowrap` is the "bar never wraps" clause spelled in CSS: without
       // it, a control the overflow rule did not catch would silently start a second row.
-      className={`flex flex-nowrap items-center gap-2 border-t border-hair pt-2 ${className}`}
-      style={{ minHeight: 44 }}
+      className={`flex flex-nowrap items-center gap-2 border-t border-hair pt-1.5 ${className}`}
+      style={{ minHeight: 40 }}
     >
       {left}
       {/* The spacer. One element, absorbing the whole difference, so both groups stay packed

@@ -1943,7 +1943,11 @@ export function BuildPane({
       </div>
 
       {/* composer — ONE input; the Chat/Test toggle folds in what used to be the run-bar */}
-      <div className="px-6 pb-4 pt-2 shrink-0">
+      {/* A COLUMN, NOT THE PANEL'S FULL WIDTH, and deliberately a narrow one. At 48rem the control
+          bar sits just below the 720px `composerBar.ts` keeps for its labels, so effort and the
+          shield draw as their glyphs with the words in their tooltips — the bar's own narrow layout,
+          chosen over a wider box. Nothing can overflow at this width, whatever is in the bar. */}
+      <div className="mx-auto w-full max-w-[48rem] shrink-0 px-6 pb-4 pt-2">
         <NoProviderKeyBanner />
         {/* connectors + name — new-agent generation only (Chat mode, no agent selected) */}
         {composerMode === "chat" && mode === "generate" && (
@@ -2209,7 +2213,7 @@ export function BuildPane({
               // for interaction, which is what the standalone composer's `shadow-glow` already is:
               // a border deepened to §03's strongest plus that one sanctioned step. So the two arms
               // are now a state and its absence rather than two levels of depth.
-              : `rounded-lg border border-edge bg-panel p-4 pb-3 transition-shadow duration-fast
+              : `rounded-lg border border-edge bg-panel px-4 pb-2.5 pt-3.5 transition-shadow duration-fast
                  focus-within:shadow-focusring ${standalone ? "shadow-glow" : ""}`
           }
         >
@@ -2361,7 +2365,7 @@ export function BuildPane({
               // is the sentence the user writes and it should be the largest text on the screen —
               // but a half-pixel size that exists once, as an inline style, is a value nobody can
               // maintain or match.
-              className="w-full resize-none bg-transparent text-body leading-[1.5] text-ink outline-none transition-opacity duration-base placeholder:text-muted focus-visible:shadow-focusring"
+              className="block w-full resize-none bg-transparent text-body leading-[1.5] text-ink outline-none transition-opacity duration-base placeholder:text-muted focus-visible:shadow-focusring"
               style={{
                 minHeight: LINE_PX,
                 // In the dialog there is no 12-line cap — the box IS the editor, and it fills
@@ -2400,7 +2404,7 @@ export function BuildPane({
               outside Test mode — is simply not a key here, and §12.1c is the promise that its
               absence moves nothing else. */}
           <ComposerBar
-            className="mt-3"
+            className="mt-2"
             controls={{
               add: {
                 bar: () => (
