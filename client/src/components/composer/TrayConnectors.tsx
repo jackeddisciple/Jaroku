@@ -6,7 +6,8 @@
 //
 // NOTHING CHOSEN: a cable mark. Clicking it opens a horizontal row of logos, each on a round blob
 // a step darker than the tray, and nothing else — no names, which the tooltips and the accessible
-// names carry. Clicking a logo toggles it, and the row stays open so several can be picked.
+// names carry. Clicking a logo toggles it and closes the row — the product owner's call on
+// 2026-09-11 — so each pick lands on the tray at once; picking another is opening it again.
 //
 // SOMETHING CHOSEN: the logos take the cable's place on the tray, in the order they were picked,
 // overlapping like a hand of cards. Past three the rest become "+N" in the same footprint — the
@@ -124,7 +125,11 @@ export function TrayConnectors({
               <button
                 key={o.id}
                 type="button"
-                onClick={() => onToggle(o.id)}
+                // Each pick closes the row, so it lands on the tray at once; see the header.
+                onClick={() => {
+                  onToggle(o.id);
+                  setOpen(false);
+                }}
                 aria-pressed={on}
                 aria-label={o.label}
                 title={`${o.label} — ${o.hint}`}
