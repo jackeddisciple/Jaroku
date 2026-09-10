@@ -270,7 +270,7 @@ export function ComposerColumn({ phase }: { phase: OnboardingPhase }) {
       <BandHeading icon={SparklesIcon} title="Connect a provider to continue">
         Describing an agent goes through Anthropic, and the bundled example agent is not in{" "}
         <span className="font-mono">runtime/agents/</span>, so there is nothing to run for free.
-        Add a key from Settings, or from the provider chip in the top bar.
+        Add one from Provider keys in the account menu, or in the Secrets tab.
       </BandHeading>
     );
   } else {

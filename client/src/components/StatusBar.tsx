@@ -1,6 +1,4 @@
-import { useMemo } from "react";
-import { orderedSteps, useTraceStore } from "../store/traceStore.ts";
-import { fmtCost, fmtDuration, fmtTokens } from "../lib/format.ts";
+import { useTraceStore } from "../store/traceStore.ts";
 import { useDeployStore } from "../store/deployStore.ts";
 import { isDeployInFlight } from "../types.ts";
 import { backendHasFailed, useHostStore } from "../store/hostStore.ts";
@@ -30,70 +28,11 @@ const DETAIL: Record<string, string> = {
 };
 
 /**
- * The live run's figures — provider/model, status, step, tokens, cost, duration.
- *
- * THEY LIVE IN THE TOP BAR NOW. They were the whole content of a 28px strip pinned to the bottom
- * of the window, which is the one place on screen the eye does not go: the numbers that say what a
- * run is costing while it costs it were furthest from everything that produces them. One
- * persistent status location, and it is the one already being read.
- *
- * Rendered by TopBar and defined here, beside the arithmetic that feeds it, so there is one place
- * that decides what a run's figures are and one that decides where they sit.
- */
-export function RunFigures() {
-  const activeRunId = useTraceStore((s) => s.activeRunId);
-  const run = useTraceStore((s) => (activeRunId ? s.runs[activeRunId] : undefined));
-  const bucket = useTraceStore((s) => (activeRunId ? s.stepsByRun[activeRunId] : undefined));
-
-  const { tokens, cost, count, duration } = useMemo(() => {
-    const steps = orderedSteps(bucket);
-    let tk = 0;
-    let ct = 0;
-    for (const s of steps) {
-      if (s.tokens != null) tk += s.tokens;
-      if (s.cost != null) ct += s.cost;
-    }
-    let dur = 0;
-    if (run) {
-      const start = Date.parse(run.started_at);
-      const end = run.ended_at ? Date.parse(run.ended_at) : start;
-      dur = Math.max(0, end - start);
-    }
-    return { tokens: tk, cost: ct, count: steps.length, duration: dur };
-  }, [bucket, run]);
-
-  if (!run) return null;
-
-  const sep = <span className="text-faint" aria-hidden>·</span>;
-
-  return (
-    <span className="flex min-w-0 items-center gap-2 text-tiny text-muted">
-      {/* The one variable-width element, and the only one that may shrink. A long model id used to
-          push the cost and the duration off the right edge, because the row it lived in was a flex
-          row with no `min-w-0` anywhere in it. */}
-      <span className="min-w-0 truncate" title={`${run.provider}/${run.model}`}>
-        {run.provider}/{run.model}
-      </span>
-      {sep}
-      <span className="shrink-0">{run.status}</span>
-      {sep}
-      <span className="shrink-0 tabular-nums">Step {count}</span>
-      {sep}
-      <span className="shrink-0 tabular-nums">{fmtTokens(tokens)}</span>
-      {sep}
-      <span className="shrink-0 tabular-nums">{fmtCost(cost)}</span>
-      {sep}
-      <span className="shrink-0 tabular-nums">{fmtDuration(duration)}</span>
-    </span>
-  );
-}
-
-/**
  * What is left at the foot of the window: whether this tab can talk to the server, and whether
  * anything is deploying.
  *
  * Both are facts about the session rather than about the thing on screen, which is why they are
- * the two that stay down here while the run's figures move up.
+ * down here. A run's own figures — its model, its steps, its tokens, its cost — are in its trace.
  */
 export function StatusBar() {
   const connection = useTraceStore((s) => s.connection);

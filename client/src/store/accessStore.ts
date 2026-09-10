@@ -116,7 +116,7 @@ interface AccessState {
    *
    * THIS EXISTS BECAUSE THE CLIENT GENUINELY HOLDS BOTH, and pretending otherwise would push the
    * problem into every call site. The Agents grid has the uuid; `buildStore.activeAgentId` — which
-   * the composer, the Deploy panel, the GitHub panel and the title bar all read — is the SLUG, and
+   * the composer, the Deploy panel and the GitHub panel all read — is the SLUG, and
    * has been since before agents had uuids. A guard in the Deploy panel cannot produce a uuid
    * without a lookup, and a guard that did the lookup itself would be forty call sites each
    * deciding what to do when it fails.

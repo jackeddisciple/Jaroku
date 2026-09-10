@@ -280,9 +280,6 @@ export const MANIFEST = {
 
   // ── §5/§6 Deploy ──────────────────────────────────────────────────────────
   deploy: {
-    // Not `Cancel01Icon`. A deploy in flight is aborted from a circular control that reads as a
-    // stop rather than as a dismissal, and the document is right about this one.
-    cancel: "CancelCircleIcon",
     buildLog: "ScrollTextIcon",
     connectRailway: "SpeedTrain01Icon",
     deployAnother: "CopyPlusIcon",
@@ -319,12 +316,6 @@ export const MANIFEST = {
     clearSearch: "SearchXIcon",
     clearFilter: "ListXIcon",
     dismissNotice: "XIcon",
-  },
-
-  // ── §6 Top bar ────────────────────────────────────────────────────────────
-  topbar: {
-    deploy: "Rocket01Icon",
-    dryRun: "SquareTerminalIcon",
   },
 
   // ── §6 Threads filter ─────────────────────────────────────────────────────

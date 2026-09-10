@@ -320,7 +320,7 @@ console.log("\n§04's Sans list, at the call sites the specification names by na
 
   check("an agent's slug is Sans", !/font-mono/.test(at("components/AgentCard.tsx", "title={agent.slug}")));
   check("a version is Sans", !/font-mono/.test(at("components/GitHubPanel.tsx", "v{row.version}")));
-  check("a model name is Sans", !/font-mono/.test(at("components/StatusBar.tsx", "${run.provider}/${run.model}")));
+  check("a model name is Sans", !/font-mono/.test(at("components/TraceTimeline.tsx", "{run.provider}/{run.model}")));
   check("a figure is Sans", !/font-mono/.test(at("components/StatRow.tsx", "{s.value}")));
 }
 

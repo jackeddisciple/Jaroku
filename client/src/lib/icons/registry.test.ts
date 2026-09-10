@@ -85,7 +85,7 @@ console.log("\n...and every key the specification names exists");
     "inbox.laneProposals", "inbox.laneSnoozed", "inbox.dismiss", "inbox.undo",
     "activity.dateRange", "activity.filterKind",
     "usage.exportCsv", "connections.disconnect", "secrets.reveal", "secrets.copy",
-    "github.syncMore", "github.openPullRequest", "deploy.cancel", "deploy.buildLog",
+    "github.syncMore", "github.openPullRequest", "deploy.buildLog",
     "evals.addExample", "evals.importCsv", "evals.deleteDataset", "evals.renameDataset",
     "evals.editRubric", "evals.revertRubric", "evals.clearComparison", "evals.prevResponse",
     "evals.nextResponse",
@@ -93,7 +93,7 @@ console.log("\n...and every key the specification names exists");
     "workspace.close", "workspace.removeMember", "workspace.revokeInvite",
     "global.clearSearch", "global.clearFilter", "global.dismissNotice",
     // §6
-    "auth.signIn", "auth.openJaroku", "topbar.deploy", "topbar.dryRun", "composer.addKey",
+    "auth.signIn", "auth.openJaroku", "composer.addKey",
     "threadsFilter.all", "threadsFilter.needsYou", "threadsFilter.running", "threadsFilter.recent",
     "threadsFilter.archived",
     "cockpitFilter.mine", "cockpitFilter.everyones", "cockpitFilter.all",
@@ -111,7 +111,9 @@ console.log("\n...and every key the specification names exists");
     "inboxCard.archive", "inboxCard.dismiss", "inboxCard.snooze",
     "emptyState.openDeployPanel",
   ];
-  check("134 keys named by §5 and §6", SPECIFIED.length === 134, `${SPECIFIED.length}`);
+  // 131 SINCE THE TOP BAR WENT: `topbar.deploy`, `topbar.dryRun` and `deploy.cancel` — its
+  // in-flight swap — were drawn only in that strip, and left with it.
+  check("131 keys named by §5 and §6", SPECIFIED.length === 131, `${SPECIFIED.length}`);
   const absent = SPECIFIED.filter((k) => !keys.includes(k));
   for (const k of absent) console.log(`  FAIL ${k} is in the specification and not in the manifest`);
   check("every specified key is in the registry", absent.length === 0);

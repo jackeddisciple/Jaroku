@@ -51,7 +51,6 @@ import { useDeployStore } from "../store/deployStore.ts";
 import { useGithubStore } from "../store/githubStore.ts";
 import { useMcpStore } from "../store/mcpStore.ts";
 import { useSecretsStore } from "../store/secretsStore.ts";
-import { TopBar } from "../components/TopBar.tsx";
 import { McpPanel } from "../components/McpPanel.tsx";
 import { ConnectionsPanel } from "../components/ConnectionsPanel.tsx";
 import { SecretsPanel } from "../components/SecretsPanel.tsx";
@@ -326,9 +325,6 @@ function render(component: React.FC, role: string): string {
 console.log("\n§14.1's structural test — absent for a member, present for an admin");
 {
   const surfaces: { name: string; component: React.FC; marker: string; admin: boolean }[] = [
-    // The title bar's Deploy button — the row §8.2 files under `agent:write`. If that were
-    // followed, this affordance would be in the member render, on every screen in the product.
-    { name: "TopBar — Deploy", component: TopBar, marker: ">Deploy<", admin: true },
     { name: "MCP panel — Connect a server", component: McpPanel, marker: "Connect a server", admin: true },
     { name: "Connections — Connect Gmail", component: ConnectionsPanel, marker: "Connect Gmail", admin: true },
     { name: "Secrets panel — Import", component: SecretsPanel, marker: ">Import<", admin: true },

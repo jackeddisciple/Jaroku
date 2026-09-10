@@ -437,10 +437,9 @@ interface UiState {
   codeOverlayOpen: boolean;
   setCodeOverlay: (v: boolean) => void;
 
-  // The provider-keys panel: where a key is added after onboarding. Lifted here because it has
-  // two openers — the provider chip in the top bar, which is where the current provider is
-  // named, and Settings in the sidebar, which is where a first-run user was told to look. One
-  // panel, two doors; a second copy of it would be a second set of promises about the key.
+  // The provider-keys dialog: where a key is added after onboarding. Lifted here because its door
+  // is the account menu in the sidebar and the dialog renders over the whole application — see
+  // ProviderKeysDialog. One dialog; a second copy would be a second set of promises about the key.
   providerPanelOpen: boolean;
   setProviderPanel: (v: boolean) => void;
 
@@ -644,8 +643,8 @@ export const useUiStore = create<UiState>((set) => ({
   setProviderPanel: (providerPanelOpen) => set({ providerPanelOpen }),
 
   workspaceSection: null,
-  // The provider popover is closed on the way in: both are overlays anchored to the top bar's
-  // right-hand group, and two of them open at once is one covering the other.
+  // The provider-keys dialog is closed on the way in: both are dialogs over the application, and
+  // two of them open at once is one covering the other.
   openWorkspacePanel: (workspaceSection) => set({ workspaceSection, providerPanelOpen: false }),
   closeWorkspacePanel: () => set({ workspaceSection: null }),
 

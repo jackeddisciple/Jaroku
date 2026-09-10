@@ -20,7 +20,10 @@ const icons = (await import("@hugeicons/core-free-icons")) as unknown as Record<
 
 console.log("\nthe manifest parses, and it is the size the specification asks for");
 {
-  // 160 SINCE THE SIDEBAR ROW'S OWN MENU. Five keys arrive and one leaves: `agents.rowMore`,
+  // 157 SINCE THE TOP BAR WENT. `topbar.deploy`, `topbar.dryRun` and `deploy.cancel` were drawn
+  // only in the strip above the middle panel, and leave with it.
+  //
+  // 160 BEFORE THAT, SINCE THE SIDEBAR ROW'S OWN MENU. Five keys arrive and one leaves: `agents.rowMore`,
   // `pin`, `rename`, `configure` and `delete` for the menu that replaced the runs capsule, and
   // `agents.runsBadge` goes with the capsule it was drawn for. Counted rather than globbed for the
   // reason the icon release gave: a number in a test is a decision somebody has to change on
@@ -29,7 +32,7 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // `agents.rowMore` IS A SECOND ELLIPSIS AND NOT A DUPLICATE. `agents.more` is horizontal and sits
   // on the AgentCard among other marks; this one is vertical and sits at the end of a dense sidebar
   // row, where a horizontal ellipsis reads as three more characters of the timestamp beside it.
-  check("160 registry keys", entries.length === 160, `${entries.length}`);
+  check("157 registry keys", entries.length === 157, `${entries.length}`);
   const names = new Set(entries.map((e) => e.export));
   // 104 from icons_integration's appendix, plus D8's 13 — the composer glyphs that had to move
   // here when `@hugeicons/react` came out. See the note at the top of `registry.ts`.
@@ -37,7 +40,8 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // `Edit03Icon`, `Settings05Icon` — plus `AddSquareIcon`, which replaced the plain plus the `New`
   // row drew on a filled black tile; `Delete01Icon` was already here for a dataset. `PlayCircle02Icon`
   // leaves with the runs capsule, the only mark this release removes.
-  check("123 distinct marks", names.size === 123, `${names.size}`);
+  // 121 SINCE THE TOP BAR WENT: `SquareTerminalIcon` and `CancelCircleIcon` had no other key.
+  check("121 distinct marks", names.size === 121, `${names.size}`);
   check("no key is declared twice", new Set(entries.map((e) => e.key)).size === entries.length);
 }
 

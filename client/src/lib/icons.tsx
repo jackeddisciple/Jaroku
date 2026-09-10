@@ -53,7 +53,7 @@ const PROVIDER_PATH: Record<string, string> = {
   google: GEMINI_MARK,
 };
 
-/** Provider mark for the chip in the top bar / status bar, and the rows on step 2. */
+/** Provider mark for the rows in the provider-keys dialog and on step 2. */
 export function ProviderMark({ provider, active = true, size = 12 }: { provider: string; active?: boolean; size?: number }) {
   const color = active ? BRAND_COLOR[provider] ?? MUTED : MUTED;
   const path = PROVIDER_PATH[provider];

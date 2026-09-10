@@ -6,9 +6,9 @@
 // what happens when it is deleted — and a tab beside `GitHub` would put "delete this workspace"
 // one click from "look at this agent's diff".
 //
-// It is a modal over the shell for the reason the provider popover is not part of the top bar: it
-// is opened deliberately, read, and dismissed. Nothing behind it needs to keep changing while it
-// is up, and nothing in it is a live feed.
+// It is a modal over the shell, as the provider keys are: it is opened deliberately, read, and
+// dismissed. Nothing behind it needs to keep changing while it is up, and nothing in it is a live
+// feed.
 //
 // SECTIONS ARE THE `section` FIELD ON THE STORE, not local state, because every one of them has a
 // second door: the members list is reached from the workspace switcher, and later sections are

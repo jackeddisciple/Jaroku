@@ -128,16 +128,14 @@ console.log("\nand the one that did is gone rather than hidden");
 {
   // NAMED, because its absence is the fix. A regression would put it back as one line, and a rule
   // that only counted dead buttons would pass the moment somebody gave it an empty handler.
-  const topBar = FILES.find((f) => f.path === "components/TopBar.tsx")?.text ?? "";
-  check(topBar.length > 0, "read the top bar");
-  check(!/ShareOutIcon/.test(topBar), "Share is not rendered in the strip that is on every screen");
-  check(
-    !/not available yet/.test(topBar),
-    "...and no control there explains itself with a tooltip instead of working",
-  );
+  //
+  // THE STRIP IT STOOD IN IS GONE NOW TOO — the middle panel has no header at all — so what is
+  // asserted is that the strip stays gone and that no component renders the control anywhere else.
+  check(!FILES.some((f) => f.path === "components/TopBar.tsx"), "the top bar it sat in is gone");
+  check(!FILES.some((f) => /<ShareOutIcon\b/.test(f.text)), "Share is not rendered anywhere");
   // The capability it was the obvious candidate for still has its two entry points, and they are
   // CONTEXTUAL — a card's overflow and the file browser — because what is exported is one version
-  // of one agent. The top bar renders where no version is in view.
+  // of one agent.
   const exporters = FILES.filter((f) => /downloadVersion\(/.test(f.text)).map((f) => f.path);
   check(
     exporters.length === 2,

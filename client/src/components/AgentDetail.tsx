@@ -52,7 +52,7 @@ export function AgentDetail() {
   // §8.2 — THE GRANT IS FETCHED WHEN THE DETAIL PANE OPENS, not when the Access tab is selected.
   //
   // THAT DISTINCTION IS THE WHOLE VALUE OF THE FETCH. Every agent-scoped guard in the client reads
-  // this cache — the Deploy button in the title bar, the GitHub panel's writes, the Deploy tab —
+  // this cache — the GitHub panel's writes, the Deploy tab —
   // and none of them is inside the Access tab. Fetching only when somebody opened Access would mean
   // per-agent narrowing was invisible on every surface except the one that displays it, which is
   // the worst possible place for it to be the only place it works.

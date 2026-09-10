@@ -4,7 +4,7 @@ import { Sidebar } from "./components/Sidebar.tsx";
 import { RightPanel, RightPanelRail, useRightPanelFollow } from "./components/RightPanel.tsx";
 import { StatusBar } from "./components/StatusBar.tsx";
 import { CommandPalette } from "./components/CommandPalette.tsx";
-import { TopBar } from "./components/TopBar.tsx";
+import { ProviderKeysDialog } from "./components/ProviderKeysDialog.tsx";
 import { CodeOverlay } from "./components/CodeOverlay.tsx";
 import { AuthFlow, SignInSwapPrompt } from "./components/auth/AuthFlow.tsx";
 import { SetUpAccountScreen } from "./components/auth/SetUpAccountScreen.tsx";
@@ -582,23 +582,17 @@ export function App() {
                 it — the trap this codebase's disabled-state discipline is about, one step further
                 out: not a control that does nothing, but one that removes itself.
 
-                AN OVERLAY, NOT A COLUMN, AND THAT WAS THE BUG. This used to be a sibling of the
-                panel inside the horizontal group, so it was a flex item: `pl-[76px]` for the
-                traffic lights plus a 28px button made a hundred-pixel strip that took its width
-                out of the workspace for as long as the sidebar was hidden. Hiding the sidebar is
-                supposed to give that space to the middle; instead it handed back everything except
-                a hundred pixels, and the panel never reached the window's left edge.
-
-                Absolute, it takes no width at all. `TopBar` insets its own first row by the same
-                amount so nothing is rendered underneath it, and everything below that row — which
-                is the part somebody hid the sidebar to make bigger — is full width.
+                A ROW, AND ONLY WHILE THE SIDEBAR IS HIDDEN. It used to float over the top bar's first
+                row, which inset itself to make room for it; the middle panel has no header now, so
+                there is nothing to float over, and the traffic lights still need their clearance.
+                With the sidebar showing there is no row at all and the panes start at the top.
 
                 It keeps `data-tauri-drag-region` because with the sidebar gone this is what sits
                 under the traffic lights, and the window still has to be draggable by its top edge. */}
             {mountSidebar && sidebarHidden && (
               <div
                 data-tauri-drag-region
-                className={`absolute left-0 top-0 z-20 flex h-11 items-center ${hasHostWindow() ? "pl-[76px]" : "pl-2"}`}
+                className={`flex h-11 shrink-0 items-center ${hasHostWindow() ? "pl-[76px]" : "pl-2"}`}
               >
                 <button
                   onClick={() => useUiStore.getState().toggleSidebar()}
@@ -610,13 +604,6 @@ export function App() {
                 </button>
               </div>
             )}
-            {/* THE TOP BAR STARTS WHERE THE SIDEBAR ENDS. It spanned the whole window, which put a
-                44px strip of chrome above the sidebar and stopped that column reaching the top of
-                the frame — and on macOS the traffic lights then sat on the bar rather than on the
-                sidebar's own first row. Everything left in it is about the OPEN AGENT and its run,
-                so the panel that holds the agent is where it belongs; the sidebar is now the full
-                height of the window and begins level with the lights. */}
-            <TopBar />
             {/* THE THREE PANES STAY MOUNTED WHILE A FULL-SCREEN VIEW IS UP, and that is the second
                 promise §2 makes: clicking the active agent in the sidebar "returns you to the
                 three-pane view exactly where you left it". Unmounting would lose a half-typed
@@ -711,6 +698,9 @@ export function App() {
           agent in it. Outside the shell like the other overlays, and above the three panes: its
           subject is the scope they are all inside. */}
       <WorkspacePanel />
+      {/* The provider keys, opened from the account menu. A dialog over everything, like the
+          workspace panel above — it used to hang off the top bar, which the middle panel no longer has. */}
+      <ProviderKeysDialog />
       {/* What became of the invitation this tab was opened with, if it was opened with one. */}
       <InviteNotice />
       {/* §8.3 — the safety net under §8s guards. It should never appear; when it does, a surface
