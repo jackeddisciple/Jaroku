@@ -1901,10 +1901,17 @@ export function BuildPane({
         {turns.length === 0 && !emptySlot && !operating &&
           (mode === "generate" ? (
             // THE NEW-AGENT SCREEN GREETS RATHER THAN INSTRUCTS: one group, a small empty-state mark
-            // above one question, centred in the space above the composer. `min-h-full` rather than
+            // above one question, set in the space above the composer. `min-h-full` rather than
             // `h-full`, so a short window lengthens the scroll area instead of clipping the group, and
             // the spacing is fixed so the balance is the same at every window size.
-            <div className="flex min-h-full flex-col items-center justify-center px-6 py-10 text-center">
+            //
+            // TWO PARTS OF THE SPACE ABOVE IT TO ONE BELOW, not centred — the product owner's call on
+            // 2026-09-10. Centred, the gap under the cards grew wider than the group itself on a tall
+            // window and the group read as floating away from the box it is there to start. The two
+            // spacers share whatever the window has spare, so the group settles nearer the composer at
+            // every height, and neither takes anything once the window is too short to have any.
+            <div className="flex min-h-full flex-col items-center px-6 py-10 text-center">
+              <div className="grow-[2]" aria-hidden />
               {/* The mark reads as an empty state, not a brand moment: small, and in the strongest
                   border grey — quiet, but not so faint that it looks like a rendering fault. */}
               <span className="inline-flex text-grip" aria-hidden>
@@ -1924,7 +1931,7 @@ export function BuildPane({
                 hidden={composerMode !== "chat" || chatDraft.trim() !== ""}
                 onPick={insertCommand}
               />
-
+              <div className="grow" aria-hidden />
             </div>
           ) : (
             <EmptyState
