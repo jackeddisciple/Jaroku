@@ -1957,45 +1957,11 @@ export function BuildPane({
           chosen over a wider box. Nothing can overflow at this width, whatever is in the bar. */}
       <div className="mx-auto w-full max-w-[48rem] shrink-0 px-6 pb-4 pt-2">
         <NoProviderKeyBanner />
-        {/* connectors + name — new-agent generation only (Chat mode, no agent selected) */}
+        {/* The agent's name — new-agent generation only (Chat mode, no agent selected). The
+            connectors that shared this row are picked on the tray behind the composer now; see
+            TrayConnectors. */}
         {composerMode === "chat" && mode === "generate" && (
-          // On first run this row is one of three stacked groups — examples, connectors,
-          // composer — and a lowercase caption between two proper section headings reads as a
-          // stray word rather than as the head of its own group. It gets the panel's section
-          // label there, and stays a caption in the three-column app, where it is the only
-          // label above the composer and an uppercase one would shout.
           <div className={`mb-2 flex flex-wrap items-center gap-2 ${standalone ? "mt-1" : ""}`}>
-            <span className={standalone ? `${TYPE.sectionLabel} mr-1` : "text-tiny text-faint mr-1"}>
-              Connectors
-            </span>
-            {CONNECTORS.map((c) => {
-              const on = selected.includes(c.id);
-              return (
-                // Ticked means "this agent gets the audited template", so the check is the
-                // reviewed accent — the same colour it will wear in the plan a moment later.
-                //
-                // `reserveIcon` keeps the slot there when unticked. Rendering the check only when
-                // on made each chip ~14px wider the moment you clicked it, and with three
-                // connectors that was enough to wrap the row onto two lines and shove the whole
-                // composer down mid-click. A control must not resize because you used it.
-                <Chip
-                  key={c.id}
-                  size="lg"
-                  onClick={() => toggle(c.id)}
-                  selected={on}
-                  // Outlined when off, rather than bare. This is a picker, not a strip of
-                  // entities where one is current: every option has to look clickable before it
-                  // has been clicked, and a bare label reads as a caption.
-                  variant={on ? undefined : "outline"}
-                  disabled={busy}
-                  title={c.hint}
-                  reserveIcon
-                  icon={on ? <StatusDot state="ok" size={ICON.badge} color={ACCENT.reviewed} /> : undefined}
-                >
-                  {c.label}
-                </Chip>
-              );
-            })}
             {/* Locked once a plan exists, because by then it does nothing. Generation takes the
                 name from the approved plan record, not from this field (server/src/index.ts —
                 "building what was approved is the whole point of the gate"), and a revision keeps
