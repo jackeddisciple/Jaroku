@@ -1893,7 +1893,9 @@ export function BuildPane({
               <span className="inline-flex text-sidebar-active" aria-hidden>
                 <JarokuGlyph size={BRAND.greeting} />
               </span>
-              <h1 className="mt-6 text-display tracking-[-0.005em] text-ink">
+              {/* REGULAR WEIGHT, one rung below the hero. The rung carries 600 for headings a person
+                  scans for; this is a sentence addressed to them, and at semibold it shouted. */}
+              <h1 className="mt-5 text-page font-normal text-ink">
                 {firstName ? `What are we cooking today, ${firstName}?` : "What are we cooking today?"}
               </h1>
             </div>
