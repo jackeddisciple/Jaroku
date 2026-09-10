@@ -79,7 +79,7 @@ console.log("\n...and every key the specification names exists");
     "agentDetail.restoreVersion",
     "cockpit.refresh", "cockpit.openConversation", "cockpit.agentMore", "cockpit.closeDetail",
     "cockpit.copyJobId",
-    "composer.attach", "composer.expand", "composer.more", "composer.mic", "composer.send",
+    "composer.attach", "composer.more", "composer.mic", "composer.send",
     // §5 inbox, activity, usage, connections, secrets, github, deploy, evals, trace, workspace, global
     "inbox.refresh", "inbox.laneInbox", "inbox.laneAlerts", "inbox.lanePermissions",
     "inbox.laneProposals", "inbox.laneSnoozed", "inbox.dismiss", "inbox.undo",
@@ -111,9 +111,10 @@ console.log("\n...and every key the specification names exists");
     "inboxCard.archive", "inboxCard.dismiss", "inboxCard.snooze",
     "emptyState.openDeployPanel",
   ];
-  // 131 SINCE THE TOP BAR WENT: `topbar.deploy`, `topbar.dryRun` and `deploy.cancel` — its
-  // in-flight swap — were drawn only in that strip, and left with it.
-  check("131 keys named by §5 and §6", SPECIFIED.length === 131, `${SPECIFIED.length}`);
+  // 130 SINCE THE COMPOSER'S EXPAND CONTROL LEFT THE BAR, taking `composer.expand` with it.
+  // 131 BEFORE THAT, SINCE THE TOP BAR WENT: `topbar.deploy`, `topbar.dryRun` and `deploy.cancel` —
+  // its in-flight swap — were drawn only in that strip, and left with it.
+  check("130 keys named by §5 and §6", SPECIFIED.length === 130, `${SPECIFIED.length}`);
   const absent = SPECIFIED.filter((k) => !keys.includes(k));
   for (const k of absent) console.log(`  FAIL ${k} is in the specification and not in the manifest`);
   check("every specified key is in the registry", absent.length === 0);

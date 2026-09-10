@@ -1116,7 +1116,7 @@ performs privileged actions.** Attaching a GitHub commit is context. *Pushing* t
 confirmed, audit-logged action that lives in the GitHub panel. Blurring that line is how a
 trust-first product quietly stops being one.
 
-**One bottom control bar, seven controls, in a fixed order.** ⊕, fullscreen, effort, the permission
+**One bottom control bar, seven controls, in a fixed order.** ⊕, effort, the permission
 shield and the connector deck pack left; the model selector, the Chat/Test toggle, mic and send pack
 right; one spacer absorbs the difference. Deliberately *not* `space-between` — the deck is absent
 with zero connectors and the effort control is hidden on a non-reasoning model, and spreading the

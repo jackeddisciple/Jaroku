@@ -2418,22 +2418,6 @@ export function BuildPane({
                   />
                 ),
               },
-              fullscreen: {
-                bar: () => (
-                  <ControlButton
-                    icon={Icon.composer.expand}
-                    name={fullscreen ? "Collapse the composer" : "Expand the composer"}
-                    title={
-                      fullscreen
-                        ? "Collapse (Esc)"
-                        : `Write in a larger editor (${keyHint("⌘⇧F")}) — keeps your text, attachments and settings`
-                    }
-                    pressed={fullscreen}
-                    active={fullscreen}
-                    onClick={() => setFullscreen(!fullscreen)}
-                  />
-                ),
-              },
               effort: {
                 bar: (density: Density) => (
                   <EffortControl

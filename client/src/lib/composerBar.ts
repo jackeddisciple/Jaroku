@@ -16,8 +16,8 @@
 // THE BAR NEVER WRAPS. Below ~560px there is not room for eight controls, and the two ways out are
 // a second row or an overflow menu. A second row would move the send button — the most-used
 // control in the product — to a position that depends on the window width, and would push the
-// textarea up as the window narrowed. So: an overflow menu, at a FIXED position (3), holding
-// exactly the three controls that are settings rather than actions.
+// textarea up as the window narrowed. So: an overflow menu, at a FIXED position (2), holding
+// exactly the controls that are settings rather than actions.
 //
 // AND THREE CONTROLS NEVER COLLAPSE. ⊕, mic and send are the highest-frequency actions in the
 // composer, and a high-frequency action behind a `⋯` is a control that costs two clicks forever.
@@ -36,10 +36,12 @@
  * split is meaningful rather than decorative: left controls change WHAT THE MODEL GETS, right
  * controls change WHO RUNS IT AND WHEN. Anything added later has to answer that question before it
  * gets a position here.
+ *
+ * THE EXPAND CONTROL IS GONE FROM THE BAR (2026-09-10), the product owner's call. The larger editor
+ * it opened is still there behind ⌘⇧F; the bar no longer spends a position advertising it.
  */
 export const CONTROL_ORDER = [
   "add",
-  "fullscreen",
   "effort",
   "shield",
   "connectors",
@@ -64,7 +66,6 @@ export type ControlId = (typeof CONTROL_ORDER)[number];
  */
 const SIDE: Record<ControlId, "input" | "execution"> = {
   add: "input",
-  fullscreen: "input",
   effort: "input",
   shield: "input",
   connectors: "input",
@@ -92,13 +93,13 @@ const PINNED: ReadonlySet<ControlId> = new Set<ControlId>(["add", "mic", "send"]
 const COLLAPSIBLE: readonly ControlId[] = ["effort", "shield", "connectors", "promote"];
 
 /**
- * Where the `⋯` trigger goes when there is one: position 3, after ⊕ and fullscreen.
+ * Where the `⋯` trigger goes when there is one: position 2, right after ⊕.
  *
- * A FIXED POSITION RATHER THAN THE END OF THE GROUP. The three controls it replaces occupied
- * positions 3, 4 and 5, so putting their menu anywhere else would move them twice — once into the
- * menu and once across the bar.
+ * A FIXED POSITION RATHER THAN THE END OF THE GROUP. The controls it replaces occupied positions 2,
+ * 3 and 4, so putting their menu anywhere else would move them twice — once into the menu and once
+ * across the bar.
  */
-export const OVERFLOW_INDEX = 2;
+export const OVERFLOW_INDEX = 1;
 
 /**
  * The two widths at which the bar changes, in px, measured on the COMPOSER rather than the window.
@@ -169,10 +170,10 @@ export function layoutBar(present: Iterable<ControlId>, density: Density): BarLa
 /**
  * Where the `⋯` trigger renders inside the left group, or -1 when there is nothing behind it.
  *
- * Clamped to the group's length rather than assumed: with `fullscreen` hidden the left group is
- * one item long, and splicing at index 2 into a one-item array would silently put the menu at the
- * end — the same "position depends on what else is visible" failure the fixed index exists to
- * prevent.
+ * Clamped to the group's length rather than assumed: were ⊕ ever absent the left group would be
+ * empty, and splicing at index 1 into an empty array would put the menu somewhere its fixed index
+ * does not describe — the "position depends on what else is visible" failure the fixed index exists
+ * to prevent.
  */
 export function overflowSlot(layout: BarLayout): number {
   if (layout.overflow.length === 0) return -1;

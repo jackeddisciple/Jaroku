@@ -128,7 +128,7 @@ const composerPx = (viewport: number): number => {
 
 console.log("\nand the composer column, whose control bar is the same kind of fixed-width content");
 {
-  // THE ROW THE FLOOR EXISTS FOR: ⊕, expand, ⋯, the model chip, Chat/Test, the mic and send, at a
+  // THE ROW THE FLOOR EXISTS FOR: ⊕, ⋯, the model chip, Chat/Test, the mic and send, at a
   // 32px hit target and an 8px gap each. `lib/composerBar.ts` promises that row never wraps and
   // that the mic and send never collapse; at 30% of this group both promises were broken at 1440,
   // with the two of them outside the composer's own box.

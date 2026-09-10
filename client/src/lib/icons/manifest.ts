@@ -196,7 +196,6 @@ export const MANIFEST = {
   // what let that dependency come out; see the note at the top of `registry.ts`.
   composer: {
     attach: "AttachmentIcon",
-    expand: "FullScreenIcon",
     more: "MoreVerticalIcon",
     mic: "Mic01Icon",
     send: "SendIcon",

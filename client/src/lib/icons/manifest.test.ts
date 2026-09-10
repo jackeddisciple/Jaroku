@@ -20,8 +20,10 @@ const icons = (await import("@hugeicons/core-free-icons")) as unknown as Record<
 
 console.log("\nthe manifest parses, and it is the size the specification asks for");
 {
-  // 162 SINCE THE NEW-AGENT SCREEN'S SUGGESTION CARDS: `emptyState.plan`, `build`, `explain` and
-  // `trace`, one per command a card starts.
+  // 161 SINCE THE COMPOSER'S EXPAND CONTROL LEFT THE BAR: `composer.expand` goes with it.
+  //
+  // 162 BEFORE THAT, SINCE THE NEW-AGENT SCREEN'S SUGGESTION CARDS: `emptyState.plan`, `build`,
+  // `explain` and `trace`, one per command a card starts.
   //
   // 158 BEFORE THAT, SINCE THE RIGHT RAIL GOT ITS OWN TOGGLE: `panel.toggle`, the sidebar toggle's twin.
   //
@@ -37,7 +39,7 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // `agents.rowMore` IS A SECOND ELLIPSIS AND NOT A DUPLICATE. `agents.more` is horizontal and sits
   // on the AgentCard among other marks; this one is vertical and sits at the end of a dense sidebar
   // row, where a horizontal ellipsis reads as three more characters of the timestamp beside it.
-  check("162 registry keys", entries.length === 162, `${entries.length}`);
+  check("161 registry keys", entries.length === 161, `${entries.length}`);
   const names = new Set(entries.map((e) => e.export));
   // 104 from icons_integration's appendix, plus D8's 13 — the composer glyphs that had to move
   // here when `@hugeicons/react` came out. See the note at the top of `registry.ts`.
@@ -49,7 +51,8 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // 122 WITH `PanelRightCloseIcon`, for the right rail's toggle.
   // 125 WITH `IdeaIcon`, `HammerIcon` and `Telescope01Icon` for the suggestion cards; the fourth
   // card borrows the Trace tab's `FootprintsIcon`.
-  check("125 distinct marks", names.size === 125, `${names.size}`);
+  // 124 WITHOUT `FullScreenIcon`, which only the composer's expand control drew.
+  check("124 distinct marks", names.size === 124, `${names.size}`);
   check("no key is declared twice", new Set(entries.map((e) => e.key)).size === entries.length);
 }
 

@@ -26,8 +26,8 @@ const ALL: ControlId[] = [...CONTROL_ORDER];
 console.log("\nthe order is the spec's, and a caller cannot argue with it");
 {
   const l = layoutBar(ALL, "full");
-  check("the input group is ⊕, fullscreen, effort, shield, connectors, promote",
-    l.left.join(",") === "add,fullscreen,effort,shield,connectors,promote", l.left.join(","));
+  check("the input group is ⊕, effort, shield, connectors, promote",
+    l.left.join(",") === "add,effort,shield,connectors,promote", l.left.join(","));
   check("the execution group is model, mode, mic, send",
     l.right.join(",") === "model,mode,mic,send", l.right.join(","));
   check("nothing is in overflow at full width", l.overflow.length === 0);
@@ -37,6 +37,10 @@ console.log("\nthe order is the spec's, and a caller cannot argue with it");
   const reversed = layoutBar([...ALL].reverse(), "full");
   check("passing them backwards changes nothing", reversed.left.join(",") === l.left.join(",")
     && reversed.right.join(",") === l.right.join(","));
+
+  // THE EXPAND CONTROL LEFT THE BAR (2026-09-10). Named, because its absence is the decision: a
+  // regression would put it back as one line in the order.
+  check("there is no expand control in the bar", !(CONTROL_ORDER as readonly string[]).includes("fullscreen"));
 }
 
 console.log("\n§12.1c — hiding a control does not move any other control");
@@ -46,17 +50,17 @@ console.log("\n§12.1c — hiding a control does not move any other control");
   const noEffort = layoutBar(ALL.filter((c) => c !== "effort"), "full");
   const noDeck = layoutBar(ALL.filter((c) => c !== "connectors"), "full");
 
-  // ⊕ and fullscreen sit BEFORE the hidden control and must not move...
+  // ⊕ sits BEFORE the hidden control and must not move...
   check("⊕ stays first with no effort control", noEffort.left[0] === "add");
-  check("fullscreen stays second with no effort control", noEffort.left[1] === "fullscreen");
+  check("⊕ stays first with no connector deck", noDeck.left[0] === "add");
   // ...and the execution group is packed from the other edge, so nothing there moves either.
   check("the execution group is untouched by a hidden input control",
     noEffort.right.join(",") === full.right.join(",") && noDeck.right.join(",") === full.right.join(","));
   // The surviving left controls keep their relative order; only the gap closes.
   check("the rest of the input group closes up in order",
-    noEffort.left.join(",") === "add,fullscreen,shield,connectors,promote", noEffort.left.join(","));
+    noEffort.left.join(",") === "add,shield,connectors,promote", noEffort.left.join(","));
   check("...and the same with the deck gone",
-    noDeck.left.join(",") === "add,fullscreen,effort,shield,promote", noDeck.left.join(","));
+    noDeck.left.join(",") === "add,effort,shield,promote", noDeck.left.join(","));
 }
 
 console.log("\n§12.1d — the bar never wraps; below ~560 the three settings go to overflow");
@@ -74,8 +78,8 @@ console.log("\n§12.1d — the bar never wraps; below ~560 the three settings go
   const narrow = layoutBar(ALL, "overflow");
   check("effort, shield, connectors and promote are what collapse",
     narrow.overflow.join(",") === "effort,shield,connectors,promote", narrow.overflow.join(","));
-  check("...and they are gone from the bar itself",
-    narrow.left.join(",") === "add,fullscreen", narrow.left.join(","));
+  check("...and they are gone from the bar itself, leaving ⊕",
+    narrow.left.join(",") === "add", narrow.left.join(","));
   check("⊕, mic and send remain inline",
     narrow.left.includes("add") && narrow.right.includes("mic") && narrow.right.includes("send"));
   // The spec is explicit that these three are never behind a `⋯`.
@@ -83,17 +87,17 @@ console.log("\n§12.1d — the bar never wraps; below ~560 the three settings go
     !narrow.overflow.some((c) => c === "add" || c === "mic" || c === "send"));
 }
 
-console.log("\nthe ⋯ trigger sits at position 3, and stays there");
+console.log("\nthe ⋯ trigger sits at position 2, and stays there");
 {
   const narrow = layoutBar(ALL, "overflow");
-  check("after ⊕ and fullscreen", overflowSlot(narrow) === 2);
+  check("right after ⊕", overflowSlot(narrow) === 1);
   check("there is no trigger when nothing collapsed", overflowSlot(layoutBar(ALL, "full")) === -1);
 
-  // The clamp. With fullscreen hidden the left group is one item, and an unclamped splice at 2
-  // would put the menu at the end — which is the very "position depends on what else is visible"
-  // failure the fixed index exists to prevent.
-  const noFullscreen = layoutBar(ALL.filter((c) => c !== "fullscreen"), "overflow");
-  check("clamped to the group when fullscreen is hidden", overflowSlot(noFullscreen) === 1);
+  // The clamp. Were ⊕ ever absent the left group would be empty, and an unclamped splice at 1 would
+  // put the menu past the end — the very "position depends on what else is visible" failure the
+  // fixed index exists to prevent.
+  const noAdd = layoutBar(ALL.filter((c) => c !== "add"), "overflow");
+  check("clamped to the group when ⊕ is absent", overflowSlot(noAdd) === 0);
 }
 
 console.log("\nnothing collapses that is not there to collapse");
@@ -104,7 +108,7 @@ console.log("\nnothing collapses that is not there to collapse");
   check("only what exists collapses", sparse.overflow.join(",") === "shield", sparse.overflow.join(","));
 
   // And with all three absent there is no trigger at all, rather than an empty menu.
-  const none = layoutBar(["add", "fullscreen", "model", "mic", "send"], "overflow");
+  const none = layoutBar(["add", "model", "mic", "send"], "overflow");
   check("no collapsible controls means no ⋯ at all", none.overflow.length === 0 && overflowSlot(none) === -1);
 }
 
