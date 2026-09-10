@@ -59,12 +59,15 @@ export function ComposerSuggestions({
           key={sentence}
           type="button"
           onClick={() => onPick(commandOf(sentence))}
-          // A hairline and a hover fill one step off the canvas — a suggestion, not a button asking to
-          // be pressed. The focus ring is the one exception to "no shadow": it is how a keyboard user
-          // sees where they are.
-          className="group flex flex-col items-center gap-2 rounded-card border border-hair px-3 py-3 text-center
-            outline-none transition-colors duration-fast hover:border-edge hover:bg-panel
-            focus-visible:bg-panel focus-visible:shadow-focusring"
+          // LIFTED AT REST, ON PURPOSE. Everywhere else in the client a card rests flat; these four
+          // are the only things on an otherwise empty screen, and flat they read as part of the page
+          // rather than as something to press. So they sit on the card surface at E2 — the product's
+          // decision, and named as an exception in surfaceSystem.test.ts rather than slipped past it.
+          // The pointer brightens the face and deepens the border; the focus ring is how a keyboard
+          // user sees where they are.
+          className="group flex flex-col items-start gap-2 rounded-card border border-hair bg-panel px-3 py-3 text-left
+            shadow-floating outline-none transition-colors duration-fast hover:border-edge hover:bg-elevated
+            focus-visible:bg-elevated focus-visible:shadow-focusring"
         >
           <span className={tone} aria-hidden>
             <Mark size={ICON.md} />

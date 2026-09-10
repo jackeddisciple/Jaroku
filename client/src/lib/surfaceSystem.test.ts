@@ -231,9 +231,19 @@ console.log("\n§07: where each level is allowed to appear");
     "App.tsx",
     "components/onboarding/OnboardingSurface.tsx",
   ]);
+  /**
+   * THE ONE IN-FLOW SURFACE THAT RESTS LIFTED, AND IT IS A DECISION RATHER THAN A SLIP. The new-agent
+   * screen's four suggestion cards sit at E2 because they are the only things on an otherwise empty
+   * screen, and flat they read as part of the page instead of as something to press — the product
+   * owner's call on 2026-09-10. Named here, one file wide, so it stays an exception and does not
+   * become the precedent every other card reaches for.
+   */
+  const LIFTED_BY_DECISION = new Set([
+    "components/composer/ComposerSuggestions.tsx",
+  ]);
   const misplaced: string[] = [];
   for (const { path, text } of CODE) {
-    if (FLOATS_WITHOUT_SAYING_SO.has(path)) continue;
+    if (FLOATS_WITHOUT_SAYING_SO.has(path) || LIFTED_BY_DECISION.has(path)) continue;
     const lines = text.split("\n");
     lines.forEach((line, i) => {
       if (!/shadow-(?:floating|overlay)/.test(line)) return;
