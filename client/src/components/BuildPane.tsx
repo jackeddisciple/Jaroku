@@ -83,7 +83,6 @@ import { useThreadStore } from "../store/threadStore.ts";
 import { firstUnresolvedTurnId } from "../lib/threadResume.ts";
 import { ACCENT, ICON, INTERACTION, STATUS, SURFACE, TEXT, TYPE } from "../lib/tokens.ts";
 import { JarokuGlyph, ProviderMark } from "../lib/icons.tsx";
-import { displayTitle, fullTitle } from "../lib/title.ts";
 import { useStreamedText } from "../lib/useStreamedText.ts";
 import { useVoiceInput } from "../lib/useVoiceInput.ts";
 import { VoiceWaveform } from "./VoiceWaveform.tsx";
@@ -1041,9 +1040,9 @@ export function BuildPane({
    */
   const agentIsDraft = agent?.draft ?? false;
   // A DRAFT COMPOSES LIKE A NEW AGENT, because that is what it is: everything this mode turns on —
-  // the connector picker, the MCP list, the "New agent" heading — is about deciding what gets
-  // BUILT, and none of it has ever had anything to do with which agent is selected. What made
-  // selection the test was that until now a selected agent always had code.
+  // the connector picker, the MCP list — is about deciding what gets BUILT, and none of it has
+  // ever had anything to do with which agent is selected. What made selection the test was that
+  // until now a selected agent always had code.
   const mode: "generate" | "edit" = activeAgentId && !agentIsDraft ? "edit" : "generate";
   const turns = threadFor({ threads, pending: pendingThread }, activeThreadId);
   // A plan on screen awaiting a decision. It routes a typed message to a revision and, when
@@ -1837,25 +1836,8 @@ export function BuildPane({
     // sit at different rhythms depending on which component rendered them. 1.55 for everything the
     // panel reads as prose; code overrides back down where it needs to (diff hunks).
     <div className={`flex h-full flex-col bg-bg leading-[1.55] ${anchored ? "justify-center" : ""}`}>
-      <div
-        className={`shrink-0 items-baseline gap-2 border-b border-hair px-6 pb-2 pt-4 ${
-          standalone ? "hidden" : "flex"
-        }`}
-      >
-        <span className={TYPE.panelLabel}>{mode === "generate" ? "New agent" : "Fix"}</span>
-        {agent && (
-          // Two truncations, two fixes. The server's 60-char cut already happened and landed
-          // mid-word, so displayTitle() ends it on a whole word; `truncate` handles the narrow-pane
-          // case, and `min-w-0` is what lets it shrink at all inside this flex row. The tooltip
-          // carries the untruncated original, which the client has always had and never shown.
-          <Truncate
-            className="text-caption text-muted"
-            title={fullTitle(agent.name, agent.description)}
-          >
-            {displayTitle(agent.name, agent.description)}
-          </Truncate>
-        )}
-      </div>
+      {/* NO HEADER. The row that stood here — "New agent" or "Fix", then the agent's name — said
+          what the sidebar already says one column over, so the middle panel starts with its content. */}
 
       {/* conversation */}
       {/* Turns are distinct moments — a prompt, a plan, a generation. 24px between them, the
