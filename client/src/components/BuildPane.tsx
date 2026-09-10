@@ -1885,17 +1885,20 @@ export function BuildPane({
         )}
         {turns.length === 0 && !emptySlot && !operating &&
           (mode === "generate" ? (
-            // THE NEW-AGENT SCREEN GREETS RATHER THAN INSTRUCTS. The mark, large and in the
-            // sidebar's grey so it sits behind the sentence rather than competing with it, and one
-            // question addressed to the person by their first name. Centred in the space above the
-            // composer the way the empty state it replaced was: the full height of the scroll area.
-            <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-              <span className="inline-flex text-sidebar-active" aria-hidden>
+            // THE NEW-AGENT SCREEN GREETS RATHER THAN INSTRUCTS: one group, a small empty-state mark
+            // above one question, centred in the space above the composer. `min-h-full` rather than
+            // `h-full`, so a short window lengthens the scroll area instead of clipping the group, and
+            // the spacing is fixed so the balance is the same at every window size.
+            <div className="flex min-h-full flex-col items-center justify-center px-6 py-10 text-center">
+              {/* The mark reads as an empty state, not a brand moment: small, and in the strongest
+                  border grey — quiet, but not so faint that it looks like a rendering fault. */}
+              <span className="inline-flex text-grip" aria-hidden>
                 <JarokuGlyph size={BRAND.greeting} />
               </span>
-              {/* REGULAR WEIGHT, one rung below the hero. The rung carries 600 for headings a person
-                  scans for; this is a sentence addressed to them, and at semibold it shouted. */}
-              <h1 className="mt-5 text-page font-normal text-ink">
+              {/* REGULAR WEIGHT, one rung below the hero, and the dominant thing in the group. The
+                  rung carries 600 for headings a person scans for; this is a sentence addressed to
+                  them. `text-balance` so a narrow window breaks it into even lines. */}
+              <h1 className="mt-8 text-balance text-page font-normal text-ink">
                 {firstName ? `What are we cooking today, ${firstName}?` : "What are we cooking today?"}
               </h1>
             </div>

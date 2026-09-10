@@ -353,10 +353,11 @@ export const BRAND = {
   /** The first-run hero, and only there. */
   hero: 40,
   /**
-   * The new-agent screen's greeting: the mark large and quiet, in the sidebar's grey, above one
-   * question. The one place it is set bigger than the hero, because there the mark IS the screen.
+   * The new-agent screen's empty-state mark, above its greeting. Between the screen mark and the
+   * hero: enough to hold the middle of an empty panel, small enough that the question below it is
+   * what gets read.
    */
-  greeting: 56,
+  greeting: 32,
 } as const;
 
 // ── Type ────────────────────────────────────────────────────────────────────
