@@ -2,9 +2,11 @@
 //
 // §3.1 is unusually specific about this row and every clause of it is here: a single row at all
 // widths, a fixed left-to-right order, a flex spacer between the input group and the execution
-// group, a top hairline, and never a second row. `layoutBar` in lib/composerBar.ts holds the part
-// of that which is a rule rather than a style, so the rules are checked by a suite instead of by
-// resizing a window.
+// group, and never a second row. `layoutBar` in lib/composerBar.ts holds the part of that which is
+// a rule rather than a style, so the rules are checked by a suite instead of by resizing a window.
+//
+// THE SPEC'S TOP HAIRLINE IS GONE — the product owner's call on 2026-09-10. Drawn across the card,
+// it cut the text from the controls that act on it, and the card is one surface rather than two.
 //
 // THE INPUT GROUP SITS TIGHTER THAN THE SPEC'S 8px. Its controls are 4px apart — the product
 // owner's call on 2026-09-10 — because they are glyphs in 32px boxes and 8px on top of that read as
@@ -130,7 +132,7 @@ export function ComposerBar({
       // `flex` with a spacer, and NEVER `justify-between` — see lib/composerBar.ts's header for
       // the whole argument. `flex-nowrap` is the "bar never wraps" clause spelled in CSS: without
       // it, a control the overflow rule did not catch would silently start a second row.
-      className={`flex flex-nowrap items-center gap-2 border-t border-hair pt-1.5 ${className}`}
+      className={`flex flex-nowrap items-center gap-2 pt-1.5 ${className}`}
       style={{ minHeight: 40 }}
     >
       {/* The input group in a row of its own, so it can pack tighter than the bar — see the header. */}
