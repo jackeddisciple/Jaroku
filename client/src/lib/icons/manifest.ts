@@ -403,7 +403,15 @@ export const MANIFEST = {
   palette: { jump: "ArrowUpRight01Icon" },
 
   // ── §6 Empty state actions ────────────────────────────────────────────────
-  emptyState: { openDeployPanel: "ArrowUpRight01Icon" },
+  emptyState: {
+    openDeployPanel: "ArrowUpRight01Icon",
+    /** The new-agent screen's four suggestion cards, one key per command the card starts. */
+    plan: "IdeaIcon",
+    build: "HammerIcon",
+    explain: "Telescope01Icon",
+    // The Trace tab's own mark, under a key that says what THIS one does.
+    trace: "FootprintsIcon",
+  },
 } as const;
 
 /** Every surface group in the registry. */

@@ -85,6 +85,7 @@ import { ACCENT, BRAND, ICON, INTERACTION, STATUS, SURFACE, TEXT, TYPE } from ".
 import { JarokuGlyph, ProviderMark } from "../lib/icons.tsx";
 import { firstNameOf } from "../lib/accountOnboarding.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
+import { ComposerSuggestions } from "./composer/ComposerSuggestions.tsx";
 import { useStreamedText } from "../lib/useStreamedText.ts";
 import { useVoiceInput } from "../lib/useVoiceInput.ts";
 import { VoiceWaveform } from "./VoiceWaveform.tsx";
@@ -887,6 +888,20 @@ export function BuildPane({
       composerRef.current?.focus();
     }
   }, [chatPrefillNonce, setComposerMode]);
+
+  // A suggestion card's command goes INTO the composer — the first word of its sentence, with the
+  // caret after it — and nothing is sent: where the message goes is decided by the composer's own
+  // rules, exactly as if the word had been typed. Cards are only offered on an empty Chat draft, so
+  // the word is the whole draft. The caret is placed a frame later, once the textarea holds it.
+  const insertCommand = (command: string): void => {
+    setChatDraft(command);
+    requestAnimationFrame(() => {
+      const el = composerRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(command.length, command.length);
+    });
+  };
 
   const connected = useTraceStore((s) => s.connection === "open");
   const genStatus = useBuildStore((s) => s.status);
@@ -1901,6 +1916,15 @@ export function BuildPane({
               <h1 className="mt-8 text-balance text-page font-normal text-ink">
                 {firstName ? `What are we cooking today, ${firstName}?` : "What are we cooking today?"}
               </h1>
+              {/* FOUR WAYS TO START, under the question. Offered while the Chat composer is empty and
+                  gone the moment it holds anything — read off the draft, never remembered — and a
+                  click only ever puts a word in the box. */}
+              <ComposerSuggestions
+                className="mt-6"
+                hidden={composerMode !== "chat" || chatDraft.trim() !== ""}
+                onPick={insertCommand}
+              />
+
             </div>
           ) : (
             <EmptyState
