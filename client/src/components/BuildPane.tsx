@@ -1138,11 +1138,30 @@ export function BuildPane({
 
   // Band 2 auto-grows with what is typed into it. MEASURED rather than counted: a wrapped line is
   // still a line, and counting newlines says a 300-character paragraph is one.
+  //
+  // AND RE-MEASURED WHENEVER ITS WIDTH CHANGES, not only when the text does. The same words are more
+  // lines in a narrower box — a window resized, a side panel opened, a stylesheet swapped mid-reload —
+  // and a height measured at one width and kept at another is a composer stuck tall over empty space
+  // (which is how it was found, at the twelve-line cap with nothing typed) or one scrolling text it
+  // has room to show.
   useEffect(() => {
     const el = composerRef.current;
     if (!el || fullscreen) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, LINE_PX * MAX_LINES)}px`;
+    const fit = (): void => {
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, LINE_PX * MAX_LINES)}px`;
+    };
+    fit();
+    if (typeof ResizeObserver === "undefined") return;
+    let width = el.clientWidth;
+    const ro = new ResizeObserver(() => {
+      // Only a change of WIDTH re-fits. Fitting changes the height, and re-fitting on that would loop.
+      if (el.clientWidth === width) return;
+      width = el.clientWidth;
+      fit();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
   }, [text, composerMode, fullscreen]);
 
 
@@ -1475,14 +1494,6 @@ export function BuildPane({
     },
   });
   const showWave = voice.listening && voice.hasAnalyser;
-
-  // Auto-grow the textarea with content (min ~2 lines; generous cap then scroll — never clips).
-  useEffect(() => {
-    const el = composerRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
-  }, [text]);
 
   // One dispatch point: route the message by (selection context + intent) into the EXISTING
   // mechanisms. Only "explain" is a new path; edit/fix reuse sendEdit, rerun reuses branchRun.
