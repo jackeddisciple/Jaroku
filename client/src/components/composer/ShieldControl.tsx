@@ -73,7 +73,10 @@ export function ShieldControl({
             : `Permission mode — ${MODES.find((m) => m.id === value)?.detail ?? modeLabel(value)}`
         }
         expanded={open}
-        active={open || value !== "smart"}
+        // AT REST IT IS THE BAR'S GREY IN EVERY MODE, never the ink of an engaged control — the
+        // product owner's call on 2026-09-10. The word already says which mode is on, and ink on
+        // top of it said the same thing twice; Fast still wears the warning tone below.
+        active={open}
         disabled={disabled || pinned}
         onClick={() => setOpen((v) => !v)}
         // The warning token, NOT the amber this app reserves for in-flight. Keeping amber's single
