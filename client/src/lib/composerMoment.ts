@@ -10,10 +10,11 @@
 // the app is doing, and is null when the answer is "nothing" — a composer that reports "idle" is
 // noise, and the empty state below it already says so.
 //
+// NO PLACEHOLDER NAMES A SHORTCUT — the product owner's call on 2026-09-10. A placeholder is for
+// what to type; the chord that sends it lives in the send button's tooltip, where it is looked for.
+//
 // A pure function on a flat descriptor, so the branching is readable in one place instead of
 // nested inside JSX, and so the order of precedence is a list rather than a shape.
-
-import { keyHint } from "./modKey.ts";
 
 export type ComposerSituation = {
   mode: "chat" | "test";
@@ -63,7 +64,7 @@ export type ComposerMoment = {
  *   3. A decision is waiting. The composer should say what typing means while a gate is open,
  *      because a typed message goes somewhere different then (a plan revision, not a new plan).
  *   4. Something is selected.
- *   5. Otherwise: build one, or change this one.
+ *   5. Otherwise: say what the agent should do.
  */
 export function composerMoment(s: ComposerSituation): ComposerMoment {
   const agent = s.agentName ?? "this agent";
@@ -73,7 +74,7 @@ export function composerMoment(s: ComposerSituation): ComposerMoment {
   // this says what the box is for at all.
   if (s.operating) {
     return {
-      placeholder: `Ask ${agent} what it has done, or give it a job — ${keyHint("⌘↵")} to send`,
+      placeholder: `Ask ${agent} what it has done, or give it a job`,
       status: null,
     };
   }
@@ -86,7 +87,7 @@ export function composerMoment(s: ComposerSituation): ComposerMoment {
       };
     }
     return {
-      placeholder: `Run ${agent} on… — ${keyHint("⌘↵")} to run`,
+      placeholder: `Run ${agent} on…`,
       status: s.running ? "A run is in flight" : null,
     };
   }
@@ -148,12 +149,11 @@ export function composerMoment(s: ComposerSituation): ComposerMoment {
     };
   }
 
+  // ONE SENTENCE, THE SAME SHAPE WITH OR WITHOUT AN AGENT, and never a worked example: an example
+  // that wraps to two lines inside the input makes an empty field look pre-filled, the one thing a
+  // placeholder must not do. The example belongs in the empty state above the composer.
   if (!s.agentName) {
-    // SIX WORDS, NOT A WORKED EXAMPLE. The example ran to twenty-two words and wrapped to two
-    // lines inside the input, which makes an empty field look pre-filled — the one thing a
-    // placeholder must not do. The example itself is not lost: it belongs in the empty state
-    // above the composer, where it can be read rather than typed over.
-    return { placeholder: `Describe an agent — ${keyHint("⌘↵")} to send`, status: null };
+    return { placeholder: "Describe what your agent should do.", status: null };
   }
-  return { placeholder: `Describe a change to ${agent} — ${keyHint("⌘↵")} to send`, status: null };
+  return { placeholder: `Describe what ${agent} should do.`, status: null };
 }
