@@ -65,7 +65,7 @@ export function ComposerSuggestions({
           // decision, and named as an exception in surfaceSystem.test.ts rather than slipped past it.
           // The pointer brightens the face and deepens the border; the focus ring is how a keyboard
           // user sees where they are.
-          className="group flex flex-col items-start gap-2 rounded-card border border-hair bg-panel px-3 py-3 text-left
+          className="group flex flex-col items-start gap-4 rounded-lg border border-hair bg-panel px-4 py-3.5 text-left
             shadow-floating outline-none transition-colors duration-fast hover:border-edge hover:bg-elevated
             focus-visible:bg-elevated focus-visible:shadow-focusring"
         >
