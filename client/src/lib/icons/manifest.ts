@@ -141,6 +141,14 @@ export const MANIFEST = {
   // is drawn through the same factory at the same token, `GameController03Icon` included, which
   // ships from the package at stroke 2 and would otherwise sit heavier than its nine neighbours.
   panel: {
+    /**
+     * The panel's own collapse control, at the top of the rail — `nav.sidebarToggle`'s twin on the
+     * other edge of the window, and chrome rather than a destination for the same reason.
+     *
+     * ONE GLYPH FOR BOTH DIRECTIONS, for that key's reason: the label names the action — "Show the
+     * panel", then "Hide the panel" — and `PanelRightOpenIcon` exists and is not used.
+     */
+    toggle: "PanelRightCloseIcon",
     agent: "Orbit02Icon",
     graph: "ArtboardIcon",
     trace: "FootprintsIcon",

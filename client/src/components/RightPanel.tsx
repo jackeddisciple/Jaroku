@@ -212,8 +212,8 @@ export function RightPanel() {
  * The rail, which stays on screen while the panel is closed.
  *
  * OUTSIDE THE PANEL RATHER THAN INSIDE IT, and that is what makes closing it safe: a collapsed
- * panel is zero pixels wide, and a rail that lived in it would go with it. A cell opens the panel
- * on its tab; the cell that is already showing closes it again.
+ * panel is zero pixels wide, and a rail that lived in it would go with it. The toggle at its top
+ * shows or hides the panel; a cell opens the panel on its tab, and the cell already showing closes it.
  */
 export function RightPanelRail() {
   const tab = useShownTab();
@@ -261,81 +261,103 @@ export function RightPanelRail() {
   }, []);
 
   const visible = TABS.filter((t) => t.id !== "agent" || agentOpen);
+  const toggleLabel = open ? "Hide the panel" : "Show the panel";
 
-  // A TABLIST, AND REACHABLE THE WAY ONE IS. Ten plain buttons meant ten Tab presses to cross the
-  // rail and no announcement of which one was chosen; the pattern is one stop for the whole set,
-  // arrows to move inside it. `roving` is the index Tab lands on — the selected cell, so returning
-  // to the rail returns you where you were.
   return (
-    <div
-      role="tablist"
-      aria-label="Panel"
-      aria-orientation="vertical"
-      onKeyDown={(e) => {
-        const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
-        if (!step) return;
-        e.preventDefault();
-        const at = visible.findIndex((t) => t.id === tab);
-        const next = visible[(at + step + visible.length) % visible.length];
-        if (next) setTab(next.id);
-      }}
-      className="flex w-10 shrink-0 flex-col items-center gap-0.5 border-l border-hair bg-bg py-2"
-    >
-      {visible.map((t) => {
-        const active = tab === t.id;
-        // LIT ONLY WHILE THE PANEL SHOWS IT. A closed panel still has a tab in the store and nothing
-        // on screen, and a highlighted cell would say otherwise.
-        const shown = open && active;
-        return (
-          <button
-            key={t.id}
-            type="button"
-            role="tab"
-            aria-selected={shown}
-            tabIndex={active ? 0 : -1}
-            ref={(el) => {
-              // Focus follows selection only while the rail already has it — an arrow press
-              // should move the focus ring with the choice, but a click from the trace pane
-              // must not yank focus out of what somebody was reading.
-              if (active && el && el.parentElement?.contains(document.activeElement)) el.focus();
-            }}
-            // The tooltip is not decoration here — it is the label. A glyph nobody can name is
-            // a worse control than the word it replaced, so every cell in this rail carries
-            // both a title for the pointer and a name for assistive tech.
-            title={t.label}
-            aria-label={t.label}
-            onClick={() => (shown ? setOpen(false) : setTab(t.id))}
-            className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
-              shown ? "bg-active text-accent" : "text-muted hover:bg-active/40 hover:text-ink"
-            }`}
-          >
-            {/* `lg`, MATCHING THE SIDEBAR'S DESTINATIONS. These two rails are the same kind of
-                control on opposite edges of the window — a column of marks that each swap what
-                fills the middle — and two of them at different sizes reads as one of them being
-                a lesser version of the other. The cell grows with the mark so the padding around
-                it is unchanged. */}
-            <t.Mark size={ICON.lg} />
-            {/* THE ONE BADGE IN THIS RAIL, and it is computable while the tab is locked — the
-                health route answers in counts, without elevation, so somebody is not asked for a
-                passcode to be told whether they need to care. Carries a title as well as a colour,
-                because a coloured dot alone says nothing to a screen reader. */}
-            {/* Amber for anything in flight, the error tone for a stopped state. Diverged is NOT
-                amber, deliberately: it is not something working, it is something waiting for a
-                person, and wearing the running colour would make it read as progress. */}
-            {t.id === "github" && githubBadge ? (
-              <GithubBadge badge={githubBadge} syncing={githubBadge === "⟳"} />
-            ) : null}
-            {t.id === "secrets" && secretsNeedAttention ? (
-              <span
-                title="A credential needs attention"
-                aria-label="A credential needs attention"
-                role="img"
-                className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-run"
-              />
-            ) : null}
-          </button>
-        );
-      })}
+    <div className="flex w-10 shrink-0 flex-col items-center border-l border-hair bg-bg py-2">
+      {/* THE PANEL'S OWN TOGGLE, at the top of the rail it belongs to — the sidebar's toggle on the
+          other edge of the window, one glyph in two states with a label that names the action.
+          Outside the tablist because it is not a destination: it shows or hides whichever tab is
+          chosen, and a closed panel opens on the tab it last had. */}
+      <button
+        type="button"
+        title={toggleLabel}
+        aria-label={toggleLabel}
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-active/40 hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+      >
+        <Icon.panel.toggle size={ICON.md} />
+      </button>
+
+      {/* A hairline between the control and the destinations, and the reason the ten marks sit a
+          little lower than they did: the toggle acts on the panel, the marks choose what is in it. */}
+      <div aria-hidden className="my-1.5 h-px w-5 shrink-0 bg-hair" />
+
+      {/* A TABLIST, AND REACHABLE THE WAY ONE IS. Ten plain buttons meant ten Tab presses to cross
+          the rail and no announcement of which one was chosen; the pattern is one stop for the
+          whole set, arrows to move inside it. `roving` is the index Tab lands on — the selected
+          cell, so returning to the rail returns you where you were. */}
+      <div
+        role="tablist"
+        aria-label="Panel"
+        aria-orientation="vertical"
+        onKeyDown={(e) => {
+          const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+          if (!step) return;
+          e.preventDefault();
+          const at = visible.findIndex((t) => t.id === tab);
+          const next = visible[(at + step + visible.length) % visible.length];
+          if (next) setTab(next.id);
+        }}
+        className="flex flex-col items-center gap-0.5"
+      >
+        {visible.map((t) => {
+          const active = tab === t.id;
+          // LIT ONLY WHILE THE PANEL SHOWS IT. A closed panel still has a tab in the store and
+          // nothing on screen, and a highlighted cell would say otherwise.
+          const shown = open && active;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={shown}
+              tabIndex={active ? 0 : -1}
+              ref={(el) => {
+                // Focus follows selection only while the rail already has it — an arrow press
+                // should move the focus ring with the choice, but a click from the trace pane
+                // must not yank focus out of what somebody was reading.
+                if (active && el && el.parentElement?.contains(document.activeElement)) el.focus();
+              }}
+              // The tooltip is not decoration here — it is the label. A glyph nobody can name is
+              // a worse control than the word it replaced, so every cell in this rail carries
+              // both a title for the pointer and a name for assistive tech.
+              title={t.label}
+              aria-label={t.label}
+              onClick={() => (shown ? setOpen(false) : setTab(t.id))}
+              className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+                shown ? "bg-active text-accent" : "text-muted hover:bg-active/40 hover:text-ink"
+              }`}
+            >
+              {/* `lg`, MATCHING THE SIDEBAR'S DESTINATIONS. These two rails are the same kind of
+                  control on opposite edges of the window — a column of marks that each swap what
+                  fills the middle — and two of them at different sizes reads as one of them being
+                  a lesser version of the other. The cell grows with the mark so the padding around
+                  it is unchanged. */}
+              <t.Mark size={ICON.lg} />
+              {/* THE ONE BADGE IN THIS RAIL, and it is computable while the tab is locked — the
+                  health route answers in counts, without elevation, so somebody is not asked for a
+                  passcode to be told whether they need to care. Carries a title as well as a colour,
+                  because a coloured dot alone says nothing to a screen reader. */}
+              {/* Amber for anything in flight, the error tone for a stopped state. Diverged is NOT
+                  amber, deliberately: it is not something working, it is something waiting for a
+                  person, and wearing the running colour would make it read as progress. */}
+              {t.id === "github" && githubBadge ? (
+                <GithubBadge badge={githubBadge} syncing={githubBadge === "⟳"} />
+              ) : null}
+              {t.id === "secrets" && secretsNeedAttention ? (
+                <span
+                  title="A credential needs attention"
+                  aria-label="A credential needs attention"
+                  role="img"
+                  className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-run"
+                />
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
