@@ -1957,50 +1957,14 @@ export function BuildPane({
           chosen over a wider box. Nothing can overflow at this width, whatever is in the bar. */}
       <div className="mx-auto w-full max-w-[48rem] shrink-0 px-6 pb-4 pt-2">
         <NoProviderKeyBanner />
-        {/* The agent's name — new-agent generation only (Chat mode, no agent selected). The
-            connectors that shared this row are picked on the tray behind the composer now; see
-            TrayConnectors. */}
-        {composerMode === "chat" && mode === "generate" && (
-          <div className={`mb-2 flex flex-wrap items-center gap-2 ${standalone ? "mt-1" : ""}`}>
-            {/* Locked once a plan exists, because by then it does nothing. Generation takes the
-                name from the approved plan record, not from this field (server/src/index.ts —
-                "building what was approved is the whole point of the gate"), and a revision keeps
-                the name the first plan was given. So typing here after planning changed nothing
-                and said nothing — the agent quietly kept its old name.
-
-                Leaving it editable-but-ignored is the worst of the options. Locking it says the
-                name is settled, and the placeholder says how to change your mind. */}
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              // Hidden, not removed, on first run: `name` is still the state the submit path
-              // reads, and it is still empty, which is what makes generation take the name from
-              // the description. See `standalone` for why it is not on screen there.
-              hidden={standalone}
-              // A DRAFT'S NAME IS SETTLED THE SAME WAY A PLAN'S IS, and locking says so. Generation
-              // into an existing row keeps that row's name and slug — that is the whole point of
-              // building into it — so a field that still accepted typing would be the
-              // editable-but-ignored control the comment above rejects, one surface along.
-              disabled={busy || Boolean(planId) || agentIsDraft}
-              placeholder={
-                agentIsDraft ? `name (${agent?.name ?? "chosen"})`
-                  : planId ? "name (set by the plan)" : "name (optional)"
-              }
-              title={
-                agentIsDraft
-                  ? "This agent already has a name — describing it fills in everything else"
-                  : planId
-                    ? "The name is fixed once a plan is on the table — discard the plan to change it"
-                    : "Optional. Otherwise the name is taken from your description."
-              }
-              className="ml-auto w-40 bg-elevated text-ink placeholder:text-faint rounded-input border border-edge px-2.5 py-1 text-caption outline-none focus:shadow-focusring disabled:opacity-50"
-            />
-          </div>
-        )}
+        {/* NO NAME FIELD ABOVE THE COMPOSER — the product owner's call on 2026-09-11. A new agent
+            takes its name from the description, or from onboarding, which still fills `name`; the
+            connectors that shared the row are picked on the tray behind the composer now (see
+            TrayConnectors). */}
 
         {/* MCP tools — new-agent generation only, and only when a server is connected.
-            Deliberately a separate row from the connectors above rather than more chips in
-            the same one. They are not the same kind of thing: ticking Postgres asks for an
+            Deliberately apart from the connectors on the tray rather than more logos among
+            them. They are not the same kind of thing: ticking Postgres asks for an
             audited template, ticking an MCP tool asks for a call into code nobody here has
             read, and a row that mixed them would quietly say those decisions are equivalent.
 
