@@ -1582,7 +1582,7 @@ export interface GithubView {
 /**
  * §B.1.3's three positions. Never a boolean — the middle one is the interesting case.
  *
- * `dry_run_only`        a check runs the free dry-run provider. Nobody's money.
+ * `dry_run_only`        "Nobody": no pull request spends; a check proves the tools import and run.
  * `collaborators_paid`  a collaborator's pull request may spend; a stranger's may not.
  * `always_paid`         any pull request may spend this workspace's provider balance.
  */

@@ -317,7 +317,7 @@ function DeployForm({
       <div>
         <div className={TYPE.sectionLabel}>Runs on</div>
         <div className="mt-1.5 flex flex-wrap items-center gap-1">
-          {catalogue.filter((p) => p.id !== "fake").map((p) => (
+          {catalogue.map((p) => (
             <Chip
               key={p.id}
               size="md"
@@ -337,10 +337,6 @@ function DeployForm({
             </Chip>
           ))}
         </div>
-        <p className="mt-1.5 text-tiny leading-[1.5] text-faint">
-          The dry-run provider is not deployable — it answers with placeholder text, so a
-          deployed one would be a URL that looks like it works.
-        </p>
       </div>
 
       <div>

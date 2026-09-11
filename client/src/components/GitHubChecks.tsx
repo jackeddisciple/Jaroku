@@ -30,11 +30,18 @@ import type { GithubProviderPolicy, GithubView } from "../types.ts";
 
 /** §B.1.3's three positions, in the words that describe what each one lets happen. */
 const POLICIES: { id: GithubProviderPolicy; label: string; what: string }[] = [
-  { id: "dry_run_only", label: "Dry run", what: "Checks run on the free dry-run provider. Nobody's money." },
+  // "NOBODY", NOT "DRY RUN". The dry run is no longer a model anyone picks, and what this position
+  // promises is about money: its checks still prove every tool imports and runs — on the scripted
+  // stand-in the check runner keeps for exactly that — and spend nothing.
+  {
+    id: "dry_run_only",
+    label: "Nobody",
+    what: "No pull request spends this workspace's balance. Checks prove the tools import and run.",
+  },
   {
     id: "collaborators_paid",
     label: "Collaborators",
-    what: "A collaborator's pull request may spend this workspace's balance; a stranger's runs dry.",
+    what: "A collaborator's pull request may spend this workspace's balance; a stranger's only proves the tools run.",
   },
   { id: "always_paid", label: "Anybody", what: "Any pull request may spend this workspace's provider balance." },
 ];
