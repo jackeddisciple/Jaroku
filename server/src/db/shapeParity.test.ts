@@ -287,6 +287,50 @@ async function threadRoundTrip(
   return { items, mode: row?.mode, refused };
 }
 
+// --- the fifth effort level, which 072 widened on both drivers --------------------------------
+//
+// THE SAME CLAIM AS THE KINDS ABOVE, one migration later. Postgres drops four constraints and adds
+// wider ones; SQLite writes two tables out again. `max` has to be writable through both routes, and
+// a word outside the five refused by both — a rebuild that lost its CHECK would take `max` too.
+async function effortRoundTrip(
+  db: {
+    run: (sql: string, params?: unknown[]) => Promise<unknown>;
+    get: <T>(sql: string, params?: unknown[]) => Promise<T | undefined>;
+  },
+): Promise<{ settings: unknown; variant: string; refused: string }> {
+  const at = "2026-02-03T12:00:00.000Z";
+  await db.run(
+    `INSERT INTO conversation_settings (workspace_id, conversation_id, reasoning_effort, updated_at)
+     VALUES (?, ?, 'max', ?)`,
+    [LOCAL_WORKSPACE_ID, threadIds.thread, at],
+  );
+  const variantId = randomUUID();
+  await db.run(
+    `INSERT INTO turn_variants
+       (id, workspace_id, turn_id, ordinal, model_id, provider, effort_requested, effort_applied, created_at)
+     VALUES (?, ?, ?, 1, 'claude-opus-5', 'anthropic', 'max', 'max', ?)`,
+    [variantId, LOCAL_WORKSPACE_ID, threadIds.items[1], at],
+  );
+  let refused = "";
+  try {
+    await db.run(
+      `UPDATE conversation_settings SET reasoning_effort = 'extreme' WHERE workspace_id = ? AND conversation_id = ?`,
+      [LOCAL_WORKSPACE_ID, threadIds.thread],
+    );
+  } catch (err) {
+    refused = (err as Error).message;
+  }
+  const s = await db.get<{ reasoning_effort: unknown }>(
+    `SELECT reasoning_effort FROM conversation_settings WHERE workspace_id = ? AND conversation_id = ?`,
+    [LOCAL_WORKSPACE_ID, threadIds.thread],
+  );
+  const v = await db.get<Record<string, unknown>>(
+    `SELECT model_id, provider, effort_requested, effort_applied FROM turn_variants WHERE id = ?`,
+    [variantId],
+  );
+  return { settings: s?.reasoning_effort, variant: JSON.stringify(v ?? {}), refused };
+}
+
 const tmp = mkdtempSync(join(tmpdir(), "jaroku-parity-"));
 const sqlite = new SqliteDb(join(tmp, "parity.db"));
 await migrate(sqlite.migrationTarget(), join(MIGRATIONS, "sqlite"), () => {});
@@ -362,6 +406,22 @@ const ran = await withScratchPostgres(async (pg) => {
   check(
     itemsA.mode === "build" && itemsB.mode === "build",
     `a thread inserted without naming a mode is a build thread on both (sqlite: ${String(itemsA.mode)}, pg: ${String(itemsB.mode)})`,
+  );
+
+  console.log("\nthe fifth effort level");
+  const effA = await effortRoundTrip(sqlite);
+  const effB = await effortRoundTrip(pg);
+  check(
+    effA.settings === "max" && effB.settings === "max",
+    `a conversation can remember Max on both drivers (sqlite: ${String(effA.settings)}, pg: ${String(effB.settings)})`,
+  );
+  check(
+    effA.variant === effB.variant && effA.variant.includes('"effort_applied":"max"'),
+    `a variant that ran at Max reads back identically\n       sqlite: ${effA.variant}\n       pg:     ${effB.variant}`,
+  );
+  check(
+    effA.refused !== "" && effB.refused !== "",
+    `and both still refuse a sixth word (sqlite: ${effA.refused ? "refused" : "ACCEPTED"}, pg: ${effB.refused ? "refused" : "ACCEPTED"})`,
   );
   return true;
 });

@@ -310,6 +310,107 @@ console.log("\nrefusing");
   db.close();
 }
 
+// --- 072, the fifth effort level, against a database with something in it --------------------
+//
+// THE SAME TWO PASSES AS 066, and for the same reason: a deployment runs 072 against tables that
+// already hold rows, and a table rebuild is exactly the kind of migration that is right on an empty
+// database and wrong on a full one. The rows are a conversation that remembered an effort and a
+// variant that recorded a clamp — both columns this migration widens, in both tables it rewrites.
+{
+  const real = join(fileURLToPath(new URL("../..", import.meta.url)), "migrations", "sqlite");
+  const upTo = (limit: number): string => {
+    const dir = mkdtempSync(join(tmpdir(), "jaroku-072-"));
+    dirs.push(dir);
+    for (const f of readdirSync(real)) {
+      if (!f.endsWith(".sql") || Number(f.slice(0, 3)) > limit) continue;
+      copyFileSync(join(real, f), join(dir, f));
+    }
+    return dir;
+  };
+
+  const { t, db } = target();
+  await migrate(t, upTo(71), quiet);
+
+  const WS = "00000000-0000-4000-8000-0000000000a1";
+  const USER = "00000000-0000-4000-8000-0000000000b1";
+  const THREAD = "00000000-0000-4000-8000-0000000000c1";
+  const TURN = "00000000-0000-4000-8000-0000000000d1";
+  const now = "2026-01-01T00:00:00.000Z";
+  db.exec(`
+    INSERT INTO workspaces (id, slug, name, kind, plan, created_at)
+      VALUES ('${WS}', 'effort', 'Effort', 'personal', 'free', '${now}');
+    INSERT INTO users (id, external_id, email, created_at)
+      VALUES ('${USER}', 'ext-effort', 'effort@example.com', '${now}');
+    INSERT INTO threads (id, workspace_id, agent_id, agent_name_snapshot, title, title_is_custom,
+                         created_by, created_at, last_activity_at, status)
+      VALUES ('${THREAD}', '${WS}', NULL, 'tracey', 'Tracey', 0, '${USER}', '${now}', '${now}', 'idle');
+    INSERT INTO thread_items (id, workspace_id, thread_id, kind, ref_id, role, body, created_at)
+      VALUES ('${TURN}', '${WS}', '${THREAD}', 'plan', 'plan-1', NULL, NULL, '${now}');
+    INSERT INTO conversation_settings
+      (workspace_id, conversation_id, reasoning_effort, permission_mode, updated_by, updated_at)
+      VALUES ('${WS}', '${THREAD}', 'xhigh', 'smart', '${USER}', '${now}');
+    INSERT INTO turn_variants
+      (id, workspace_id, turn_id, ordinal, model_id, provider, effort_requested, effort_applied,
+       duration_ms, tokens_in, tokens_out, cost_usd, agent_version_id, created_at)
+      VALUES ('v1', '${WS}', '${TURN}', 1, 'claude-opus-5', 'anthropic', 'xhigh', 'high',
+              1200, 10, 20, 0.5, NULL, '${now}');
+  `);
+
+  await migrate(t, upTo(72), quiet);
+
+  const one = (sql: string): number => Number((db.prepare(sql).get() as { n: number | bigint }).n);
+  const tryExec = (sql: string): string => {
+    try { db.exec(sql); return ""; } catch (e) { return (e as Error).message; }
+  };
+
+  // THE ROWS THE REWRITE COPIED, every column of them, because a copy that dropped one would pass
+  // any assertion that only counted.
+  const s = db.prepare(`SELECT reasoning_effort, permission_mode, updated_by FROM conversation_settings`).get() as
+    Record<string, unknown>;
+  const settingsKept = s?.reasoning_effort === "xhigh" && s?.permission_mode === "smart" && s?.updated_by === USER;
+  check(settingsKept, `072: the remembered settings survived the rewrite${settingsKept ? "" : ` — ${JSON.stringify(s)}`}`);
+  const v = db.prepare(
+    `SELECT model_id, provider, effort_requested, effort_applied, duration_ms, tokens_in, tokens_out, cost_usd
+       FROM turn_variants WHERE id = 'v1'`,
+  ).get() as Record<string, unknown>;
+  const variantKept = JSON.stringify(v) ===
+    JSON.stringify({ model_id: "claude-opus-5", provider: "anthropic", effort_requested: "xhigh",
+      effort_applied: "high", duration_ms: 1200, tokens_in: 10, tokens_out: 20, cost_usd: 0.5 });
+  check(variantKept, `072: the variant survived with every column, the clamp included${variantKept ? "" : ` — ${JSON.stringify(v)}`}`);
+
+  const idx = (db.prepare(
+    `SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='turn_variants' ORDER BY name`,
+  ).all() as { name: string }[]).map((r) => r.name);
+  check(idx.includes("turn_variants_turn_ordinal"), "072: the unique (workspace, turn, ordinal) index was recreated");
+  check(idx.includes("turn_variants_turn"), "072: and the lookup index beside it");
+  check(
+    tryExec(`INSERT INTO turn_variants (id, workspace_id, turn_id, ordinal, created_at)
+             VALUES ('v-dupe', '${WS}', '${TURN}', 1, '${now}')`) !== "",
+    "072: which still refuses a second variant at the same ordinal",
+  );
+
+  // THE WIDENING, from both directions and in both tables: the fifth word is taken, a sixth is not.
+  // Only the refusal could fail on a table whose CHECK had been dropped and never put back.
+  db.exec(`UPDATE conversation_settings SET reasoning_effort = 'max' WHERE conversation_id = '${THREAD}'`);
+  check(one(`SELECT COUNT(*) n FROM conversation_settings WHERE reasoning_effort = 'max'`) === 1,
+    "072: a conversation can remember Max");
+  db.exec(`INSERT INTO turn_variants (id, workspace_id, turn_id, ordinal, effort_requested, effort_applied, created_at)
+           VALUES ('v2', '${WS}', '${TURN}', 2, 'max', 'max', '${now}')`);
+  check(one(`SELECT COUNT(*) n FROM turn_variants WHERE effort_applied = 'max'`) === 1,
+    "072: and a variant can record that it ran at Max");
+  check(tryExec(`UPDATE conversation_settings SET reasoning_effort = 'extreme'`).includes("CHECK"),
+    "072: the settings CHECK still refuses a level that is not one of the five");
+  check(
+    tryExec(`INSERT INTO turn_variants (id, workspace_id, turn_id, ordinal, effort_applied, created_at)
+             VALUES ('v3', '${WS}', '${TURN}', 3, 'extreme', '${now}')`).includes("CHECK"),
+    "072: and so does the variants one",
+  );
+  check((db.prepare(`PRAGMA foreign_key_check`).all() as unknown[]).length === 0,
+    "072: every foreign key in the database still resolves");
+
+  db.close();
+}
+
 for (const d of dirs) rmSync(d, { recursive: true, force: true });
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
