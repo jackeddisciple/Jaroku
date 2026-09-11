@@ -106,7 +106,7 @@ a tool you trust and one you don't:
 | **Unknown ≠ zero** | An unpriced model reports `null` cost, never `$0.00`. A judge failure is *unscored*, never a score of 0. Both survive CSV export. |
 | **Nothing lands unreviewed** | Generation shows you a plan first. Edits show you a diff first. Both stage to a temp directory and atomic-swap only after validation passes. |
 | **stdout is sacred** | stdout carries trace events and nothing else. The runner `dup2`s fd 1 to stderr before importing any generated code, so a stray `print()` physically cannot corrupt the stream. |
-| **Money asks first** | The free dry-run path is one click. Spending real money requires picking providers, seeing an estimate, and setting a hard budget ceiling the server enforces. |
+| **Money asks first** | Every model bills per token, so an eval is never one click: you pick models, see an estimate, and set a hard budget ceiling the server enforces. |
 | **Unreviewed code is labelled as such** | Connectors are audited and copied in verbatim. An [MCP server](#mcp-servers) is third-party code nobody here has read, so its tools carry a badge everywhere they appear, an agent only gets the specific ones it was granted, and a high-impact one stops for your confirmation before it runs. |
 | **A control that does nothing is worse than no control** | A stored setting has to change what the machine does, or it is a lie the UI keeps telling. A read that fails answers on its own channel rather than leaving an empty state that means "there is nothing here". A button with no handler fails `test:dead-controls`, and an action name with no case fails the typecheck. |
 
@@ -119,7 +119,7 @@ a tool you trust and one you don't:
 | **Node.js** | **22+** (24 recommended) | The server uses the built-in `node:sqlite` module — no native build step, no `better-sqlite3`. |
 | **Python** | **3.12+** | Pinned in `runtime/.python-version`. |
 | **uv** | any recent | The server spawns every agent as `uv run python -m jaroku_runner …`. Install from [astral.sh/uv](https://docs.astral.sh/uv/). |
-| **Anthropic API key** | optional | Needed for planning, generation, editing, explain and the eval judge. Everything else — running agents on the dry-run provider, the trace pipeline, the graph view, the whole UI — works with no key at all. |
+| **A provider key** | to run anything | Anthropic for planning, generation, editing, explain and the eval judge; Anthropic, OpenAI or Meta for the agents themselves. Without one you can look around the whole UI, and anything that would run a model opens Secrets at the key it needs. |
 | **Railway CLI** | optional | Only to deploy. Jaroku uses it to upload a project; everything else about a deploy goes over Railway's API. `brew install railway` or `npm i -g @railway/cli`. |
 
 macOS and Linux are the tested platforms. On macOS the server prepends `/opt/homebrew/bin`
@@ -145,7 +145,7 @@ cd ..
 
 The connector SDKs are deliberately kept out of the base install. Each connector template
 lazy-imports its SDK and returns a clear message when it is absent, so the trace pipeline and
-the dry-run path never depend on them.
+the test suites' dry-run model never depend on them.
 
 **2 — Node server** (install this before the client — the client's test scripts borrow the
 server's `tsx` binary)
@@ -179,10 +179,9 @@ ANTHROPIC_API_KEY=sk-ant-...
 # Only needed to run agents on the OpenAI provider.
 OPENAI_API_KEY=sk-...
 
-# Only needed to run agents on Gemini. GOOGLE_API_KEY and not GEMINI_API_KEY, because that is
-# the name langchain_google_genai reads — and it is NOT the Gmail connector's OAuth app, which
-# is JAROKU_OAUTH_GOOGLE_CLIENT_ID / _SECRET below and will not run a model.
-GOOGLE_API_KEY=...
+# Only needed to run agents on Muse Spark. META_API_KEY rather than the MODEL_API_KEY of Meta's
+# own examples, which in a product with three providers names none of them. Keys start LLM|.
+META_API_KEY=LLM|...
 
 # Only needed by the connectors you actually select.
 GMAIL_CLIENT_ID=
@@ -281,12 +280,13 @@ The first time you open the UI on a machine, Jaroku walks you from nothing to a 
 four screens, then gets out of the way permanently.
 
 1. **Welcome** — what the product does, one button.
-2. **Connect a provider** — Anthropic and/or OpenAI, with the key's destination stated before
+2. **Connect a provider** — Anthropic, OpenAI or Meta, with the key's destination stated before
    the field that wants it. **Test connection** is free and writes nothing; **Save** writes.
-   There is a real skip: the dry-run path costs nothing and exercises the whole trace/graph/UI.
-3. **First prompt** — the ordinary composer, alone, with a few real examples. With an Anthropic
-   key those are agents to build; without one they are inputs for the bundled `example_agent`,
-   because planning and generation go through Anthropic while *running* does not.
+   There is a real skip: you can look around everything, and whatever would run a model asks
+   for a key first.
+3. **First prompt** — the ordinary composer, alone, with a few real agents to describe.
+   Planning and generation go through Anthropic, so without a Claude key a send opens Secrets
+   at it instead.
 4. **First run** — the sidebar arrives when a plan card does, the right panel when files start
    streaming, and the Trace tab when the first run does. Nothing appears before it has something
    in it.
@@ -555,7 +555,7 @@ any generated module the runner:
 After that, "write to stdout" and "write to stderr" are the same thing for every line of code
 that is not the event emitter. It is irreversible by design.
 
-**The dry-run model** (`fake.py`) is the default provider and costs nothing. It is
+**The dry-run model** (`fake.py`) is the test suites' stand-in — never offered in the product, and free. It is
 *schema-driven*: it walks the agent's `TOOLS`, reads each tool's argument schema, synthesises
 one call per tool with placeholder arguments, then finishes with a plain answer so the
 conditional edge can route to `END`. That buys you, for free and with no API key:
@@ -588,8 +588,8 @@ Deliberately **not** in the contract: anything Jaroku. A generated agent that im
 standard LangGraph.
 
 Because the model is injected rather than constructed, the provider dropdown is a real
-feature instead of a regeneration: the same project runs unchanged on the free dry-run model,
-on Claude, or on GPT.
+feature instead of a regeneration: the same project runs unchanged on Claude, on GPT or on
+Muse Spark.
 
 `runtime/agents/example_agent/` is the hand-written reference implementation — two
 dependency-free tools, a custom `notes` state field, a system prompt as editable markdown. It
@@ -1320,8 +1320,7 @@ terminal and recorded, so a broken judge costs you the quality column and nothin
 
 ### Starting an eval
 
-The free dry-run path is one click, because it is genuinely free. A real-provider eval is
-deliberately asymmetric:
+Every model on offer bills per token, so starting an eval is deliberately never one click:
 
 ```
 pick providers → see an estimate (a RANGE, and what it's based on) → set a ceiling → confirm
@@ -1356,8 +1355,9 @@ priced entry, could not be selected anywhere, and nothing failed because nothing
 lists. That is the drift this file's own header warns about, one level up — not two copies of the
 prices, but a second, hidden copy of the *catalogue* that the priced one could not correct.
 `test:pricing` now asserts the properties that keep it safe: every model names a provider, every
-provider has a display name, the free dry-run entry is present, and every model the catalogue offers
-resolves through the same `priceFor` that will be asked about it later.
+offered provider has a display name, the catalogue is exactly the nine models the product names, each
+with a name, nothing offered is free, and every model the catalogue offers resolves through the same
+`priceFor` that will be asked about it later.
 
 Prices are USD **per million tokens** so they're auditable against a published price sheet.
 Three rules, implemented identically on both sides:
@@ -1674,7 +1674,7 @@ not an edit's.
 Importing the bridge does **file reads only, never network** — validation imports the staged
 project under a 20-second kill timer and graph introspection imports it again, and neither may
 depend on a third party being awake. Because it builds each tool from the *real* declared JSON
-Schema, the free dry-run model synthesises arguments for MCP tools too, so every one of them is
+Schema, the dry-run model the test suites use synthesises arguments for MCP tools too, so every one of them is
 exercised with no server, no credential and no money.
 
 Like a connector template, **the bridge is copied at generation time**: updating the template
@@ -1812,12 +1812,12 @@ than a boolean, because the middle one is the interesting case:
 
 | Policy | What a check may use |
 |---|---|
-| Dry run | The free dry-run provider. Nobody's money |
-| Collaborators | A collaborator's pull request may spend this workspace's balance; a stranger's runs dry |
+| Nobody | No pull request spends; checks prove the tools import and run |
+| Collaborators | A collaborator's pull request may spend this workspace's balance; a stranger's only proves the tools run |
 | Anybody | Any pull request may spend it |
 
 The default when a config row is first written is the middle one — defaulting to *anybody* would make
-opting in an opt-out of the boundary, and defaulting to *dry run* would make the feature do nothing
+opting in an opt-out of the boundary, and defaulting to *nobody* would make the feature do nothing
 until configured twice. The two fields are patched independently: clearing the dataset turns checks
 off and keeps the policy, and changing the policy does not clear the dataset.
 
@@ -1988,8 +1988,8 @@ curl -XPOST https://your-agent.up.railway.app/run \
 
 ### What a deploy refuses
 
-- **The dry-run provider.** It answers with placeholder text; a deployed one would be a URL that
-  looks like a working agent and is not.
+- **A provider other than Claude, OpenAI or Meta** — the test suites' dry-run model included. It
+  answers with placeholder text; a deployed one would be a URL that looks like a working agent and is not.
 - **A missing connector credential** — or one you unticked. Rule 7 makes an unconfigured
   template *raise* on every call, so that container deploys green and is dead, and it makes no
   difference whether the value was absent or withheld. Overridable by the same checkbox — you
@@ -2196,8 +2196,8 @@ agent, for real — and reusing the routing would mean *"refund order 4471"* cou
 instruction and quietly turned into a code change to the agent that was supposed to do it.
 
 **A pre-flight gate sits between the button and the dispatch**, naming the agent, the deployment
-version, and the provider and model it will run on. Money asks first, and there is no free dry-run
-path out here. A deployment written before migration 041 has no recorded version, and the gate says
+version, and the provider and model it will run on. Money asks first; every model out here bills
+per token. A deployment written before migration 041 has no recorded version, and the gate says
 *an unrecorded version* rather than guessing one.
 
 Then five steps, in this order:
@@ -2645,7 +2645,7 @@ to happen because a browser cannot put a header on a WebSocket:
 | `JAROKU_OBJECT_SIGNING_KEY` | generated into `server/.objectkey` | Signs presigned object URLs. **Required in production**: a per-replica key produces URLs that verify on one replica and nowhere else |
 | `JAROKU_SECRET_STORE` | `dotenv` | `dotenv` \| `kms`. `dotenv` is `runtime/.env` and refuses `NODE_ENV=production`, because one file has no workspace in it |
 | `JAROKU_MASTER_KEY` | — | Wraps each workspace's data key when `JAROKU_SECRET_STORE=kms`. No generated fallback: a regenerated master key would make every stored credential permanently unreadable |
-| `JAROKU_OAUTH_GOOGLE_CLIENT_ID` / `_SECRET` | — | The Google OAuth app the Gmail connector is granted through. **Not** the Gemini credential — that is `GOOGLE_API_KEY` under [Models](#models), and setting one will not do the other's job. Unset means the connector is listed as unavailable, which is the local default and not an error |
+| `JAROKU_OAUTH_GOOGLE_CLIENT_ID` / `_SECRET` | — | The Google OAuth app the Gmail connector is granted through. It runs no model: Jaroku offers no Google model, and no provider key under [Models](#models) stands in for it. Unset means the connector is listed as unavailable, which is the local default and not an error |
 | `JAROKU_OAUTH_SLACK_CLIENT_ID` / `_SECRET` | — | The same, for Slack |
 | `JAROKU_OAUTH_REDIRECT_BASE` | `http://localhost:<port>` | Where a provider sends the browser back. `{base}/v1/oauth/{provider}/callback` must be registered as an authorised redirect URI |
 | `JAROKU_APP_URL` | `http://localhost:5173` | Where the browser is sent once a flow finishes. A `returnTo` is a PATH joined to this and never a URL of its own — see [the flow](#the-flow-and-the-two-things-that-defend-it) |
@@ -2703,7 +2703,7 @@ to happen because a browser cannot put a header on a WebSocket:
 |---|---|---|
 | `ANTHROPIC_API_KEY` | — | Planning, generation, editing, explain, judging — **and** running an agent on Claude |
 | `OPENAI_API_KEY` | — | Running an agent on OpenAI. Nothing Jaroku itself does uses it |
-| `GOOGLE_API_KEY` | — | Running an agent on Gemini. Nothing Jaroku itself does uses it. Not the Gmail connector's credential — that is `JAROKU_OAUTH_GOOGLE_CLIENT_ID` / `_SECRET`, which will not run a model |
+| `META_API_KEY` | — | Running an agent on Muse Spark. Nothing Jaroku itself does uses it. Meta's own examples call it `MODEL_API_KEY`; this is the name Jaroku stores and reads |
 | `JAROKU_GEN_MODEL` | `claude-haiku-4-5` | Generation |
 | `JAROKU_PLAN_MODEL` | falls through to `JAROKU_GEN_MODEL` | Planning |
 | `JAROKU_EDIT_MODEL` | `claude-haiku-4-5` | The fix loop |
@@ -2761,7 +2761,7 @@ should not disagree about who is doing the thinking.
 Everything the UI does through the server, you can do from a terminal. All commands run from
 `runtime/`.
 
-**Run an agent on the free dry-run model** — events (JSON, one per line) to stdout, logs to
+**Run an agent offline, on the scripted dry-run model the test suites use** — events (JSON, one per line) to stdout, logs to
 stderr:
 
 ```bash
@@ -5539,8 +5539,8 @@ elsewhere, start the server with an explicit `PATH`, or install uv where the she
 launches the server can see it.
 
 **`ANTHROPIC_API_KEY is not set (expected in runtime/.env)`**
-Planning, generation, editing and judging all need it. Running agents on the dry-run provider
-does not. Note that an env var already set in your shell always beats the file.
+Planning, generation, editing and judging all need it; an agent needs the key of the provider
+it runs on. Note that an env var already set in your shell always beats the file.
 
 **`DatabaseSync is not a constructor` / `node:sqlite` not found**
 Node is too old. You need 22+; 24 is what this is developed against.

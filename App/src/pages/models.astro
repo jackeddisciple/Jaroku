@@ -1,7 +1,7 @@
 ---
 import Base from "@layouts/Base.astro";
 import Icon from "@components/Icon.astro";
-import { MODELS, DRY_RUN, PROVIDER_META, REASONING_BUDGETS, type Provider } from "@data/models";
+import { MODELS, PROVIDER_META, REASONING_BUDGETS, type Provider } from "@data/models";
 
 const grouped = new Map<Provider, typeof MODELS>();
 for (const m of MODELS) {
@@ -9,10 +9,11 @@ for (const m of MODELS) {
   arr.push(m);
   grouped.set(m.provider, arr);
 }
-const providerOrder: Provider[] = ["anthropic", "openai", "google"];
+const providerOrder: Provider[] = ["anthropic", "openai", "meta"];
 const currency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const fmtCtx = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : `${(n / 1000).toFixed(0)}k`);
-const fmtOut = (n: number) => `${(n / 1000).toFixed(0)}k`;
+// Two places, trimmed: 1,050,000 is "1.05M", which one place would round up to a window it is not.
+const fmtCtx = (n: number) => (n >= 1_000_000 ? `${+(n / 1_000_000).toFixed(2)}M` : `${(n / 1000).toFixed(0)}k`);
+const fmtOut = (n?: number) => (n ? `${(n / 1000).toFixed(0)}k` : "—");
 ---
 <Base
   title="Models"
@@ -76,7 +77,7 @@ const fmtOut = (n: number) => `${(n / 1000).toFixed(0)}k`;
             <tbody>
               {(grouped.get(prov) ?? []).map((m) => (
                 <tr>
-                  <th scope="row"><span class="mono">{m.id}</span></th>
+                  <th scope="row">{m.name} <span class="mono faint model-id">{m.id}</span></th>
                   <td>{currency.format(m.input)}</td>
                   <td>{currency.format(m.output)}</td>
                   <td>{fmtCtx(m.context_window)}</td>
@@ -95,23 +96,6 @@ const fmtOut = (n: number) => `${(n / 1000).toFixed(0)}k`;
     </section>
   ))}
 
-  <section class="section-tight" aria-labelledby="s-dry">
-    <div class="container">
-      <div class="dry card">
-        <div class="dry-icon"><Icon name="sparkles" size={22} /></div>
-        <div>
-          <h2 id="s-dry">The dry-run provider &mdash; free.</h2>
-          <p class="muted">
-            <code class="mono">{DRY_RUN.id}</code> walks your agent&rsquo;s <code class="mono">TOOLS</code>,
-            synthesises one call per tool, then answers plainly. It exercises every generated tool function
-            with no API key and no cost, and it&rsquo;s the reason you can build with Jaroku before you enter
-            a single credential.
-          </p>
-        </div>
-      </div>
-    </div>
-  </section>
-
   <section class="section" aria-labelledby="s-reasoning">
     <div class="container">
       <div class="two-col">
@@ -119,15 +103,15 @@ const fmtOut = (n: number) => `${(n / 1000).toFixed(0)}k`;
           <span class="eyebrow">Reasoning effort</span>
           <h2 id="s-reasoning">Three shapes, one control.</h2>
           <p>
-            Providers expose reasoning three different ways: an extended-thinking token budget (Claude,
-            Gemini 2.5), a named level the API takes directly (OpenAI&rsquo;s <code class="mono">reasoning_effort</code>),
+            Providers expose reasoning three different ways: extended thinking (Claude), a named level
+            the API takes directly (OpenAI&rsquo;s and Meta&rsquo;s <code class="mono">reasoning_effort</code>),
             or none at all. Jaroku surfaces one control &mdash; Low, Medium, High, XHigh &mdash; and maps
             it to the right shape for the model you picked. A model with no reasoning control shows no
             chip, rather than a meaningless &ldquo;Low&rdquo;.
           </p>
           <p class="muted">
-            XHigh clamps to High on <em>effort</em> providers because their API has three levels and no
-            fourth. The clamp is reported, never silent.
+            Every <em>effort</em> model on offer takes all four levels. One whose API took fewer would
+            clamp XHigh to High &mdash; and say so. A clamp is reported, never silent.
           </p>
         </div>
         <aside class="card">
@@ -190,12 +174,7 @@ const fmtOut = (n: number) => `${(n / 1000).toFixed(0)}k`;
   table.matrix { min-width: 720px; }
   table.matrix thead th { font-size: 11px; }
 
-  .dry {
-    display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: start;
-    padding: 24px;
-  }
-  .dry-icon { color: var(--accent); margin-top: 4px; }
-  .dry h2 { font-size: 22px; margin: 0 0 6px; }
+  .model-id { font-size: 11.5px; font-weight: 400; margin-left: 6px; }
 
   .two-col { display: grid; gap: 32px; grid-template-columns: 1fr; }
   @media (min-width: 900px) { .two-col { grid-template-columns: 1.1fr 1fr; gap: 48px; } }

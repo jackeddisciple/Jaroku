@@ -144,7 +144,7 @@ const BUILDS: Build[] = [
   <section class="section" aria-labelledby="s-first">
     <div class="container">
       <span class="eyebrow">The 60-second path</span>
-      <h2 id="s-first">Install, run the example agent on the free dry-run model.</h2>
+      <h2 id="s-first">Install, add a key, run the example agent.</h2>
       <ol class="steps">
         <li>
           <span class="n">1</span>
@@ -156,8 +156,8 @@ const BUILDS: Build[] = [
         <li>
           <span class="n">2</span>
           <div>
-            <h4>Skip the key</h4>
-            <p>The dry-run provider needs no key. You can add one later from Settings.</p>
+            <h4>Add a key</h4>
+            <p>A Claude, OpenAI or Meta key of your own. Or skip, look around, and add one later from Secrets.</p>
           </div>
         </li>
         <li>
@@ -166,17 +166,17 @@ const BUILDS: Build[] = [
             <h4>Run the example</h4>
             <p>
               <code class="mono">runtime/agents/example_agent</code> ships with two dependency-free tools.
-              Click Run &mdash; the trace opens, the state diff opens, the cost stays at $0.00.
+              Click Run &mdash; the trace opens, the state diff opens, and every step is priced.
             </p>
           </div>
         </li>
         <li>
           <span class="n">4</span>
           <div>
-            <h4>Add a key when you&rsquo;re ready</h4>
+            <h4>Describe your own</h4>
             <p>
-              Provide an Anthropic key for planning, generation, editing and the eval judge. Provider keys
-              never leave the local file.
+              Planning, generation, editing and the eval judge run on your Anthropic key; the agent runs on
+              whichever model you pick. Provider keys never leave the local file.
             </p>
           </div>
         </li>

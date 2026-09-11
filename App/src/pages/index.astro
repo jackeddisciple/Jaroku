@@ -68,8 +68,8 @@ import { SITE } from "@data/site";
             to land. It&rsquo;s LangGraph. Take it out.
           </p>
           <ul class="dots">
-            <li><Icon name="check" size={16} /> Provider selection is host-side. Switch Claude &harr; GPT &harr; Gemini without regenerating.</li>
-            <li><Icon name="check" size={16} /> Dry-run model walks <code class="mono">TOOLS</code> and calls each one, so you can build with no API key.</li>
+            <li><Icon name="check" size={16} /> Provider selection is host-side. Switch Claude &harr; GPT &harr; Muse Spark without regenerating.</li>
+            <li><Icon name="check" size={16} /> A scripted stand-in walks <code class="mono">TOOLS</code> and calls each one, so the test suites exercise every tool without spending a cent.</li>
             <li><Icon name="check" size={16} /> Every generated project ships its own <code class="mono">pyproject.toml</code> and runs standalone.</li>
           </ul>
         </div>
@@ -262,10 +262,10 @@ TOOLS = [search_web, read_file]
 
   <section class="section closer" id="download" aria-labelledby="s-closer">
     <div class="container-narrow closer-inner">
-      <h2 id="s-closer">Try it in sixty seconds. On your own key or on the dry-run model.</h2>
+      <h2 id="s-closer">Try it in sixty seconds, on your own key.</h2>
       <p class="lead">
-        The dry-run provider walks your tools and answers plainly &mdash; no key, no cost. Add an Anthropic key when
-        you want a real model.
+        Claude, OpenAI or Meta &mdash; paste a key and run the example agent. Without one you can still look
+        around everything; whatever would run a model asks for the key first.
       </p>
       <div class="closer-cta">
         <DownloadButton variant="accent">

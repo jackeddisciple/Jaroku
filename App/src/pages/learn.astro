@@ -58,9 +58,9 @@ import DownloadButton from "@components/DownloadButton.astro";
           <p>
             The reason this matters in daily use: switching providers is a dropdown, not a regeneration.
             The evaluation dashboard runs the same agent on three providers at once and shows you the
-            spread. And the free dry-run model &mdash; the one that doesn&rsquo;t need a key &mdash;
-            walks your <code class="mono">TOOLS</code> list synthesising one call per tool, so every
-            tool function is exercised without a cent spent.
+            spread. And the test suites run agents on a scripted stand-in that walks your
+            <code class="mono">TOOLS</code> list synthesising one call per tool, so every tool function
+            is exercised on every change without a cent spent.
           </p>
           <p class="muted">
             Related: <a href={`https://github.com/jackeddisciple/jaroku/blob/main/adr/ADR-005-generated-agent-contract.md`} target="_blank" rel="noopener noreferrer">ADR-005 &mdash; the generated agent contract</a>.
@@ -138,7 +138,7 @@ import DownloadButton from "@components/DownloadButton.astro";
     <div class="container-narrow closer-inner">
       <h2>The rest is muscle memory.</h2>
       <p class="lead">
-        Install the app and try the example agent on the dry-run model. Read the changelog for the shape
+        Install the app, add a key, and run the example agent. Read the changelog for the shape
         of the surface. Open an ADR when a decision seems opinionated &mdash; because it is, and the
         reasoning is written down.
       </p>
