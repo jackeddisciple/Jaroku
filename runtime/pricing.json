@@ -35,7 +35,14 @@
       "output": 10,
       "cache_read_mult": 0.1,
       "cache_write_mult": 1.25,
-      "reasoning": "thinking",
+      "reasoning": "effort",
+      "effort_levels": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
       "max_output_tokens": 128000,
       "context_window": 1000000
     },
@@ -47,7 +54,14 @@
       "output": 25,
       "cache_read_mult": 0.1,
       "cache_write_mult": 1.25,
-      "reasoning": "thinking",
+      "reasoning": "effort",
+      "effort_levels": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
       "max_output_tokens": 128000,
       "context_window": 1000000
     },
@@ -71,7 +85,14 @@
       "output": 50,
       "cache_read_mult": 0.025,
       "cache_write_mult": 1.25,
-      "reasoning": "thinking",
+      "reasoning": "effort",
+      "effort_levels": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
       "max_output_tokens": 128000,
       "context_window": 1000000
     },
@@ -88,7 +109,8 @@
         "low",
         "medium",
         "high",
-        "xhigh"
+        "xhigh",
+        "max"
       ],
       "max_output_tokens": 128000,
       "context_window": 1050000
@@ -106,7 +128,8 @@
         "low",
         "medium",
         "high",
-        "xhigh"
+        "xhigh",
+        "max"
       ],
       "max_output_tokens": 128000,
       "context_window": 1050000
@@ -124,7 +147,8 @@
         "low",
         "medium",
         "high",
-        "xhigh"
+        "xhigh",
+        "max"
       ],
       "max_output_tokens": 128000,
       "context_window": 1050000
@@ -142,7 +166,8 @@
         "low",
         "medium",
         "high",
-        "xhigh"
+        "xhigh",
+        "max"
       ],
       "max_output_tokens": 128000,
       "context_window": 1050000
@@ -155,13 +180,7 @@
       "output": 4.25,
       "cache_read_mult": 0.12,
       "cache_write_mult": 1,
-      "reasoning": "effort",
-      "effort_levels": [
-        "low",
-        "medium",
-        "high",
-        "xhigh"
-      ],
+      "reasoning": null,
       "context_window": 1048576
     },
     {
@@ -187,13 +206,18 @@
       "code is a number the Python side cannot read, and the two would drift.",
       "",
       "`kinds` are the three shapes a provider takes:",
-      "  thinking  an extended-thinking budget in tokens (Claude)",
-      "  effort    a named level the API takes directly (OpenAI's and Meta's reasoning_effort)",
-      "  null      no reasoning control at all — the composer HIDES the chip rather than",
-      "            reporting a meaningless 'Low' (spec 6.2)",
+      "  thinking  an extended-thinking budget in tokens, for a model that takes budgets rather than",
+      "            effort names (none in the shipped catalogue)",
+      "  effort    a named level the API takes directly (Claude's output_config.effort, OpenAI's",
+      "            reasoning.effort)",
+      "  null      no reasoning control at all — the composer HIDES the control (spec 6.2). Muse Spark",
+      "            is null by the product owner's call on 2026-09-11 and runs at Meta's own default;",
+      "            Haiku 4.5 is null because Anthropic offers it no effort setting.",
       "",
-      "`effort_levels` on an `effort` model lists the levels its API takes. XHigh clamps to the highest",
-      "listed level at or below it; an entry that lists none takes low/medium/high, so XHigh becomes High.",
+      "Five levels: low, medium, high, xhigh, max. `effort_levels` on an `effort` model lists the ones",
+      "its API takes; a request clamps to the highest listed level at or below it, and an entry that",
+      "lists none takes low/medium/high. `labels` are what each provider calls the levels in the",
+      "composer — the product owner's words, verbatim.",
       "The clamp is REPORTED, never silent: spec 3.2 — 'Never report an effort that wasn't used.'",
       "",
       "Every budget is validated against the model's max_output_tokens before dispatch. A thinking",
@@ -204,7 +228,24 @@
       "low": 0,
       "medium": 4000,
       "high": 16000,
-      "xhigh": 32000
+      "xhigh": 32000,
+      "max": 64000
+    },
+    "labels": {
+      "anthropic": {
+        "low": "Low",
+        "medium": "Medium",
+        "high": "High effort",
+        "xhigh": "XHigh",
+        "max": "Max effort"
+      },
+      "openai": {
+        "low": "Light",
+        "medium": "Medium",
+        "high": "High",
+        "xhigh": "Extra High",
+        "max": "Ultra"
+      }
     }
   }
 }

@@ -86,7 +86,7 @@ import { TokenVerifier } from "./auth/verifier.ts";
 import { authenticate, sessionRoutes } from "./auth/session.ts";
 import { conversationRoutes } from "./http/conversations.ts";
 import { ConversationSettingsStore, DEFAULT_PERMISSION_MODE, type PermissionMode } from "./conversationSettings.ts";
-import { planEffort, type EffortPlan } from "./effort.ts";
+import { offeredLevels, planEffort, type EffortPlan } from "./effort.ts";
 import { ConversationConnectorStore } from "./conversationConnectors.ts";
 import { TurnInteractionStore } from "./turnInteraction.ts";
 import { TurnVariantStore } from "./turnVariants.ts";
@@ -281,7 +281,7 @@ import {
   PROVIDER_ENV_KEY, isProviderId, isRealProvider, providerLabel, providerStatus, verifyProviderKey,
   type ProviderId,
 } from "./providers.ts";
-import { allPrices, capabilityFor } from "./pricing.ts";
+import { allPrices, capabilityFor, effortLabelsFor } from "./pricing.ts";
 import { DeployStore, isInFlight as isDeployInFlight, type Deployment } from "./deployStore.ts";
 import { DeployOps } from "./deployOps.ts";
 import { DeployDispatcher } from "./deployDispatch.ts";
@@ -5867,6 +5867,10 @@ async function providerSnapshot(ctx: TenantContext): Promise<ProviderSnapshot> {
         // than showing a meaningless "Low".
         reasoning: cap?.reasoning ?? null,
         context_window: cap?.contextWindow ?? null,
+        // THE SLIDER'S STOPS AND WHAT THEY ARE CALLED, from the same file: the levels this model can
+        // actually be run at, and its provider's own names for them. See `offeredLevels`.
+        effort_levels: offeredLevels(p.id),
+        effort_labels: effortLabelsFor(p.provider),
       };
     }),
   };

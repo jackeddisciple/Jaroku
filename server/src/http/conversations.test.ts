@@ -151,6 +151,17 @@ console.log("\nthe response is what is IN EFFECT, never an echo of the request")
   await h.close();
 }
 
+console.log("\nthe fifth level is a level: Max is stored, not refused");
+{
+  // 072 widened the column and `isEffort` took the word; this is the two meeting at the route. A
+  // validator still listing four would answer 400 here, and a column still listing four, 500.
+  const h = await harness();
+  const thread = await h.seedThread(ctx.workspaceId);
+  const res = await h.patch(req("PATCH", `/v1/conversations/${thread}/settings`, { reasoning_effort: "max" }));
+  check("Max took", (res.body as Record<string, unknown>).reasoning_effort === "max", JSON.stringify(res.body));
+  await h.close();
+}
+
 console.log("\nvalidation refuses a level nobody defined, rather than storing it");
 {
   const h = await harness();

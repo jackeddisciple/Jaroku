@@ -10,30 +10,49 @@
 // for. Nothing errors, nothing looks wrong, and the user believes they paid for XHigh reasoning on
 // every turn for a month.
 //
+// FIVE LEVELS SINCE 2026-09-11, and per-provider names for them: Claude's "Low, Medium, High effort,
+// XHigh, Max effort", OpenAI's "Light, Medium, High, Extra High, Ultra", and no control on Muse
+// Spark. Those are the product owner's words and are checked here verbatim.
+//
 //   npm run test:effort
 
 import {
-  DEFAULT_EFFORT, EFFORT_LEVELS, effortLabel, isEffort, planEffort, planForCapability, relativeCost,
+  DEFAULT_EFFORT, EFFORT_LEVELS, effortLabel, isEffort, offeredLevels, planEffort, planForCapability,
+  relativeCost, relativeCostFor,
 } from "./effort.ts";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-import { capabilityFor, contextWindowFor, reasoningBudgets, type Capability } from "./pricing.ts";
+import { capabilityFor, contextWindowFor, effortLabelsFor, reasoningBudgets, type Capability } from "./pricing.ts";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 /**
- * A `reasoning_effort`-shaped model, because the shipped catalogue has none.
+ * A `reasoning_effort`-shaped model that lists no levels, because the shipped catalogue has none.
  *
- * Every `effort` entry in runtime/pricing.json lists all four levels, so §12.5's clamp branch is
- * unreachable through a model id. Constructed here rather than added to the shared
- * pricing file: putting a model into that table makes it appear in the product's model selector,
- * and a model shipped so that a test can reach a branch is a model somebody eventually runs a real
- * job on, at a price nobody verified.
+ * Every `effort` entry in runtime/pricing.json lists all five levels, so §12.5's clamp branch is
+ * unreachable through a model id. Constructed here rather than added to the shared pricing file:
+ * putting a model into that table makes it appear in the product's model selector, and a model
+ * shipped so that a test can reach a branch is a model somebody eventually runs a real job on, at a
+ * price nobody verified.
  */
 const EFFORT_MODEL: Capability = {
   id: "o-series-test",
   reasoning: "effort",
   maxOutputTokens: 65536,
+  contextWindow: 200000,
+};
+
+/**
+ * A budget-shaped model, for the same reason. Since Sonnet 5, Opus 5 and Fable 5.1 took effort
+ * names, the catalogue ships no extended-thinking model at all — and the branch still has to be
+ * right for the first one that comes back.
+ */
+const THINKING_MODEL: Capability = {
+  id: "thinking-test",
+  reasoning: "thinking",
+  maxOutputTokens: 128000,
   contextWindow: 200000,
 };
 
@@ -43,15 +62,22 @@ const check = (name: string, ok: boolean, detail = ""): void => {
   else { fail++; console.log(`  FAIL ${name}${detail ? ` — ${detail}` : ""}`); }
 };
 
+const FIVE = "low,medium,high,xhigh,max";
+const CLAUDE_EFFORT = ["claude-sonnet-5", "claude-opus-5", "claude-fable-5-1"];
+const OPENAI = ["gpt-6-astra", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"];
+
 console.log("\nthe capability table loaded, and it is the shared pricing file");
 {
   // §3.2: "Concrete budget numbers belong in the same shared pricing/capability file as model
   // metadata, not hardcoded in the adapter." If this fails, everything below is testing defaults.
   const budgets = reasoningBudgets();
-  check("the budget table is present", Object.keys(budgets).length === 4, JSON.stringify(budgets));
+  check("the budget table has one budget per level", Object.keys(budgets).length === 5, JSON.stringify(budgets));
   check("low is OFF, not a small budget", budgets.low === 0);
-  check("...and the rest ascend", (budgets.medium ?? 0) < (budgets.high ?? 0) && (budgets.high ?? 0) < (budgets.xhigh ?? 0));
+  check("...and the rest ascend",
+    (budgets.medium ?? 0) < (budgets.high ?? 0) && (budgets.high ?? 0) < (budgets.xhigh ?? 0) &&
+      (budgets.xhigh ?? 0) < (budgets.max ?? 0));
 
+  check("five levels, in order", EFFORT_LEVELS.join(",") === FIVE, EFFORT_LEVELS.join(","));
   check("every level is a known level", EFFORT_LEVELS.every(isEffort));
   check("...and nothing else is", !isEffort("extreme") && !isEffort("") && !isEffort(3));
   check("the default is balanced", DEFAULT_EFFORT === "medium");
@@ -60,14 +86,36 @@ console.log("\nthe capability table loaded, and it is the shared pricing file");
   // no record is treated as unsupported, which is safe — but silently unsupported for a model the
   // product ships is a feature that went missing without anybody deciding to remove it.
   for (const id of [
-    "claude-sonnet-5", "claude-opus-5", "claude-haiku-4-5", "claude-fable-5-1",
-    "gpt-6-astra", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "muse-spark-1.3", "fake-dry-run",
+    ...CLAUDE_EFFORT, "claude-haiku-4-5", ...OPENAI, "muse-spark-1.3", "fake-dry-run",
   ]) {
     const cap = capabilityFor(id);
     check(`${id} has a capability record`, cap !== null);
     check(`...with a max output ceiling`, (cap?.maxOutputTokens ?? 0) > 0, String(cap?.maxOutputTokens));
     check(`...and a context window`, (contextWindowFor(id) ?? 0) > 0, String(contextWindowFor(id)));
   }
+}
+
+console.log("\nwhat the slider offers, model by model");
+{
+  // THE PRODUCT OWNER'S LIST: five stops on every Claude and OpenAI model that takes effort, and no
+  // control on Muse Spark. Haiku 4.5 has none because Anthropic offers it no effort setting — a stop
+  // there would be a control that changes nothing the API is sent.
+  for (const id of [...CLAUDE_EFFORT, ...OPENAI]) {
+    check(`${id} offers all five`, offeredLevels(id).join(",") === FIVE, offeredLevels(id).join(","));
+  }
+  for (const id of ["muse-spark-1.3", "claude-haiku-4-5", "fake-dry-run", "some-model-shipped-tomorrow"]) {
+    check(`${id} offers none`, offeredLevels(id).length === 0, offeredLevels(id).join(","));
+  }
+}
+
+console.log("\n...and what each provider calls them");
+{
+  const names = (provider: string): string => JSON.stringify(EFFORT_LEVELS.map((l) => effortLabelsFor(provider)?.[l]));
+  check("Claude's, verbatim", names("anthropic") === JSON.stringify(["Low", "Medium", "High effort", "XHigh", "Max effort"]),
+    names("anthropic"));
+  check("OpenAI's, verbatim", names("openai") === JSON.stringify(["Light", "Medium", "High", "Extra High", "Ultra"]),
+    names("openai"));
+  check("and Meta, which has no control, has no names", effortLabelsFor("meta") === null);
 }
 
 console.log("\n§12.4 — a model with no reasoning control says so, by name");
@@ -82,6 +130,12 @@ console.log("\n§12.4 — a model with no reasoning control says so, by name");
   check("it is not reported as a clamp", !p.clamped);
   check("...and the applied level still echoes what was asked", p.applied === "high");
 
+  // MUSE SPARK TOO, and that one is a choice rather than a limit: Meta's API takes effort levels, and
+  // the product owner asked for no control. A level carried over from another model must not leak
+  // onto its requests.
+  const m = planEffort("muse-spark-1.3", "max", "Muse Spark 1.3");
+  check("Muse Spark is sent no effort at all", !m.supported && m.thinking === null && m.reasoningEffort === null);
+
   // A model nobody has recorded is unsupported for the same reason, and says a different thing —
   // "we have never checked this" is not "this model cannot reason".
   const unknown = planEffort("some-model-shipped-tomorrow", "xhigh");
@@ -89,26 +143,40 @@ console.log("\n§12.4 — a model with no reasoning control says so, by name");
   check("...and says why it is different", (unknown.reason ?? "").includes("no capability record"), unknown.reason ?? "");
 }
 
-console.log("\nextended-thinking providers get a budget, and Low means off");
+console.log("\nClaude's modern models take the level by name, all five of them");
 {
-  const low = planEffort("claude-opus-5", "low");
+  // `output_config.effort`, not a thinking budget: Sonnet 5, Opus 5 and Fable 5.1 reject the old
+  // `budget_tokens` shape with a 400, and take low through max by name.
+  for (const id of CLAUDE_EFFORT) {
+    for (const level of EFFORT_LEVELS) {
+      const p = planEffort(id, level);
+      check(`${id} @ ${level} goes out as effort "${level}"`,
+        p.supported && !p.clamped && p.reasoningEffort === level && p.thinking === null, JSON.stringify(p));
+    }
+  }
+}
+
+console.log("\nextended-thinking models get a budget, and Low means off");
+{
+  const low = planForCapability(THINKING_MODEL, "low", "t");
   check("Low disables thinking outright", low.supported && low.thinking?.type === "disabled");
   check("...and is not a clamp", !low.clamped && low.applied === "low");
 
-  for (const level of ["medium", "high", "xhigh"] as const) {
-    const p = planEffort("claude-opus-5", level);
+  for (const level of ["medium", "high", "xhigh", "max"] as const) {
+    const p = planForCapability(THINKING_MODEL, level, "t");
     check(`${level} enables thinking`, p.thinking?.type === "enabled", JSON.stringify(p.thinking));
     check(`...at the shared file's budget`,
       p.thinking?.type === "enabled" && p.thinking.budget_tokens === reasoningBudgets()[level]);
-    check(`...with no OpenAI field set`, p.reasoningEffort === null);
+    check(`...with no effort name set`, p.reasoningEffort === null);
   }
 
   // The budgets ascend in the plan, not only in the table.
-  const spent = (["medium", "high", "xhigh"] as const).map((l) => {
-    const t = planEffort("claude-opus-5", l).thinking;
+  const spent = (["medium", "high", "xhigh", "max"] as const).map((l) => {
+    const t = planForCapability(THINKING_MODEL, l, "t").thinking;
     return t?.type === "enabled" ? t.budget_tokens : 0;
   });
-  check("a higher level really does buy more thinking", spent[0]! < spent[1]! && spent[1]! < spent[2]!, spent.join(" < "));
+  check("a higher level really does buy more thinking",
+    spent.every((s, i) => i === 0 || spent[i - 1]! < s), spent.join(" < "));
 }
 
 console.log("\n§12.5 — XHigh on a clamping model completes, and reports High");
@@ -127,6 +195,14 @@ console.log("\n§12.5 — XHigh on a clamping model completes, and reports High"
   check("...and what goes to the provider is one of its three levels", p.reasoningEffort === "high");
   check("...with no thinking block, which this provider does not take", p.thinking === null);
 
+  // MAX CLAMPS THE SAME WAY, to the highest level the model lists at or below it — never above.
+  const max = planForCapability(EFFORT_MODEL, "max", "o-series");
+  check("Max on a three-level model runs as High, and says so",
+    max.clamped && max.applied === "high" && max.reason === "Max requested; o-series caps at High.", max.reason ?? "null");
+  const four = planForCapability({ ...EFFORT_MODEL, effortLevels: ["low", "medium", "high", "xhigh"] }, "max", "o-series");
+  check("...and on a four-level model, as XHigh",
+    four.clamped && four.applied === "xhigh" && four.reason === "Max requested; o-series caps at XHigh.", four.reason ?? "null");
+
   // The three levels the API does accept pass through untouched. A clamp marker on a level that
   // was honoured would train people to ignore the marker.
   for (const level of ["low", "medium", "high"] as const) {
@@ -135,49 +211,46 @@ console.log("\n§12.5 — XHigh on a clamping model completes, and reports High"
     check("...and needs no explanation", q.reason === null);
   }
 
-  // AND A MODEL THAT TAKES XHIGH GETS IT. Which levels a model takes is `effort_levels` in the price
+  // AND A MODEL THAT TAKES MAX GETS IT. Which levels a model takes is `effort_levels` in the price
   // sheet; the clamp above is the default for an entry that lists none, not a rule about the kind.
-  const four = planForCapability({ ...EFFORT_MODEL, effortLevels: ["low", "medium", "high", "xhigh"] }, "xhigh", "gpt-5.6");
-  check("a model whose entry lists XHigh is not clamped",
-    !four.clamped && four.applied === "xhigh" && four.reasoningEffort === "xhigh" && four.reason === null);
+  const all = planForCapability({ ...EFFORT_MODEL, effortLevels: EFFORT_LEVELS }, "max", "gpt-5.6");
+  check("a model whose entry lists Max is not clamped",
+    !all.clamped && all.applied === "max" && all.reasoningEffort === "max" && all.reason === null);
 
   // And an unsupported model does not pretend to clamp — §6.2 omits the chip instead.
   const none = planEffort("claude-haiku-4-5", "xhigh", "Haiku 4.5");
   check("an unsupported model does not fake a clamp", !none.supported && !none.clamped);
 
-  // EVERY `effort` MODEL THE PRODUCT OFFERS TAKES XHIGH. GPT-6 Astra, GPT-5.6 and Muse Spark all go
-  // past it, and their entries say so — a clamp marker on any of them would report a downgrade that
-  // never happened, on the models somebody picked precisely to think harder.
-  for (const id of ["gpt-6-astra", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "muse-spark-1.3"]) {
-    const q = planEffort(id, "xhigh");
-    check(`${id} runs XHigh as XHigh`, q.supported && !q.clamped && q.reasoningEffort === "xhigh",
-      `${q.applied} ${q.reason ?? ""}`);
+  // EVERY OPENAI MODEL THE PRODUCT OFFERS TAKES MAX — "Ultra" — and a clamp marker on any of them
+  // would report a downgrade that never happened, on the models somebody picked to think harder.
+  for (const id of OPENAI) {
+    const q = planEffort(id, "max");
+    check(`${id} runs Max as Max`, q.supported && !q.clamped && q.reasoningEffort === "max", `${q.applied} ${q.reason ?? ""}`);
   }
 }
 
 console.log("\n...and when a budget will not fit, the clamp is reported rather than the run failing");
 {
-  // A thinking budget must fit inside half the model's output allowance. Every thinking model the
-  // product offers has 128K, so nothing clamps on the shipped catalogue — asserted here on Opus —
-  // and the arithmetic itself is asserted across all three of them below.
+  // A thinking budget must fit inside half the model's output allowance. At 128K every level fits;
+  // at 64K, Max's budget does not, and the plan steps down and says so rather than sending a 400.
   const budgets = reasoningBudgets();
-  const cap = capabilityFor("claude-opus-5")!;
-  const ceiling = Math.floor(cap.maxOutputTokens / 2);
-  check("Opus's ceiling admits XHigh, so nothing clamps there",
-    (budgets.xhigh ?? 0) <= ceiling, `${budgets.xhigh} vs ${ceiling}`);
-  const p = planEffort("claude-opus-5", "xhigh");
-  check("...and the plan agrees", !p.clamped && p.applied === "xhigh" && p.reason === null);
+  const roomy = planForCapability(THINKING_MODEL, "max", "t");
+  check("a 128K model's ceiling admits Max, so nothing clamps there", !roomy.clamped && roomy.applied === "max");
+  const tight = planForCapability({ ...THINKING_MODEL, maxOutputTokens: 64000 }, "max", "Haiku-sized");
+  check("a 64K model steps Max down to XHigh",
+    tight.clamped && tight.applied === "xhigh" &&
+      tight.thinking?.type === "enabled" && tight.thinking.budget_tokens === budgets.xhigh, JSON.stringify(tight));
+  check("...and says so in §6.2's sentence", tight.reason === "Max requested; Haiku-sized caps at XHigh.", tight.reason ?? "null");
 
   // The rule itself, stated as arithmetic rather than as a model: no plan may ever emit a budget
   // that exceeds half the model's output allowance. A thinking block that eats the whole allowance
   // truncates the answer, which reads as the model giving up mid-sentence with no error attached.
-  for (const id of ["claude-sonnet-5", "claude-opus-5", "claude-fable-5-1"]) {
-    const c = capabilityFor(id)!;
+  for (const size of [8192, 64000, 128000]) {
+    const cap = { ...THINKING_MODEL, maxOutputTokens: size };
     for (const level of EFFORT_LEVELS) {
-      const t = planEffort(id, level).thinking;
+      const t = planForCapability(cap, level, "t").thinking;
       const spent = t?.type === "enabled" ? t.budget_tokens : 0;
-      check(`${id} @ ${level} leaves room for an answer`,
-        spent <= Math.floor(c.maxOutputTokens / 2), `${spent} of ${c.maxOutputTokens}`);
+      check(`${size} @ ${level} leaves room for an answer`, spent <= Math.floor(size / 2), `${spent} of ${size}`);
     }
   }
 }
@@ -187,16 +260,21 @@ console.log("\nthe cost hint is a multiple, never a dollar figure");
   // §3.2: "Do not show a fake precise dollar figure pre-flight." A hint with a `$` in it is the
   // failure; doc §8's "wrong cost numbers destroy trust instantly" applied ahead of the fact.
   for (const level of EFFORT_LEVELS) {
-    const hint = relativeCost("claude-opus-5", level);
+    const hint = relativeCostFor(THINKING_MODEL, level);
     check(`${level}'s hint carries no currency`, hint === null || !hint.includes("$"), hint ?? "null");
   }
   check("Medium has no hint — it is the thing everything else is relative to",
-    relativeCost("claude-opus-5", "medium") === null);
+    relativeCostFor(THINKING_MODEL, "medium") === null);
   check("XHigh's hint is a multiple of Medium",
-    (relativeCost("claude-opus-5", "xhigh") ?? "").includes("× tokens vs Medium"),
-    relativeCost("claude-opus-5", "xhigh") ?? "null");
+    (relativeCostFor(THINKING_MODEL, "xhigh") ?? "").includes("× tokens vs Medium"),
+    relativeCostFor(THINKING_MODEL, "xhigh") ?? "null");
+  check("...and so is Max's", (relativeCostFor(THINKING_MODEL, "max") ?? "").includes("× tokens vs Medium"),
+    relativeCostFor(THINKING_MODEL, "max") ?? "null");
+  // Named levels expose no budget, so the honest hint on an effort model is a direction.
+  check("an effort model's hint is a direction, not a number",
+    relativeCost("claude-opus-5", "max") === "more than Medium" && relativeCost("gpt-6-astra", "low") === "cheaper than Medium");
   check("a model with no reasoning control has no hint at all",
-    relativeCost("claude-haiku-4-5", "xhigh") === null);
+    relativeCost("claude-haiku-4-5", "xhigh") === null && relativeCost("muse-spark-1.3", "max") === null);
 }
 
 console.log("\nthe labels are the ones the spec writes");
@@ -205,6 +283,7 @@ console.log("\nthe labels are the ones the spec writes");
   check("Low", effortLabel("low") === "Low");
   check("Medium", effortLabel("medium") === "Medium");
   check("High", effortLabel("high") === "High");
+  check("Max", effortLabel("max") === "Max");
 }
 
 console.log("\nthe budget is clamped against THIS call's ceiling, not the model's");
@@ -214,31 +293,19 @@ console.log("\nthe budget is clamped against THIS call's ceiling, not the model'
   // against the model's theoretical maximum is a 400 from the provider on the plan call and a
   // truncated answer on the explain one, neither of which has an error attached to it that names
   // the cause. So the ceiling is per REQUEST, and the plan reports the level it stepped down to.
-  // The same model the block above uses, for the same reason: it is a real entry in the shipped
-  // catalogue and is thinking-shaped, so this exercises the branch the product actually takes.
-  const model = "claude-opus-5";
-  check("the model under test is thinking-shaped", capabilityFor(model)?.reasoning === "thinking");
-  {
-    const roomy = planEffort(model, "high");
-    check("with the model's own ceiling, High is High", roomy.applied === "high" && !roomy.clamped);
+  check("planEffort narrows the ceiling to the call's own max_tokens",
+    /maxOutputTokens < cap\.maxOutputTokens/.test(readFileSync(join(HERE, "effort.ts"), "utf8")));
+  const roomy = planForCapability(THINKING_MODEL, "high", "t");
+  check("with the model's own ceiling, High is High", roomy.applied === "high" && !roomy.clamped);
 
-    // A planner-sized request. Whatever the budget table says High costs, 600 tokens cannot hold
-    // it and leave room for an answer.
-    const tight = planEffort(model, "high", undefined, 600);
-    check("...and on a 600-token request it steps down", tight.applied !== "high" || tight.thinking?.type === "disabled");
-    check("...reporting the level that was actually spent", tight.requested === "high");
-    check(
-      "...with the clamp visible rather than silent",
-      tight.clamped || tight.thinking?.type === "disabled",
-      JSON.stringify(tight),
-    );
-    if (tight.thinking?.type === "enabled") {
-      check("...and a budget that leaves room to answer inside 600", tight.thinking.budget_tokens <= 300);
-    }
-
-    // A ceiling ABOVE the model's own changes nothing — it is a floor of two, not a replacement.
-    const generous = planEffort(model, "high", undefined, 10_000_000);
-    check("a ceiling above the model's own is ignored", JSON.stringify(generous) === JSON.stringify(roomy));
+  // A planner-sized request. Whatever the budget table says High costs, 600 tokens cannot hold it
+  // and leave room for an answer.
+  const tight = planForCapability({ ...THINKING_MODEL, maxOutputTokens: 600 }, "high", "t");
+  check("...and on a 600-token request it steps down", tight.applied !== "high" || tight.thinking?.type === "disabled");
+  check("...reporting the level that was actually spent", tight.requested === "high");
+  check("...with the clamp visible rather than silent", tight.clamped || tight.thinking?.type === "disabled", JSON.stringify(tight));
+  if (tight.thinking?.type === "enabled") {
+    check("...and a budget that leaves room to answer inside 600", tight.thinking.budget_tokens <= 300);
   }
 }
 
@@ -249,7 +316,6 @@ console.log("\nand the adapter is actually called, at every dispatch that shippe
   // the setting persisted, the chip rendered it, and every request went out at the provider's
   // default. §3.2's own rule was broken by the same absence twice: "never report an effort that
   // wasn't used", and a clamp marker that could not fire because both fields were always equal.
-  const HERE = dirname(fileURLToPath(import.meta.url));
   const index = readFileSync(join(HERE, "index.ts"), "utf8");
   const read = (f: string): string => readFileSync(join(HERE, f), "utf8");
 
@@ -286,6 +352,9 @@ console.log("\nand the adapter is actually called, at every dispatch that shippe
     (index.match(/\.\.\.effortFields\(/g) ?? []).length === 4,
     String((index.match(/\.\.\.effortFields\(/g) ?? []).length),
   );
+  // AND THE SLIDER'S STOPS RIDE THE CATALOGUE, from the same adapter — never a client's own table.
+  check("the providers snapshot carries each model's stops and names",
+    /effort_levels: offeredLevels\(p\.id\)/.test(index) && /effort_labels: effortLabelsFor\(p\.provider\)/.test(index));
 
   // THE RUN PATH, on the seam JAROKU_PROVIDER and JAROKU_MODEL already use. Without it a
   // conversation set to High planned and edited at High and RAN at the default, which is worse
@@ -293,6 +362,7 @@ console.log("\nand the adapter is actually called, at every dispatch that shippe
   check("the run env carries the level", /env\.JAROKU_REASONING_EFFORT =/.test(index));
   const models = readFileSync(join(HERE, "..", "..", "runtime", "jaroku_runner", "models.py"), "utf8");
   check("...and models.py reads it", /JAROKU_REASONING_EFFORT/.test(models));
+  check("...all five of it", /_EFFORT_ORDER = \("low", "medium", "high", "xhigh", "max"\)/.test(models));
   check("...translating it beside the constructor that uses it", /thinking=\{"type": "enabled", "budget_tokens": budget\}/.test(models));
   // AND CLAMPED WHERE THE PLAN CLAMPS. The runtime reads the same `effort_levels` from the same file,
   // through the cost callback's loader, so a run cannot send a level the metadata row says was
@@ -301,6 +371,12 @@ console.log("\nand the adapter is actually called, at every dispatch that shippe
   check("...the price sheet's loader carries each model's levels", /effort_levels=tuple\(/.test(pricingPy));
   check("...clamping to the levels the price sheet lists for the model", /price\.effort_levels/.test(models));
   check("...and to three when it lists none", /_THREE_LEVELS = \("low", "medium", "high"\)/.test(models));
+  // Claude's modern models take their effort NAME from that same list, not from a table of their own.
+  const anthropicBranch = models.slice(models.indexOf('if provider == "anthropic":'), models.indexOf('if provider == "openai":'));
+  check("...Claude's effort name comes from the price sheet", /effort = _named_effort\(model_name, level\)/.test(anthropicBranch));
+  // AND MUSE SPARK IS SENT NONE, the product owner's call: its branch never spreads the named level.
+  const metaBranch = models.slice(models.indexOf('if provider == "meta":'), models.indexOf("return build_dry_run_model"));
+  check("...and Muse Spark is sent no effort at all", metaBranch.length > 0 && !metaBranch.includes("**named"));
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

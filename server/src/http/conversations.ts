@@ -199,7 +199,7 @@ export function conversationRoutes(deps: ConversationRouteDeps): ConversationRou
         await requireThread(deps, caller, id);
 
         const body = await req.json();
-        const effort = readField<Effort>(body, "reasoning_effort", isEffort, "low, medium, high, xhigh");
+        const effort = readField<Effort>(body, "reasoning_effort", isEffort, "low, medium, high, xhigh, max");
         const mode = readField<PermissionMode>(body, "permission_mode", isPermissionMode, "strict, smart, fast");
 
         // Read BEFORE the write, because the audit row needs the old value and the store's return

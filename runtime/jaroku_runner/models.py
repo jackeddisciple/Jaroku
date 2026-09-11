@@ -32,7 +32,9 @@ from .fake import build_dry_run_model
 # LOW MEANS OFF, which is effort.ts's rule as well: a thinking block of a few hundred tokens is the
 # cost of the feature with none of the benefit. An unset or unrecognised value means the provider's
 # own default, so a run started before this existed is byte-identical to the one that shipped.
-_THINKING_BUDGETS = {"medium": 4_000, "high": 12_000, "xhigh": 24_000}
+# MAX IS THE LARGEST BUDGET WHOSE DOUBLED `max_tokens` STILL FITS Haiku 4.5's 64K output — the one
+# fixed-budget model a run can reach — so it is a real step above XHigh rather than a 400.
+_THINKING_BUDGETS = {"medium": 4_000, "high": 12_000, "xhigh": 24_000, "max": 32_000}
 
 # WHICH MODELS STILL TAKE A FIXED THINKING BUDGET, and it is a closed, shrinking set.
 #
@@ -58,22 +60,26 @@ _FIXED_BUDGET_MODELS = frozenset({
     "claude-3-5-sonnet-latest",
 })
 
-# `output_config.effort` takes the level as a NAME, so the server's four levels pass straight
-# through. `low` is a real level here rather than "off": thinking is on by default on Opus 5, and
-# `{"type": "disabled"}` is both refused above effort `high` and documented to make the model write
-# tool calls into its visible text. Lowering effort is the supported way to spend less.
-_ADAPTIVE_EFFORT = {"low": "low", "medium": "medium", "high": "high", "xhigh": "xhigh"}
-
 # ROOM FOR THE ANSWER PLUS THE THINKING IT IS SPENT OUT OF. The client's own default is small, and
 # a thinking block drawn from the same allowance is how a response gets truncated mid-sentence with
 # no error attached — the failure the fixed-budget branch below already doubled `max_tokens` for.
 _ADAPTIVE_MAX_TOKENS = 16_000
-# OpenAI and Meta take the level as a NAME rather than a budget. WHICH names a model takes is a fact
-# in pricing.json (`effort_levels`), read here through the cost callback's own loader so the run
-# clamps exactly where effort.ts reports a clamp: the highest level the model lists at or below the
-# one asked for. A model that lists none takes the three every such API has taken, so XHigh becomes
-# High there — on the run, in the plan and on the metadata row alike.
-_EFFORT_ORDER = ("low", "medium", "high", "xhigh")
+# AND MORE ROOM AT XHIGH AND MAX, which is Anthropic's own advice for Opus 5 and the models beside
+# it: "set a large max_tokens ... starting at 64k". A long think under the smaller ceiling is a
+# response cut off before its answer.
+_DEEP_EFFORT_MAX_TOKENS = 64_000
+
+# Claude's modern models and OpenAI's take the level as a NAME rather than a budget — Claude's
+# `output_config.effort`, OpenAI's `reasoning.effort`. WHICH names a model takes is a fact in
+# pricing.json (`effort_levels`), read here through the cost callback's own loader so the run clamps
+# exactly where effort.ts reports a clamp: the highest level the model lists at or below the one
+# asked for. A model that lists none takes the three every such API has taken, so XHigh and Max
+# become High there — on the run, in the plan and on the metadata row alike.
+#
+# On Claude, `low` is a real level rather than "off": thinking is on by default on Opus 5, and
+# `{"type": "disabled"}` is both refused above effort `high` and documented to make the model write
+# tool calls into its visible text. Lowering effort is the supported way to spend less.
+_EFFORT_ORDER = ("low", "medium", "high", "xhigh", "max")
 _THREE_LEVELS = ("low", "medium", "high")
 
 
@@ -93,7 +99,7 @@ META_BASE_URL = "https://api.meta.ai/v1"
 
 def _requested_effort() -> str | None:
     level = (os.environ.get("JAROKU_REASONING_EFFORT") or "").strip().lower()
-    return level if level in ("low", "medium", "high", "xhigh") else None
+    return level if level in _EFFORT_ORDER else None
 
 # Cheap defaults on purpose: a mis-set provider should cost cents, not dollars. The server
 # forwards JAROKU_MODEL explicitly, so these only apply to a hand-run with no model set.
@@ -146,13 +152,14 @@ def build_model(provider: str, model_name: str, tools: Sequence[Any]) -> tuple[A
             return ChatAnthropic(model=model_name), provider, model_name
 
         # THE MODERN SHAPE. Thinking is adaptive — the model decides how much to spend — and the
-        # level is expressed as effort rather than as a token count.
-        effort = _ADAPTIVE_EFFORT.get(level or "")
+        # level is expressed as effort rather than as a token count: one of the names this model's
+        # entry lists, which on Sonnet 5, Opus 5 and Fable 5.1 is all five.
+        effort = _named_effort(model_name, level)
         if effort:
             return (
                 ChatAnthropic(
                     model=model_name,
-                    max_tokens=_ADAPTIVE_MAX_TOKENS,
+                    max_tokens=_DEEP_EFFORT_MAX_TOKENS if effort in ("xhigh", "max") else _ADAPTIVE_MAX_TOKENS,
                     thinking={"type": "adaptive"},
                     effort=effort,
                 ),
@@ -197,6 +204,10 @@ def build_model(provider: str, model_name: str, tools: Sequence[Any]) -> tuple[A
         # or a named function with a 400. Auto is the default whenever tools are bound, so the
         # ordinary agent loses nothing, and a structured-output call that would have forced a
         # function gets the default instead of an error.
+        #
+        # AND NO EFFORT, by the product owner's call on 2026-09-11. Muse Spark takes effort levels,
+        # but the composer offers no control for it, so it runs at Meta's own default rather than
+        # at a level carried over from whichever model the conversation used before.
         return (
             ChatOpenAI(
                 model=model_name,
@@ -204,7 +215,6 @@ def build_model(provider: str, model_name: str, tools: Sequence[Any]) -> tuple[A
                 api_key=key,
                 use_responses_api=False,
                 disabled_params={"tool_choice": None},
-                **named,
             ),
             provider,
             model_name,

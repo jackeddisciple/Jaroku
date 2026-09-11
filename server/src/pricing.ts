@@ -153,11 +153,15 @@ export interface Capability {
 /** Jaroku's four levels, in tokens, for `thinking`-shaped providers. */
 export type ReasoningBudgets = Record<string, number>;
 
-function loadCapabilities(): { caps: Capability[]; budgets: ReasoningBudgets } {
+function loadCapabilities(): {
+  caps: Capability[];
+  budgets: ReasoningBudgets;
+  labels: Record<string, Record<string, string>>;
+} {
   try {
     const raw = JSON.parse(readFileSync(PRICING_PATH, "utf8")) as {
       models?: Record<string, unknown>[];
-      reasoning?: { budgets?: Record<string, unknown> };
+      reasoning?: { budgets?: Record<string, unknown>; labels?: Record<string, Record<string, unknown>> };
     };
     const caps: Capability[] = [];
     for (const m of raw.models ?? []) {
@@ -181,9 +185,15 @@ function loadCapabilities(): { caps: Capability[]; budgets: ReasoningBudgets } {
     for (const [k, v] of Object.entries(raw.reasoning?.budgets ?? {})) {
       if (Number.isFinite(Number(v))) budgets[k] = Number(v);
     }
-    return { caps, budgets };
+    const labels: Record<string, Record<string, string>> = {};
+    for (const [provider, names] of Object.entries(raw.reasoning?.labels ?? {})) {
+      labels[provider] = Object.fromEntries(
+        Object.entries(names ?? {}).filter((e): e is [string, string] => typeof e[1] === "string"),
+      );
+    }
+    return { caps, budgets, labels };
   } catch {
-    return { caps: [], budgets: {} };
+    return { caps: [], budgets: {}, labels: {} };
   }
 }
 
@@ -208,6 +218,15 @@ export function capabilityFor(model: string): Capability | null {
 /** The shared budget table. Empty when the file is missing, which reads as "no thinking". */
 export function reasoningBudgets(): ReasoningBudgets {
   return CAPS.budgets;
+}
+
+/**
+ * What each effort level is CALLED on a provider — "Ultra" on OpenAI, "Max effort" on Claude — from
+ * `reasoning.labels`. The product owner's words, kept beside the levels they name so no client keeps
+ * its own copy. Null for a provider the file names none for, which is also one with no control.
+ */
+export function effortLabelsFor(provider: string): Record<string, string> | null {
+  return CAPS.labels[provider] ?? null;
 }
 
 /** How much context this model has, for the attachment budget check. Null when unrecorded. */
