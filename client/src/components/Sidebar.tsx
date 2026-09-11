@@ -1202,10 +1202,11 @@ function FilterMenu({
           filtering || open ? "bg-sidebar-active text-accent" : "text-muted hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink"
         }`}
       >
-        {/* `md`, NOT `lg`. The ladder's top rung is for a NAVIGATION row — a mark that anchors a
-            line you scan a column for — and this is a control sitting beside a 13px section
-            label, where 18px read as the loudest thing in the header. */}
-        <Icon.agents.filter size={ICON.md} />
+        {/* `sm`, A RUNG UNDER THE TAB ICONS. Those are `md` now, and a navigation row's mark is what
+            anchors a line you scan the column for; this is a control sitting beside a 13px section
+            label, so it takes the rung below — the product owner's call on 2026-09-11, when `md`
+            read as big as the tabs themselves. */}
+        <Icon.agents.filter size={ICON.sm} />
         {filtering && current?.count != null && (
           <span className="text-caption tabular-nums">{current.count}</span>
         )}
