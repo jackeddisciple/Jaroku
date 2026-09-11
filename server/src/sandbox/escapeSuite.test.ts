@@ -46,12 +46,13 @@ await (async () => {
   const resolver = fakeResolver({
     "api.anthropic.com": ["1.1.1.1"],
     "api.openai.com": ["1.1.1.1"],
+    "api.meta.ai": ["1.1.1.1"],
     "gmail.googleapis.com": ["169.254.169.254"], // a compromised/rebinding answer
     "oauth2.googleapis.com": ["1.1.1.1"],
     "slack.com": ["1.1.1.1"],
   });
   let sawRefusal = false;
-  for (const provider of ["anthropic", "openai"]) {
+  for (const provider of ["anthropic", "openai", "meta"]) {
     for (const connectors of [[], ["gmail"], ["slack"], ["gmail", "slack"]]) {
       try {
         const policy = await buildEgressPolicy({ runId: "sweep", provider, connectors }, resolver);

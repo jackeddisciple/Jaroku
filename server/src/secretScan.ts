@@ -79,6 +79,7 @@ const SHAPES: { rule: string; re: RegExp; what: string }[] = [
   { rule: "aws_secret_key", re: /\baws_secret_access_key\s*[=:]\s*["']?[A-Za-z0-9/+=]{40}\b/i, what: "an AWS secret key" },
   { rule: "anthropic_key", re: /\bsk-ant-[A-Za-z0-9_-]{20,}/, what: "an Anthropic API key" },
   { rule: "openai_key", re: /\bsk-(?:proj-)?[A-Za-z0-9]{32,}/, what: "an OpenAI API key" },
+  { rule: "meta_key", re: /\bLLM\|\d{6,}\|[A-Za-z0-9_-]{16,}/, what: "a Meta Model API key" },
   { rule: "github_token", re: /\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{20,}/, what: "a GitHub token" },
   { rule: "slack_token", re: /\bxox[abposr]-[A-Za-z0-9-]{10,}/, what: "a Slack token" },
   { rule: "google_key", re: /\bAIza[0-9A-Za-z_-]{35}\b/, what: "a Google API key" },

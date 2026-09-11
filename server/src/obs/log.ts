@@ -93,6 +93,7 @@ const SECRET_FIELD_NAMES = new Set([
 const SECRET_PATTERNS: { name: string; re: RegExp }[] = [
   { name: "anthropic", re: /\bsk-ant-[A-Za-z0-9_-]{8,}/g },
   { name: "openai", re: /\bsk-(?!ant-)[A-Za-z0-9_-]{16,}/g },
+  { name: "meta", re: /\bLLM\|\d{6,}\|[A-Za-z0-9_-]{8,}/g },
   { name: "slack", re: /\bxox[abposr]-[A-Za-z0-9-]{8,}/g },
   { name: "google", re: /\bya29\.[A-Za-z0-9._-]{8,}/g },
   { name: "github", re: /\bgh[pousr]_[A-Za-z0-9]{16,}/g },

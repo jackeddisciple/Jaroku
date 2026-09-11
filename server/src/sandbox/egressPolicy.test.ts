@@ -284,6 +284,14 @@ await (async () => {
 })();
 
 await (async () => {
+  const resolver = fakeResolver({ "api.meta.ai": { v4: ["157.240.0.35"] } });
+  const policy = await buildEgressPolicy({ runId: "r2m", provider: "meta", connectors: [] }, resolver);
+  check("meta maps to api.meta.ai, and to nothing else",
+    policy.rules.length === 1 && policy.rules[0]!.host === "api.meta.ai",
+    policy.rules.map((r) => r.host).join(","));
+})();
+
+await (async () => {
   const resolver = fakeResolver({});
   const policy = await buildEgressPolicy({ runId: "r3", provider: "fake", connectors: [] }, resolver);
   check("the free dry-run provider grants no network at all", policy.rules.length === 0);

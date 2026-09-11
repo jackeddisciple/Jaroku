@@ -44,6 +44,7 @@ const HTTPS_PORT = 443;
 const PROVIDER_HOSTS: Record<string, string> = {
   anthropic: "api.anthropic.com",
   openai: "api.openai.com",
+  meta: "api.meta.ai",
 };
 
 /** Fixed hosts a reviewed connector template calls. Postgres has none here — its host comes

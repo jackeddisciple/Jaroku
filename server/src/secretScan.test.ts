@@ -53,6 +53,7 @@ const FAKE = {
   aws: join("AKIA", "EXAMPLEEXAMPLE12"),
   slack: join("xox", "b-", "000000000000-", "EXAMPLEEXAMPLE"),
   google: join("AIza", "EXAMPLE".repeat(5)),
+  meta: join("LLM", "|", "607358788850350", "|", "EXAMPLE".repeat(4)),
   stripe: join("sk", "_", "live", "_", "EXAMPLE".repeat(3), "1234"),
 };
 
@@ -64,6 +65,7 @@ console.log("\npublished token shapes are caught, by their own formats");
   check(found(`ID = "${FAKE.aws}"`) === "aws_access_key_id", "an AWS access key id");
   check(found(`T = "${FAKE.slack}"`) === "slack_token", "a Slack token");
   check(found(`K = "${FAKE.google}"`) === "google_key", "a Google API key");
+  check(found(`K = "${FAKE.meta}"`) === "meta_key", "a Meta Model API key");
   check(found(`K = "${FAKE.stripe}"`) === "stripe_key", "a Stripe secret key");
   check(found("-----BEGIN RSA PRIVATE KEY-----\nMIIE\n") === "private_key", "a private key block");
   check(

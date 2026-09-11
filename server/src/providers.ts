@@ -58,6 +58,7 @@ export const PROVIDER_LABEL: Record<string, string> = {
   anthropic: "Claude",
   openai: "OpenAI",
   google: "Gemini",
+  meta: "Meta",
 };
 
 /** The label to show for a provider id, falling back to the id for one nothing has named. */

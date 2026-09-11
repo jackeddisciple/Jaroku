@@ -47,6 +47,7 @@ const check = (ok: boolean, msg: string): void => {
 const SECRET = ["sk", "ant", "api03", "REALLOOKINGKEYVALUE0123456789abcdefXYZ"].join("-");
 const SLACK = ["xoxb", "99887766554433", "2211009988776", "AbCdEfGhIjKlMnOpQrStUvWx"].join("-");
 const GOOGLE = `ya29${"."}a0AfH6SMBxxxxxxxxxxxxxxxx`;
+const META = ["LLM", "607358788850350", "AbCdEfGhIjKlMnOpQrStUvWx"].join("|");
 const JWT = ["eyJhbGciOiJIUzI1NiJ9", "eyJzdWIiOiIxIn0", "dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1gFWFOEjXk"].join(".");
 const DB_URL = `postgres://analytics:${"hunter2"}@db.internal.example:5432/warehouse`;
 
@@ -71,6 +72,7 @@ console.log("\nshapes nobody registered");
 {
   check(!redact(`Bearer ${SLACK}`).includes(SLACK), "a Slack bot token is recognised by shape");
   check(!redact(`token ${GOOGLE}`).includes("a0AfH6SMB"), "...and a Google access token");
+  check(!redact(`key ${META}`).includes("AbCdEfGhIjKl"), "...and a Meta Model API key");
   check(
     !redact(JWT).includes("eyJzdWIiOiIxIn0"),
     "...and a JWT, which is what a leaked run token looks like",

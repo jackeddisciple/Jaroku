@@ -145,6 +145,12 @@ export interface DeployPlan {
 }
 
 /**
+ * What a deployed agent may run on — the same three `serve.py`'s `DEPLOYABLE_PROVIDERS` names, so
+ * the form cannot offer a provider the container would refuse at boot.
+ */
+const DEPLOYABLE_PROVIDERS: readonly string[] = ["anthropic", "openai", "meta"];
+
+/**
  * Everything knowable before the user commits: which variables are needed, what is missing,
  * and whether this can work at all.
  *
@@ -173,9 +179,9 @@ export async function planDeploy(
   // The dry-run provider answers with placeholder text. Deploying it would put a URL on the
   // internet that looks like a working agent and is not — so it is refused here rather than
   // three minutes later by serve.py, inside a container the user is paying for.
-  if (req.provider !== "anthropic" && req.provider !== "openai") {
+  if (!DEPLOYABLE_PROVIDERS.includes(req.provider)) {
     problems.push(
-      `${req.provider} cannot be deployed. Pick anthropic or openai — the dry-run provider ` +
+      `${req.provider} cannot be deployed. Pick anthropic, openai or meta — the dry-run provider ` +
       `answers with placeholder text, so a deployed one would be a URL that looks like it works.`,
     );
   }
