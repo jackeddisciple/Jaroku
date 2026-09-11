@@ -302,12 +302,12 @@ function RunRow({ run, runs, agentId }: { run: RunSummary; runs: RunSummary[]; a
             The row already carries `bg-sidebar-active` and a 2px bar, which is how every other
             selected thing in the product says so, and dimming the unselected run numbers to buy a
             third signal would cost the column the one figure people scan it for. */}
-        <span className="shrink-0 text-caption tabular-nums text-ink">
+        <span className="shrink-0 text-label font-normal tabular-nums text-ink">
           Run #{runNumber(runs, run)}
         </span>
         {/* THE TIME, THEN WHAT IT COST YOU — a duration when it worked, the reason when it did not.
             One slot, because they answer the same question: what happened after it started. */}
-        <span className="ml-auto flex min-w-0 shrink items-center gap-1.5 overflow-hidden text-tiny tabular-nums text-faint">
+        <span className="ml-auto flex min-w-0 shrink items-center gap-1.5 overflow-hidden text-caption tabular-nums text-faint">
           <span className="shrink-0" title={absTime(run.started_at)}>{relTime(run.started_at)}</span>
           {failed && run.error
             ? <span className="min-w-0 truncate text-err" title={run.error}>{errorSnippet(run.error)}</span>
@@ -450,7 +450,7 @@ function NavList() {
             drawn smaller to fit. Without the tile that left `New` two pixels under every mark under
             it, on the one row that leads the column. */}
         <Icon.nav.newAgent size={ICON.lg} />
-        <span className="min-w-0 flex-1 truncate text-label">New</span>
+        <span className="min-w-0 flex-1 truncate text-body font-medium">New</span>
         {/* THE CHORD, ON APPROACH. A shortcut printed permanently is a second thing to read on a
             row with two words on it; one that appears when the pointer arrives is there exactly
             when somebody is deciding whether to click or to type. `group-focus-within` as well, so
@@ -479,14 +479,14 @@ function NavList() {
             }`}
           >
             <Mark size={ICON.lg} />
-            <span className="min-w-0 flex-1 truncate text-label">{label}</span>
+            <span className="min-w-0 flex-1 truncate text-body font-medium">{label}</span>
             {badge > 0 && (
               <span
                 title={badgeTitle}
                 // A CLASS RATHER THAN AN INLINE STYLE, so the material can reach it. An inline
                 // `background` wins over every stylesheet rule there is, which left this badge the
                 // one opaque patch in the column that could not be softened with the rest.
-                className={`shrink-0 rounded-xs px-1 text-tiny leading-[15px] tabular-nums ${
+                className={`shrink-0 rounded-xs px-1 text-caption leading-[16px] tabular-nums ${
                   id === "threads" ? "text-run" : "bg-chrome text-ink"
                 }`}
               >
@@ -783,16 +783,16 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
           </span>
           {/* TWO LINES: who it is, then what it is and when it last ran. The category and the
               timestamp are both qualifiers on the name, so they share the second line and the
-              name gets the first to itself — at 13px semibold it is the thing the eye lands on
+              name gets the first to itself — at 14px medium it is the thing the eye lands on
               when scanning a column of agents. */}
           <span className="flex min-w-0 flex-1 flex-col leading-tight">
             {/* Ink whether or not it is the selected one — see the run row above for why the
                 ternary that used to be here had the same value on both arms, and why the fill and
                 the bar are what say "this one". A name is content; content does not dim. */}
-            <Truncate className="text-label text-ink" title={agent.name}>
+            <Truncate className="text-body font-medium text-ink" title={agent.name}>
               {agent.name}
             </Truncate>
-            <span className="flex min-w-0 items-center gap-1.5 text-tiny text-faint">
+            <span className="flex min-w-0 items-center gap-1.5 text-caption text-faint">
               {agent.category && <Truncate className="min-w-0" title={agent.category}>{agent.category}</Truncate>}
               {agent.category && stamp && <span aria-hidden>·</span>}
               {stamp && (
@@ -879,7 +879,7 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
           {!all && runs.length > RUNS_AT_FIRST && (
             <button
               onClick={() => setAll(true)}
-              className="w-full py-1 pl-10 pr-3 text-left text-tiny text-muted transition-colors hover:bg-sidebar-hover hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+              className="w-full py-1 pl-10 pr-3 text-left text-caption text-muted transition-colors hover:bg-sidebar-hover hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
             >
               Show {runs.length - RUNS_AT_FIRST} more…
             </button>
@@ -1203,11 +1203,11 @@ function FilterMenu({
         }`}
       >
         {/* `md`, NOT `lg`. The ladder's top rung is for a NAVIGATION row — a mark that anchors a
-            line you scan a column for — and this is a control sitting beside an 11px section
+            line you scan a column for — and this is a control sitting beside a 13px section
             label, where 18px read as the loudest thing in the header. */}
         <Icon.agents.filter size={ICON.md} />
         {filtering && current?.count != null && (
-          <span className="text-tiny tabular-nums">{current.count}</span>
+          <span className="text-caption tabular-nums">{current.count}</span>
         )}
       </button>
       {open && (
@@ -1378,7 +1378,7 @@ export function Sidebar() {
             >
               {pinnedOpen ? <Icon.workspace.switcherOpen size={ICON.lg} /> : <Icon.workspace.switcherClosed size={ICON.lg} />}
             </button>
-            <span className="min-w-0 flex-1 text-caption tracking-wide text-faint">Pinned</span>
+            <span className="min-w-0 flex-1 text-label font-normal tracking-wide text-faint">Pinned</span>
           </div>
           {/* CAPPED, WHICH IS THE DIFFERENCE FROM RECENTS. The shelf is `shrink-0` so the list below
               can never squeeze it — and that is exactly what makes an unbounded one dangerous:
@@ -1414,7 +1414,7 @@ export function Sidebar() {
           {/* NOT `TYPE.panelLabel`, which uppercases. This heading names a place in a column of
               places — `New`, `Threads`, `Agents` — and shouting one of them makes it a
               different kind of thing from the rows above it. */}
-          <span className="min-w-0 flex-1 text-caption tracking-wide text-faint">Recents</span>
+          <span className="min-w-0 flex-1 text-label font-normal tracking-wide text-faint">Recents</span>
           {/* THE PLUS LEFT THIS ROW for the `New` destination at the top of the column. A control
               that creates an agent was filed beside the filter that narrows a list of them, which
               made "new" read as a thing you do to the list rather than the first thing you do at
@@ -1454,7 +1454,7 @@ export function Sidebar() {
             {runList.length >= historyWindow && !historyComplete && (
               <button
                 onClick={() => sendLoadHistory(Math.min(historyWindow * 2, 500))}
-                className="mt-1 w-full rounded-control px-2 py-1.5 text-left text-tiny text-muted transition-colors hover:bg-sidebar-hover hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+                className="mt-1 w-full rounded-control px-2 py-1.5 text-left text-caption text-muted transition-colors hover:bg-sidebar-hover hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
               >
                 Load older runs…
               </button>

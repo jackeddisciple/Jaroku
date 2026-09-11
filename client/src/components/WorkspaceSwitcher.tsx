@@ -423,8 +423,9 @@ export function WorkspaceSwitcher() {
           aria-haspopup="menu"
           aria-expanded={open}
           // THE MOST PROMINENT TEXT IN THE SIDEBAR — §9.1: larger than the tab labels, smaller than
-          // a page title. 14px at medium weight, a step above the 13px of the tab labels and the
-          // agent names — raised from 13px, the product owner's call on 2026-09-11. This is the thing
+          // a page title. 16px at medium weight, a step above the 14px of the tab labels and the
+          // agent names — raised twice on 2026-09-11 at the product owner's call, the second time
+          // with the rest of the column, so it keeps its step over the rows. This is the thing
           // every other row in the column is scoped BY; a heading twice the size of its list would
           // be a banner.
           className={`flex min-w-0 flex-1 items-center gap-2 py-2 pl-3 pr-2 text-left transition-colors hover:bg-active/40 active:bg-chrome focus-visible:outline-none focus-visible:shadow-focusring ${
@@ -439,7 +440,7 @@ export function WorkspaceSwitcher() {
               row in the column is scoped by. It stays in the row's tooltip, which reads
               "<name> — team, you are owner", so the fact is still reachable where somebody asking
               for it would look. */}
-          <Truncate className="min-w-0 text-body font-medium text-ink" title={current?.name}>
+          <Truncate className="min-w-0 text-title font-medium text-ink" title={current?.name}>
             {current?.name ?? "workspace"}
           </Truncate>
           {/* THE AFFORDANCE SITS AGAINST THE NAME, NOT AT THE ROW'S EDGE — and the difference is
@@ -486,9 +487,9 @@ export function WorkspaceSwitcher() {
             other destination, so a second, narrower agent-only box would be two answers to one
             question — and the one people reach for is whichever is nearer.
 
-            `sm` RATHER THAN `md`. It shares a row with 13px text and a 12px chevron rather than with
-            the 16px window controls it used to sit beside, and a mark a rung above everything around
-            it reads as the loudest thing on the row it is a footnote to. */}
+            `sm` RATHER THAN `md`. It shares a row with the workspace name and a 12px chevron rather
+            than with the 16px window controls it used to sit beside, and a mark as loud as the name
+            reads as the loudest thing on the row it is a footnote to. */}
         <button
           onClick={() => setPaletteOpen(true)}
           title={`Search agents and commands — ${keyHint("⌘K")} opens the palette`}
