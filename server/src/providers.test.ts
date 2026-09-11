@@ -107,6 +107,18 @@ const namesFromEnv = (): ReadonlySet<string> =>
   check("openai is not", providerStatus(namesFromEnv()).find((p) => p.id === "openai")?.powers_jaroku === false);
   check("...and neither is meta", providerStatus(namesFromEnv()).find((p) => p.id === "meta")?.powers_jaroku === false);
 
+  // RUNNABLE IS "A RUN CAN START HERE", which is not the same question as `configured` once there is
+  // a platform pool: a hosted workspace with no key of its own still runs on a lent one.
+  const none = new Set<string>();
+  check("a provider with neither its own key nor a lendable one cannot run",
+    providerStatus(none).every((p) => !p.runnable));
+  check("its own key makes it runnable",
+    providerStatus(new Set(["META_API_KEY"])).find((p) => p.id === "meta")?.runnable === true);
+  const lent = providerStatus(none, (id) => id === "openai");
+  check("a key the deployment can lend makes it runnable without being configured",
+    lent.find((p) => p.id === "openai")?.runnable === true && lent.find((p) => p.id === "openai")?.configured === false);
+  check("...and only for the provider it lends", lent.find((p) => p.id === "anthropic")?.runnable === false);
+
   if (before === undefined) delete process.env.OPENAI_API_KEY;
   else process.env.OPENAI_API_KEY = before;
 }

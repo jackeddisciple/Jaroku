@@ -94,6 +94,17 @@ export interface ProviderStatus {
   env_key: string;
   configured: boolean;
   /**
+   * Whether a run on this provider can START here: the workspace's own key, or a key this
+   * deployment holds to lend.
+   *
+   * NOT THE SAME AS `configured`, and the difference is hosting. A hosted workspace with no key of
+   * its own still runs on the platform's pool, within its plan — so a client that blocked on
+   * `configured` would refuse runs the server was about to accept. Locally the pool IS the process
+   * environment, so the two agree. Whether the platform will lend right now (caps, a kill switch)
+   * is still the server's call at run time, and it says so when it declines.
+   */
+  runnable: boolean;
+  /**
    * Whether Jaroku ITSELF thinks with this provider.
    *
    * Worth reporting rather than leaving the UI to hardcode: planning, generation, the fix
@@ -118,13 +129,21 @@ export interface ProviderStatus {
  * `configured` still means A NAMED VARIABLE IS SET, still never carries a value, and is still
  * deliberately not "this provider is fine". Same rule, a per-workspace answer.
  */
-export function providerStatus(configuredNames: ReadonlySet<string>): ProviderStatus[] {
-  return PROVIDER_IDS.map((id) => ({
-    id,
-    env_key: PROVIDER_ENV_KEY[id],
-    configured: configuredNames.has(PROVIDER_ENV_KEY[id]),
-    powers_jaroku: id === "anthropic",
-  }));
+export function providerStatus(
+  configuredNames: ReadonlySet<string>,
+  /** Whether this deployment holds a key it could lend for the provider. See `runnable`. */
+  lendable: (id: ProviderId) => boolean = () => false,
+): ProviderStatus[] {
+  return PROVIDER_IDS.map((id) => {
+    const configured = configuredNames.has(PROVIDER_ENV_KEY[id]);
+    return {
+      id,
+      env_key: PROVIDER_ENV_KEY[id],
+      configured,
+      runnable: configured || lendable(id),
+      powers_jaroku: id === "anthropic",
+    };
+  });
 }
 
 /** How long a validation call may take before it is called a failure. */

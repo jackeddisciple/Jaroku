@@ -5834,7 +5834,9 @@ async function providerSnapshot(ctx: TenantContext): Promise<ProviderSnapshot> {
     // same set — the local store is the process environment — and hosted they are emphatically
     // not: reading process.env there would tell every workspace it has a provider connected
     // because the server does.
-    providers: providerStatus(await providerKeys.configuredNames(ctx)),
+    // `runnable` counts the platform's pool, so a hosted workspace with no key of its own is not told
+    // it cannot run when the server would lend it one.
+    providers: providerStatus(await providerKeys.configuredNames(ctx), (id) => keyPool.size(id) > 0),
     ownKeyForPlatform: await providerKeys.ownKeyForPlatform(ctx),
     // THE SELECTABLE CATALOGUE, FROM THE PRICE SHEET. `runtime/pricing.json` declares itself the
     // single source of truth for models and is read by both this process and the Python

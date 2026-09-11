@@ -659,6 +659,11 @@ export interface ProviderStatus {
   env_key: string;
   configured: boolean;
   /**
+   * Whether a run on this provider can START here — the workspace's own key, or one the deployment
+   * lends. What gates a send, where `configured` is what the key rows report.
+   */
+  runnable: boolean;
+  /**
    * Whether Jaroku ITSELF thinks with this provider.
    *
    * Planning, generation, the fix loop, explain and the eval judge are Anthropic-only.

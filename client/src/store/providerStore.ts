@@ -110,12 +110,17 @@ export function isConfigured(providers: ProviderStatus[], id: ProviderId): boole
 /**
  * Whether Jaroku itself can plan, generate, edit and explain.
  *
- * The distinction the run-provider dropdown does not make: `fake` runs an agent for free, but
- * BUILDING one goes through Anthropic. Asking the snapshot rather than hardcoding "anthropic"
- * keeps the rule in one place — the server flags which provider powers Jaroku.
+ * BUILDING goes through Anthropic whatever an agent later runs on. Asking the snapshot rather than
+ * hardcoding "anthropic" keeps the rule in one place — the server flags which provider powers
+ * Jaroku — and `runnable` rather than `configured` counts a key the deployment lends.
  */
 export function canBuild(providers: ProviderStatus[]): boolean {
-  return providers.some((p) => p.powers_jaroku && p.configured);
+  return providers.some((p) => p.powers_jaroku && p.runnable);
+}
+
+/** Whether a run on this provider can start here: its own key, or one the deployment lends. */
+export function isRunnable(providers: ProviderStatus[], id: string): boolean {
+  return providers.some((p) => p.id === id && p.runnable);
 }
 
 /** A provider and the models a run may be started on with it. What every model selector renders. */
