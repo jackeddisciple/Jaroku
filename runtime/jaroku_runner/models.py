@@ -2,8 +2,9 @@
 
 Generated code never constructs a model (hard rule 2 of the generation prompt). It receives
 one already configured. That is what makes the provider dropdown a real feature rather than
-a regeneration: the same generated project runs on the free dry-run model, on Claude, or on
-GPT, decided here at spawn time from ``JAROKU_PROVIDER`` / ``JAROKU_MODEL``.
+a regeneration: the same generated project runs on Claude, on GPT or on Muse Spark, decided
+here at spawn time from ``JAROKU_PROVIDER`` / ``JAROKU_MODEL``. The scripted dry-run model is
+still reachable, but only as the test suites' stand-in — no product surface offers it.
 
 Note on sampling parameters: no ``temperature`` is passed. Current Claude models (Opus 4.7+,
 Sonnet 5, Fable 5) reject ``temperature``/``top_p``/``top_k`` with a 400, so passing it would
@@ -47,6 +48,8 @@ _THINKING_BUDGETS = {"medium": 4_000, "high": 12_000, "xhigh": 24_000}
 # The two halves are one decision, so they are made in one place.
 _FIXED_BUDGET_MODELS = frozenset({
     "claude-haiku-4-5",
+    # The same snapshot under its dated id, which is the one Anthropic's model table leads with.
+    "claude-haiku-4-5-20251001",
     "claude-sonnet-4-5",
     "claude-opus-4-5",
     "claude-3-5-haiku-latest",
@@ -63,9 +66,15 @@ _ADAPTIVE_EFFORT = {"low": "low", "medium": "medium", "high": "high", "xhigh": "
 # a thinking block drawn from the same allowance is how a response gets truncated mid-sentence with
 # no error attached — the failure the fixed-budget branch below already doubled `max_tokens` for.
 _ADAPTIVE_MAX_TOKENS = 16_000
-# OpenAI takes a NAME rather than a budget, and takes three of the four — xhigh clamps to high,
-# which is the same clamp effort.ts applies for the same reason.
-_OPENAI_EFFORT = {"low": "low", "medium": "medium", "high": "high", "xhigh": "high"}
+# OpenAI and Meta take the level as a NAME rather than a budget, and every model either offers
+# accepts all four of ours — GPT-6 Astra and GPT-5.6 go up to `max`, Muse Spark likewise — so they
+# pass straight through. The clamp this table used to apply (xhigh to high) was for the older
+# three-level models; which models clamp is now a fact in pricing.json (`effort_levels`), and it is
+# the server that reports one.
+_NAMED_EFFORT = {"low": "low", "medium": "medium", "high": "high", "xhigh": "xhigh"}
+
+# Meta's Model API speaks OpenAI's wire format at its own address.
+META_BASE_URL = "https://api.meta.ai/v1"
 
 
 def _requested_effort() -> str | None:
@@ -76,10 +85,14 @@ def _requested_effort() -> str | None:
 # forwards JAROKU_MODEL explicitly, so these only apply to a hand-run with no model set.
 DEFAULT_MODELS = {
     "anthropic": "claude-haiku-4-5",
-    "openai": "gpt-4o-mini",
-    "google": "gemini-2.0-flash",
+    "openai": "gpt-5.6-luna",
+    "meta": "muse-spark-1.3",
     "fake": "fake-dry-run",
 }
+
+#: The providers a run may name. Anything else is the dry-run double, which is what the test
+#: suites run on and what a run with no provider set falls back to.
+RUN_PROVIDERS = ("anthropic", "openai", "meta")
 
 
 def resolve_model_name(provider: str, requested: str | None) -> str:
@@ -137,23 +150,50 @@ def build_model(provider: str, model_name: str, tools: Sequence[Any]) -> tuple[A
         # this existed.
         return ChatAnthropic(model=model_name, max_tokens=_ADAPTIVE_MAX_TOKENS), provider, model_name
 
+    effort = _NAMED_EFFORT.get(level or "")
+    named = {"reasoning_effort": effort} if effort else {}
+
     if provider == "openai":
         from langchain_openai import ChatOpenAI
 
-        effort = _OPENAI_EFFORT.get(level or "")
-        if effort:
-            return ChatOpenAI(model=model_name, reasoning_effort=effort), provider, model_name
-        return ChatOpenAI(model=model_name), provider, model_name
+        # THE RESPONSES API, NOT CHAT COMPLETIONS. GPT-6 Astra answers on Chat Completions but calls
+        # tools only through Responses, and every generated agent binds tools — so on the old
+        # endpoint the one thing an agent is for would fail. langchain-openai switches on its own
+        # only for the `-pro` models, so it is asked for here, for every OpenAI model, rather than
+        # left to a prefix list that has never heard of these names. `reasoning_effort` becomes
+        # `reasoning.effort` on the way out.
+        return ChatOpenAI(model=model_name, use_responses_api=True, **named), provider, model_name
 
-    if provider == "google":
-        # Imported inside the branch, like the other two: a workspace on Claude should not pay the
-        # import cost — or the failure — of a package it never uses.
+    if provider == "meta":
+        from langchain_openai import ChatOpenAI
+
+        # MUSE SPARK IS THE OPENAI CLIENT AT META'S ADDRESS, not a third SDK: Meta's Model API is
+        # OpenAI-compatible, key as a Bearer token. Chat Completions rather than Responses, because
+        # that is the endpoint that takes the whole transcript every turn — which is what a
+        # LangGraph agent sends anyway — where Responses carries state server-side.
         #
-        # The key is read from ``GOOGLE_API_KEY`` by the client itself, which is why that name is
-        # the one the server writes. No ``temperature`` here either, for consistency with the note
-        # at the top of this module rather than because Gemini refuses one.
-        from langchain_google_genai import ChatGoogleGenerativeAI
-
-        return ChatGoogleGenerativeAI(model=model_name), provider, model_name
+        # THE KEY IS PASSED, NEVER LEFT TO THE CLIENT. Unset, `ChatOpenAI` falls back to
+        # OPENAI_API_KEY — which would send somebody's OpenAI credential to Meta. Refused by name
+        # instead; the server already declines to start a run with no key, so this only fires on a
+        # hand-run.
+        key = os.environ.get("META_API_KEY")
+        if not key:
+            raise RuntimeError("META_API_KEY is not set — Muse Spark needs a Meta Model API key")
+        # `tool_choice` IS DISABLED because Meta accepts only "auto" and answers "required", "none"
+        # or a named function with a 400. Auto is the default whenever tools are bound, so the
+        # ordinary agent loses nothing, and a structured-output call that would have forced a
+        # function gets the default instead of an error.
+        return (
+            ChatOpenAI(
+                model=model_name,
+                base_url=META_BASE_URL,
+                api_key=key,
+                use_responses_api=False,
+                disabled_params={"tool_choice": None},
+                **named,
+            ),
+            provider,
+            model_name,
+        )
 
     return build_dry_run_model(tools), "fake", DEFAULT_MODELS["fake"]

@@ -33,7 +33,7 @@ from . import controlplane_http
 from .contract import ContractError, load_agent, tools_of
 from .debug import emit_ctrl, run_with_checkpoints, thread_id_for
 from .guard import install_stdout_guard
-from .models import build_model, resolve_model_name
+from .models import RUN_PROVIDERS, build_model, resolve_model_name
 
 DEFAULT_INPUT = "Hello! Please introduce yourself and show me what you can do."
 
@@ -65,7 +65,7 @@ def main(argv: list[str]) -> int:
         bind_trace_sink(controlplane_http.queue_trace_event)
 
     provider = os.environ.get("JAROKU_PROVIDER", "fake").lower()
-    if provider not in ("anthropic", "openai"):
+    if provider not in RUN_PROVIDERS:
         provider = "fake"
     model_name = resolve_model_name(provider, os.environ.get("JAROKU_MODEL"))
 

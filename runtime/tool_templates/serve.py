@@ -73,7 +73,7 @@ MAX_BODY_BYTES = 64 * 1024
 #: selected the model itself: it answers with placeholder text, so deploying it would put a URL
 #: on the internet that looks like a working agent and is not. The runner would happily accept
 #: it — this is the deploy layer declining to ask for it.
-DEPLOYABLE_PROVIDERS = ("anthropic", "openai")
+DEPLOYABLE_PROVIDERS = ("anthropic", "openai", "meta")
 
 #: The project directory this file was copied into. Resolved from ``__file__`` rather than from
 #: the agent id or the working directory, so it is the same expression in a container
