@@ -76,13 +76,18 @@ export function ComposerSuggestions({
     // and to hidden at the end of a fade out, so the cards are seen for the whole of both and are out
     // of the tab order and the accessibility tree once they have gone. `pointer-events-none` applies
     // at once, so a card that is still fading out cannot be clicked over what somebody just typed.
+    //
+    // SHOWN MEANS "NOT HIDDEN", NEVER `visible`. An explicit `visible` overrides a hidden ancestor,
+    // and the three panes are hidden with `invisible` while a full-screen view is up — so the cards
+    // stayed drawn and in the tab order under every destination, and showed straight through
+    // Cockpit, which paints no background of its own. Inheriting is what lets the panes hide them.
     <div
       //
       // AS WIDE AS THE COMPOSER AND NO WIDER. 45rem is the composer card's own width, so the row of
       // cards and the box they start share both edges — the product owner's call on 2026-09-10, when
       // the cards grew from a 40rem row.
       className={`w-full max-w-[45rem] transition-[opacity,transform,visibility] duration-collapse ease-smooth motion-reduce:transition-none ${
-        hidden ? "pointer-events-none invisible translate-y-1 opacity-0" : "visible translate-y-0 opacity-100"
+        hidden ? "pointer-events-none invisible translate-y-1 opacity-0" : "translate-y-0 opacity-100"
       } ${className}`}
     >
       {/* FOUR ACROSS WHERE THERE IS ROOM, fewer where there is not. The columns are sized off the

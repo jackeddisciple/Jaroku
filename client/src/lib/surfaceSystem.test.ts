@@ -495,6 +495,34 @@ console.log("\n§12: the rules that are checkable across every file");
   // than over the agent card alone — a rule about cards is worth what the number of cards it reads.
 }
 
+console.log("\nnothing under a hidden pane insists on being seen");
+{
+  // `invisible` HIDES A WHOLE SUBTREE ONLY IF NOTHING IN IT SAYS `visible`. An explicit `visible`
+  // overrides a hidden ancestor, which is how the new-agent screen's four cards stayed drawn — and in
+  // the tab order — under every full-screen view, and showed straight through Cockpit (2026-09-11).
+  // App hides the three panes with `invisible` while a destination is up, so the rule is that no
+  // class list in this client says `visible`: shown means "not hidden", and inherits.
+  //
+  // CLASS LISTS ONLY — a string whose every word is a class — because `const visible = …` is ordinary
+  // code in four files and a tooltip may say the word. Double-quoted strings are read wherever they
+  // are, inside templates included, which is where the one that did this sat.
+  const CLASSY = /^[a-z0-9:\-[\]/.%!()_,]+$/;
+  const forced: string[] = [];
+  for (const { path, text } of CODE) {
+    const literals = [
+      ...[...text.matchAll(/"([^"\n]*)"/g)].map((m) => ({ at: m.index ?? 0, body: m[1] ?? "" })),
+      ...[...text.matchAll(/`([^`]*)`/g)].map((m) => ({ at: m.index ?? 0, body: (m[1] ?? "").replace(/\$\{[^}]*\}/g, " ") })),
+    ];
+    for (const { at, body } of literals) {
+      const words = body.split(/\s+/).filter(Boolean);
+      if (words.includes("visible") && words.every((w) => CLASSY.test(w))) {
+        forced.push(`${path}:${text.slice(0, at).split("\n").length}`);
+      }
+    }
+  }
+  check("no class list forces `visible`, so a hidden pane hides everything in it", forced.length === 0, forced.slice(0, 6).join("; "));
+}
+
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
 // The same exit the other client suites use: this runs under tsx with no node types in scope.
 (globalThis as { process?: { exit(code: number): void } }).process?.exit(failures === 0 ? 0 : 1);
