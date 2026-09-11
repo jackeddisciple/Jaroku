@@ -445,11 +445,11 @@ function NavList() {
             and read as heavier still once the column became a translucent material. `AddSquareIcon`
             is the same idea drawn rather than built: a plus already inside its square, at the same
             stroke weight as every other mark in the column. */}
-        {/* `lg`, THE SAME RUNG AS THE FIVE DESTINATIONS BELOW IT. This was `md` when the black tile
-            came off — the tile had been carrying the visual weight, and the glyph inside it was
-            drawn smaller to fit. Without the tile that left `New` two pixels under every mark under
-            it, on the one row that leads the column. */}
-        <Icon.nav.newAgent size={ICON.lg} />
+        {/* `md`, THE SAME RUNG AS THE FIVE DESTINATIONS BELOW IT. All six came down from `lg` together
+            on 2026-09-11 at the product owner's call. `New` was once drawn a rung under the rest to
+            fit a black tile, and a leading row whose mark is smaller than every mark under it reads
+            as the odd one out — so it moves with them rather than on its own. */}
+        <Icon.nav.newAgent size={ICON.md} />
         <span className="min-w-0 flex-1 truncate text-body font-medium">New</span>
         {/* THE CHORD, ON APPROACH. A shortcut printed permanently is a second thing to read on a
             row with two words on it; one that appears when the pointer arrives is there exactly
@@ -478,7 +478,7 @@ function NavList() {
               active ? "bg-sidebar-active text-accent" : "text-muted hover:bg-sidebar-hover hover:text-ink"
             }`}
           >
-            <Mark size={ICON.lg} />
+            <Mark size={ICON.md} />
             <span className="min-w-0 flex-1 truncate text-body font-medium">{label}</span>
             {badge > 0 && (
               <span
@@ -756,7 +756,7 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
         // one and the five destinations above it use, so this is the pattern arriving somewhere it
         // was missing rather than a new one, and it survives an accent that is a neutral.
         // AND ITS EMOJI SITS IN THE TABS' ICON COLUMN — the product owner's call on 2026-09-11. The
-        // row's 10px of left padding lands its 18px mark box on the same 16px the tab icons start at,
+        // row's 10px of left padding lands its 16px mark box on the same 16px the tab icons start at,
         // and the 10px gap after it starts the name where the tab labels start. The runs twisty that
         // used to hold this column moved to the row's right end, before the pull request.
         className={`group relative flex h-11 w-full items-center gap-1 rounded-control pl-2.5 pr-1 transition-colors duration-fast ${
@@ -776,9 +776,9 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
           title={identityTitle(agent.name, agent.category)}
           className="flex min-w-0 flex-1 items-center gap-2.5 py-1 text-left focus-visible:outline-none focus-visible:shadow-focusring"
         >
-          {/* The tab icons' own 18px box, so the mark is centred under them whatever width its glyph
+          {/* The tab icons' own box, `md`, so the mark is centred under them whatever width its glyph
               draws — an emoji's is its own, and a bat is wider than a robot. */}
-          <span className="inline-flex shrink-0 justify-center" style={{ width: ICON.lg }}>
+          <span className="inline-flex shrink-0 justify-center" style={{ width: ICON.md }}>
             <AgentEmoji emoji={agent.emoji} size={EMOJI_SIZE.sidebar} />
           </span>
           {/* TWO LINES: who it is, then what it is and when it last ran. The category and the

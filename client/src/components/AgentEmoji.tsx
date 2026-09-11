@@ -34,10 +34,10 @@ export const EMOJI_SIZE = {
   /**
    * The sidebar's agent list. The reason this feature exists.
    *
-   * 14, NOT 16 — the product owner's call on 2026-09-11, so the mark sits level with the 18px tab
-   * icons above it. Measured: a colour emoji at 16px inks about 15px, the same as an 18px line icon,
-   * and still reads larger, because a filled glyph weighs more than a 1.5px stroke. At 14 it inks
-   * about 13px and the two columns read as one.
+   * 14, NOT 16 — the product owner's call on 2026-09-11, so the mark sits level with the tab icons
+   * above it. Measured: a colour emoji at 16px inks about 15px, the same as an 18px line icon, and
+   * still reads larger, because a filled glyph weighs more than a 1.5px stroke. At 14 it inks about
+   * 13px — what the tab icons ink since they came down to 16px the same day.
    */
   sidebar: 14,
   /** An agent card in the grid. */
