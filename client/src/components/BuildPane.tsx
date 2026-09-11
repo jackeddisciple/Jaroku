@@ -58,6 +58,7 @@ import { MAX_ATTACHMENTS, WARN_AT, budgetPercent } from "../lib/attachBudget.ts"
 import { EffortControl } from "./composer/EffortControl.tsx";
 import { effortName, effortStops, stopFor } from "../lib/effortLevels.ts";
 import { ShieldControl, modeLabel } from "./composer/ShieldControl.tsx";
+import { CookAnimation } from "./CookAnimation.tsx";
 import { ConnectorDeck } from "./composer/ConnectorDeck.tsx";
 import { TurnActions } from "./composer/TurnActions.tsx";
 import { PinRail, pinLabel, type PinnedTurn } from "./composer/PinRail.tsx";
@@ -1937,20 +1938,15 @@ export function BuildPane({
                   rung carries 600 for headings a person scans for; this is a sentence addressed to
                   them. `text-balance` so a narrow window breaks it into even lines.
                   A COOK SIGNS OFF THE QUESTION, the product owner's call on 2026-09-11: the sentence
-                  says "cook" in words and names whoever is signed in, and a woman cook in the light
-                  skin tone follows it — a quarter larger than the words (1.25em, so she scales with
-                  the heading), and held to the last word by a no-break space so a narrow window cannot
-                  leave her alone on a line. `aria-hidden`, because the words already say it and a
-                  labelled image would have a screen reader say "cook" twice. WRITTEN AS ESCAPES
-                  because it is four code points held together by a zero-width joiner, which is
-                  invisible in source; an edit that drops it splits the cook into a woman and a frying
-                  pan. Woman, light tone, ZWJ, cooking. */}
+                  says "cook" in words and names whoever is signed in, and the product owner's own
+                  animated cook follows it — in exactly the box the woman-cook emoji had, a quarter
+                  larger than the words (`CookAnimation` says how that was measured), and held to the
+                  last word by a no-break space so a narrow window cannot leave it alone on a line.
+                  Hidden from screen readers, because the words already say it. */}
               <h1 className="mt-8 text-balance text-page font-normal text-ink">
                 {firstName ? `What should we cook today, ${firstName}?` : "What should we cook today?"}
                 {"\u00A0"}
-                <span aria-hidden className="leading-none" style={{ fontSize: "1.25em" }}>
-                  {"\u{1F469}\u{1F3FB}\u200D\u{1F373}"}
-                </span>
+                <CookAnimation />
               </h1>
               {/* FOUR WAYS TO START, under the question. Offered while the Chat composer is empty and
                   gone the moment it holds anything — read off the draft, never remembered — and a
