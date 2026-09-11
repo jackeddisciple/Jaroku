@@ -783,13 +783,14 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
           </span>
           {/* TWO LINES: who it is, then what it is and when it last ran. The category and the
               timestamp are both qualifiers on the name, so they share the second line and the
-              name gets the first to itself — at 14px medium it is the thing the eye lands on
-              when scanning a column of agents. */}
+              name gets the first to itself — at 13px medium, the product owner's call on
+              2026-09-11: a rung under the 14px tab labels, and still one over the 12px line it
+              heads, so the name stays the thing the eye lands on in a column of agents. */}
           <span className="flex min-w-0 flex-1 flex-col leading-tight">
             {/* Ink whether or not it is the selected one — see the run row above for why the
                 ternary that used to be here had the same value on both arms, and why the fill and
                 the bar are what say "this one". A name is content; content does not dim. */}
-            <Truncate className="text-body font-medium text-ink" title={agent.name}>
+            <Truncate className="text-label text-ink" title={agent.name}>
               {agent.name}
             </Truncate>
             <span className="flex min-w-0 items-center gap-1.5 text-caption text-faint">
