@@ -737,7 +737,11 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
         // same value the name already had. A fill and a 2px bar are what the run rows under this
         // one and the five destinations above it use, so this is the pattern arriving somewhere it
         // was missing rather than a new one, and it survives an accent that is a neutral.
-        className={`group relative flex h-11 w-full items-center gap-1 rounded-control pr-1 transition-colors duration-fast ${
+        // AND ITS EMOJI SITS IN THE TABS' ICON COLUMN — the product owner's call on 2026-09-11. The
+        // row's 10px of left padding lands its 18px mark box on the same 16px the tab icons start at,
+        // and the 10px gap after it starts the name where the tab labels start. The runs twisty that
+        // used to hold this column moved to the row's right end, before the pull request.
+        className={`group relative flex h-11 w-full items-center gap-1 rounded-control pl-2.5 pr-1 transition-colors duration-fast ${
           selected ? "bg-sidebar-active" : "hover:bg-sidebar-hover"
         }`}
       >
@@ -749,26 +753,16 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
         {/* THE TWISTY AND THE NAME ARE TWO CONTROLS, because they do two things: one opens the
             agent's runs, the other selects the agent into the three panes. Nesting a button inside
             a button is invalid markup and makes the inner one unreachable by keyboard. */}
-        {hasRuns ? (
-          <button
-            onClick={() => setOpen((v) => !v)}
-            title={open ? `Hide ${agent.name}'s runs` : `Show ${agent.name}'s runs`}
-            aria-label={open ? `Hide ${agent.name}'s runs` : `Show ${agent.name}'s runs`}
-            aria-expanded={open}
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-faint transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
-          >
-            {open ? <Icon.workspace.switcherOpen size={ICON.lg} /> : <Icon.workspace.switcherClosed size={ICON.lg} />}
-          </button>
-        ) : (
-          // The twisty's width, kept, so names line up whether or not an agent has ever run.
-          <span className="h-6 w-6 shrink-0" aria-hidden />
-        )}
         <button
           onClick={() => selectAgent(agent.agent_id)}
           title={identityTitle(agent.name, agent.category)}
-          className="flex min-w-0 flex-1 items-center gap-2 py-1 text-left focus-visible:outline-none focus-visible:shadow-focusring"
+          className="flex min-w-0 flex-1 items-center gap-2.5 py-1 text-left focus-visible:outline-none focus-visible:shadow-focusring"
         >
-          <AgentEmoji emoji={agent.emoji} size={EMOJI_SIZE.sidebar} />
+          {/* The tab icons' own 18px box, so the mark is centred under them whatever width its glyph
+              draws — an emoji's is its own, and a bat is wider than a robot. */}
+          <span className="inline-flex shrink-0 justify-center" style={{ width: ICON.lg }}>
+            <AgentEmoji emoji={agent.emoji} size={EMOJI_SIZE.sidebar} />
+          </span>
           {/* TWO LINES: who it is, then what it is and when it last ran. The category and the
               timestamp are both qualifiers on the name, so they share the second line and the
               name gets the first to itself — at 13px semibold it is the thing the eye lands on
@@ -791,6 +785,20 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
             </span>
           </span>
         </button>
+        {/* THE RUNS TWISTY, AT THE ROW'S RIGHT END since the emoji took its column. Only on an agent
+            that has runs: one that has never run has nothing under it to open, and no longer needs
+            a blank of the twisty's width to keep the names in line. */}
+        {hasRuns && (
+          <button
+            onClick={() => setOpen((v) => !v)}
+            title={open ? `Hide ${agent.name}'s runs` : `Show ${agent.name}'s runs`}
+            aria-label={open ? `Hide ${agent.name}'s runs` : `Show ${agent.name}'s runs`}
+            aria-expanded={open}
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-faint transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+          >
+            {open ? <Icon.workspace.switcherOpen size={ICON.lg} /> : <Icon.workspace.switcherClosed size={ICON.lg} />}
+          </button>
+        )}
         {/* THE PULL REQUEST, AND IT IS ON EVERY ROW because it is a control rather than a badge.
             "Only when there is one" made it invisible on exactly the agents somebody would want to
             open one FOR — and an affordance you cannot find until after you have used it is not an
@@ -841,8 +849,9 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
       <Collapse open={open && hasRuns}>
         <div className="flex flex-col">
           {shown.map((r) => (
-            // Indented to the twisty's width, so a run reads as belonging to the row above it.
-            <div key={r.id} className="pl-5">
+            // Indented to where the agent's name starts, so a run reads as belonging to the row above
+            // it — the emoji column is the tabs' icon column now, and the name follows it.
+            <div key={r.id} className="pl-7">
               <RunRow run={r} runs={runs} agentId={agent.agent_id} />
             </div>
           ))}
