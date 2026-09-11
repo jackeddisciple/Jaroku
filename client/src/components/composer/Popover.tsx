@@ -80,6 +80,10 @@ export function Popover({
       // navigate when focus is on a row itself.
       const active = document.activeElement as HTMLElement | null;
       if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return;
+      // AND A SLIDER OWNS ITS ARROWS, Home and End included: they move its value, not the focus. Taken
+      // here, End jumped focus to the last row while the slider still moved, and every key after it
+      // landed on something else. The effort slider is the one inside a popover today.
+      if (active?.getAttribute("role") === "slider") return;
       e.preventDefault();
       const at = active ? items.indexOf(active) : -1;
       const next =
