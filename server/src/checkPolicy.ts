@@ -131,7 +131,7 @@ export const APPROVE_ACTION = {
  */
 export function modeReason(facts: TriggerFacts): string {
   if (facts.policy === "dry_run_only") {
-    return "this agent is configured to run checks on the dry-run provider only";
+    return "this agent is configured so its checks spend nobody's balance — they prove the tools import and run";
   }
   if (facts.authorIsCollaborator) return "the author has write access to this repository";
   if (facts.approvedForThisSha) return "a collaborator approved this commit for real providers";
@@ -141,7 +141,7 @@ export function modeReason(facts: TriggerFacts): string {
   // `approvedForThisSha` — so the maintainer it was addressed to went looking and found nothing.
   // `offersApproval` gates the control it points at, and both are false together under
   // `dry_run_only`, so this can never describe a button that is not on the check.
-  return `this pull request is from outside the repository, so it runs on the free dry-run provider — a collaborator with write access can press "${APPROVE_ACTION.label}" above to re-run it on real providers`;
+  return `this pull request is from outside the repository, so it only proves the tools import and run — a collaborator with write access can press "${APPROVE_ACTION.label}" above to re-run it on real providers`;
 }
 
 /**

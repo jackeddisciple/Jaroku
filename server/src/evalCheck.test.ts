@@ -140,8 +140,8 @@ console.log("\nthe dry-run note, and the title");
   const text = summaryFor(c, m(0.92, null, 820), { providerMode: "dry_run" });
   // §B.1.3's boundary, said on the check rather than only in the settings: a pass rate from the
   // fake provider proves every tool imports and executes, and nothing about what a model answers.
-  check(text.includes("free dry-run provider"), "a dry run says so on the check itself", text);
-  check(!summaryFor(c, m(0.92, null, 820), { providerMode: "paid" }).includes("dry-run provider"),
+  check(text.includes("ran without a model"), "a tools-only run says so on the check itself", text);
+  check(!summaryFor(c, m(0.92, null, 820), { providerMode: "paid" }).includes("without a model"),
     "and a paid run does not carry the note");
 
   check(titleFor("weather-agent-suite") === "Jaroku eval · weather-agent-suite", "the title names the dataset");

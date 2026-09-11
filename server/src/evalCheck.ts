@@ -200,7 +200,7 @@ export function summaryFor(
     // a pass rate needs to know it came from the fake provider, because it proves every tool imports
     // and executes and proves nothing about what a real model would answer.
     lines.push("");
-    lines.push("ran on the free dry-run provider — this proves the tools import and execute, not what a real model answers");
+    lines.push("ran without a model — a scripted stand-in drove every tool, which proves they import and execute, not what a real model answers");
   }
 
   return lines.join("\n");

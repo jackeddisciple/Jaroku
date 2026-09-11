@@ -93,7 +93,7 @@ console.log("\nthe sentence on the check says which of the four reasons applied"
   // `approvedForThisSha` needed a paid row, a paid row needed a paid run, and a paid run needed
   // `approvedForThisSha`. The maintainer it was addressed to went looking for the control and
   // found nothing — the failure `offersApproval`'s own comment names, achieved without a button.
-  check(stranger.includes("dry-run provider") && stranger.includes(APPROVE_ACTION.label),
+  check(stranger.includes("only proves the tools") && stranger.includes(APPROVE_ACTION.label),
     "…and names the control that would change it", stranger);
   // THE SENTENCE AND THE CONTROL CANNOT DISAGREE. Both are false together under `dry_run_only` and
   // both are true together for a stranger, so this can never describe a button that is not on the

@@ -200,7 +200,7 @@ export class CheckRunner {
         name,
         headSha: event.headSha,
         status: "in_progress",
-        title: mode === "paid" ? "Running" : "Running (dry-run provider)",
+        title: mode === "paid" ? "Running" : "Running (tools only)",
         summary: modeReason(facts),
       })
       // The check is already open and the eval is already going; failing to move it from queued to
@@ -257,7 +257,7 @@ export class CheckRunner {
     // overrode it would make the setting advisory — which is the same reason `offersApproval`
     // declines to render the button under it in the first place.
     if (config.provider_policy === "dry_run_only") {
-      return { checkRunId: null, reason: "this agent is configured to run checks on the dry-run provider only" };
+      return { checkRunId: null, reason: "this agent is configured so its checks spend nobody's balance — they prove the tools import and run" };
     }
 
     const allowed = input.senderLogin
