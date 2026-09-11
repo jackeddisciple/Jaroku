@@ -1633,11 +1633,6 @@ jobs:
           # it the rule that keeps the mark out of the tag row: that row trims to three plus a `+n`
           # chip, so an identity mark in it would vanish exactly when the card is busiest.
           npm run test:emoji-render
-          # THE COOK ANIMATION HAS TO PLAY ON EVERY DESKTOP: under a CSP with no 'unsafe-eval', offline,
-          # on an old webview as well as a new one, and in exactly the box the emoji had. The light
-          # player with no eval in it, a file with no expressions, images or URLs, both imports lazy,
-          # the emoji again if either fails, and a still frame under prefers-reduced-motion.
-          npm run test:cook-animation
 
       # THE ICON SYSTEM, IN ITS OWN STEP, because the six suites guard six different invariants and
       # a reader looking at a red build should be able to tell which one broke without opening a

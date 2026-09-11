@@ -58,7 +58,6 @@ import { MAX_ATTACHMENTS, WARN_AT, budgetPercent } from "../lib/attachBudget.ts"
 import { EffortControl } from "./composer/EffortControl.tsx";
 import { effortName, effortStops, stopFor } from "../lib/effortLevels.ts";
 import { ShieldControl, modeLabel } from "./composer/ShieldControl.tsx";
-import { CookAnimation } from "./CookAnimation.tsx";
 import { ConnectorDeck } from "./composer/ConnectorDeck.tsx";
 import { TurnActions } from "./composer/TurnActions.tsx";
 import { PinRail, pinLabel, type PinnedTurn } from "./composer/PinRail.tsx";
@@ -1937,16 +1936,11 @@ export function BuildPane({
               {/* REGULAR WEIGHT, one rung below the hero, and the dominant thing in the group. The
                   rung carries 600 for headings a person scans for; this is a sentence addressed to
                   them. `text-balance` so a narrow window breaks it into even lines.
-                  A COOK SIGNS OFF THE QUESTION, the product owner's call on 2026-09-11: the sentence
-                  says "cook" in words and names whoever is signed in, and the product owner's own
-                  animated cook follows it — in exactly the box the woman-cook emoji had, a quarter
-                  larger than the words (`CookAnimation` says how that was measured), and held to the
-                  last word by a no-break space so a narrow window cannot leave it alone on a line.
-                  Hidden from screen readers, because the words already say it. */}
+                  THE SENTENCE SAYS "COOK" AND NAMES WHOEVER IS SIGNED IN, the product owner's wording on
+                  2026-09-11 — the name is the account's first name, and the plain question stands in when there
+                  is none. */}
               <h1 className="mt-8 text-balance text-page font-normal text-ink">
                 {firstName ? `What should we cook today, ${firstName}?` : "What should we cook today?"}
-                {"\u00A0"}
-                <CookAnimation />
               </h1>
               {/* FOUR WAYS TO START, under the question. Offered while the Chat composer is empty and
                   gone the moment it holds anything — read off the draft, never remembered — and a
