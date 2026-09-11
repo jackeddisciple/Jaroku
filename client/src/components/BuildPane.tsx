@@ -55,7 +55,8 @@ import { AddMenu } from "./composer/AddMenu.tsx";
 import { AttachmentRail, type DraftAttachment } from "./composer/AttachmentRail.tsx";
 import { refKey, type AttachKind, type AttachableRow } from "./composer/AttachPicker.tsx";
 import { MAX_ATTACHMENTS, WARN_AT, budgetPercent } from "../lib/attachBudget.ts";
-import { EffortControl, effortLabel } from "./composer/EffortControl.tsx";
+import { EffortControl } from "./composer/EffortControl.tsx";
+import { effortName, effortStops, stopFor } from "../lib/effortLevels.ts";
 import { ShieldControl, modeLabel } from "./composer/ShieldControl.tsx";
 import { ConnectorDeck } from "./composer/ConnectorDeck.tsx";
 import { TurnActions } from "./composer/TurnActions.tsx";
@@ -2390,41 +2391,45 @@ export function BuildPane({
                   />
                 ),
               },
-              effort: {
-                bar: (density: Density) => (
-                  <EffortControl
-                    value={effort}
-                    model={selectedModel}
-                    dense={!showsLabel(density)}
-                    disabled={busy}
-                    remembered={settings.explicit.effort}
-                    onPick={(level, remember) => {
-                      // UNCHECKED IS THE DEFAULT AND IT WRITES NOTHING. The level applies to the
-                      // next turn and is forgotten after it; only "Remember" reaches the server.
-                      setEffortOverride(level);
-                      if (remember) void patchSettings(activeThreadId, { reasoning_effort: level });
-                    }}
-                  />
-                ),
-                menu: () => (
-                  <PopoverRow
-                    label="Reasoning effort"
-                    detail={
-                      selectedModel?.reasoning
-                        ? effortLabel(effort)
-                        : `${selectedModel?.id ?? "This model"} doesn't expose a reasoning control.`
-                    }
-                    disabled={!selectedModel?.reasoning || busy}
-                    onSelect={() => {
-                      // Cycles rather than opening a second popover inside the overflow one. A
-                      // nested menu at this width is a menu that does not fit on the screen it is
-                      // collapsing for, and the four levels are a ring somebody can step round.
-                      const order: Effort[] = ["low", "medium", "high", "xhigh"];
-                      setEffortOverride(order[(order.indexOf(effort) + 1) % order.length]!);
-                    }}
-                  />
-                ),
-              },
+              // NO STOPS, NO CONTROL: Muse Spark by the product owner's call, Haiku 4.5 because it
+              // takes no effort. The slot is left out rather than drawn disabled, and the bar closes
+              // up around the gap — §12.1c's absence rule, which `layoutBar` already keeps.
+              ...(effortStops(selectedModel).length > 0 ? {
+                effort: {
+                  bar: (density: Density) => (
+                    <EffortControl
+                      value={effort}
+                      model={selectedModel}
+                      dense={!showsLabel(density)}
+                      disabled={busy}
+                      remembered={settings.explicit.effort}
+                      onPick={(level, remember) => {
+                        // UNCHECKED IS THE DEFAULT AND IT WRITES NOTHING. The level applies to the
+                        // next turn and is forgotten after it; only "Remember" reaches the server.
+                        setEffortOverride(level);
+                        if (remember) void patchSettings(activeThreadId, { reasoning_effort: level });
+                      }}
+                    />
+                  ),
+                  menu: () => {
+                    const stops = effortStops(selectedModel);
+                    const at = stopFor(stops, effort) ?? stops[0]!;
+                    return (
+                      <PopoverRow
+                        label="Reasoning effort"
+                        detail={effortName(selectedModel, at)}
+                        disabled={busy}
+                        onSelect={() => {
+                          // Cycles rather than opening a second popover inside the overflow one. A
+                          // nested menu at this width is a menu that does not fit on the screen it is
+                          // collapsing for, and the model's stops are a ring somebody can step round.
+                          setEffortOverride(stops[(stops.indexOf(at) + 1) % stops.length]!);
+                        }}
+                      />
+                    );
+                  },
+                },
+              } : {}),
               shield: {
                 bar: (density: Density) => (
                   <ShieldControl

@@ -207,6 +207,9 @@ export const MANIFEST = {
     tray: "FolderClosedIcon",
     // ...and the connector picker at the tray's left edge.
     trayConnectors: "CableIcon",
+    // The effort slider's way back to Medium. An undo — "put it back how it was" — not a refresh,
+    // which D3 keeps for "re-fetch the list I am looking at".
+    effortReset: "Undo03Icon",
   },
 
   // ── D8 · the composer's ⊕ menu, five sources ──────────────────────────────

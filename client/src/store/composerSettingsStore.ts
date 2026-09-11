@@ -24,10 +24,10 @@
 import { create } from "zustand";
 import { apiRequest } from "../lib/http.ts";
 
-export type Effort = "low" | "medium" | "high" | "xhigh";
+export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 export type PermissionMode = "strict" | "smart" | "fast";
 
-export const EFFORT_LEVELS: readonly Effort[] = ["low", "medium", "high", "xhigh"];
+export const EFFORT_LEVELS: readonly Effort[] = ["low", "medium", "high", "xhigh", "max"];
 export const PERMISSION_MODES: readonly PermissionMode[] = ["strict", "smart", "fast"];
 
 /** What the server says is in effect, which is not always what was asked for. */

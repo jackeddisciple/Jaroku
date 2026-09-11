@@ -1377,6 +1377,10 @@ jobs:
           # thread-activity rule the session picker and the server use. A pure rule, so a wrong
           # order is a failing line here rather than the wrong two agents on somebody's screen.
           npm run test:recent-agent
+          # THE EFFORT SLIDER'S STOPS AND NAMES, per model, from the catalogue: five on Claude and
+          # OpenAI in the product owner's own words ("Max effort", "Ultra"), none on Muse Spark, and
+          # a remembered level landing on the highest stop at or below it rather than off the end.
+          npm run test:effort-levels
           # THE CONNECTOR DECK'S LAYOUT — §12.9: "1/2/3 render as tiles; 5 renders 3 tiles + +2;
           # a disabled connector renders grayscale and stays in the deck." Every clause has a
           # wrong answer that looks fine on the one workspace somebody tested with: three

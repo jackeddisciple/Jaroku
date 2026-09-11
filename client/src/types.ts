@@ -649,6 +649,13 @@ export interface ProviderModel {
   reasoning: "thinking" | "effort" | null;
   /** How much context it has, for §4.4's attachment budget check. Null when unrecorded. */
   context_window: number | null;
+  /**
+   * The stops this model's effort slider has — the levels it can actually be run at — from the
+   * server's catalogue. Empty for a model with no reasoning control: Muse Spark, Haiku 4.5.
+   */
+  effort_levels: string[];
+  /** Its provider's names for those levels — "Ultra", "Max effort". Null when it has none. */
+  effort_labels: Record<string, string> | null;
 }
 
 export interface ProviderStatus {
