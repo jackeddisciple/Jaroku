@@ -1936,12 +1936,15 @@ export function BuildPane({
               {/* REGULAR WEIGHT, one rung below the hero, and the dominant thing in the group. The
                   rung carries 600 for headings a person scans for; this is a sentence addressed to
                   them. `text-balance` so a narrow window breaks it into even lines.
-                  THE VERB IS A POT, the product owner's pick on 2026-09-11 — and it is still a word to a
-                  screen reader: `role="img"` labelled "cook" keeps the sentence whole. */}
+                  THE VERB IS A COOK, the product owner's pick on 2026-09-11: a woman cook in the light
+                  skin tone — and it is still a word to a screen reader: `role="img"` labelled "cook"
+                  keeps the sentence whole. WRITTEN AS ESCAPES because it is four code points held
+                  together by a zero-width joiner, which is invisible in source; an edit that drops it
+                  splits the cook into a woman and a frying pan. Woman, light tone, ZWJ, cooking. */}
               <h1 className="mt-8 text-balance text-page font-normal text-ink">
                 What should we{" "}
                 <span role="img" aria-label="cook">
-                  🍲
+                  {"\u{1F469}\u{1F3FB}\u200D\u{1F373}"}
                 </span>{" "}
                 today{firstName ? `, ${firstName}` : ""}?
               </h1>
