@@ -11,7 +11,7 @@ import { Command } from "cmdk";
 import { orderedSteps, useTraceStore } from "../store/traceStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
-import { runProviders, useProviderStore } from "../store/providerStore.ts";
+import { isRunnable, runProviders, useProviderStore } from "../store/providerStore.ts";
 import { inputKey } from "../store/uiStore.ts";
 import { Truncate } from "./Truncate.tsx";
 import { chipClass } from "./Chip.tsx";
@@ -55,6 +55,12 @@ function runActiveAgent(): void {
   const { provider, model } = useUiStore.getState();
   const agentId = useBuildStore.getState().activeAgentId;
   if (!agentId) return;
+  // No key for the chosen model: Secrets at that provider, rather than a run the server refuses.
+  const { providers, loaded } = useProviderStore.getState();
+  if (loaded && !isRunnable(providers, provider)) {
+    useUiStore.getState().openSecretsForProvider(provider || "anthropic");
+    return;
+  }
   const input = localStorage.getItem(inputKey(agentId)) ?? "";
   sendRun(input.trim(), provider, model, agentId);
 }

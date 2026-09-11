@@ -50,13 +50,8 @@ export type ProviderId = keyof typeof PROVIDER_ENV_KEY;
  * copies of it — one in the composer's model selector, one in the top bar's provider menu — and they
  * disagreed. The menu's was a three-entry record with no `google` key that fell back to the raw id,
  * so the same provider was "Gemini" where you picked it and `google` where you configured it.
- *
- * `fake` IS IN IT even though it is not a provider you connect: it is the free dry-run path, it
- * appears in every model selector in the product, and a catalogue that named every provider except
- * the default one would need a special case in each of them.
  */
 export const PROVIDER_LABEL: Record<string, string> = {
-  fake: "Dry run (free)",
   anthropic: "Claude",
   openai: "OpenAI",
   meta: "Meta",
@@ -67,7 +62,7 @@ export function providerLabel(id: string): string {
   return PROVIDER_LABEL[id] ?? id;
 }
 
-/** `fake` is not a provider you connect — it is the free dry-run path, and needs no key. */
+/** `fake` is not a provider you connect — it is the test suites' stand-in, and needs no key. */
 export const PROVIDER_IDS = Object.keys(PROVIDER_ENV_KEY) as ProviderId[];
 
 export function isProviderId(id: unknown): id is ProviderId {
@@ -80,9 +75,9 @@ export function isProviderId(id: unknown): id is ProviderId {
  * The same predicate as `isProviderId` today and NOT a duplicate of it, because the two are
  * asking different questions and will diverge. `isProviderId` asks "is this a provider a user
  * can connect a key for". This asks "will this run spend money", which is what the platform-key
- * gate needs — an unset provider and `fake` are both the dry-run path, which needs no key and
- * costs nothing, and refusing one of those for budget would refuse the free path this product
- * is rightly proud of.
+ * gate needs — an unset provider and `fake` are both the dry run the test suites use, which needs
+ * no key and costs nothing, and refusing one of those for budget would fail every suite built on
+ * it. It is also what keeps that dry run out of the catalogue a client is offered.
  */
 export function isRealProvider(provider: string | undefined | null): provider is ProviderId {
   return isProviderId(provider);

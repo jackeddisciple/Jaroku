@@ -1842,11 +1842,11 @@ export interface ProviderSnapshot {
    * as an eval leg, or deployed with. A model added to the price sheet (the deliberate, reviewed,
    * auditable step) silently changed nothing a user could do.
    *
-   * So it comes from the same file the prices do. `free` is what makes the dry-run path
-   * identifiable without a second list of which providers cost money, and `name` is what a person
-   * reads — "GPT-5.6 Luna" — so no client keeps its own table of display names either.
+   * So it comes from the same file the prices do, less the dry run — the test suites' stand-in,
+   * which no selector offers. `name` is what a person reads — "GPT-5.6 Luna" — so no client keeps
+   * its own table of display names either.
    */
-  models: { id: string; name: string; provider: string; label: string; free: boolean }[];
+  models: { id: string; name: string; provider: string; label: string }[];
 }
 
 export type ProviderEvent =

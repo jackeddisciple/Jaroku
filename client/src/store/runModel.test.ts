@@ -19,8 +19,8 @@
 //
 //   npm run test:run-model
 
-import { defaultModelFor, modelName, providerForModel, runProviders } from "./providerStore.ts";
-import type { ProviderModel } from "../types.ts";
+import { defaultModelFor, modelName, pickRunModel, providerForModel, runProviders } from "./providerStore.ts";
+import type { ProviderModel, ProviderStatus } from "../types.ts";
 
 let fail = 0;
 const check = (name: string, ok: boolean, detail = ""): void => {
@@ -33,7 +33,7 @@ const sheet: ProviderModel[] = [
   { id: "claude-opus-5", provider: "anthropic", label: "Claude" },
   { id: "claude-sonnet-5", provider: "anthropic", label: "Claude" },
   { id: "gpt-5", provider: "openai", label: "OpenAI" },
-  { id: "gemini-3-pro", provider: "google", label: "Gemini" },
+  { id: "muse-spark-1.3", provider: "meta", label: "Meta" },
 ] as ProviderModel[];
 
 console.log("\nevery model in the catalogue resolves to the provider that offers it");
@@ -42,7 +42,7 @@ console.log("\nevery model in the catalogue resolves to the provider that offers
     String(providerForModel(sheet, "claude-opus-5")));
   check("...and its sibling", providerForModel(sheet, "claude-sonnet-5") === "anthropic");
   check("an OpenAI model", providerForModel(sheet, "gpt-5") === "openai");
-  check("a Google model", providerForModel(sheet, "gemini-3-pro") === "google");
+  check("a Meta model", providerForModel(sheet, "muse-spark-1.3") === "meta");
 }
 
 console.log("\nthe pair the audit found, which is now unreachable");
@@ -64,12 +64,30 @@ console.log("\na model nothing offers resolves to nothing, never to a guess");
   check("a provider id is not a model id", providerForModel(sheet, "anthropic") === null);
 }
 
-console.log("\nthe pre-snapshot catalogue answers for the default pair");
+console.log("\nbefore the catalogue lands there is nothing to run on — not even a dry run");
 {
-  // uiStore boots on `fake`/`fake-dry-run` before any providers frame lands. If that pair did not
-  // resolve, the first `setModel` of a session would refuse the app's own default.
-  check("an empty catalogue still owns fake-dry-run", providerForModel([], "fake-dry-run") === "fake");
-  check("...and offers nothing else", providerForModel([], "claude-opus-5") === null);
+  // uiStore boots on an empty pair. The dry run is the test suites' stand-in and no selector offers
+  // it, so an empty catalogue owns nothing at all rather than quietly owning that.
+  check("an empty catalogue owns no dry run", providerForModel([], "fake-dry-run") === null);
+  check("...and nothing else", providerForModel([], "claude-opus-5") === null);
+  check("...and groups into no providers", runProviders([]).length === 0);
+}
+
+console.log("\nthe run model follows the catalogue and the keys");
+{
+  const status = (...ids: string[]): ProviderStatus[] =>
+    (["anthropic", "openai", "meta"] as const).map((id) => ({
+      id, env_key: "", configured: ids.includes(id), runnable: ids.includes(id), powers_jaroku: id === "anthropic",
+    }));
+  check("a pick that can run is kept", pickRunModel(sheet, status("anthropic"), "claude-sonnet-5") === "claude-sonnet-5");
+  check("a stored dry-run pick moves to the first model that can run",
+    pickRunModel(sheet, status("openai"), "fake-dry-run") === "gpt-5");
+  check("a pick whose provider cannot run moves to one that can",
+    pickRunModel(sheet, status("meta"), "claude-opus-5") === "muse-spark-1.3");
+  check("with nothing runnable an offered pick stays, so a send can name the key it needs",
+    pickRunModel(sheet, status(), "gpt-5") === "gpt-5");
+  check("...and one nothing offers becomes the catalogue's first", pickRunModel(sheet, status(), "fake-dry-run") === "claude-opus-5");
+  check("an empty catalogue picks nothing", pickRunModel([], status("anthropic"), "claude-opus-5") === "");
 }
 
 console.log("\nthe two directions agree — the invariant is round-trippable");

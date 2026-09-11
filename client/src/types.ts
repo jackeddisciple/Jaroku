@@ -638,8 +638,6 @@ export interface ProviderModel {
   name: string;
   provider: string;
   label: string;
-  /** Whether running on it costs anybody anything. What identifies the dry-run path. */
-  free: boolean;
   /**
    * How this model spells "think harder", or null when it does not.
    *

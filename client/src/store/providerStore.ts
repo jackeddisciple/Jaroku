@@ -131,16 +131,6 @@ export interface RunProvider {
 }
 
 /**
- * The dry-run path, for the moment before the first snapshot lands.
- *
- * NOT A FALLBACK CATALOGUE — one entry, and the one the app already defaults to. A selector with
- * nothing in it reads as "this product supports no models", and a hardcoded copy of the real
- * catalogue is exactly what this change exists to remove. `fake-dry-run` is guaranteed: it is in the
- * price sheet, it is `uiStore`'s default provider and model, and it costs nothing.
- */
-const DRY_RUN: RunProvider[] = [{ id: "fake", label: "Dry run (free)", models: ["fake-dry-run"] }];
-
-/**
  * The catalogue, grouped by provider, in the price sheet's own order.
  *
  * ORDER IS THE FILE'S. `pricing.json` is a curated list with the newest models first, and re-sorting
@@ -150,7 +140,6 @@ const DRY_RUN: RunProvider[] = [{ id: "fake", label: "Dry run (free)", models: [
  * snapshot's array identity instead of rebuilding a catalogue on every unrelated render.
  */
 export function runProviders(models: ProviderModel[]): RunProvider[] {
-  if (models.length === 0) return DRY_RUN;
   const out: RunProvider[] = [];
   for (const m of models) {
     const existing = out.find((p) => p.id === m.provider);
@@ -175,12 +164,28 @@ export function defaultModelFor(models: ProviderModel[], provider: string): stri
  * The Usage panel, the trace header and Activity's model mix all read that column, so one press of
  * a menu item reported a model that never ran.
  *
- * Reads through `runProviders`, so the pre-snapshot dry-run catalogue answers for `fake-dry-run`
- * exactly as the real one answers for everything else. `null` for a model no provider offers, which
- * is what makes "the pair is impossible" refusable rather than merely undetectable.
+ * Reads through `runProviders`, so it answers from exactly the catalogue a selector shows. `null` for
+ * a model no provider offers — the retired dry run included — which is what makes "the pair is
+ * impossible" refusable rather than merely undetectable.
  */
 export function providerForModel(models: ProviderModel[], model: string): string | null {
   return runProviders(models).find((p) => p.models.includes(model))?.id ?? null;
+}
+
+/**
+ * The model a run should be on, given the catalogue, which providers can run here, and the pick.
+ *
+ * KEEPS A PICK THAT STILL WORKS. Replaces one the catalogue no longer offers — a stored
+ * `fake-dry-run`, a retired model — or one whose provider cannot run here while another can, with
+ * the first runnable provider's first model. With nothing runnable it keeps an offered pick, or takes
+ * the catalogue's first, so the chip names a real model and a send can say which key it needs.
+ */
+export function pickRunModel(models: ProviderModel[], providers: ProviderStatus[], current: string): string {
+  const owner = providerForModel(models, current);
+  if (owner && isRunnable(providers, owner)) return current;
+  const runnable = runProviders(models).find((p) => isRunnable(providers, p.id));
+  if (runnable?.models[0]) return runnable.models[0];
+  return owner ? current : (models[0]?.id ?? "");
 }
 
 /**

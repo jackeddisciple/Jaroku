@@ -17,7 +17,9 @@ import {
 } from "../store/chatStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { inputKey, useUiStore } from "../store/uiStore.ts";
-import { modelName, runProviders, useProviderStore } from "../store/providerStore.ts";
+import {
+  canBuild, isRunnable, modelName, providerLabelOf, runProviders, useProviderStore,
+} from "../store/providerStore.ts";
 import {
   sendApplyEdit, sendAskRecord, sendBranchRun, sendDiscardEdit, sendDiscardPlan, sendDispatchWork,
   sendEdit, sendExplain, sendGenerate, sendLoadWorkItem, sendPlanAgent, sendPromoteTestInput, sendRun,
@@ -603,9 +605,8 @@ function ModelSelector({
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const openSecretsForProvider = useUiStore((s) => s.openSecretsForProvider);
-  // WHICH PROVIDERS CAN ACTUALLY RUN. `fake` always can — it is the free dry-run path and needs no
-  // key, which is the thing this product is rightly proud of. The rest need one in THIS workspace,
-  // which `providerStore` already knows from the providers channel.
+  // WHICH PROVIDERS CAN ACTUALLY RUN: a key in THIS workspace, or one the deployment lends —
+  // `runnable`, from the providers channel. There is no free path that needs neither.
   const providers = useProviderStore((s) => s.providers);
   // THE CATALOGUE COMES FROM THE SERVER'S PRICE SHEET, not from a constant in this client — see
   // providerStore. Memoised against the snapshot's own array, so the grouping runs when the
@@ -613,11 +614,9 @@ function ModelSelector({
   const models = useProviderStore((s) => s.models);
   const catalogue = useMemo(() => runProviders(models), [models]);
   // THE NAME, NOT THE ID — "GPT-5.6 Luna", from the same price sheet as the catalogue.
-  const label = provider === "fake" ? "Dry run (free)" : modelName(models, model);
-  const usableProviders = new Set<string>([
-    "fake",
-    ...providers.filter((p) => p.configured).map((p) => p.id),
-  ]);
+  // Nothing picked yet only before the catalogue lands; uiStore picks as soon as it does.
+  const label = model ? modelName(models, model) : "Choose a model";
+  const usableProviders = new Set<string>(providers.filter((p) => p.runnable).map((p) => p.id));
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
@@ -642,7 +641,7 @@ function ModelSelector({
         title={`Run model — ${label}`}
         icon={<ProviderMark provider={provider} size={12} />}
       >
-        {/* "Dry run (free)" is prose; a model id is an identifier. Only the latter gets mono. */}
+        {/* A model's name is prose — "GPT-5.6 Luna" — so it is not set in mono. */}
         {/* `truncate` RATHER THAN THE CHIP'S OWN BREAK RULE. `chipClass` sets
             `overflow-wrap:anywhere` on every chip, for the good reason that a tool id or a file
             path should break rather than overflow the row it sits in — but this chip sits in a row
@@ -752,9 +751,9 @@ function ModelSelector({
   );
 }
 
-// NO "NO PROVIDER KEY" BANNER ABOVE THE COMPOSER — the product owner's call on 2026-09-11. The
-// composer's model chip already says "Dry run (free)" when no provider key is configured, and its
-// menu carries the way out: "Add key" beside each provider and "Add a provider key…" under them all.
+// NO "NO PROVIDER KEY" BANNER ABOVE THE COMPOSER — the product owner's call on 2026-09-11. A send
+// that needs a key it does not have opens Secrets at that provider instead of sending, and the model
+// menu carries the same way out: "Add key" beside each provider and "Add a provider key…" under them.
 
 export function BuildPane({
   /**
@@ -843,6 +842,10 @@ export function BuildPane({
   const provider = useUiStore((s) => s.provider);
   const model = useUiStore((s) => s.model);
   const setModel = useUiStore((s) => s.setModel);
+  // Which providers can run here, for the key a send needs — see `missingKey`.
+  const providerStatuses = useProviderStore((s) => s.providers);
+  const providersLoaded = useProviderStore((s) => s.loaded);
+  const providerModels = useProviderStore((s) => s.models);
 
   // Cmd+/ (and the palette) focus the composer.
   useEffect(() => {
@@ -1337,6 +1340,27 @@ export function BuildPane({
   // --- Test mode (runs) + voice, folded in from the old run-bar ------------------
   const canRun = connected && Boolean(activeAgentId) && (agent?.runnable ?? false);
 
+  // THE KEY A SEND NEEDS, or null when it has one. Test mode runs the agent on the chosen model; Chat
+  // is Jaroku thinking — plan, edit, fix, explain — which is Anthropic whatever the agent runs on.
+  // Operate threads dispatch deployed agents, which carry their own keys. Before the first snapshot
+  // nothing is known, and the server would refuse anyway, so nothing is claimed.
+  const missingKey: string | null = !providersLoaded || operating ? null
+    : composerMode === "test"
+      ? (isRunnable(providerStatuses, provider) ? null : provider || "anthropic")
+      : (canBuild(providerStatuses) ? null : "anthropic");
+  const missingKeyLabel = missingKey ? providerLabelOf(providerModels, missingKey) : "";
+  const keyAsk = missingKey
+    ? `Add ${/^[AEIOU]/.test(missingKeyLabel) ? "an" : "a"} ${missingKeyLabel} key to ${composerMode === "test" ? "run" : "send this"}`
+    : "";
+  /** Instead of sending: Secrets, open at the provider the send needed. The draft stays put. */
+  const askForKey = useCallback((id: string): void => {
+    const ui = useUiStore.getState();
+    // Onboarding's first prompt has no side panel to open Secrets in, so it moves on to the phase the
+    // app arrives in — asking for a key does not finish onboarding, which is the server's fact.
+    if (standalone) ui.setOnboardingStep("run");
+    ui.openSecretsForProvider(id);
+  }, [standalone]);
+
   // Promote the current test input into the eval dataset (doc §4.7.6, "one click"). The
   // draft is the subject when there is one, otherwise the remembered last input — so this
   // works both before running and right after, which is when a case proves worth keeping.
@@ -1456,9 +1480,14 @@ export function BuildPane({
   // it's independent of the composer's live draft and works from any mode.
   const rerunLast = useCallback(() => {
     if (!canRun) return;
+    // R runs on the chosen model from any mode, so it is that provider's key it needs.
+    if (providersLoaded && !isRunnable(providerStatuses, provider)) {
+      askForKey(provider || "anthropic");
+      return;
+    }
     const last = localStorage.getItem(inputKey(activeAgentId)) ?? "";
     sendRun(last.trim(), provider, model, activeAgentId ?? undefined);
-  }, [canRun, activeAgentId, provider, model]);
+  }, [canRun, activeAgentId, provider, model, providersLoaded, providerStatuses, askForKey]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "r" && e.key !== "R") return;
@@ -1522,6 +1551,12 @@ export function BuildPane({
   const submit = () => {
     const trimmed = text.trim();
     if (!connected || !trimmed) return;
+
+    // NO KEY, NO SEND — and no dead end: the way to the key opens instead, with the draft intact.
+    if (missingKey) {
+      askForKey(missingKey);
+      return;
+    }
 
     // Test mode: the text is the agent's runtime input (a Run), NOT an instruction to Jaroku.
     // Persist it as the last-test-input (what R re-run / eval promotion read) and keep the draft.
@@ -2581,8 +2616,8 @@ export function BuildPane({
                       !connected || !text.trim() || overBudget
                       || (composerMode === "test" ? !canRun : busy)
                     }
-                    aria-label={composerMode === "test" ? "Run the agent on this input" : "Send"}
-                    title={composerMode === "test" ? "Run the agent on this input" : `Send (${keyHint("⌘↵")})`}
+                    aria-label={missingKey ? keyAsk : composerMode === "test" ? "Run the agent on this input" : "Send"}
+                    title={missingKey ? keyAsk : composerMode === "test" ? "Run the agent on this input" : `Send (${keyHint("⌘↵")})`}
                     // The one ink-filled control on the screen, and the only one in this bar that
                     // is not a glyph on open background.
                     //

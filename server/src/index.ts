@@ -5853,7 +5853,9 @@ async function providerSnapshot(ctx: TenantContext): Promise<ProviderSnapshot> {
     // explanatory tooltip when it does not — and the client must not answer that from a table of
     // its own. That is the exact drift this comment is about, one field over: a second hidden copy
     // of model facts in the browser is how the catalogue fell four models behind last time.
-    models: allPrices().map((p) => {
+    // THE DRY RUN IS NOT OFFERED. It stays in the price sheet so the test suites' runs are priced at
+    // $0, and this is where it stops: only a provider somebody can connect reaches a selector.
+    models: allPrices().filter((p) => isRealProvider(p.provider)).map((p) => {
       const cap = capabilityFor(p.id);
       return {
         id: p.id,
@@ -5861,7 +5863,6 @@ async function providerSnapshot(ctx: TenantContext): Promise<ProviderSnapshot> {
         name: p.name ?? p.id,
         provider: p.provider,
         label: providerLabel(p.provider),
-        free: p.free,
         // Null means "no reasoning control", which §6.2 renders as the chip being OMITTED rather
         // than showing a meaningless "Low".
         reasoning: cap?.reasoning ?? null,

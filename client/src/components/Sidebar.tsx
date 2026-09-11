@@ -21,6 +21,7 @@ import { ICON } from "../lib/tokens.ts";
 import { quietBtn, secondaryBtn } from "./buttons.ts";
 import { AlertTriangleIcon } from "./panelIcons.tsx";
 import { useUiStore, type NavDestination } from "../store/uiStore.ts";
+import { isRunnable, useProviderStore } from "../store/providerStore.ts";
 import { useGithubStore } from "../store/githubStore.ts";
 import { useThreadStore } from "../store/threadStore.ts";
 import { useInboxStore } from "../store/inboxStore.ts";
@@ -161,6 +162,23 @@ function RunStatusCapsule({ status }: { status: RunStatus }) {
  * does nothing is the exact control `test:dead-controls` exists to keep out, so the two that cannot
  * work are absent rather than disabled-with-a-tooltip.
  */
+/**
+ * "Run again", for THIS agent on the model the composer has chosen.
+ *
+ * It sent a bare `run` with neither, and the server reads a run with no agent as the hand-written
+ * test agent and one with no provider as the dry run — so it ran the wrong agent on a model nobody
+ * picked. With no key for the chosen model it opens Secrets at that provider instead.
+ */
+function runAgain(agentId: string): void {
+  const { provider, model } = useUiStore.getState();
+  const { providers, loaded } = useProviderStore.getState();
+  if (loaded && !isRunnable(providers, provider)) {
+    useUiStore.getState().openSecretsForProvider(provider || "anthropic");
+    return;
+  }
+  sendRun(undefined, provider, model, agentId);
+}
+
 function RunOverflow({ run, agentId }: { run: RunSummary; agentId: string }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -225,7 +243,7 @@ function RunOverflow({ run, agentId }: { run: RunSummary; agentId: string }) {
           </button>
           <button
             role="menuitem"
-            onClick={(e) => { e.stopPropagation(); setOpen(false); selectAgent(agentId); sendRun(); }}
+            onClick={(e) => { e.stopPropagation(); setOpen(false); selectAgent(agentId); runAgain(agentId); }}
             className={ACCOUNT_MENU_ROW}
           >
             <Icon.cockpit.refresh size={ICON.sm} />

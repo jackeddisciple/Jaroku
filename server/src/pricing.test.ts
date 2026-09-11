@@ -17,7 +17,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { allPrices, costFor, isPriced, priceFor, PRICING_PATH } from "./pricing.ts";
-import { PROVIDER_LABEL } from "./providers.ts";
+import { PROVIDER_LABEL, isRealProvider } from "./providers.ts";
 
 const RUNTIME_DIR = join(resolve(dirname(fileURLToPath(import.meta.url)), "..", ".."), "runtime");
 
@@ -186,19 +186,26 @@ CASES.forEach((c, i) => {
   // EVERY PROVIDER HAS A LABEL. It travels with the model so the browser keeps no copy of this
   // mapping; a provider missing here renders as its raw id, which is how one provider came to be
   // called two different things in two surfaces.
-  const providers = [...new Set(table.map((p) => p.provider))];
+  // Every OFFERED provider: the dry run never reaches a selector, so it has nothing to be called.
+  const providers = [...new Set(table.filter((p) => isRealProvider(p.provider)).map((p) => p.provider))];
   const unlabelled = providers.filter((id) => !(id in PROVIDER_LABEL));
   if (unlabelled.length) { fail++; console.log(`  FAIL providers with no display name: ${unlabelled.join(", ")}`); }
   else console.log(`  ok   every provider in the price sheet has a display name (${providers.join(", ")})`);
 
-  // THE DRY-RUN PATH IS IN THE TABLE, marked free. It is the default provider and model of every
-  // fresh tab, and it is the client's one pre-snapshot fallback — if it left the price sheet, that
-  // fallback would name a model the server does not offer.
+  // THE TEST DOUBLE IS IN THE TABLE, marked free. The suites run on it, and a run the tracer could
+  // not price would read as unknown cost rather than as the $0 it really is. It is never offered —
+  // the providers snapshot drops every provider that is not a real one.
   const dry = table.find((p) => p.id === "fake-dry-run");
   if (!dry || !dry.free || dry.provider !== "fake") {
     fail++;
     console.log(`  FAIL the free dry-run model is missing or not marked free (${JSON.stringify(dry)})`);
   } else console.log("  ok   the dry-run model is in the table and marked free");
+
+  // AND NOTHING THE PRODUCT OFFERS IS FREE. The only $0 entry is the double nobody is offered; a free
+  // model in the catalogue would be the free option back under a different name.
+  const freeOffered = table.filter((p) => isRealProvider(p.provider) && p.free);
+  if (freeOffered.length) { fail++; console.log(`  FAIL offered and free: ${freeOffered.map((p) => p.id).join(", ")}`); }
+  else console.log("  ok   nothing the catalogue offers is free");
 
   // AND EVERY MODEL RESOLVES THROUGH THE FUNCTION THAT WILL BE ASKED ABOUT IT. A row this file
   // parsed but `priceFor` cannot resolve would be selectable and would meter as unknown cost.

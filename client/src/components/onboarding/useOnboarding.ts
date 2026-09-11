@@ -44,6 +44,7 @@ export function useOnboarding(): Onboarding {
   const userId = useSessionStore((s) => s.user?.id ?? null);
   const complete = useSessionStore((s) => s.user?.onboarded ?? false);
   const step = useUiStore((s) => s.onboardingStep);
+  const rightTab = useUiStore((s) => s.rightTab);
 
   // Where THIS person got to, re-read whenever the signed-in account changes. Without it the
   // store still holds the previous user's step, which is the browser-shaped bug one level in.
@@ -138,7 +139,9 @@ export function useOnboarding(): Onboarding {
   const mountRightPanel =
     phase === "complete" ||
     (phase === "run" &&
-      (genStatus === "generating" || genFileCount > 0 || runStarted || agentHasThread || finishedOwnRun));
+      (genStatus === "generating" || genFileCount > 0 || runStarted || agentHasThread || finishedOwnRun
+        // A send that needed a key opened Secrets, and Secrets lives in this panel.
+        || rightTab === "secrets"));
 
   return {
     phase,

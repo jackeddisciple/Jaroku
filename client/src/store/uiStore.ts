@@ -5,7 +5,7 @@
 
 import { create } from "zustand";
 import { useSessionStore } from "./sessionStore.ts";
-import { defaultModelFor, providerForModel, useProviderStore } from "./providerStore.ts";
+import { defaultModelFor, pickRunModel, providerForModel, useProviderStore } from "./providerStore.ts";
 import type { GithubAttachment } from "../types.ts";
 
 /**
@@ -611,8 +611,10 @@ export const useUiStore = create<UiState>((set) => ({
   selectedNodeId: null,
   setSelectedNodeId: (selectedNodeId) => set({ selectedNodeId }),
 
-  provider: "fake",
-  model: "fake-dry-run",
+  // NOTHING UNTIL THE CATALOGUE LANDS. The first providers snapshot picks the model — see the
+  // subscription at the foot of this file — and there is no dry run to stand in until it does.
+  provider: "",
+  model: "",
   // The provider's first model in the catalogue, read at call time rather than captured: the
   // catalogue arrives on the providers snapshot, so a module-level copy would be empty on the one
   // render that matters — the first — and a default chosen from it would be blank forever after.
@@ -689,3 +691,16 @@ export const useUiStore = create<UiState>((set) => ({
       return { onboardingHintsShown: hintsShown };
     }),
 }));
+
+// THE RUN MODEL FOLLOWS THE CATALOGUE AND THE KEYS. The first snapshot picks one; a later one keeps
+// the pick while it can still run and moves it when it cannot — a key connected for the only other
+// provider, a model retired from the price sheet. `setModel` resolves the provider, so the pair is
+// never one no catalogue offers. See `pickRunModel`.
+useProviderStore.subscribe((s, prev) => {
+  if (s.models === prev.models && s.providers === prev.providers) return;
+  const ui = useUiStore.getState();
+  const next = pickRunModel(s.models, s.providers, ui.model);
+  if (next === ui.model) return;
+  if (next) ui.setModel(next);
+  else useUiStore.setState({ provider: "", model: "" });
+});
