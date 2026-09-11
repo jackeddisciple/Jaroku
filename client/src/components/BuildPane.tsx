@@ -17,7 +17,7 @@ import {
 } from "../store/chatStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { inputKey, useUiStore } from "../store/uiStore.ts";
-import { runProviders, useProviderStore } from "../store/providerStore.ts";
+import { modelName, runProviders, useProviderStore } from "../store/providerStore.ts";
 import {
   sendApplyEdit, sendAskRecord, sendBranchRun, sendDiscardEdit, sendDiscardPlan, sendDispatchWork,
   sendEdit, sendExplain, sendGenerate, sendLoadWorkItem, sendPlanAgent, sendPromoteTestInput, sendRun,
@@ -442,9 +442,10 @@ function AssistantTurn({
             streaming={isLast && streaming}
             onRegenerate={rerunnable ? () => rerunTurn(turns, turn) : undefined}
             onRegenerateWith={rerunnable ? (opts) => rerunTurn(turns, turn, opts) : undefined}
-            // The three most recent models from the catalogue. The whole list would be a menu
-            // longer than the response it is offering to replace.
-            models={models.slice(0, 3).map((m) => ({ id: m.id, label: m.label }))}
+            // The first three models in the catalogue. The whole list would be a menu longer than the
+            // response it is offering to replace. Labelled by the MODEL's name — the provider's label
+            // made all three read "Regenerate with Claude".
+            models={models.slice(0, 3).map((m) => ({ id: m.id, label: m.name }))}
             turnId={itemId}
             conversationId={threadId}
             // §5.5's promotion offer is only shown on a turn that PRODUCED a version, because that
@@ -601,7 +602,6 @@ function ModelSelector({
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const label = provider === "fake" ? "Dry run (free)" : model;
   const openSecretsForProvider = useUiStore((s) => s.openSecretsForProvider);
   // WHICH PROVIDERS CAN ACTUALLY RUN. `fake` always can — it is the free dry-run path and needs no
   // key, which is the thing this product is rightly proud of. The rest need one in THIS workspace,
@@ -612,6 +612,8 @@ function ModelSelector({
   // catalogue changes rather than on every keystroke in the composer beside it.
   const models = useProviderStore((s) => s.models);
   const catalogue = useMemo(() => runProviders(models), [models]);
+  // THE NAME, NOT THE ID — "GPT-5.6 Luna", from the same price sheet as the catalogue.
+  const label = provider === "fake" ? "Dry run (free)" : modelName(models, model);
   const usableProviders = new Set<string>([
     "fake",
     ...providers.filter((p) => p.configured).map((p) => p.id),
@@ -718,7 +720,7 @@ function ModelSelector({
                     <span className="inline-flex w-[11px] shrink-0 items-center justify-center" aria-hidden>
                       {active && <CheckIcon size={ICON.xs} />}
                     </span>
-                    <span className="min-w-0 flex-1 truncate">{m}</span>
+                    <span className="min-w-0 flex-1 truncate">{modelName(models, m)}</span>
                     {!usable ? <span className="shrink-0 text-tiny">no API key</span> : null}
                   </button>
                 );

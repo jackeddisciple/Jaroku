@@ -192,3 +192,13 @@ export function providerForModel(models: ProviderModel[], model: string): string
 export function providerLabelOf(models: ProviderModel[], provider: string): string {
   return models.find((m) => m.provider === provider)?.label ?? provider;
 }
+
+/**
+ * What a model is CALLED — "GPT-5.6 Luna" rather than `gpt-5.6-luna` — from the price sheet.
+ *
+ * Falls back to the id, for the same reason `providerLabelOf` does: a model this client has not been
+ * told about is better shown as what it is than as a name nobody gave it.
+ */
+export function modelName(models: ProviderModel[], id: string): string {
+  return models.find((m) => m.id === id)?.name || id;
+}

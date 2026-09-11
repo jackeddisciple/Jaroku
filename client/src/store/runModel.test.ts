@@ -19,7 +19,7 @@
 //
 //   npm run test:run-model
 
-import { defaultModelFor, providerForModel, runProviders } from "./providerStore.ts";
+import { defaultModelFor, modelName, providerForModel, runProviders } from "./providerStore.ts";
 import type { ProviderModel } from "../types.ts";
 
 let fail = 0;
@@ -83,6 +83,15 @@ console.log("\nthe two directions agree — the invariant is round-trippable");
   // And every model in the sheet, not only the defaults.
   const orphans = sheet.filter((m) => providerForModel(sheet, m.id) !== m.provider).map((m) => m.id);
   check("no model in the catalogue is orphaned", orphans.length === 0, orphans.join(","));
+}
+
+console.log("\na model reads as its name, and an unnamed one as its id");
+{
+  // Every selector shows this. The id is what a run is started with and recorded under; the name is
+  // what somebody picked it by.
+  const named = [{ id: "gpt-5.6-luna", name: "GPT-5.6 Luna", provider: "openai", label: "OpenAI" }] as ProviderModel[];
+  check("the name the price sheet gives it", modelName(named, "gpt-5.6-luna") === "GPT-5.6 Luna");
+  check("...and the id for a model nobody named", modelName(named, "gpt-9") === "gpt-9");
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

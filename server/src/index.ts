@@ -5855,6 +5855,8 @@ async function providerSnapshot(ctx: TenantContext): Promise<ProviderSnapshot> {
       const cap = capabilityFor(p.id);
       return {
         id: p.id,
+        // What every selector shows. The id is still what a run is started with and recorded under.
+        name: p.name ?? p.id,
         provider: p.provider,
         label: providerLabel(p.provider),
         free: p.free,

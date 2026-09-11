@@ -631,6 +631,11 @@ export type ProviderId = "anthropic" | "openai" | "meta";
  */
 export interface ProviderModel {
   id: string;
+  /**
+   * What a person reads — "GPT-5.6 Luna", "Sonnet 5" — from the price sheet. `id` is what a run is
+   * started with and recorded under, and never what a selector shows.
+   */
+  name: string;
   provider: string;
   label: string;
   /** Whether running on it costs anybody anything. What identifies the dry-run path. */

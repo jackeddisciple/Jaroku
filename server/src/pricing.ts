@@ -32,6 +32,8 @@ const USD_DP = 8;
 /** One model's rates. `input`/`output` are USD per MILLION tokens. */
 export interface Price {
   id: string;
+  /** What a person reads — "GPT-5.6 Luna" — where `id` is what the API is sent. Null if unnamed. */
+  name: string | null;
   provider: string;
   input: number;
   output: number;
@@ -62,6 +64,7 @@ function load(): Price[] {
       if (!id || !Number.isFinite(input) || !Number.isFinite(output)) continue;
       out.push({
         id,
+        name: typeof m.name === "string" && m.name.trim() ? m.name.trim() : null,
         provider: typeof m.provider === "string" ? m.provider : "",
         input,
         output,

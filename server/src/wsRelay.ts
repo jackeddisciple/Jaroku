@@ -1843,9 +1843,10 @@ export interface ProviderSnapshot {
    * auditable step) silently changed nothing a user could do.
    *
    * So it comes from the same file the prices do. `free` is what makes the dry-run path
-   * identifiable without a second list of which providers cost money.
+   * identifiable without a second list of which providers cost money, and `name` is what a person
+   * reads — "GPT-5.6 Luna" — so no client keeps its own table of display names either.
    */
-  models: { id: string; provider: string; label: string; free: boolean }[];
+  models: { id: string; name: string; provider: string; label: string; free: boolean }[];
 }
 
 export type ProviderEvent =

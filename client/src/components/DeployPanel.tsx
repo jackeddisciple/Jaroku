@@ -31,7 +31,7 @@ import { ACCENT, ICON, STATUS, TYPE } from "../lib/tokens.ts";
 import { fmtDuration } from "../lib/format.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { useDeployStore, selectedDeployment } from "../store/deployStore.ts";
-import { runProviders, useProviderStore } from "../store/providerStore.ts";
+import { modelName, runProviders, useProviderStore } from "../store/providerStore.ts";
 import type { Deployment, DeployLogLine, DeployStatus } from "../types.ts";
 import { isDeployInFlight } from "../types.ts";
 import { ActionRow, type ActionState } from "./ActionRow.tsx";
@@ -333,7 +333,7 @@ function DeployForm({
           <span className="mx-1 text-hair">|</span>
           {models.map((m) => (
             <Chip key={m} size="md" selected={model === m} onClick={() => setModel(m)}>
-              <span className="font-mono">{m}</span>
+              {modelName(providerModels, m)}
             </Chip>
           ))}
         </div>

@@ -17,7 +17,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useBuildStore } from "../store/buildStore.ts";
 import { examplesOf, useEvalStore } from "../store/evalStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
-import { runProviders, useProviderStore } from "../store/providerStore.ts";
+import { modelName, runProviders, useProviderStore } from "../store/providerStore.ts";
 import { sendCancelEval, sendEstimateEval, sendStartEval } from "../lib/socket.ts";
 import { fmtCost } from "../lib/format.ts";
 import { Chip } from "./Chip.tsx";
@@ -118,7 +118,7 @@ export function EvalRunBar() {
                 title={free ? "Free — no API calls" : `${p.label} · billed per token`}
                 className="whitespace-nowrap"
               >
-                {free ? "Dry run (free)" : m}
+                {free ? "Dry run (free)" : modelName(providerModels, m)}
               </Chip>
             );
           }),
