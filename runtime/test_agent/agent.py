@@ -5,8 +5,10 @@ Tools: get_weather + calculator. A simple agent<->tools loop.
 Model selection (env ``JAROKU_PROVIDER``):
   * unset / "fake"  -> deterministic scripted model, no API key required. This is the
                        default so the trace pipeline is verifiable offline and repeatably.
-  * "anthropic"     -> ChatAnthropic (needs ANTHROPIC_API_KEY, JAROKU_MODEL optional)
-  * "openai"        -> ChatOpenAI    (needs OPENAI_API_KEY, JAROKU_MODEL optional)
+  * "anthropic" / "openai" / "meta"
+                    -> built by the runner's own ``build_model`` (needs that provider's key,
+                       JAROKU_MODEL optional), so this fixture runs on the same clients a
+                       generated agent does.
 
 Run directly:  uv run python -m test_agent.agent  ["your input"]
 Events (Run/Step JSON) stream to stdout; human logs go to stderr.
@@ -28,6 +30,8 @@ from langgraph.prebuilt import ToolNode
 
 from jaroku_interceptor import JarokuTracer, Run, load_env
 from jaroku_interceptor.schema import emit_run_end, emit_run_start, now_iso
+from jaroku_runner.models import DEFAULT_MODELS, RUN_PROVIDERS
+from jaroku_runner.models import build_model as build_run_model
 
 
 def log(*args) -> None:
@@ -75,14 +79,15 @@ TOOLS = [get_weather, calculator]
 
 # --------------------------------------------------------------------------- model
 def build_model(provider: str, model_name: str):
-    """Return (runnable, provider, model_name). Binds tools for real providers."""
-    if provider == "anthropic":
-        from langchain_anthropic import ChatAnthropic
-        llm = ChatAnthropic(model=model_name, temperature=0)
-        return llm.bind_tools(TOOLS), provider, model_name
-    if provider == "openai":
-        from langchain_openai import ChatOpenAI
-        llm = ChatOpenAI(model=model_name, temperature=0)
+    """Return (runnable, provider, model_name). Binds tools for real providers.
+
+    A REAL PROVIDER COMES FROM THE RUNNER, not from a second copy of its constructors. This file
+    used to build its own, and the copy had drifted from every model it could be pointed at:
+    ``temperature=0``, which the current Claude models answer with a 400, and GPT on Chat
+    Completions, where GPT-6 Astra will not call a tool.
+    """
+    if provider in RUN_PROVIDERS:
+        llm, provider, model_name = build_run_model(provider, model_name, TOOLS)
         return llm.bind_tools(TOOLS), provider, model_name
 
     # Default: deterministic scripted model (no API key). Cycles through these replies,
@@ -133,7 +138,7 @@ def main() -> int:
         "What's the weather in Paris, and what is 18 + 4?"
 
     provider = os.environ.get("JAROKU_PROVIDER", "fake").lower()
-    default_model = {"anthropic": "claude-opus-4-8", "openai": "gpt-4o"}.get(provider, "fake-scripted")
+    default_model = DEFAULT_MODELS[provider] if provider in RUN_PROVIDERS else "fake-scripted"
     model_name = os.environ.get("JAROKU_MODEL", default_model)
 
     model, provider, model_name = build_model(provider, model_name)
