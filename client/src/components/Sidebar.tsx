@@ -31,7 +31,6 @@ import { WorkspaceSwitcher } from "./WorkspaceSwitcher.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { identityTitle } from "./AgentIdentityLine.tsx";
 import { AgentEmoji, EMOJI_SIZE } from "./AgentEmoji.tsx";
-import { EmptyState } from "./EmptyState.tsx";
 import { Capable } from "./Capable.tsx";
 import { Collapse } from "./Collapse.tsx";
 import { keyHint } from "../lib/modKey.ts";
@@ -43,7 +42,6 @@ import { useAvatar } from "../lib/avatar.ts";
 import { useMenuFocus } from "../lib/menuFocus.ts";
 import { useAnchoredMenu } from "../lib/anchoredMenu.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
-import { SearchIcon, SparklesIcon } from "./panelIcons.tsx";
 
 
 /**
@@ -1179,7 +1177,7 @@ function FilterMenu({
     { id: "drafts", label: "Drafts", count: counts.drafts },
   ];
   // Only when there is something in it. An Archived entry on a workspace that has never archived
-  // anything leads to an empty state, which is the same noise an empty section is in Threads.
+  // anything leads to an empty list, which is the same noise an empty section is in Threads.
   // ARCHIVED IS LISTED WHEN THERE ARE ANY **OR WHEN IT IS THE ONE YOU ARE ON**, and the second
   // half is the bug this had. The entry existed only while the count was above zero — so
   // un-archiving the last archived agent while looking at that filter took the entry out from
@@ -1367,9 +1365,8 @@ export function Sidebar() {
 
       {/* PINNED — a shelf above the list, and only when something is on it.
           NOTHING WHEN EMPTY, deliberately: a permanent `Pinned` header over nothing is a section
-          that teaches people it is broken, and the column already has an empty state for the case
-          where there are no agents at all. It appears the moment somebody pins one and goes away
-          again when they unpin the last. */}
+          that teaches people it is broken — the same rule that leaves an empty Recents empty. It
+          appears the moment somebody pins one and goes away again when they unpin the last. */}
       {pinnedVisible.length > 0 && (
         <div className="mt-4 flex shrink-0 flex-col">
           <div className="flex h-8 shrink-0 items-center gap-1 pl-1.5 pr-2">
@@ -1434,22 +1431,13 @@ export function Sidebar() {
             row walking up the column every time somebody folds the list away. */}
         <Collapse open={recentsOpen} className="min-h-0 min-w-0 flex-1">
           <div className="h-full min-h-0 min-w-0 overflow-y-auto overflow-x-hidden px-1.5 pb-2">
-            {recents.length === 0 ? (
-              <EmptyState
-                size="inline"
-                icon={agents.length === 0 ? SparklesIcon : SearchIcon}
-                title={agents.length === 0 ? "No agents yet" : "Nothing here"}
-                hint={
-                  agents.length === 0
-                    ? "Describe one in the composer and you’ll get a plan to approve first."
-                    : undefined
-                }
-              />
-            ) : (
-              recents.map((a) => (
-                <AgentTreeRow key={a.agent_id} agent={a} runs={runsByAgent.get(a.agent_id) ?? []} />
-              ))
-            )}
+            {/* NOTHING WHEN EMPTY, the product owner's call on 2026-09-11. An empty Recents is left
+                empty: no mark, no "Nothing here", no "No agents yet". What would explain it is
+                already on screen — the filter in the header says what is narrowing the list, and
+                `New` leads the column for a workspace that has no agents at all. */}
+            {recents.map((a) => (
+              <AgentTreeRow key={a.agent_id} agent={a} runs={runsByAgent.get(a.agent_id) ?? []} />
+            ))}
 
             {/* THE WINDOW, WIDENED FROM HERE. The history read stops at a cap, so the runs nested
                 above are the ones that have been FETCHED — this is how the 51st-newest becomes
