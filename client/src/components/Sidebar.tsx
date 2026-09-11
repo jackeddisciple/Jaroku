@@ -818,10 +818,12 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
             {open ? <Icon.workspace.switcherOpen size={ICON.lg} /> : <Icon.workspace.switcherClosed size={ICON.lg} />}
           </button>
         )}
-        {/* THE PULL REQUEST, AND IT IS ON EVERY ROW because it is a control rather than a badge.
-            "Only when there is one" made it invisible on exactly the agents somebody would want to
-            open one FOR — and an affordance you cannot find until after you have used it is not an
-            affordance. It has a real action in all three states, so it is never a dead control:
+        {/* THE PULL REQUEST, ON EVERY ROW AND SHOWN ON HOVER. On every row because it is a control
+            rather than a badge: "only when there is one" hid it on exactly the agents somebody would
+            want to open one FOR. Shown on hover — and on keyboard focus — like the row's menu beside
+            it, the product owner's call on 2026-09-11: a green mark resting on every agent was the
+            loudest thing in the column, and pointing at any row still finds it. It has a real action
+            in all three states, so it is never a dead control:
 
               a PR is open        green, and it opens that PR on GitHub
               linked, no PR       muted, and it opens one — `sendOpenGithubPr`
@@ -851,7 +853,7 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
           // made the mark carry the state as well as the action — and the state is already in the
           // tooltip and in what pressing it does. What the colour buys here is a control the eye
           // finds on a row of grey text; the three states differ in behaviour, not in shade.
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-ok transition-colors hover:bg-sidebar-hover focus-visible:outline-none focus-visible:shadow-focusring"
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-ok opacity-0 transition-[background-color,opacity] duration-fast hover:bg-sidebar-hover group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:shadow-focusring"
         >
           <Icon.github.openPullRequest size={ICON.sm} />
         </button>
