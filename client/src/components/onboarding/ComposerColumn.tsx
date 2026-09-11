@@ -10,33 +10,25 @@
 // swapping the component out at completion would tear the composer down and rebuild it at the
 // exact moment step 5 promises the user lands "in the exact state they were just in".
 //
-// The examples branch on whether Jaroku can BUILD:
+// THE EXAMPLES ARE DESCRIPTIONS, which route through the plan gate like any typed one. The first is
+// the README's own, and matches the shipped fixtures, so replaying it stays free for testing.
 //
-//   * With an Anthropic key — descriptions, which route through the plan gate like any typed
-//     one. The first is the README's own, and matches the shipped fixtures, so the free replay
-//     path stays available for repeatable testing.
-//
-//   * Without one — planning and generation are Anthropic-only, so a description would fail with
-//     "ANTHROPIC_API_KEY is not set" as the first thing the product ever said. Instead this
-//     offers inputs for the reference agent that ships in the repo, run on the free dry-run
-//     provider: a real graph, a real trace, real depth, no cost. It is the README's own "Try it
-//     in 60 seconds", and it reaches the same place — a live trace and a finished run — by the
-//     only route that actually works with no key.
+// THERE IS NO FREE PATH ANY MORE. Without a key for planning this screen used to offer inputs for
+// the bundled agent on the dry-run provider, and that provider is no longer offered. So the examples
+// are the same either way; a send with no key opens Secrets at the provider it needs, and this screen
+// says so up front rather than letting the first press be the surprise.
 
 import { useEffect, useRef } from "react";
-import { useBuildStore } from "../../store/buildStore.ts";
 import { threadFor, useChatStore } from "../../store/chatStore.ts";
 import { canBuild, useProviderStore } from "../../store/providerStore.ts";
 import { useThreadStore } from "../../store/threadStore.ts";
-import { useTraceStore } from "../../store/traceStore.ts";
-import { inputKey, useUiStore } from "../../store/uiStore.ts";
+import { useUiStore } from "../../store/uiStore.ts";
 import { selectAgent } from "../../lib/selection.ts";
-import { sendRun } from "../../lib/socket.ts";
 import { JarokuGlyph } from "../../lib/icons.tsx";
-import { BRAND, ICON, SPACE_CLASS, STATUS, TYPE } from "../../lib/tokens.ts";
+import { BRAND, ICON, SPACE_CLASS, TYPE } from "../../lib/tokens.ts";
 import { BuildPane } from "../BuildPane.tsx";
-import { ChevronRightIcon, PlayIcon, SparklesIcon, ZapIcon } from "../panelIcons.tsx";
-import { EXAMPLE_AGENT_ID, type OnboardingPhase } from "./useOnboarding.ts";
+import { ChevronRightIcon, SparklesIcon } from "../panelIcons.tsx";
+import type { OnboardingPhase } from "./useOnboarding.ts";
 
 /**
  * Descriptions, for the build path. Each is a real brief that produces a working agent.
@@ -61,12 +53,6 @@ const DESCRIPTIONS = [
   },
 ];
 
-/** Inputs for the shipped reference agent, for the free path. It has a clock and a calculator. */
-const EXAMPLE_INPUTS = [
-  { text: "What time is it in Europe/Paris?", hint: "one tool call" },
-  { text: "What's 17 * 23, and what time is it in Tokyo?", hint: "two tools, one turn" },
-];
-
 /**
  * One example, as a row you can tell is a control before you touch it.
  *
@@ -74,10 +60,8 @@ const EXAMPLE_INPUTS = [
  * strips that did nothing until clicked — the same shape a read-only list row has. Three things
  * fix that, and none of them is decoration:
  *
- *   * a leading glyph that says what the click DOES, which differs between the two paths. On the
- *     build path it drafts the sentence into the composer for you to send; on the free path it
- *     runs an agent immediately. Those are not the same promise and they should not wear the
- *     same mark
+ *   * a leading glyph that says what the click DOES: it drafts the sentence into the composer for
+ *     you to send, and nothing runs until you do
  *   * hover and focus carry weight — the border deepens, the text comes up to full ink, the
  *     surface fills. Same GLOW the provider cards use, so "you are on this one" looks identical
  *     wherever the app says it. It brightened the border under the near-black palette and deepens
@@ -140,13 +124,10 @@ function ExampleRow({
  */
 function BandHeading({
   icon: Icon,
-  tone,
   title,
   children,
 }: {
   icon: (p: { size?: number }) => React.ReactElement;
-  /** Only for the free path, where amber means what it always means: something is going to run. */
-  tone?: string;
   title: string;
   children: React.ReactNode;
 }) {
@@ -156,7 +137,7 @@ function BandHeading({
         <JarokuGlyph size={BRAND.screen} />
       </span>
       <h2 className="mt-3 flex items-center gap-2 text-page tracking-[-0.01em] text-ink">
-        <span style={tone ? { color: tone } : undefined} className={tone ? undefined : "text-muted"}>
+        <span className="text-muted">
           <Icon size={ICON.md} />
         </span>
         {title}
@@ -169,44 +150,24 @@ function BandHeading({
 export function ComposerColumn({ phase }: { phase: OnboardingPhase }) {
   const providers = useProviderStore((s) => s.providers);
   const loaded = useProviderStore((s) => s.loaded);
-  const agents = useBuildStore((s) => s.agents);
   const threads = useChatStore((s) => s.threads);
   // The conversation is keyed by session, not by agent (§3.1) — see chatStore's header.
   const activeThreadId = useThreadStore((s) => s.activeThreadId);
   const pending = useChatStore((s) => s.pending);
-  const connected = useTraceStore((s) => s.connection === "open");
 
-  const exampleAgent = agents.find((a) => a.agent_id === EXAMPLE_AGENT_ID);
-  // Only once the snapshot has landed: before that, "no key" and "not told yet" look identical,
-  // and the free framing would flash at a user who has a key.
-  //
-  // The run provider is the second half of this, and it is the half that was missing. The free
-  // path used to mean only "cannot build" — so a user WITH an Anthropic key who pressed "Try it
-  // free first" was handed "Describe the agent you want", whose first action is a paid planning
-  // call. The button said free and the screen behind it charged. The previous step records the
-  // choice by setting the run provider, so read it: picking the dry-run provider IS choosing
-  // the free path, whether or not a key happens to exist.
-  const runProvider = useUiStore((s) => s.provider);
-  const freePath = loaded && (!canBuild(providers) || runProvider === "fake");
+  // Only once the snapshot has landed: before that, "no key" and "not told yet" look identical, and
+  // the note below would flash at somebody who has one.
+  const needsKey = loaded && !canBuild(providers);
 
-  // Point the app at whatever the branch needs, once. The free path needs the reference agent
-  // selected and the composer in Test mode (its input is the agent's input, not an instruction
-  // to Jaroku); the build path needs nothing selected, which is what makes a typed description
-  // route to `planAgent` through the composer's own intent rules.
+  // Nothing selected and the composer in Chat, once: that is what makes a typed description route
+  // to `planAgent` through the composer's own intent rules.
   const aimed = useRef(false);
   useEffect(() => {
-    if (phase !== "prompt" || !loaded || aimed.current) return;
+    if (phase !== "prompt" || aimed.current) return;
     aimed.current = true;
-    const ui = useUiStore.getState();
-    if (freePath && exampleAgent) {
-      selectAgent(EXAMPLE_AGENT_ID);
-      ui.setComposerMode("test");
-      ui.setProvider("fake");
-    } else {
-      selectAgent(null);
-      ui.setComposerMode("chat");
-    }
-  }, [phase, loaded, freePath, exampleAgent]);
+    selectAgent(null);
+    useUiStore.getState().setComposerMode("chat");
+  }, [phase]);
 
   // The examples are for an empty screen. Once there is a plan, a diff or a trace to read they
   // are just something else on the page — and BuildPane only renders this slot while the thread
@@ -215,92 +176,43 @@ export function ComposerColumn({ phase }: { phase: OnboardingPhase }) {
   const onboarding = phase === "prompt" || phase === "run";
   const showBand = phase === "prompt" && turns.length === 0;
 
-  const runExample = (text: string) => {
-    if (!connected) return;
-    // Exactly what BuildPane's submit() does in Test mode: remember the input (so R re-runs it
-    // and the eval promotion can reach it) and run. One run path, not a second one.
-    localStorage.setItem(inputKey(EXAMPLE_AGENT_ID), text);
-    sendRun(text, "fake", "fake-dry-run", EXAMPLE_AGENT_ID);
-  };
-
   // Rendered into BuildPane's own empty slot rather than stacked above it: this REPLACES the
   // pane's "Describe the agent you want", which otherwise appeared twice — once at the top of
   // the column and once in the middle of it — with a gap between them.
-  let band: React.ReactNode = null;
-  if (freePath && exampleAgent) {
-    band = (
-      <>
-        <BandHeading icon={ZapIcon} tone={STATUS.pending} title="Watch an agent think — free">
-          This is the reference agent that ships with Jaroku, on the dry-run provider. Nothing is
-          billed, and the trace is real: every LLM call, tool call and routing decision it makes
-          streams in as it happens.
-        </BandHeading>
-        <div className={SPACE_CLASS.block}>
-          <div className={TYPE.sectionLabel}>Run one of these</div>
-          <div className="mt-2 space-y-1.5">
-            {EXAMPLE_INPUTS.map((e) => (
-              <ExampleRow
-                key={e.text}
-                text={e.text}
-                hint={e.hint}
-                // Play, not sparkles: this row RUNS the agent the moment it is clicked. The
-                // build path's rows only draft a sentence, and two marks for two promises is
-                // the least a row can do before it spends something on your behalf.
-                icon={PlayIcon}
-                title="Run the reference agent on this input — free, on the dry-run provider"
-                onPick={() => runExample(e.text)}
-              />
-            ))}
-          </div>
-        </div>
-        {/* Two audiences reach this screen now: someone with no key, and someone who has one
-            and chose to look around first. Telling the second to go connect a key is telling
-            them to do something they have already done. */}
-        <p className="mt-4 text-center text-tiny leading-[1.6] text-faint">
-          {canBuild(providers)
-            ? "Describing an agent of your own goes through Anthropic, which is already connected — build one whenever you are ready."
-            : "Describing an agent of your own goes through Anthropic — add a key in the Secrets tab whenever you want to build one."}
-        </p>
-      </>
-    );
-  } else if (freePath) {
-    // No key AND no shipped agent (deleted, or a partial checkout). Say so, rather than render a
-    // screen whose buttons cannot work.
-    band = (
-      <BandHeading icon={SparklesIcon} title="Connect a provider to continue">
-        Describing an agent goes through Anthropic, and the bundled example agent is not in{" "}
-        <span className="font-mono">runtime/agents/</span>, so there is nothing to run for free.
-        Add one from Provider keys in the account menu, or in the Secrets tab.
+  const band = (
+    <>
+      <BandHeading icon={SparklesIcon} title="Describe the agent you want">
+        In plain English. You get a short plan first — its tools, state and graph — to approve or
+        correct, and nothing is written until you do.
       </BandHeading>
-    );
-  } else {
-    band = (
-      <>
-        <BandHeading icon={SparklesIcon} title="Describe the agent you want">
-          In plain English. You get a short plan first — its tools, state and graph — to approve or
-          correct, and nothing is written until you do.
-        </BandHeading>
-        <div className={SPACE_CLASS.block}>
-          <div className={TYPE.sectionLabel}>Try one of these</div>
-          <div className="mt-2 space-y-1.5">
-            {DESCRIPTIONS.map((e) => (
-              <ExampleRow
-                key={e.text}
-                text={e.text}
-                hint={e.hint}
-                icon={SparklesIcon}
-                title="Put this in the composer — you send it"
-                // Fills the composer instead of sending, so the user reads what they are about to
-                // ask for and sends it themselves — through the ordinary intent router, with
-                // nothing spent on a mis-click.
-                onPick={() => useUiStore.getState().prefillChat(e.text)}
-              />
-            ))}
-          </div>
+      <div className={SPACE_CLASS.block}>
+        <div className={TYPE.sectionLabel}>Try one of these</div>
+        <div className="mt-2 space-y-1.5">
+          {DESCRIPTIONS.map((e) => (
+            <ExampleRow
+              key={e.text}
+              text={e.text}
+              hint={e.hint}
+              icon={SparklesIcon}
+              title="Put this in the composer — you send it"
+              // Fills the composer instead of sending, so the user reads what they are about to
+              // ask for and sends it themselves — through the ordinary intent router, with
+              // nothing spent on a mis-click.
+              onPick={() => useUiStore.getState().prefillChat(e.text)}
+            />
+          ))}
         </div>
-      </>
-    );
-  }
+      </div>
+      {/* SAID BEFORE THE FIRST PRESS rather than discovered by it. Somebody who skipped the key
+          step can look at all of this; sending is where the key is asked for. */}
+      {needsKey && (
+        <p className="mt-4 text-center text-tiny leading-[1.6] text-faint">
+          Planning and building go through Claude, and this workspace has no Claude key yet. Send one
+          of these and Secrets opens where you can add it.
+        </p>
+      )}
+    </>
+  );
 
   return (
     // Narrowed to a reading column while onboarding, full width once the three columns are back.

@@ -41,8 +41,8 @@ interface ProviderState {
    * Whether the first snapshot has landed.
    *
    * Load-bearing rather than cosmetic: before it does, "no provider is configured" and "we have
-   * not been told yet" look identical, and onboarding would flash the free-path framing at a
-   * user who has a key. Everything that branches on configuration waits for this.
+   * not been told yet" look identical, and onboarding would flash its no-key note at a user who
+   * has one. Everything that branches on configuration waits for this.
    */
   loaded: boolean;
   /**

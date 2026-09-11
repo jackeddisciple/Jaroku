@@ -258,7 +258,7 @@ console.log("\n§04: the mono face is confined to the files that are about code"
     "components/McpConfirmModal.tsx", "components/StateBranchEditor.tsx",
     // Environment variable names and .env paths, quoted inside prose.
     "components/DeployPanel.tsx", "components/McpPanel.tsx",
-    "components/onboarding/ComposerColumn.tsx", "components/composer/ShieldControl.tsx",
+    "components/composer/ShieldControl.tsx",
     // A type annotation on a state field — the one identifier on a plan card that is code.
     "components/PlanCard.tsx",
     // Credentials and the keys they are stored under.

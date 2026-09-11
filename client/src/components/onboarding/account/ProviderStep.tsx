@@ -1,11 +1,11 @@
 // §5.1 step 3 — connect a model provider, or don't.
 //
-// "SKIP IS GENUINELY FIRST-CLASS HERE." The specification says it in bold and then says why: "A
-// user who skips can still use the offline dry-run mode for their first agent, and can add a key
-// later from the Secrets tab. The sample agent generated in Step 4 respects this." That sentence is
-// the difference between this product and every other one that asks for an API key before it has
-// shown you anything — and it is why the skip below is not apologetic, and why it is the one
-// control on this screen that is always available whatever state the vault is in.
+// "SKIP IS GENUINELY FIRST-CLASS HERE." The specification says it in bold: somebody can see the
+// product before handing it a credential. There is no offline dry-run mode behind the skip any more
+// — the product owner retired it on 2026-09-11 — so what a skip buys is the whole app to look
+// around, with every control that would run a model opening Secrets at the key it needs. That is
+// still the difference between this product and one that asks for an API key before it has shown
+// you anything, and it is why the skip below is not apologetic and is always available.
 //
 // THIS STEP GOES THROUGH THE SECRETS TAB'S OWN GATE, WHICH IS THE HARD PART.
 //

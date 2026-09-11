@@ -25,8 +25,8 @@ export type OnboardingPhase = "welcome" | "prompt" | "run" | "complete";
 /**
  * The reference agent that ships in the repo, and the only one a fresh clone has.
  *
- * It does double duty: it is the free path's subject (see FirstPromptStep), and its presence
- * is what makes "has this instance ever been used?" answerable below.
+ * Its presence is what makes "has this instance ever been used?" answerable below — a fresh
+ * clone has it and nothing else.
  */
 export const EXAMPLE_AGENT_ID = "example_agent";
 
@@ -93,8 +93,8 @@ export function useOnboarding(): Onboarding {
   // --- step 3 → 4: the first thing the app does back ---------------------------------------
   //
   // Either a plan card appeared (the build path — the plan gate is the only way into
-  // generation, so this is the first response to a described agent), or a run started (the
-  // free path, where the user is testing the shipped agent and there is no plan to wait for).
+  // generation, so this is the first response to a described agent), or a run started
+  // (somebody testing an agent that already exists, with no plan to wait for).
   const planOnScreen = pending.some((t) => t.role === "jaroku" && t.kind === "plan");
   const activeRunId = useTraceStore((s) => s.activeRunId);
   const runStarted = Boolean(activeRunId && runs[activeRunId]?.agent_id === activeAgentId);
@@ -127,7 +127,7 @@ export function useOnboarding(): Onboarding {
   //
   // The right panel waits for something to put in it. An empty Graph/Trace/Evals/MCP tab bar
   // beside a composer reads as broken rather than as a feature not yet reached, so it arrives
-  // when files start streaming (or, on the free path, when a run does) — and after a reload
+  // when files start streaming (or when a run does) — and after a reload
   // mid-flow, whenever the agent it would describe already exists.
   // Keyed by session now (§3.1), so "this agent has been talked to" is asked of the sessions on it.
   const agentThreadIds = useThreadStore((s) => s.threads)
