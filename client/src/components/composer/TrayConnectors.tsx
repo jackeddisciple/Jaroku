@@ -13,6 +13,12 @@
 // overlapping like a hand of cards. Past three the rest become "+N" in the same footprint — the
 // composer deck's own rule (`deckLayout`), so the two decks in this composer count the same way.
 //
+// TWO MOTIONS, AND THEY ARE DIFFERENT ON PURPOSE — the product owner's call on 2026-09-11. The row
+// OPENS smoothly: its blobs rise out of the tray one after another, nearest the trigger first, on
+// the app's `smooth` curve (`pop-smooth`). A pick LANDS with a bounce: the logo springs onto the
+// tray (`pop`), and so does a new "+N". Both only on arrival — a blob already on the tray keeps its
+// key and never replays — and neither under reduced motion, where things simply appear.
+//
 // THE LOGOS ARE THE PRODUCT OWNER'S FILES, from assets/connectors, prepared into
 // client/public/connectors/<id>.png: each on a transparent background (Postgres's white knocked out),
 // and Stripe's wordmark cropped to its "s", which is the only part readable at this size.
@@ -38,6 +44,8 @@ const TRAY_BLOB = 22;
 const ROW_BLOB = 30;
 /** How far each blob on the tray tucks under the one before it. */
 const TUCK = -7;
+/** How far apart the row's blobs start rising, so the row arrives as a ripple rather than a block. */
+const STAGGER_MS = 25;
 
 export function TrayConnectors({
   options,
@@ -92,7 +100,9 @@ export function TrayConnectors({
             {deck.tiles.map((c, i) => (
               <span
                 key={c.id}
-                className="inline-flex shrink-0 items-center justify-center rounded-full bg-edge ring-2 ring-chrome"
+                // Lands with the bounce — see the header.
+                className="inline-flex shrink-0 animate-pop items-center justify-center rounded-full bg-edge ring-2 ring-chrome
+                  motion-reduce:animate-none"
                 // The first sits on top, as a hand of cards is held; each after it tucks under.
                 style={{ width: TRAY_BLOB, height: TRAY_BLOB, marginLeft: i === 0 ? 0 : TUCK, zIndex: MAX_TILES - i, position: "relative" }}
               >
@@ -102,9 +112,11 @@ export function TrayConnectors({
             {deck.overflow > 0 && (
               // A PILL, AS WIDE AGAIN AS THE TUCK, and padded by it. It sits under the blob before
               // it like the rest, and a plain circle lost its "+" behind that blob; this way the
-              // count is centred in the part that shows.
+              // count is centred in the part that shows. Keyed by the count, so a new count bounces.
               <span
-                className="inline-flex shrink-0 items-center justify-center rounded-full bg-edge text-tiny text-muted ring-2 ring-chrome"
+                key={deck.overflow}
+                className="inline-flex shrink-0 animate-pop items-center justify-center rounded-full bg-edge text-tiny text-muted
+                  ring-2 ring-chrome motion-reduce:animate-none"
                 style={{ height: TRAY_BLOB, minWidth: TRAY_BLOB - TUCK, paddingLeft: -TUCK, paddingRight: 2, marginLeft: TUCK, position: "relative" }}
               >
                 +{deck.overflow}
@@ -120,7 +132,7 @@ export function TrayConnectors({
           row, just the logos on their blobs, the product owner's call on 2026-09-11. */}
       <Popover open={open} onClose={() => setOpen(false)} triggerRef={triggerRef} label="Connectors" align="right" width={0} bare>
         <div ref={rowRef} onKeyDown={onRowKey} className="flex items-center gap-1.5">
-          {options.map((o) => {
+          {options.map((o, i) => {
             const on = selected.includes(o.id);
             return (
               <button
@@ -136,9 +148,12 @@ export function TrayConnectors({
                 title={`${o.label} — ${o.hint}`}
                 // A chosen logo wears the ink ring, and the tray behind shows it too; the ring is the
                 // row's only way of saying so, which is why it is the strongest edge the palette has.
-                className={`flex shrink-0 items-center justify-center rounded-full bg-edge transition-colors duration-fast
-                  hover:bg-grip/60 focus-visible:outline-none focus-visible:shadow-focusring ${on ? "ring-2 ring-ink" : ""}`}
-                style={{ width: ROW_BLOB, height: ROW_BLOB }}
+                // Rises in smoothly — see the header.
+                className={`flex shrink-0 animate-pop-smooth items-center justify-center rounded-full bg-edge transition-colors
+                  duration-fast hover:bg-grip/60 focus-visible:outline-none focus-visible:shadow-focusring
+                  motion-reduce:animate-none ${on ? "ring-2 ring-ink" : ""}`}
+                // The rightmost — nearest the trigger — rises first, and the ripple runs leftwards.
+                style={{ width: ROW_BLOB, height: ROW_BLOB, animationDelay: `${(options.length - 1 - i) * STAGGER_MS}ms` }}
               >
                 <img src={connectorLogo(o.id)} alt="" width={16} height={16} className="block" draggable={false} />
               </button>

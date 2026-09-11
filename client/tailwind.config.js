@@ -234,6 +234,14 @@ export default {
           "0%": { opacity: "0", transform: "translateY(6px)" },
           "100%": { opacity: "1", transform: "translateY(0)" },
         },
+        // SOMETHING PICKED, ARRIVING WITH A LITTLE SPRING — the product owner's call on 2026-09-11,
+        // for the tray's connector logos: the row's blobs rising out of the tray one after another,
+        // and a picked logo landing on the tray. The overshoot lives in the curve (see `pop` under
+        // animation), not in extra keyframes, so every stop here is a real resting value.
+        pop: {
+          "0%": { opacity: "0", transform: "translateY(6px) scale(0.6)" },
+          "100%": { opacity: "1", transform: "translateY(0) scale(1)" },
+        },
         // A step, a file or a task finished. The mark scales up past its resting size and settles,
         // which is what makes it read as *landing* rather than as having quietly always been there.
         // Fast, and it never repeats: this is a state change, not a status.
@@ -338,6 +346,12 @@ export default {
       },
       animation: {
         "slide-in": "slide-in 120ms ease-out",
+        // The spring: y2 past 1 carries a blob a little beyond its size and back. `backwards` so a
+        // staggered blob waits hidden for its delay instead of showing first and then jumping.
+        pop: "pop 420ms cubic-bezier(0.34, 1.56, 0.64, 1) backwards",
+        // The same arrival without the spring, on the `smooth` curve: the connector row OPENING, which
+        // the product owner wanted smooth, where a pick LANDING on the tray bounces.
+        "pop-smooth": "pop 260ms cubic-bezier(0.32, 0.72, 0, 1) backwards",
         "panel-in": "panel-in 260ms cubic-bezier(0.2, 0, 0, 1)",
         // `backwards` matters: these are staggered by animation-delay, and without it every
         // block paints at full opacity first and then jumps back to hidden to start.
