@@ -12,8 +12,9 @@
 //   thinking  an extended-thinking token budget (Claude, Gemini 2.5). Low means OFF, not a small
 //             budget — a thinking block of a few hundred tokens is the cost of the feature with
 //             none of the benefit.
-//   effort    a named level the API takes directly (OpenAI's `reasoning_effort`). Three levels,
-//             which is why XHigh clamps.
+//   effort    a named level the API takes directly (OpenAI's and Meta's `reasoning_effort`). Which
+//             levels, per model, is `effort_levels`; an entry that lists none takes three, which is
+//             where XHigh clamps.
 //   null      no reasoning control at all. §6.2: the composer OMITS the chip entirely rather than
 //             showing a meaningless "Low".
 //
@@ -63,15 +64,16 @@ export interface EffortPlan {
   reason: string | null;
   /** Anthropic / Gemini: the extended-thinking block, already validated against max output. */
   thinking: { type: "enabled"; budget_tokens: number } | { type: "disabled" } | null;
-  /** OpenAI: the named level, already clamped to the three the API accepts. */
-  reasoningEffort: "low" | "medium" | "high" | null;
+  /** OpenAI / Meta: the named level, already clamped to the ones the model takes. */
+  reasoningEffort: Effort | null;
 }
 
 /**
- * The three levels an `effort`-shaped provider accepts. XHigh is not among them, which is the
- * whole of §3.2's "Level clamps (XHigh → High)".
+ * The levels an `effort`-shaped model takes when its price-sheet entry lists none — the three every
+ * such API has accepted. XHigh is not among them, which is the whole of §3.2's "Level clamps (XHigh
+ * → High)". A model that takes more says so in `effort_levels`.
  */
-const EFFORT_API_LEVELS = new Set(["low", "medium", "high"]);
+const DEFAULT_EFFORT_LEVELS: readonly string[] = ["low", "medium", "high"];
 
 /**
  * Translate a level for a model.
@@ -142,8 +144,14 @@ export function planForCapability(
   }
 
   if (cap.reasoning === "effort") {
-    const clamped = !EFFORT_API_LEVELS.has(requested);
-    const applied: Effort = clamped ? "high" : requested;
+    // THE HIGHEST LEVEL THE MODEL TAKES AT OR BELOW THE ONE ASKED FOR — never above it, which would
+    // spend more than somebody chose. models.py applies the same rule to the same list.
+    const accepted = cap.effortLevels ?? DEFAULT_EFFORT_LEVELS;
+    const applied: Effort = EFFORT_LEVELS
+      .slice(0, EFFORT_LEVELS.indexOf(requested) + 1)
+      .reverse()
+      .find((l) => accepted.includes(l)) ?? requested;
+    const clamped = applied !== requested;
     return {
       requested,
       applied,
@@ -151,9 +159,9 @@ export function planForCapability(
       clamped,
       // The exact sentence §6.2 asks for, so the tooltip is written where the decision is made
       // rather than reconstructed in the client from a boolean.
-      reason: clamped ? `XHigh requested; ${name} caps at High.` : null,
+      reason: clamped ? `${effortLabel(requested)} requested; ${name} caps at ${effortLabel(applied)}.` : null,
       thinking: null,
-      reasoningEffort: applied as "low" | "medium" | "high",
+      reasoningEffort: applied,
     };
   }
 

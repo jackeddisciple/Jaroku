@@ -16,6 +16,8 @@ from __future__ import annotations
 import os
 from typing import Any, Sequence
 
+from jaroku_interceptor.pricing import price_for
+
 from .fake import build_dry_run_model
 
 # Reasoning effort, translated where the model is constructed — the run half of the same rule the
@@ -66,12 +68,24 @@ _ADAPTIVE_EFFORT = {"low": "low", "medium": "medium", "high": "high", "xhigh": "
 # a thinking block drawn from the same allowance is how a response gets truncated mid-sentence with
 # no error attached — the failure the fixed-budget branch below already doubled `max_tokens` for.
 _ADAPTIVE_MAX_TOKENS = 16_000
-# OpenAI and Meta take the level as a NAME rather than a budget, and every model either offers
-# accepts all four of ours — GPT-6 Astra and GPT-5.6 go up to `max`, Muse Spark likewise — so they
-# pass straight through. The clamp this table used to apply (xhigh to high) was for the older
-# three-level models; which models clamp is now a fact in pricing.json (`effort_levels`), and it is
-# the server that reports one.
-_NAMED_EFFORT = {"low": "low", "medium": "medium", "high": "high", "xhigh": "xhigh"}
+# OpenAI and Meta take the level as a NAME rather than a budget. WHICH names a model takes is a fact
+# in pricing.json (`effort_levels`), read here through the cost callback's own loader so the run
+# clamps exactly where effort.ts reports a clamp: the highest level the model lists at or below the
+# one asked for. A model that lists none takes the three every such API has taken, so XHigh becomes
+# High there — on the run, in the plan and on the metadata row alike.
+_EFFORT_ORDER = ("low", "medium", "high", "xhigh")
+_THREE_LEVELS = ("low", "medium", "high")
+
+
+def _named_effort(model_name: str, level: str | None) -> str | None:
+    if level is None:
+        return None
+    price = price_for(model_name)
+    accepted = price.effort_levels if price and price.effort_levels else _THREE_LEVELS
+    for candidate in reversed(_EFFORT_ORDER[: _EFFORT_ORDER.index(level) + 1]):
+        if candidate in accepted:
+            return candidate
+    return None
 
 # Meta's Model API speaks OpenAI's wire format at its own address.
 META_BASE_URL = "https://api.meta.ai/v1"
@@ -150,7 +164,7 @@ def build_model(provider: str, model_name: str, tools: Sequence[Any]) -> tuple[A
         # this existed.
         return ChatAnthropic(model=model_name, max_tokens=_ADAPTIVE_MAX_TOKENS), provider, model_name
 
-    effort = _NAMED_EFFORT.get(level or "")
+    effort = _named_effort(model_name, level)
     named = {"reasoning_effort": effort} if effort else {}
 
     if provider == "openai":

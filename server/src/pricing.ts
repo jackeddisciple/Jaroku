@@ -140,6 +140,11 @@ export interface Capability {
   maxOutputTokens: number;
   /** For the attachment budget check. Null when nothing has recorded one. */
   contextWindow: number | null;
+  /**
+   * For `effort` models, the levels the API takes, from `effort_levels`. Absent means the three
+   * every such API has taken — which is what makes XHigh clamp. models.py reads the same list.
+   */
+  effortLevels?: readonly string[];
 }
 
 /** Jaroku's four levels, in tokens, for `thinking`-shaped providers. */
@@ -164,6 +169,9 @@ function loadCapabilities(): { caps: Capability[]; budgets: ReasoningBudgets } {
         // number exists to prevent.
         maxOutputTokens: Number.isFinite(Number(m.max_output_tokens)) ? Number(m.max_output_tokens) : 4096,
         contextWindow: Number.isFinite(Number(m.context_window)) ? Number(m.context_window) : null,
+        ...(Array.isArray(m.effort_levels)
+          ? { effortLevels: m.effort_levels.filter((l): l is string => typeof l === "string") }
+          : {}),
       });
     }
     const budgets: ReasoningBudgets = {};

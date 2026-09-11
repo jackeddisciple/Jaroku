@@ -132,6 +132,12 @@ console.log("\n§12.5 — XHigh on a clamping model completes, and reports High"
     check("...and needs no explanation", q.reason === null);
   }
 
+  // AND A MODEL THAT TAKES XHIGH GETS IT. Which levels a model takes is `effort_levels` in the price
+  // sheet; the clamp above is the default for an entry that lists none, not a rule about the kind.
+  const four = planForCapability({ ...EFFORT_MODEL, effortLevels: ["low", "medium", "high", "xhigh"] }, "xhigh", "gpt-5.6");
+  check("a model whose entry lists XHigh is not clamped",
+    !four.clamped && four.applied === "xhigh" && four.reasoningEffort === "xhigh" && four.reason === null);
+
   // And an unsupported model does not pretend to clamp — §6.2 omits the chip instead.
   const none = planEffort("gpt-4o", "xhigh", "GPT-4o");
   check("an unsupported model does not fake a clamp", !none.supported && !none.clamped);
@@ -277,7 +283,13 @@ console.log("\nand the adapter is actually called, at every dispatch that shippe
   const models = readFileSync(join(HERE, "..", "..", "runtime", "jaroku_runner", "models.py"), "utf8");
   check("...and models.py reads it", /JAROKU_REASONING_EFFORT/.test(models));
   check("...translating it beside the constructor that uses it", /thinking=\{"type": "enabled", "budget_tokens": budget\}/.test(models));
-  check("...and clamping XHigh for the three-level provider", /"xhigh": "high"/.test(models));
+  // AND CLAMPED WHERE THE PLAN CLAMPS. The runtime reads the same `effort_levels` from the same file,
+  // through the cost callback's loader, so a run cannot send a level the metadata row says was
+  // stepped down — and a model that lists none takes three, so XHigh becomes High on the run too.
+  const pricingPy = readFileSync(join(HERE, "..", "..", "runtime", "jaroku_interceptor", "pricing.py"), "utf8");
+  check("...the price sheet's loader carries each model's levels", /effort_levels=tuple\(/.test(pricingPy));
+  check("...clamping to the levels the price sheet lists for the model", /price\.effort_levels/.test(models));
+  check("...and to three when it lists none", /_THREE_LEVELS = \("low", "medium", "high"\)/.test(models));
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

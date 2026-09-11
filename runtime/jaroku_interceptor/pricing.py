@@ -55,6 +55,9 @@ class Price:
     cache_read_mult: float
     cache_write_mult: float
     free: bool = False
+    #: For ``effort`` models, the levels the API takes (``effort_levels``). Empty means none are
+    #: listed, which the run reads as the three every such API has taken.
+    effort_levels: tuple[str, ...] = ()
 
 
 def _load() -> dict[str, Price]:
@@ -71,6 +74,7 @@ def _load() -> dict[str, Price]:
                     cache_read_mult=float(m.get("cache_read_mult", 0.0)),
                     cache_write_mult=float(m.get("cache_write_mult", 1.0)),
                     free=bool(m.get("free", False)),
+                    effort_levels=tuple(str(x) for x in (m.get("effort_levels") or ())),
                 )
             except (KeyError, TypeError, ValueError):
                 continue  # one bad row must not void the whole table
