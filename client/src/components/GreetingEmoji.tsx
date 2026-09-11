@@ -1,6 +1,6 @@
 // The greeting's sign-off: the product owner's twenty-five emojis after "What should we cook today,
 // Sumu?", one at a time, a new one every second — their call on 2026-09-11, the same day it replaced
-// the cook animation, and made a buttery slide the same evening.
+// the cook animation, and made "buttery smooth" the same evening.
 //
 // THEIR OWN, IN THEIR ORDER, AS APPLE DRAWS THEM. The list is the one they sent as a screenshot of
 // Apple's emoji, matched glyph by glyph against Apple Color Emoji on a Mac: the card index is the
@@ -14,17 +14,13 @@
 // would draw one as a box, a monochrome outline or two glyphs side by side drops it from the cycle,
 // and a machine that can draw none of them shows the question on its own.
 //
-// A SLIDE, ON ONE REEL. Every second the emojis move up by one box: the new one comes up from just
-// below while the one before it rises out above, on the same curve for the same time, so the two stay
-// exactly one box apart the whole way — consecutive frames of one strip, not two animations. Up,
-// because across would carry the leaving emoji over the words beside it. The curve is a long
-// deceleration that never overshoots, which is what makes it buttery rather than bouncy, and each
-// fades as it travels so neither ever shows a hard edge. Three things keep it smooth rather than
-// merely animated:
+// A CROSSFADE, NOT A SWAP. The new emoji rises in from a little small, overshooting by a hair, while
+// the old one floats up and fades — quicker than the arrival, so the two never crowd. Three things
+// make it smooth rather than merely animated:
 //   - ONLY TRANSFORM AND OPACITY, the two properties a compositor runs on its own. Nothing is laid
 //     out or repainted per frame, so a busy main thread cannot make it stutter.
 //   - BEFORE PAINT. The animations start in a layout effect, so the first frame of a new emoji is
-//     already the first frame of its slide — never a flash of it sitting in place.
+//     already the first frame of its arrival — never a flash of it at full size.
 //   - LAYERS THAT STAY PROMOTED. `will-change` keeps both on the compositor for their whole life, so
 //     there is no snap when an animation ends and a layer would otherwise be handed back.
 // The moving layers sit over an invisible twin of the current emoji, which is what gives the box its
@@ -76,19 +72,23 @@ export const GREETING_EMOJIS: readonly string[] = [
 /** A new one every second: the product owner's number. */
 export const GREETING_EMOJI_MS = 1000;
 
-/** How long each emoji takes to travel its one box — well inside the second, most of it a long settle. */
-export const SLIDE_MS = 600;
-/** The fades ride along, a little quicker: the leaving one is gone before it is far, the arriving one whole before it lands. */
-export const FADE_IN_MS = 420;
-export const FADE_OUT_MS = 320;
+/** How long the new one takes to arrive, and the old one to leave — both well inside the second. */
+export const ENTER_MS = 560;
+export const EXIT_MS = 300;
 
-/** Up from one box below, and up out to one box above — the same distance, so the reel never gaps. */
-export const SLIDE_IN: Keyframe[] = [{ transform: "translateY(100%)" }, { transform: "translateY(0)" }];
-export const SLIDE_OUT: Keyframe[] = [{ transform: "translateY(0)" }, { transform: "translateY(-100%)" }];
-export const FADE_IN: Keyframe[] = [{ opacity: 0 }, { opacity: 1 }];
-export const FADE_OUT: Keyframe[] = [{ opacity: 1 }, { opacity: 0 }];
-/** One curve for both slides: a long deceleration that never overshoots. */
-export const SLIDE_EASE = "cubic-bezier(0.16, 1, 0.3, 1)";
+/** The arrival: up from a little below and a little small, fading in. */
+export const ENTER: Keyframe[] = [
+  { transform: "translateY(10%) scale(0.55)", opacity: 0 },
+  { transform: "translateY(0) scale(1)", opacity: 1 },
+];
+/** The departure: up and away, shrinking and fading. */
+export const EXIT: Keyframe[] = [
+  { transform: "translateY(0) scale(1)", opacity: 1 },
+  { transform: "translateY(-10%) scale(0.7)", opacity: 0 },
+];
+/** A soft back-out: overshoots by about one percent (1.012 at 390ms, measured) and settles without a wobble. */
+const ENTER_EASE = "cubic-bezier(0.34, 1.28, 0.64, 1)";
+const EXIT_EASE = "cubic-bezier(0.5, 0, 0.75, 0)";
 
 /** Keeps a layer on the compositor for its whole life — see the header. */
 const LAYER = { willChange: "transform, opacity", backfaceVisibility: "hidden" } as const;
@@ -152,17 +152,13 @@ export function GreetingEmoji() {
     };
   }, [emojis]);
 
-  // THE SLIDE, before paint — the first emoji comes up on its own, every later one as the last rises
-  // out. Cancelled when the next change begins or the greeting goes.
+  // THE CROSSFADE, before paint — the first emoji arrives on its own, every later one as the last
+  // leaves. Cancelled when the next change begins or the greeting goes.
   useBeforePaint(() => {
     if (!canAnimate || emojis.length === 0 || window.matchMedia(REDUCED).matches) return;
-    const arrive = enter.current;
-    const leave = n > 0 ? exit.current : null;
     const running = [
-      arrive?.animate(SLIDE_IN, { duration: SLIDE_MS, easing: SLIDE_EASE, fill: "backwards" }),
-      arrive?.animate(FADE_IN, { duration: FADE_IN_MS, easing: "ease-out", fill: "backwards" }),
-      leave?.animate(SLIDE_OUT, { duration: SLIDE_MS, easing: SLIDE_EASE, fill: "forwards" }),
-      leave?.animate(FADE_OUT, { duration: FADE_OUT_MS, easing: "ease-in", fill: "forwards" }),
+      enter.current?.animate(ENTER, { duration: ENTER_MS, easing: ENTER_EASE, fill: "backwards" }),
+      n > 0 ? exit.current?.animate(EXIT, { duration: EXIT_MS, easing: EXIT_EASE, fill: "forwards" }) : undefined,
     ];
     return () => running.forEach((a) => a?.cancel());
   }, [n, emojis]);

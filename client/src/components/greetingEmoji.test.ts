@@ -1,6 +1,7 @@
 // The greeting's emojis: the product owner's twenty-five, in their order, a new one every second
-// after "What should we cook today, Sumu?" on a buttery slide — and only the ones a machine can draw
-// as colour emoji, so a Windows or Linux desktop never shows a box in the middle of the question.
+// after "What should we cook today, Sumu?" in a crossfade smooth enough to be called buttery — and
+// only the ones a machine can draw as colour emoji, so a Windows or Linux desktop never shows a box in
+// the middle of the question.
 //
 //   npm run test:greeting-emoji
 
@@ -8,8 +9,7 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
-  FADE_IN, FADE_IN_MS, FADE_OUT, FADE_OUT_MS, GREETING_EMOJIS, GREETING_EMOJI_MS, GreetingEmoji,
-  SLIDE_EASE, SLIDE_IN, SLIDE_MS, SLIDE_OUT,
+  ENTER, ENTER_MS, EXIT, EXIT_MS, GREETING_EMOJIS, GREETING_EMOJI_MS, GreetingEmoji,
 } from "./GreetingEmoji.tsx";
 import { canDrawEmoji } from "../lib/emojiSupport.ts";
 
@@ -20,7 +20,6 @@ const check = (name: string, ok: boolean, detail = ""): void => {
 };
 const read = (p: string): string => readFileSync(p, "utf8");
 const hex = (s: string): string => [...s].map((c) => c.codePointAt(0)!.toString(16)).join(" ");
-const last = <T,>(a: readonly T[]): T => a[a.length - 1]!;
 
 console.log("\nthe product owner's twenty-five, in their order");
 {
@@ -40,28 +39,19 @@ console.log("\nthe product owner's twenty-five, in their order");
   });
 }
 
-console.log("\none a second, on a slide that moves as one reel");
+console.log("\none a second, in a crossfade rather than a swap");
 {
   const src = read("src/components/GreetingEmoji.tsx");
   check("a new one every 1000ms", GREETING_EMOJI_MS === 1000 && src.includes("window.setInterval(() => setN((k) => k + 1), GREETING_EMOJI_MS)"));
-  // ONLY THE TWO PROPERTIES A COMPOSITOR ANIMATES ON ITS OWN. Anything else — a top, a margin, a
-  // filter — is a layout or a repaint every frame, and that is what stutters on a busy machine.
-  check("the slides move only transform", [...SLIDE_IN, ...SLIDE_OUT].every((k) => Object.keys(k).join() === "transform"));
-  check("the fades move only opacity", [...FADE_IN, ...FADE_OUT].every((k) => Object.keys(k).join() === "opacity"));
-  check("the new one comes up from one box below", SLIDE_IN[0]!.transform === "translateY(100%)" && last(SLIDE_IN).transform === "translateY(0)");
-  check("the old one rises out to one box above", SLIDE_OUT[0]!.transform === "translateY(0)" && last(SLIDE_OUT).transform === "translateY(-100%)");
-  // ONE REEL: the same distance, the same curve, the same time — so at every instant the two are
-  // exactly one box apart, which is what makes it a slide rather than two things moving.
-  check("both slides run on the one curve for the one duration",
-    src.includes("animate(SLIDE_IN, { duration: SLIDE_MS, easing: SLIDE_EASE")
-      && src.includes("animate(SLIDE_OUT, { duration: SLIDE_MS, easing: SLIDE_EASE"));
-  const [, y1, , y2] = (SLIDE_EASE.match(/[\d.]+/g) ?? []).map(Number);
-  check("the curve decelerates without overshooting — buttery, not bouncy", y1! <= 1 && y2! <= 1, SLIDE_EASE);
-  check("the new one arrives from nothing, the old one leaves to nothing",
-    FADE_IN[0]!.opacity === 0 && last(FADE_IN).opacity === 1 && FADE_OUT[0]!.opacity === 1 && last(FADE_OUT).opacity === 0);
-  check("the fades are quicker than the slide, so neither is seen far from the box", FADE_IN_MS < SLIDE_MS && FADE_OUT_MS < SLIDE_MS);
-  check("and it is all over well inside the second", SLIDE_MS <= 700);
-  check("started before paint, so a new emoji is never seen sitting in place first",
+  // ONLY THE TWO PROPERTIES A COMPOSITOR ANIMATES ON ITS OWN. Anything else — a width, a filter, a
+  // top — is a layout or a repaint every frame, and that is what stutters on a busy machine.
+  const props = [...ENTER, ...EXIT].flatMap((k) => Object.keys(k));
+  check("the keyframes move only transform and opacity", props.every((p) => p === "transform" || p === "opacity"), props.join(","));
+  check("the new one arrives from nothing to whole", ENTER[0]!.opacity === 0 && ENTER[ENTER.length - 1]!.opacity === 1);
+  check("...while the old one leaves from whole to nothing", EXIT[0]!.opacity === 1 && EXIT[EXIT.length - 1]!.opacity === 0);
+  check("the leaving is quicker than the arriving, so the two never crowd", EXIT_MS < ENTER_MS);
+  check("and both are over well inside the second", ENTER_MS <= 600 && EXIT_MS <= 600);
+  check("started before paint, so a new emoji is never seen at full size first",
     src.includes("useLayoutEffect") && src.includes("useBeforePaint(() => {"));
   check("the arrival holds its first frame until it starts", src.includes('fill: "backwards"'));
   check("the layers stay on the compositor for their whole life", src.includes('willChange: "transform, opacity"'));
