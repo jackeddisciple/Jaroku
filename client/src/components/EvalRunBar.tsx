@@ -2,12 +2,12 @@
 //
 // An eval multiplies cost by examples × providers, and the judge adds one more paid call
 // per cell. Three examples on two providers is eight calls; fifty on three is three
-// hundred. So a real-provider eval cannot be started from a single click:
+// hundred. So an eval cannot be started from a single click:
 //
-//   pick providers → see an estimate → set a ceiling → confirm
+//   pick models → see an estimate → set a ceiling → confirm
 //
-// The dry run skips all of it, because it is genuinely free. That asymmetry is the point —
-// the free path stays one click, and only spending money asks for a decision.
+// EVERY EVAL GOES THIS WAY. There used to be a free dry-run leg that skipped all of it; there is no
+// such model any more, so every run of this bar spends money, and every one asks first.
 //
 // The estimate informs; the CEILING enforces. An estimate that reads low must never be the
 // only thing between a user and a large bill, so the confirm step requires a ceiling and
@@ -17,7 +17,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useBuildStore } from "../store/buildStore.ts";
 import { examplesOf, useEvalStore } from "../store/evalStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
-import { modelName, runProviders, useProviderStore } from "../store/providerStore.ts";
+import { isRunnable, modelName, runProviders, useProviderStore } from "../store/providerStore.ts";
+import { useUiStore } from "../store/uiStore.ts";
 import { sendCancelEval, sendEstimateEval, sendStartEval } from "../lib/socket.ts";
 import { fmtCost } from "../lib/format.ts";
 import { Chip } from "./Chip.tsx";
@@ -27,7 +28,6 @@ import { Icon } from "../lib/icons/registry.ts";
 import { IconButton } from "./IconButton.tsx";
 
 const key = (t: EvalTarget) => `${t.provider}/${t.model}`;
-const FREE: EvalTarget = { provider: "fake", model: "fake-dry-run" };
 
 /** Default ceiling offered alongside an estimate: comfortably above the high end. */
 function suggestedCeiling(high: number): number {
@@ -49,15 +49,20 @@ export function EvalRunBar() {
   // a constant in the client, four models behind, so a priced model could not be added as a leg.
   const providerModels = useProviderStore((s) => s.models);
   const catalogue = useMemo(() => runProviders(providerModels), [providerModels]);
+  const providerStatuses = useProviderStore((s) => s.providers);
 
-  const [targets, setTargets] = useState<EvalTarget[]>([FREE]);
+  // THE COMPOSER'S MODEL, when it can run: "how does this agent do on what I already run it on" is
+  // the common question, so it starts as one chosen leg rather than an empty row of chips.
+  const [targets, setTargets] = useState<EvalTarget[]>(() => {
+    const { provider, model } = useUiStore.getState();
+    const runnable = isRunnable(useProviderStore.getState().providers, provider);
+    return provider && model && runnable ? [{ provider, model }] : [];
+  });
   const [confirming, setConfirming] = useState(false);
   const [ceiling, setCeiling] = useState<string>("");
 
   const examples = examplesOf(examplesByDataset, selectedDatasetId);
   const running = progress !== null && progress.status === undefined;
-  const paid = targets.filter((t) => t.provider !== "fake");
-  const needsConfirm = paid.length > 0;
 
   // Changing the selection invalidates any estimate on screen — a stale number next to a
   // different set of providers is worse than none.
@@ -79,11 +84,6 @@ export function EvalRunBar() {
 
   const beginRun = () => {
     if (!activeAgentId || !examples.length || !targets.length) return;
-    if (!needsConfirm) {
-      // Free by construction — nothing to estimate, nothing to confirm.
-      sendStartEval(selectedDatasetId, activeAgentId, targets, null);
-      return;
-    }
     sendEstimateEval(selectedDatasetId, activeAgentId, targets);
     setConfirming(true);
   };
@@ -105,20 +105,22 @@ export function EvalRunBar() {
           p.models.map((m) => {
             const t: EvalTarget = { provider: p.id, model: m };
             const on = targets.some((x) => key(x) === key(t));
-            const free = p.id === "fake";
+            // DISABLED WITH A STATED REASON, the composer's rule: a model that vanishes because a
+            // key is missing reads as one the product does not support. A leg already chosen stays
+            // pressable, so it can always be taken back off.
+            const usable = isRunnable(providerStatuses, p.id);
             return (
               <Chip
                 key={key(t)}
                 onClick={() => toggle(t)}
                 selected={on}
-                disabled={running}
-                // "Dry run (free)" is prose and a model id is an identifier, and this used to set
-                // the latter in mono for that reason. §04 lists model labels as Sans and §05 is
-                // explicit that looking technical is not the test, so both are prose now.
-                title={free ? "Free — no API calls" : `${p.label} · billed per token`}
+                disabled={running || (!usable && !on)}
+                // The model's name, in Sans: §04 lists model labels as prose, and §05 is explicit
+                // that looking technical is not the test.
+                title={usable ? `${p.label} · billed per token` : `No ${p.label} API key in this workspace`}
                 className="whitespace-nowrap"
               >
-                {free ? "Dry run (free)" : modelName(providerModels, m)}
+                {modelName(providerModels, m)}
               </Chip>
             );
           }),
@@ -197,8 +199,8 @@ export function EvalRunBar() {
             {examples.length} × {targets.length} = {examples.length * targets.length} run
             {examples.length * targets.length === 1 ? "" : "s"}
           </span>
-          {needsConfirm && (
-            <span className="text-run text-tiny whitespace-nowrap">real providers — billed</span>
+          {targets.length > 0 && (
+            <span className="text-run text-tiny whitespace-nowrap">billed per token</span>
           )}
           <span className="ml-auto" />
           {running ? (
@@ -211,10 +213,10 @@ export function EvalRunBar() {
           ) : (
             <IconButton
               icon={Icon.evals.run}
-              // §8: A GATE'S LABEL NAMES WHAT THE PRESS DOES. Behind a spend ceiling this opens
-              // the estimate rather than dispatching, and saying "Run eval" there would promise
-              // money moving that the next screen has not asked about yet.
-              label={needsConfirm ? "Estimate the cost of this eval" : "Run eval"}
+              // §8: A GATE'S LABEL NAMES WHAT THE PRESS DOES. Every eval sits behind a spend
+              // ceiling, so this opens the estimate rather than dispatching, and "Run eval" would
+              // promise money moving that the next screen has not asked about yet.
+              label="Estimate the cost of this eval"
               disabledReason={
                 !connected ? "Not connected"
                   : !examples.length ? "Add an example first"
