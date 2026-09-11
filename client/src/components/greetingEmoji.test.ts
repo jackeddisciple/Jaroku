@@ -1,5 +1,5 @@
 // The greeting's emojis: the product owner's twenty-five, in their order, a new one every second
-// after "What should we cook today, Sumu?" in a crossfade smooth enough to be called buttery — and
+// after "What are we working on today, <name>?" in a crossfade smooth enough to be called buttery — and
 // only the ones a machine can draw as colour emoji, so a Windows or Linux desktop never shows a box in
 // the middle of the question.
 //
@@ -70,7 +70,7 @@ console.log("\nstill when asked, paused when unseen, and the same on an old webv
   check("paused while the window is hidden", src.includes('"visibilitychange"') && src.includes('visibilityState !== "hidden"'));
   check("an old webview's media-query subscription is handled", src.includes("motion.addListener(sync)"));
   check("the interval is cleared on unmount", src.includes("window.clearInterval(timer)"));
-  check("hidden from screen readers — the words already say cook", src.includes("aria-hidden"));
+  check("hidden from screen readers — decoration, not words", src.includes("aria-hidden"));
   check("a fixed 1em box at 1.25em, so the centred line never shifts", src.includes('style={{ fontSize: "1.25em", width: "1em" }}'));
   check("held to the last word by a no-break space", src.includes("String.fromCharCode(0xa0)") && src.includes("{NBSP}"));
   const INVISIBLE = [0x200b, 0x200c, 0x200d, 0x2060, 0xfeff, 0xa0].map((c) => String.fromCodePoint(c));
@@ -131,7 +131,10 @@ console.log("\nonly what this machine draws as colour emoji");
 console.log("\nthe greeting uses it");
 {
   const pane = read("src/components/BuildPane.tsx");
-  check("BuildPane puts <GreetingEmoji /> after the question", /cook today\?"\}\s*<GreetingEmoji \/>\s*<\/h1>/.test(pane));
+  // The product owner's exact wording, 2026-09-11 — named and unnamed alike.
+  check("the question is \"What are we working on today, <name>?\"",
+    pane.includes("`What are we working on today, ${firstName}?`") && pane.includes('"What are we working on today?"'));
+  check("BuildPane puts <GreetingEmoji /> after the question", /working on today\?"\}\s*<GreetingEmoji \/>\s*<\/h1>/.test(pane));
   check("and the cook animation is gone", !pane.includes("CookAnimation"));
 }
 

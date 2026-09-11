@@ -1937,12 +1937,12 @@ export function BuildPane({
               {/* REGULAR WEIGHT, one rung below the hero, and the dominant thing in the group. The
                   rung carries 600 for headings a person scans for; this is a sentence addressed to
                   them. `text-balance` so a narrow window breaks it into even lines.
-                  THE SENTENCE SAYS "COOK" AND NAMES WHOEVER IS SIGNED IN, the product owner's wording on
-                  2026-09-11 — the name is the account's first name, and the plain question stands in when there
-                  is none. Their own emojis follow it, a new one popping in every second; `GreetingEmoji` says
-                  which, and how it keeps to what each machine can draw. */}
+                  THE QUESTION NAMES WHOEVER IS SIGNED IN — "What are we working on today, <name>?", the
+                  product owner's wording on 2026-09-11 — with the account's first name, and the plain question
+                  standing in when there is none. Their own emojis follow it, a new one every second;
+                  `GreetingEmoji` says which, and how it keeps to what each machine can draw. */}
               <h1 className="mt-8 text-balance text-page font-normal text-ink">
-                {firstName ? `What should we cook today, ${firstName}?` : "What should we cook today?"}
+                {firstName ? `What are we working on today, ${firstName}?` : "What are we working on today?"}
                 <GreetingEmoji />
               </h1>
               {/* FOUR WAYS TO START, under the question. Offered while the Chat composer is empty and

@@ -1,6 +1,6 @@
-// The greeting's sign-off: the product owner's twenty-five emojis after "What should we cook today,
-// Sumu?", one at a time, a new one every second — their call on 2026-09-11, the same day it replaced
-// the cook animation, and made "buttery smooth" the same evening.
+// The greeting's sign-off: the product owner's twenty-five emojis after "What are we working on
+// today, <name>?", one at a time, a new one every second — their call on 2026-09-11, the same day it
+// replaced the cook animation, and made "buttery smooth" the same evening.
 //
 // THEIR OWN, IN THEIR ORDER, AS APPLE DRAWS THEM. The list is the one they sent as a screenshot of
 // Apple's emoji, matched glyph by glyph against Apple Color Emoji on a Mac: the card index is the
@@ -28,8 +28,8 @@
 // emoji at a time and swaps, never two stacked.
 //
 // STILL UNDER prefers-reduced-motion — the first emoji, held, nothing moving — and paused while the
-// window is hidden, the rules the 3D gloss keeps. Hidden from screen readers: the words already say
-// cook.
+// window is hidden, the rules the 3D gloss keeps. Hidden from screen readers: they decorate the
+// question rather than say anything it does not.
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { canDrawEmoji } from "../lib/emojiSupport.ts";
