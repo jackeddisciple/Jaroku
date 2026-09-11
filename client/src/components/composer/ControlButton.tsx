@@ -36,7 +36,7 @@ export function ControlButton({
   buttonRef,
 }: {
   icon: IconComponent;
-  /** The text beside the glyph — "High", "Smart". Dropped below ~720px unless composerBar.ts keeps it. */
+  /** The text beside the glyph — "High", "Fast". Dropped below ~720px unless composerBar.ts keeps it. */
   label?: string;
   /** The accessible name. Required, because half of these controls have no visible text. */
   name: string;

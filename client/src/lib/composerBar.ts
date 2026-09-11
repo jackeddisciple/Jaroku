@@ -136,14 +136,14 @@ export function densityFor(width: number): Density {
  * The controls that keep their word at the dense width.
  *
  * THE PERMISSION MODE'S WORD IS ITS STATE. Effort's level is a detail its tooltip can carry; the
- * shield is the same glyph whether an agent runs Strict, Smart or Fast, so without the word the
+ * shield is the same glyph whether an agent runs Strict, Fast or Auto, so without the word the
  * policy it runs under is invisible — the product owner's call on 2026-09-10. Below the overflow
  * breakpoint it collapses into the `⋯` menu, whose row names the mode anyway.
  */
 const KEEPS_LABEL: ReadonlySet<ControlId> = new Set<ControlId>(["shield"]);
 
 /**
- * Whether a control shows its text label ("High", "Smart") or renders as a bare glyph. Asked
+ * Whether a control shows its text label ("High", "Fast") or renders as a bare glyph. Asked
  * without a control, the answer for the bar in general: only at full width.
  */
 export function showsLabel(density: Density, control?: ControlId): boolean {

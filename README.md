@@ -1156,9 +1156,9 @@ as `JAROKU_REASONING_EFFORT` on the same seam `JAROKU_PROVIDER` already uses.
 
 ### The permission shield
 
-Strict, Smart, Fast — a *policy* control, enforced server-side with the client bypassed. Two
+Strict, Fast, Auto — a *policy* control, enforced server-side with the client bypassed. Two
 invariants hold it up: an environment that claimed a mode cannot authorise anything (every ask still
-arrives at the gate, which resolves the mode from the conversation's own row), and **Fast still
+arrives at the gate, which resolves the mode from the conversation's own row), and **Auto still
 confirms a write**. A workspace admin can pin the mode, and a pinned conversation refuses a `PATCH`
 with 409 rather than accepting a write the resolver would then ignore.
 

@@ -216,7 +216,7 @@ export function conversationRoutes(deps: ConversationRouteDeps): ConversationRou
           throw new HttpError(409, "mode_pinned", "a workspace admin has pinned the permission mode for this workspace");
         }
         if (mode === "fast" && before.fastDisallowed) {
-          throw new HttpError(409, "fast_disallowed", "a workspace admin has disallowed Fast mode in this workspace");
+          throw new HttpError(409, "fast_disallowed", "a workspace admin has disallowed Auto mode in this workspace");
         }
 
         const after = await deps.settings.set(
