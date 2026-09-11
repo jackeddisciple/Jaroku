@@ -1633,6 +1633,10 @@ jobs:
           # it the rule that keeps the mark out of the tag row: that row trims to three plus a `+n`
           # chip, so an identity mark in it would vanish exactly when the card is busiest.
           npm run test:emoji-render
+          # THE GREETING'S EMOJIS: the product owner's twenty-five, in their order, by code point; a
+          # new one every second, popping in; only the ones this machine draws as colour emoji, so no
+          # desktop shows a box mid-question; still under prefers-reduced-motion, paused while hidden.
+          npm run test:greeting-emoji
 
       # THE ICON SYSTEM, IN ITS OWN STEP, because the six suites guard six different invariants and
       # a reader looking at a red build should be able to tell which one broke without opening a

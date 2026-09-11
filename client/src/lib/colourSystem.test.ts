@@ -389,6 +389,7 @@ console.log("\n...and no file outside the brand marks writes a colour of its own
   ]);
   // Two files hold values that are deliberately off-palette, and both say so at length.
   const OFF_PALETTE = new Set([
+    "lib/emojiSupport.ts", // canDrawEmoji's two probe fills — painted on a canvas nobody sees
     "lib/memberList.ts", // §6.2's avatar mnemonics — a mnemonic, not a status
     "components/VoiceWaveform.tsx", // two tokens as channels, because they are interpolated
     "lib/palette.ts",

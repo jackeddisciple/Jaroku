@@ -58,6 +58,7 @@ import { MAX_ATTACHMENTS, WARN_AT, budgetPercent } from "../lib/attachBudget.ts"
 import { EffortControl } from "./composer/EffortControl.tsx";
 import { effortName, effortStops, stopFor } from "../lib/effortLevels.ts";
 import { ShieldControl, modeLabel } from "./composer/ShieldControl.tsx";
+import { GreetingEmoji } from "./GreetingEmoji.tsx";
 import { ConnectorDeck } from "./composer/ConnectorDeck.tsx";
 import { TurnActions } from "./composer/TurnActions.tsx";
 import { PinRail, pinLabel, type PinnedTurn } from "./composer/PinRail.tsx";
@@ -1938,9 +1939,11 @@ export function BuildPane({
                   them. `text-balance` so a narrow window breaks it into even lines.
                   THE SENTENCE SAYS "COOK" AND NAMES WHOEVER IS SIGNED IN, the product owner's wording on
                   2026-09-11 — the name is the account's first name, and the plain question stands in when there
-                  is none. */}
+                  is none. Their own emojis follow it, a new one popping in every second; `GreetingEmoji` says
+                  which, and how it keeps to what each machine can draw. */}
               <h1 className="mt-8 text-balance text-page font-normal text-ink">
                 {firstName ? `What should we cook today, ${firstName}?` : "What should we cook today?"}
+                <GreetingEmoji />
               </h1>
               {/* FOUR WAYS TO START, under the question. Offered while the Chat composer is empty and
                   gone the moment it holds anything — read off the draft, never remembered — and a
