@@ -13,7 +13,7 @@
 //   npm run test:pricing
 
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { allPrices, costFor, isPriced, priceFor, PRICING_PATH } from "./pricing.ts";
@@ -39,8 +39,10 @@ const CASES: Case[] = [
   { name: "cache read only", model: "claude-haiku-4-5", inputTokens: 0, outputTokens: 0, cacheReadTokens: 1_000_000 },
   { name: "cache write only", model: "claude-haiku-4-5", inputTokens: 0, outputTokens: 0, cacheWriteTokens: 1_000_000 },
   {
+    // Fable 5.1, because its cache reads are 0.025x rather than the usual 0.1x — the one entry
+    // where a reader that assumed the common multiplier would be wrong by a factor of four.
     name: "mixed cached + uncached",
-    model: "claude-opus-4-8",
+    model: "claude-fable-5-1",
     inputTokens: 1_234,
     outputTokens: 567,
     cacheReadTokens: 89_012,
@@ -50,7 +52,9 @@ const CASES: Case[] = [
   { name: "all zeros", model: "claude-haiku-4-5", inputTokens: 0, outputTokens: 0 },
   // Longest-prefix resolution: a dated/suffixed variant must fall back to its base entry.
   { name: "prefix variant", model: "claude-haiku-4-5-20251001", inputTokens: 1_000, outputTokens: 1_000 },
-  { name: "openai priced", model: "gpt-4o-mini", inputTokens: 500_000, outputTokens: 250_000 },
+  { name: "openai priced", model: "gpt-5.6-luna", inputTokens: 500_000, outputTokens: 250_000 },
+  { name: "openai cached", model: "gpt-6-astra", inputTokens: 2_000, outputTokens: 900, cacheReadTokens: 40_000 },
+  { name: "meta cached", model: "muse-spark-1.3", inputTokens: 7_500, outputTokens: 1_200, cacheReadTokens: 30_000 },
   // The free dry-run path is genuinely $0 — distinct from "unknown".
   { name: "fake dry run is free", model: "fake-dry-run", inputTokens: 9_999, outputTokens: 9_999 },
   // An unpriced model must be null on BOTH sides. Never 0.
@@ -142,8 +146,8 @@ CASES.forEach((c, i) => {
 // Longest prefix wins, not first-match. The old substring walk over an unordered dict
 // could resolve a suffixed model to whichever similar key came first.
 {
-  const p = priceFor("claude-opus-4-8-experimental");
-  const ok = p?.id === "claude-opus-4-8";
+  const p = priceFor("claude-opus-5-experimental");
+  const ok = p?.id === "claude-opus-5";
   if (!ok) { fail++; console.log(`  FAIL longest-prefix resolved to ${p?.id}`); }
   else console.log("  ok   longest prefix wins over shorter matches");
 }
@@ -201,6 +205,28 @@ CASES.forEach((c, i) => {
   const unresolvable = table.filter((p) => !isPriced(p.id));
   if (unresolvable.length) { fail++; console.log(`  FAIL selectable but unpriced: ${unresolvable.map((p) => p.id).join(", ")}`); }
   else console.log("  ok   every model the catalogue offers resolves to a price");
+
+  // THE CATALOGUE IS EXACTLY THE PRODUCT OWNER'S LIST, IN THEIR ORDER. Pinned, because a row added
+  // to or dropped from this table appears in or vanishes from every model selector in the product
+  // with nothing else changing — which is precisely how the old models would creep back.
+  const raw = JSON.parse(readFileSync(PRICING_PATH, "utf8")) as {
+    models: { id: string; name?: string; provider: string }[];
+  };
+  const offered = raw.models.filter((m) => m.provider !== "fake");
+  const want = [
+    "claude-sonnet-5", "claude-opus-5", "claude-haiku-4-5", "claude-fable-5-1",
+    "gpt-6-astra", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol",
+    "muse-spark-1.3",
+  ];
+  const got = offered.map((m) => m.id).join(",");
+  if (got !== want.join(",")) { fail++; console.log(`  FAIL the catalogue is ${got}`); }
+  else console.log("  ok   the catalogue is the nine named models, in the order they were named");
+
+  // AND EVERY ONE HAS A NAME. The selector shows `name` — "GPT-5.6 Luna", not `gpt-5.6-luna` — so an
+  // entry without one would fall back to an API identifier in the middle of a menu of names.
+  const nameless = offered.filter((m) => !m.name?.trim());
+  if (nameless.length) { fail++; console.log(`  FAIL models with no display name: ${nameless.map((m) => m.id).join(", ")}`); }
+  else console.log("  ok   every offered model has a display name");
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

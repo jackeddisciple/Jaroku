@@ -24,8 +24,8 @@ import { capabilityFor, contextWindowFor, reasoningBudgets, type Capability } fr
 /**
  * A `reasoning_effort`-shaped model, because the shipped catalogue has none.
  *
- * Every OpenAI entry in runtime/pricing.json is a non-reasoning model today, so §12.5's clamp
- * branch is unreachable through a model id. Constructed here rather than added to the shared
+ * Every `effort` entry in runtime/pricing.json lists all four levels, so §12.5's clamp branch is
+ * unreachable through a model id. Constructed here rather than added to the shared
  * pricing file: putting a model into that table makes it appear in the product's model selector,
  * and a model shipped so that a test can reach a branch is a model somebody eventually runs a real
  * job on, at a price nobody verified.
@@ -59,7 +59,10 @@ console.log("\nthe capability table loaded, and it is the shared pricing file");
   // Every model in the table answers the capability question, one way or the other. A model with
   // no record is treated as unsupported, which is safe — but silently unsupported for a model the
   // product ships is a feature that went missing without anybody deciding to remove it.
-  for (const id of ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5", "gpt-4o", "gemini-2.5-pro", "fake-dry-run"]) {
+  for (const id of [
+    "claude-sonnet-5", "claude-opus-5", "claude-haiku-4-5", "claude-fable-5-1",
+    "gpt-6-astra", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "muse-spark-1.3", "fake-dry-run",
+  ]) {
     const cap = capabilityFor(id);
     check(`${id} has a capability record`, cap !== null);
     check(`...with a max output ceiling`, (cap?.maxOutputTokens ?? 0) > 0, String(cap?.maxOutputTokens));
@@ -139,16 +142,24 @@ console.log("\n§12.5 — XHigh on a clamping model completes, and reports High"
     !four.clamped && four.applied === "xhigh" && four.reasoningEffort === "xhigh" && four.reason === null);
 
   // And an unsupported model does not pretend to clamp — §6.2 omits the chip instead.
-  const none = planEffort("gpt-4o", "xhigh", "GPT-4o");
+  const none = planEffort("claude-haiku-4-5", "xhigh", "Haiku 4.5");
   check("an unsupported model does not fake a clamp", !none.supported && !none.clamped);
+
+  // EVERY `effort` MODEL THE PRODUCT OFFERS TAKES XHIGH. GPT-6 Astra, GPT-5.6 and Muse Spark all go
+  // past it, and their entries say so — a clamp marker on any of them would report a downgrade that
+  // never happened, on the models somebody picked precisely to think harder.
+  for (const id of ["gpt-6-astra", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "muse-spark-1.3"]) {
+    const q = planEffort(id, "xhigh");
+    check(`${id} runs XHigh as XHigh`, q.supported && !q.clamped && q.reasoningEffort === "xhigh",
+      `${q.applied} ${q.reason ?? ""}`);
+  }
 }
 
 console.log("\n...and when a budget will not fit, the clamp is reported rather than the run failing");
 {
-  // Haiku's ceiling is 8192, so half of it is 4096 — which admits Medium (4000) and refuses High
-  // (16000). Haiku has no reasoning control, so the case is constructed on a thinking model with a
-  // small ceiling instead: gemini-2.0-flash is 8192 but also unsupported. The property under test
-  // is the arithmetic, so it is asserted through the one model that has both.
+  // A thinking budget must fit inside half the model's output allowance. Every thinking model the
+  // product offers has 128K, so nothing clamps on the shipped catalogue — asserted here on Opus —
+  // and the arithmetic itself is asserted across all three of them below.
   const budgets = reasoningBudgets();
   const cap = capabilityFor("claude-opus-5")!;
   const ceiling = Math.floor(cap.maxOutputTokens / 2);
@@ -160,7 +171,7 @@ console.log("\n...and when a budget will not fit, the clamp is reported rather t
   // The rule itself, stated as arithmetic rather than as a model: no plan may ever emit a budget
   // that exceeds half the model's output allowance. A thinking block that eats the whole allowance
   // truncates the answer, which reads as the model giving up mid-sentence with no error attached.
-  for (const id of ["claude-opus-5", "claude-sonnet-5", "gemini-2.5-pro", "gemini-2.5-flash"]) {
+  for (const id of ["claude-sonnet-5", "claude-opus-5", "claude-fable-5-1"]) {
     const c = capabilityFor(id)!;
     for (const level of EFFORT_LEVELS) {
       const t = planEffort(id, level).thinking;
