@@ -422,12 +422,10 @@ export function WorkspaceSwitcher() {
           onClick={() => setOpen((v) => !v)}
           aria-haspopup="menu"
           aria-expanded={open}
-          // THE MOST PROMINENT TEXT IN THE SIDEBAR — §9.1: larger than the tab labels, smaller than
-          // a page title. 16px at medium weight, a step above the 14px of the tab labels and the
-          // agent names — raised twice on 2026-09-11 at the product owner's call, the second time
-          // with the rest of the column, so it keeps its step over the rows. This is the thing
-          // every other row in the column is scoped BY; a heading twice the size of its list would
-          // be a banner.
+          // THE ROW EVERY OTHER ROW IN THE COLUMN IS SCOPED BY. §9.1 put it a size above the tab
+          // labels; the product owner took it back down from 16px on 2026-09-11, and with no rung
+          // between 16 and 14 and no semibold on top of a rung (`test:surface-system`), it is 14px
+          // medium, the rows' own size — the row it heads is what sets it apart now.
           className={`flex min-w-0 flex-1 items-center gap-2 py-2 pl-3 pr-2 text-left transition-colors hover:bg-active/40 active:bg-chrome focus-visible:outline-none focus-visible:shadow-focusring ${
             open ? "bg-active/40" : ""
           }`}
@@ -440,7 +438,7 @@ export function WorkspaceSwitcher() {
               row in the column is scoped by. It stays in the row's tooltip, which reads
               "<name> — team, you are owner", so the fact is still reachable where somebody asking
               for it would look. */}
-          <Truncate className="min-w-0 text-title font-medium text-ink" title={current?.name}>
+          <Truncate className="min-w-0 text-body font-medium text-ink" title={current?.name}>
             {current?.name ?? "workspace"}
           </Truncate>
           {/* THE AFFORDANCE SITS AGAINST THE NAME, NOT AT THE ROW'S EDGE — and the difference is
