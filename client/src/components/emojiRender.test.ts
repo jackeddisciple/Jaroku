@@ -43,7 +43,7 @@ console.log("\nno circle, no box, no tint, no backdrop, no border");
   check("no class at all", !/class=/.test(drawn), drawn);
   // SIZED BY FONT-SIZE, which is what lets it sit on the text baseline with the name and take
   // normal inline spacing rather than a fixed-width gutter.
-  check("sized with font-size", /font-size:16px/.test(drawn), drawn);
+  check("sized with font-size", /font-size:14px/.test(drawn), drawn);
   // AND `line-height: 1`, for §13's walk: an unusually tall glyph must not push its row taller than
   // its neighbours, and a default line box is exactly how that happens.
   check("its line box is pinned", /line-height:1/.test(drawn), drawn);
@@ -64,9 +64,10 @@ console.log("\nthe seven sites §8.4 names");
   const SITES: [string, string][] = [
     // THE SIDEBAR'S MARK MOVED INTO `AgentIdentityLine`, which is now the whole of §7's row: the
     // emoji, the name that never truncates, and the category that does. The mark did not change
-    // register — it is still `EMOJI_SIZE.sidebar`, still bare, still 16px — it is drawn one
-    // component down, beside the two rules it shares a line with.
-    ["components/AgentIdentityLine.tsx", "AgentEmoji"],     // 16 — the reason this exists
+    // register — it is still `EMOJI_SIZE.sidebar`, still bare, and 14px since 2026-09-11 so it sits
+    // level with the tab icons — it is drawn one component down, beside the two rules it shares a
+    // line with.
+    ["components/AgentIdentityLine.tsx", "AgentEmoji"],     // 14 — the reason this exists
     // THE TWO 3D SURFACES REACH THE MARK THROUGH `GlossAvatar`, which is where §5.2's split lands:
     // small sizes wear the emoji directly, and the card and the detail header wear the character
     // with the emoji inside it — as the placeholder while it builds, and for ever on a machine with
