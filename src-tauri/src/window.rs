@@ -41,6 +41,11 @@ const SPLASH: (f64, f64) = (560.0, 620.0);
 const APP: (f64, f64) = (1440.0, 900.0);
 const APP_MIN: (f64, f64) = (1024.0, 680.0);
 
+/// Where the traffic lights go, as `traffic_light_position`'s (x, y) — measured rather than derived,
+/// see the note where the window is built. tao applies it at creation, and `reinset_traffic_lights`
+/// again whenever AppKit puts the buttons back.
+const TRAFFIC_LIGHTS: (f64, f64) = (9.0, 24.05);
+
 /// The size the application was going to open at, held across the welcome screen.
 ///
 /// WHY REMEMBER IT AT ALL, when `APP` is right there. The window-state plugin restores the width
@@ -87,38 +92,29 @@ pub fn open(app: &AppHandle, ws_url: &str) -> Result<(), Box<dyn std::error::Err
         // in index.css says the same thing to the webview; this says it to AppKit.
         .theme(Some(tauri::Theme::Light))
         // THE LIGHTS COME DOWN TO THE ROW, RATHER THAN THE ROW GOING UP TO THE LIGHTS. With
-        // `TitleBarStyle::Overlay` macOS keeps the three buttons where a 28pt title bar would have
-        // put them — centred about 14pt down — while `SidebarChrome` is a 44px row of 28px controls
-        // centred at 22. Eight points apart, on the one row where two different toolkits' controls
-        // sit side by side, which is exactly where the eye reads a misalignment.
+        // `TitleBarStyle::Overlay` macOS keeps the three buttons where a default title bar keeps
+        // them — centred 15.75pt down on macOS 26 — while `SidebarChrome` is a 44px row of 28px
+        // controls whose icons centre at 21.75. Six points apart, on the one row where two different
+        // toolkits' controls sit side by side, which is exactly where the eye reads a misalignment.
         //
         // Moving them is the smaller change of the two: the alternative is shortening the row or
         // pushing its contents up, which moves Jaroku's own chrome to accommodate three buttons it
         // does not own.
         //
-        // THE `y` IS NOT THE BUTTON'S CENTRE AND IT DOES NOT MOVE IT ONE FOR ONE. `tao`'s
-        // `inset_traffic_lights` resizes the title-bar container to `buttonHeight + y` and lets the
-        // button follow, so reading the source gives the shape of the relationship and none of the
-        // constants. Three values were guessed from it and all three missed.
+        // `y` IS NOT THE BUTTON'S CENTRE. tao's `inset_traffic_lights` resizes the title-bar
+        // container to `buttonHeight + y`, so the constant comes from measuring rather than reading:
+        // window captures at 2x, read IN POINTS, gave `y=38.05 → centre 35.75` and
+        // `y=24.05 → centre 21.75` — one point per point, centre = y − 2.3 — and 21.75 is where the
+        // row's icons centre, measured the same way. An earlier calibration here read a 2x capture's
+        // pixels as points, which is why it found a slope of 2; its answer never showed anyway,
+        // because the page's first `set_window_title` put the buttons back (`reinset_traffic_lights`
+        // is why that no longer happens). If the row's height changes, this moves with it.
         //
-        // SO IT WAS CALIBRATED, from two measurements on the SAME window — which is the part that
-        // took three tries to get right, because a reading taken on the 560×620 splash window does
-        // not describe the 1440×843 app window and mixing them produced a slope that appeared to
-        // move the buttons UP as `y` rose. Screenshotting the corner and finding the close button's
-        // red pixels gave `y=24.2 → 15.8` and `y=30.4 → 28.2`:
-        //
-        //     slope  = (28.2 - 15.8) / (30.4 - 24.2) = 2.0
-        //     centre = 2y - 32.6
-        //
-        // The 2.0 is the tell: the inset is being applied in a doubled coordinate space on this
-        // display, which is exactly why every one-point extrapolation from it was wrong.
-        //
-        // 22 IS THE TARGET, ARITHMETICALLY: `SidebarChrome` is `h-11` (44px) with `items-center`,
-        // so everything in it centres on 22. Solving gives 27.3. If that row's height changes this
-        // has to move with it, which is why the derivation is here and not just the number. `20` is
-        // the horizontal inset macOS itself uses, and `SidebarChrome`'s `pl-[76px]` reservation is
-        // that inset plus the three buttons and their spacing.
-        .traffic_light_position(tauri::LogicalPosition::new(20.0, 27.3))
+        // `x` IS 9, WHICH KEEPS THE BUTTONS WHERE THEY HAVE ALWAYS BEEN SEEN: macOS's own default,
+        // the close button centred 15.8pt in. The 20 this held before was never applied, for the same
+        // reason, and applying it now would move them 11pt right — the zoom button past the edge of
+        // the 76px the chrome rows reserve for all three.
+        .traffic_light_position(tauri::LogicalPosition::new(TRAFFIC_LIGHTS.0, TRAFFIC_LIGHTS.1))
         .initialization_script(&host_config(ws_url));
 
     // MACOS ONLY, AND NOT BY PREFERENCE — `title_bar_style` and `hidden_title` are compiled only
@@ -172,7 +168,20 @@ pub fn open(app: &AppHandle, ws_url: &str) -> Result<(), Box<dyn std::error::Err
         })
         .initialization_script(VIBRANCY_FLAG);
 
-    builder.build()?;
+    #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
+    let window = builder.build()?;
+    // LEAVING FULLSCREEN MOVES THE LIGHTS BACK TOO — the other reset tao 0.36 fixed — and it arrives
+    // as a resize, so every resize puts them back. During a live resize that repeats tao's own
+    // `drawRect:` path, and harmlessly: the same frames, set to the same values.
+    #[cfg(target_os = "macos")]
+    {
+        let handle = window.clone();
+        window.on_window_event(move |event| {
+            if let tauri::WindowEvent::Resized(_) = event {
+                reinset_traffic_lights(&handle, None);
+            }
+        });
+    }
     Ok(())
 }
 
@@ -334,7 +343,59 @@ pub fn set_window_title(app: AppHandle, name: Option<String>) {
     let trimmed = name.unwrap_or_default().trim().chars().take(64).collect::<String>();
     // An em dash rather than a hyphen: the two halves are a product and a place, not a compound.
     let title = if trimmed.is_empty() { "Jaroku".to_string() } else { format!("Jaroku — {trimmed}") };
+    // ON MACOS THE TITLE AND THE LIGHTS ARE SET TOGETHER — see `reinset_traffic_lights`.
+    #[cfg(target_os = "macos")]
+    reinset_traffic_lights(&main, Some(title));
+    #[cfg(not(target_os = "macos"))]
     let _ = main.set_title(&title);
+}
+
+/// Put the traffic lights back where `traffic_light_position` put them — optionally setting the
+/// window's title first, because setting it is what moves them.
+///
+/// `setTitle:` LAYS THE TITLE BAR OUT AGAIN, and the three buttons go back to where a default title
+/// bar keeps them — about 15.75pt down on macOS 26, six points above the row they line up with —
+/// without anything redrawing the view tao re-applies its inset from. `set_window_title` runs on
+/// every workspace load, so the configured position lasted only until the page named its
+/// workspace. tao 0.36 fixed exactly this (#1254: re-apply after a title change and after leaving
+/// fullscreen), and tauri 2.11 still pins tao 0.35, so this does what that fix does: tao's own
+/// container resize and button placement, in the same main-thread call as the title, so no layout
+/// pass can land between the two.
+#[cfg(target_os = "macos")]
+fn reinset_traffic_lights(window: &tauri::WebviewWindow, title: Option<String>) {
+    // `with_webview` HANDS THE WINDOW OVER ON THE MAIN THREAD, which is where AppKit wants all of
+    // this: one queued call that carries the pointer, rather than asking for it and dispatching again.
+    let _ = window.with_webview(move |webview| unsafe {
+        use objc2::msg_send;
+        use objc2_app_kit::{NSWindow, NSWindowButton};
+        use objc2_foundation::NSString;
+        let ns_window = &*(webview.ns_window() as *const NSWindow);
+        if let Some(title) = title {
+            ns_window.setTitle(&NSString::from_str(&title));
+        }
+        let (Some(close), Some(mini), Some(zoom)) = (
+            ns_window.standardWindowButton(NSWindowButton::CloseButton),
+            ns_window.standardWindowButton(NSWindowButton::MiniaturizeButton),
+            ns_window.standardWindowButton(NSWindowButton::ZoomButton),
+        ) else {
+            return;
+        };
+        let Some(bar) = close.superview().and_then(|view| view.superview()) else { return };
+        // The container is resized to the button's height plus `y` and pinned to the window's top;
+        // the buttons are then spaced from `x` at the gap AppKit gave them. Both exactly as tao does.
+        let close_rect = close.frame();
+        let height = close_rect.size.height + TRAFFIC_LIGHTS.1;
+        let mut rect = bar.frame();
+        rect.size.height = height;
+        rect.origin.y = ns_window.frame().size.height - height;
+        let _: () = msg_send![&bar, setFrame: rect];
+        let gap = mini.frame().origin.x - close_rect.origin.x;
+        for (i, button) in [close, mini, zoom].into_iter().enumerate() {
+            let mut frame = button.frame();
+            frame.origin.x = TRAFFIC_LIGHTS.0 + i as f64 * gap;
+            button.setFrameOrigin(frame.origin);
+        }
+    });
 }
 
 /// The script that runs before the bundle does.

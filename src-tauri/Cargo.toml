@@ -102,3 +102,19 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_JobObjects",
     "Win32_System_Threading",
 ] }
+
+# THE TRAFFIC LIGHTS, PUT BACK AFTER APPKIT MOVES THEM — see `reinset_traffic_lights` in
+# src/window.rs. The same three crates, at the same versions and with a subset of the features,
+# that tao already builds for this target, so the lockfile gains no package: only this crate's
+# own use of them.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSButton",
+    "NSControl",
+    "NSResponder",
+    "NSView",
+    "NSWindow",
+] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry", "NSString"] }

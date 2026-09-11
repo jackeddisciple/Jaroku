@@ -1898,6 +1898,9 @@ version = "0.3.11"
 dependencies = [
  "keyring",
  "libc",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
  "serde",
  "serde_json",
  "tauri",
