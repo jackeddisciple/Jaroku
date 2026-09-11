@@ -423,9 +423,10 @@ export function WorkspaceSwitcher() {
           aria-haspopup="menu"
           aria-expanded={open}
           // THE MOST PROMINENT TEXT IN THE SIDEBAR — §9.1: larger than the tab labels, smaller than
-          // a page title. 13px against the 12px the agent rows and the account row use, which is one
-          // step and is enough: this is the thing every other row in the column is scoped BY, and a
-          // heading twice the size of its list would be a banner.
+          // a page title. 14px at medium weight, a step above the 13px of the tab labels and the
+          // agent names — raised from 13px, the product owner's call on 2026-09-11. This is the thing
+          // every other row in the column is scoped BY; a heading twice the size of its list would
+          // be a banner.
           className={`flex min-w-0 flex-1 items-center gap-2 py-2 pl-3 pr-2 text-left transition-colors hover:bg-active/40 active:bg-chrome focus-visible:outline-none focus-visible:shadow-focusring ${
             open ? "bg-active/40" : ""
           }`}
@@ -438,7 +439,7 @@ export function WorkspaceSwitcher() {
               row in the column is scoped by. It stays in the row's tooltip, which reads
               "<name> — team, you are owner", so the fact is still reachable where somebody asking
               for it would look. */}
-          <Truncate className="min-w-0 text-label text-ink" title={current?.name}>
+          <Truncate className="min-w-0 text-body font-medium text-ink" title={current?.name}>
             {current?.name ?? "workspace"}
           </Truncate>
           {/* THE AFFORDANCE SITS AGAINST THE NAME, NOT AT THE ROW'S EDGE — and the difference is
