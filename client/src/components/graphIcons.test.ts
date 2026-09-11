@@ -70,8 +70,11 @@ console.log("\na tool nothing recognises gets a readable label rather than a pat
 
 console.log("\nand the model circle is unchanged by any of this");
 {
-  check("anthropic", modelResource("anthropic", "claude-sonnet-4").label === "claude-sonnet-4");
-  check("openai", modelResource("openai", "gpt-4o").label === "gpt-4o");
+  check("anthropic", modelResource("anthropic", "claude-sonnet-5").label === "claude-sonnet-5");
+  check("openai", modelResource("openai", "gpt-5.6-luna").label === "gpt-5.6-luna");
+  check("meta", modelResource("meta", "muse-spark-1.3").label === "muse-spark-1.3");
+  check("...wearing Meta's mark rather than the generic chip",
+    modelResource("meta", "muse-spark-1.3").Icon !== modelResource("fake").Icon);
   check("the dry-run provider names itself rather than guessing", modelResource("fake").label === "Dry-run");
 }
 

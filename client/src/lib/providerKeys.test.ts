@@ -1,7 +1,7 @@
 // §5.1 step 3's key, and mostly §5.3's "already saved is not re-collected".
 //
-// THE THREE NAMES ARE THE POINT OF THE FIRST HALF. A key stored as `GEMINI_API_KEY` and read as
-// `GOOGLE_API_KEY` produces an onboarding that reports success, a Secrets tab that shows a
+// THE THREE NAMES ARE THE POINT OF THE FIRST HALF. A key stored as `MODEL_API_KEY` and read as
+// `META_API_KEY` produces an onboarding that reports success, a Secrets tab that shows a
 // connected provider, and a first run that cannot authenticate — with nothing anywhere saying the
 // two differ. `test:desktop-contract` checks them against the server's own `PROVIDER_ENV_KEY`,
 // across the seam; this checks the shape the step depends on, on this side.
@@ -45,7 +45,7 @@ g.fetch = async (): Promise<unknown> => {
 console.log("\nthe three providers §5.1 lists");
 {
   check("there are three", PROVIDER_CHOICES.length === 3);
-  check("...in §5.1's order", PROVIDER_CHOICES.map((p) => p.id).join(",") === "anthropic,openai,google");
+  check("...in §5.1's order", PROVIDER_CHOICES.map((p) => p.id).join(",") === "anthropic,openai,meta");
   // §5.1 marks exactly one, and marking two would make the word mean nothing.
   check("exactly one is recommended", PROVIDER_CHOICES.filter((p) => p.recommended).length === 1);
   check("...and it is Anthropic, as §5.1 says", PROVIDER_CHOICES.find((p) => p.recommended)?.id === "anthropic");
@@ -56,9 +56,9 @@ console.log("\nthe three providers §5.1 lists");
   const named = Object.fromEntries(PROVIDER_CHOICES.map((p) => [p.id, p.secretName]));
   check("anthropic is stored as ANTHROPIC_API_KEY", named.anthropic === "ANTHROPIC_API_KEY");
   check("openai is stored as OPENAI_API_KEY", named.openai === "OPENAI_API_KEY");
-  // `GOOGLE_API_KEY` rather than the prettier `GEMINI_API_KEY`, because that is the name
-  // `langchain_google_genai` reads and the runtime is what has to find it.
-  check("google is stored as GOOGLE_API_KEY", named.google === "GOOGLE_API_KEY");
+  // `META_API_KEY` rather than the `MODEL_API_KEY` of Meta's own examples, which in a product with
+  // three providers names none of them. models.py hands the client this name, so it is the one.
+  check("meta is stored as META_API_KEY", named.meta === "META_API_KEY");
   check("every name is UPPER_SNAKE_CASE, which the server's own validator requires",
     PROVIDER_CHOICES.every((p) => /^[A-Z][A-Z0-9_]*$/.test(p.secretName)));
   check("every provider has a placeholder that looks like its own keys",
@@ -83,7 +83,7 @@ console.log("\nwhich providers already have a key");
     body: {
       secrets: [
         { name: "ANTHROPIC_API_KEY", kind: "provider_key" },
-        { name: "GOOGLE_API_KEY", kind: "provider_key" },
+        { name: "META_API_KEY", kind: "provider_key" },
         // Not a provider key at all. A workspace has other credentials in it, and counting one
         // would put "Connected" beside a provider nobody configured.
         { name: "SLACK_BOT_TOKEN", kind: "custom" },
@@ -91,7 +91,7 @@ console.log("\nwhich providers already have a key");
     },
   });
   const two = await connectedProviders();
-  check("two stored keys mark two providers", two.has("anthropic") && two.has("google"));
+  check("two stored keys mark two providers", two.has("anthropic") && two.has("meta"));
   check("...and an unrelated credential marks none", !two.has("openai") && two.size === 2);
 }
 {

@@ -273,7 +273,8 @@ pub fn open_checkout(app: AppHandle, url: String) -> Result<(), String> {
 ///                                        fire.
 ///   `accounts.google.com`              — §3.2's authorization endpoint. Google's own host, and the
 ///                                        only OAuth provider this specification has.
-///   the three consoles                 — §5.1 step 3's "Where do I find this?", per provider.
+///   the three key pages                — §5.1 step 3's "Where do I find this?", per provider:
+///                                        Anthropic's and OpenAI's consoles, and Meta's docs.
 const ALLOWED_EXTERNAL: [&str; 7] = [
     "jaroku.dev",
     "docs.jaroku.dev",
@@ -281,7 +282,7 @@ const ALLOWED_EXTERNAL: [&str; 7] = [
     "accounts.google.com",
     "console.anthropic.com",
     "platform.openai.com",
-    "aistudio.google.com",
+    "dev.meta.ai",
 ];
 
 /// Whether this URL may be handed to the operating system as an ordinary page.
@@ -373,7 +374,9 @@ mod tests {
         // §5.1 step 3's "Where do I find this?", per provider.
         assert!(may_open_external("https://console.anthropic.com/settings/keys"));
         assert!(may_open_external("https://platform.openai.com/api-keys"));
-        assert!(may_open_external("https://aistudio.google.com/app/apikey"));
+        assert!(may_open_external("https://dev.meta.ai/docs/authentication"));
+        // Gemini's key page left with Gemini: nothing links there any more.
+        assert!(!may_open_external("https://aistudio.google.com/app/apikey"));
     }
 
     #[test]

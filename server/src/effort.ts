@@ -9,7 +9,7 @@
 //
 // THREE SHAPES OF PROVIDER, and the table lives in runtime/pricing.json rather than here:
 //
-//   thinking  an extended-thinking token budget (Claude, Gemini 2.5). Low means OFF, not a small
+//   thinking  an extended-thinking token budget (Claude). Low means OFF, not a small
 //             budget — a thinking block of a few hundred tokens is the cost of the feature with
 //             none of the benefit.
 //   effort    a named level the API takes directly (OpenAI's and Meta's `reasoning_effort`). Which
@@ -62,7 +62,7 @@ export interface EffortPlan {
   clamped: boolean;
   /** The tooltip, in words, or null when nothing needs explaining. */
   reason: string | null;
-  /** Anthropic / Gemini: the extended-thinking block, already validated against max output. */
+  /** Anthropic: the extended-thinking block, already validated against max output. */
   thinking: { type: "enabled"; budget_tokens: number } | { type: "disabled" } | null;
   /** OpenAI / Meta: the named level, already clamped to the ones the model takes. */
   reasoningEffort: Effort | null;

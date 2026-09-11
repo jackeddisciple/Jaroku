@@ -99,7 +99,7 @@ export class PlatformKeyGate {
         // not over is how a support queue fills up during an incident.
         message:
           "runs on the platform's provider key are paused on this deployment — " +
-          "connect your own Anthropic or OpenAI key to keep going",
+          "connect your own Anthropic, OpenAI or Meta key to keep going",
       };
     }
 

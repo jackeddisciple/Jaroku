@@ -53,11 +53,18 @@ SLACK_BOT_TOKEN=xoxb-123
     PROVIDER_ENV_KEY.anthropic === "ANTHROPIC_API_KEY");
   check("openai maps to the name the runtime reads",
     PROVIDER_ENV_KEY.openai === "OPENAI_API_KEY");
-  // GOOGLE_API_KEY, not GEMINI_API_KEY: the first is what `langchain_google_genai` reads, and the
-  // Python runtime finding the key is the only thing that decides which name is correct.
-  check("google maps to the name the runtime reads",
-    PROVIDER_ENV_KEY.google === "GOOGLE_API_KEY");
-  check("only real providers are connectable", PROVIDER_IDS.join(",") === "anthropic,openai,google");
+  // META_API_KEY rather than Meta's own MODEL_API_KEY — see PROVIDER_ENV_KEY. No library reads this
+  // one: models.py hands it to the client by name, so the two files are the two ends of one
+  // decision, and a rename at either end alone is a key that is stored and never used.
+  check("meta maps to the name models.py hands the client",
+    PROVIDER_ENV_KEY.meta === "META_API_KEY");
+  const modelsPy = readFileSync(new URL("../../runtime/jaroku_runner/models.py", import.meta.url), "utf8");
+  check("...and models.py reads exactly that name",
+    modelsPy.includes(`os.environ.get("${PROVIDER_ENV_KEY.meta}")`));
+  check("only real providers are connectable", PROVIDER_IDS.join(",") === "anthropic,openai,meta");
+  // GEMINI IS GONE WITH ITS MODELS. A key somebody could connect for a provider with nothing to run
+  // on would be a control that does nothing, which is worse than no control.
+  check("google is no longer a provider you connect", !isProviderId("google"));
   // `fake` is the free dry-run path, not a credential — offering it as something to connect
   // would ask a user for a key that does not exist.
   check("fake is not a provider you connect", !isProviderId("fake"));
@@ -98,6 +105,7 @@ const namesFromEnv = (): ReadonlySet<string> =>
   check("anthropic is flagged as the one that powers Jaroku itself",
     providerStatus(namesFromEnv()).find((p) => p.id === "anthropic")?.powers_jaroku === true);
   check("openai is not", providerStatus(namesFromEnv()).find((p) => p.id === "openai")?.powers_jaroku === false);
+  check("...and neither is meta", providerStatus(namesFromEnv()).find((p) => p.id === "meta")?.powers_jaroku === false);
 
   if (before === undefined) delete process.env.OPENAI_API_KEY;
   else process.env.OPENAI_API_KEY = before;
@@ -110,6 +118,8 @@ const namesFromEnv = (): ReadonlySet<string> =>
 {
   const blank = await verifyProviderKey("openai", "   ");
   check("a blank key is refused without a call", !blank.ok && blank.message === "no key was entered");
+  const blankMeta = await verifyProviderKey("meta", "");
+  check("...on meta as well", !blankMeta.ok && blankMeta.message === "no key was entered");
 }
 
 // --- 4. connecting a provider writes exactly one correctly named line ---------------------

@@ -911,7 +911,7 @@ const secrets = openSecretStore({
     name.startsWith("JAROKU_MCP_") ? "mcp"
       : name.startsWith("ANTHROPIC") ? "anthropic"
         : name.startsWith("OPENAI") ? "openai"
-          : name.startsWith("GOOGLE") ? "google"
+          : name.startsWith("META_API_KEY") ? "meta"
             : name === RAILWAY_ENV_KEY ? "railway"
               : null,
   // LATE-BOUND ON PURPOSE. The store is built here, near the top, because half the server needs

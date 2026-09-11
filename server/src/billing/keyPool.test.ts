@@ -67,8 +67,8 @@ console.log("\nkeys are read from the name that already exists, and numbered fro
 
   check(
     poolKeysFor("openai", { OPENAI_API_KEY: "sk-o" }).length === 1 &&
-      poolKeysFor("google", { GOOGLE_API_KEY: "g" }).length === 1,
-    "every provider reads its own name, including Google's, which is not the pretty one",
+      poolKeysFor("meta", { META_API_KEY: "LLM|1|m" }).length === 1,
+    "every provider reads its own name, including Meta's, which is ours rather than its docs'",
   );
 
   // Whitespace is not a key. A variable set to an empty string in a shell script is the ordinary

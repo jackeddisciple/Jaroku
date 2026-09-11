@@ -55,7 +55,7 @@ import { StepShell } from "./StepShell.tsx";
 const HELP: Record<ProviderChoiceId, string> = {
   anthropic: HELP_URLS.anthropicKeys,
   openai: HELP_URLS.openaiKeys,
-  google: HELP_URLS.googleKeys,
+  meta: HELP_URLS.metaKeys,
 };
 
 export function ProviderStep() {

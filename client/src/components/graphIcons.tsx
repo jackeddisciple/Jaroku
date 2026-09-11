@@ -16,6 +16,7 @@
 
 import type { ReactElement } from "react";
 import { ACCENT, TEXT } from "../lib/tokens.ts";
+import { ProviderMark } from "../lib/icons.tsx";
 import { PlugIcon, svg } from "./panelIcons.tsx";
 
 type IconProps = { size?: number };
@@ -201,6 +202,11 @@ export function OpenAIIcon({ size = 26 }: IconProps) {
   );
 }
 
+/** Meta's own mark, from the table the provider rows draw — not a third hand-drawn copy of a logo. */
+export function MetaIcon({ size = 26 }: IconProps) {
+  return <ProviderMark provider="meta" size={size} />;
+}
+
 // The two generic fallbacks. Neither identifies a service, so neither is a brand mark, and both
 // are drawn to the icon rules — same sparkle the plan card uses for a model-written tool, same
 // hex nut for a tool with no logo to show.
@@ -277,5 +283,6 @@ export function modelResource(provider?: string, model?: string): Brand {
   const m = (model || "").toLowerCase();
   if (p.includes("anthropic") || m.includes("claude")) return { label: model || "Anthropic", Icon: AnthropicIcon };
   if (p.includes("openai") || m.includes("gpt")) return { label: model || "OpenAI", Icon: OpenAIIcon };
+  if (p === "meta" || m.includes("muse")) return { label: model || "Meta", Icon: MetaIcon };
   return { label: model || "Dry-run", Icon: ModelChipIcon };
 }

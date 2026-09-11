@@ -257,7 +257,7 @@ export const SURFACE = {
 export const SHARE_RAMP = ["#62625F", "#7C7C78", "#90908C", "#A8A8A3", "#C1C1BB"] as const;
 
 /** The order series are assigned ramp steps in, so two surfaces colour one provider alike. */
-export const SHARE_ORDER = ["anthropic", "openai", "google", "together", "groq"] as const;
+export const SHARE_ORDER = ["anthropic", "openai", "meta", "together", "groq"] as const;
 
 /**
  * §02's ink, under this app's names for it.

@@ -30,7 +30,8 @@ export const HELP_URLS = {
   /** §5.1 step 3's "Where do I find this?", per provider. */
   anthropicKeys: "https://console.anthropic.com/settings/keys",
   openaiKeys: "https://platform.openai.com/api-keys",
-  googleKeys: "https://aistudio.google.com/app/apikey",
+  /** Meta's Model API keys live in a dashboard its docs walk you to; this is that page. */
+  metaKeys: "https://dev.meta.ai/docs/authentication",
 } as const;
 
 interface TauriBridge {

@@ -611,12 +611,11 @@ export type McpMessage =
 /**
  * A provider a key can be connected for. Mirrors the server's `keyof typeof PROVIDER_ENV_KEY`.
  *
- * IT WAS TWO-VALUED WHILE THE PRODUCT SHIPPED THREE. Nothing broke — every render path keys off
- * `string` — but the client's own type system could not express a provider the server has supported
- * since Gemini landed, so `google` was invisible to every exhaustiveness check in this file. `fake`
- * is deliberately absent: it is the free dry-run path and there is no key to connect for it.
+ * THE THREE THE PRODUCT OFFERS: Claude, OpenAI and Meta. Gemini left with its models — a key field
+ * for a provider with nothing to run on is a control that does nothing. `fake` is deliberately
+ * absent: it is the test suites' stand-in and there is no key to connect for it.
  */
-export type ProviderId = "anthropic" | "openai" | "google";
+export type ProviderId = "anthropic" | "openai" | "meta";
 
 /**
  * One selectable model, as the server offers it.

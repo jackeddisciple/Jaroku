@@ -30,7 +30,7 @@ export const PROVIDER_CHOICES = [
     secretName: "ANTHROPIC_API_KEY",
   },
   { id: "openai", label: "OpenAI", recommended: false, placeholder: "sk-…", secretName: "OPENAI_API_KEY" },
-  { id: "google", label: "Google", recommended: false, placeholder: "AIza…", secretName: "GOOGLE_API_KEY" },
+  { id: "meta", label: "Meta", recommended: false, placeholder: "LLM|…", secretName: "META_API_KEY" },
 ] as const;
 
 export type ProviderChoiceId = (typeof PROVIDER_CHOICES)[number]["id"];
