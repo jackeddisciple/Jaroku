@@ -1,13 +1,16 @@
-// The greeting's emojis: the product owner's twenty-five, in their order, a new one popping in every
-// second after "What should we cook today, Sumu?" — and only the ones a machine can draw as colour
-// emoji, so a Windows or Linux desktop never shows a box in the middle of the question.
+// The greeting's emojis: the product owner's twenty-five, in their order, a new one every second
+// after "What should we cook today, Sumu?" in a crossfade smooth enough to be called buttery — and
+// only the ones a machine can draw as colour emoji, so a Windows or Linux desktop never shows a box in
+// the middle of the question.
 //
 //   npm run test:greeting-emoji
 
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { GREETING_EMOJIS, GREETING_EMOJI_MS, GreetingEmoji } from "./GreetingEmoji.tsx";
+import {
+  ENTER, ENTER_MS, EXIT, EXIT_MS, GREETING_EMOJIS, GREETING_EMOJI_MS, GreetingEmoji,
+} from "./GreetingEmoji.tsx";
 import { canDrawEmoji } from "../lib/emojiSupport.ts";
 
 let fail = 0;
@@ -36,14 +39,34 @@ console.log("\nthe product owner's twenty-five, in their order");
   });
 }
 
-console.log("\none a second, popping in, and still when asked to be");
+console.log("\none a second, in a crossfade rather than a swap");
 {
   const src = read("src/components/GreetingEmoji.tsx");
-  check("a new one every 1000ms", GREETING_EMOJI_MS === 1000 && src.includes("window.setInterval(() => setAt("));
-  check("each change pops in, with Web Animations", src.includes("el.animate(POP") && src.includes('transform: "scale(0.3)"'));
-  check("...skipped where the webview has no animate", src.includes('typeof el.animate !== "function"'));
-  check("the last pop is cancelled when the next begins or the greeting goes", src.includes("return () => pop.cancel()"));
-  check("prefers-reduced-motion holds the first, no pop", src.includes("(prefers-reduced-motion: reduce)") && src.includes("if (motion.matches) setAt(0)"));
+  check("a new one every 1000ms", GREETING_EMOJI_MS === 1000 && src.includes("window.setInterval(() => setN((k) => k + 1), GREETING_EMOJI_MS)"));
+  // ONLY THE TWO PROPERTIES A COMPOSITOR ANIMATES ON ITS OWN. Anything else — a width, a filter, a
+  // top — is a layout or a repaint every frame, and that is what stutters on a busy machine.
+  const props = [...ENTER, ...EXIT].flatMap((k) => Object.keys(k));
+  check("the keyframes move only transform and opacity", props.every((p) => p === "transform" || p === "opacity"), props.join(","));
+  check("the new one arrives from nothing to whole", ENTER[0]!.opacity === 0 && ENTER[ENTER.length - 1]!.opacity === 1);
+  check("...while the old one leaves from whole to nothing", EXIT[0]!.opacity === 1 && EXIT[EXIT.length - 1]!.opacity === 0);
+  check("the leaving is quicker than the arriving, so the two never crowd", EXIT_MS < ENTER_MS);
+  check("and both are over well inside the second", ENTER_MS <= 600 && EXIT_MS <= 600);
+  check("started before paint, so a new emoji is never seen at full size first",
+    src.includes("useLayoutEffect") && src.includes("useBeforePaint(() => {"));
+  check("the arrival holds its first frame until it starts", src.includes('fill: "backwards"'));
+  check("the layers stay on the compositor for their whole life", src.includes('willChange: "transform, opacity"'));
+  check("an invisible twin gives the box its size and baseline under the moving layers",
+    src.includes('<span className="invisible">{current}</span>'));
+  check("a webview without Web Animations shows one emoji, never two stacked", src.includes("canAnimate && n > 0 &&"));
+  check("running animations are cancelled when the next change begins or the greeting goes",
+    src.includes("running.forEach((a) => a?.cancel())"));
+}
+
+console.log("\nstill when asked, paused when unseen, and the same on an old webview");
+{
+  const src = read("src/components/GreetingEmoji.tsx");
+  check("prefers-reduced-motion holds the first, nothing moving",
+    src.includes("(prefers-reduced-motion: reduce)") && src.includes("if (motion.matches) setN(0)"));
   check("paused while the window is hidden", src.includes('"visibilitychange"') && src.includes('visibilityState !== "hidden"'));
   check("an old webview's media-query subscription is handled", src.includes("motion.addListener(sync)"));
   check("the interval is cleared on unmount", src.includes("window.clearInterval(timer)"));
