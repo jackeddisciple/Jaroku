@@ -1935,9 +1935,15 @@ export function BuildPane({
               </span>
               {/* REGULAR WEIGHT, one rung below the hero, and the dominant thing in the group. The
                   rung carries 600 for headings a person scans for; this is a sentence addressed to
-                  them. `text-balance` so a narrow window breaks it into even lines. */}
+                  them. `text-balance` so a narrow window breaks it into even lines.
+                  THE VERB IS A POT, the product owner's pick on 2026-09-11 — and it is still a word to a
+                  screen reader: `role="img"` labelled "cooking" keeps the sentence whole. */}
               <h1 className="mt-8 text-balance text-page font-normal text-ink">
-                {firstName ? `What are we cooking today, ${firstName}?` : "What are we cooking today?"}
+                What are we{" "}
+                <span role="img" aria-label="cooking">
+                  🍲
+                </span>{" "}
+                today{firstName ? `, ${firstName}` : ""}?
               </h1>
               {/* FOUR WAYS TO START, under the question. Offered while the Chat composer is empty and
                   gone the moment it holds anything — read off the draft, never remembered — and a
