@@ -33,7 +33,7 @@ import type { ProviderModel } from "../../types.ts";
 export { effortLabel } from "../../lib/effortLevels.ts";
 
 /** The thumb's diameter. The end stops sit half of it in from each end, so it never overhangs. */
-const THUMB = 22;
+const THUMB = 28;
 
 /**
  * The relative cost hint, mirroring the server's `relativeCost`.
@@ -117,21 +117,23 @@ function EffortSlider({
         else return;
         e.preventDefault();
       }}
-      className="relative mt-3 h-8 cursor-pointer touch-none select-none rounded-full outline-none focus-visible:shadow-focusring"
+      className="relative mt-3 h-10 cursor-pointer touch-none select-none rounded-full outline-none focus-visible:shadow-focusring"
     >
-      <span aria-hidden className="absolute inset-x-0 top-1/2 h-2.5 -translate-y-1/2 rounded-full bg-edge" />
+      {/* A BROAD TRACK, 20px — the product owner found 10 too thin, and a slider is a control you
+          aim at with a pointer, so its body should read as one rather than as a rule. */}
+      <span aria-hidden className="absolute inset-x-0 top-1/2 h-5 -translate-y-1/2 rounded-full bg-edge" />
       {/* THE FILL, IN INK — the product owner asked for the slider in black, and ink is this palette's
           black. It runs from the start of the track to the thumb's centre. */}
       <span
         aria-hidden
-        className="absolute left-0 top-1/2 h-2.5 -translate-y-1/2 rounded-full bg-ink transition-[width] duration-fast ease-state motion-reduce:transition-none"
+        className="absolute left-0 top-1/2 h-5 -translate-y-1/2 rounded-full bg-ink transition-[width] duration-fast ease-state motion-reduce:transition-none"
         style={{ width: at(index) }}
       />
       {stops.map((s, i) => (
         <span
           key={s}
           aria-hidden
-          className={`absolute top-1/2 size-1 -translate-x-1/2 -translate-y-1/2 rounded-full ${
+          className={`absolute top-1/2 size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full ${
             i < index ? "bg-elevated/60" : i > index ? "bg-faint" : "hidden"
           }`}
           style={{ left: at(i) }}
@@ -199,7 +201,7 @@ export function EffortControl({
         disabled={disabled}
         onClick={() => setOpen((v) => !v)}
       />
-      <Popover open={open} onClose={close} triggerRef={triggerRef} label="Reasoning effort" width={300}>
+      <Popover open={open} onClose={close} triggerRef={triggerRef} label="Reasoning effort" width={320}>
         <div className="px-2 pb-2 pt-1.5">
           <div className="flex items-start gap-2">
             <div className="min-w-0 flex-1">
