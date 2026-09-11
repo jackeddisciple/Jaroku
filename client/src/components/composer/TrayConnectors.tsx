@@ -13,10 +13,16 @@
 // overlapping like a hand of cards. Past three the rest become "+N" in the same footprint — the
 // composer deck's own rule (`deckLayout`), so the two decks in this composer count the same way.
 //
+// ON THE TRAY THEY ARE BARE LOGOS, with no blob behind them — the product owner's call on 2026-09-11
+// (the blobs belong to the row). Each sits on a backing in the tray's own colour, which is invisible
+// except where it tucks over the logo before it: without it two overlapping logos print through each
+// other's gaps and read as one smudge; with it the overlap reads as cards. It is also why the deck
+// lifts rather than fills when hovered — a fill would show every backing as a pale disc.
+//
 // TWO MOTIONS, AND THEY ARE DIFFERENT ON PURPOSE — the product owner's call on 2026-09-11. The row
 // OPENS smoothly: its blobs rise out of the tray one after another, nearest the trigger first, on
 // the app's `smooth` curve (`pop-smooth`). A pick LANDS with a bounce: the logo springs onto the
-// tray (`pop`), and so does a new "+N". Both only on arrival — a blob already on the tray keeps its
+// tray (`pop`), and so does a new "+N". Both only on arrival — a logo already on the tray keeps its
 // key and never replays — and neither under reduced motion, where things simply appear.
 //
 // THE LOGOS ARE THE PRODUCT OWNER'S FILES, from assets/connectors, prepared into
@@ -39,11 +45,13 @@ export interface TrayConnector {
 /** Where a connector's logo lives. See the header. */
 export const connectorLogo = (id: string): string => `/connectors/${id}.png`;
 
-/** The blobs on the tray, and in the row. The tray's controls are 24px tall; these sit inside that. */
-const TRAY_BLOB = 22;
+/** A logo on the tray, and the invisible backing it sits on — 2px of tray colour all round. */
+const TRAY_LOGO = 18;
+const TRAY_BACK = 22;
+/** How far each logo on the tray tucks under the one before it. */
+const TUCK = -8;
+/** The blobs in the row. */
 const ROW_BLOB = 30;
-/** How far each blob on the tray tucks under the one before it. */
-const TUCK = -7;
 /** How far apart the row's blobs start rising, so the row arrives as a ripple rather than a block. */
 const STAGGER_MS = 25;
 
@@ -90,34 +98,38 @@ export function TrayConnectors({
         aria-label={deck.present ? `Connectors: ${names}` : "Add connectors"}
         title={deck.present ? names : "Add connectors to the agent you describe"}
         // `-mr-1.5`: at the tray's right end, the mark lines up with the tray's own padding rather
-        // than with the edge of its hover fill.
-        className="-mr-1.5 inline-flex h-6 items-center rounded-control px-1.5 text-muted transition-colors duration-fast
-          hover:bg-grip/60 hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring
-          disabled:cursor-not-allowed disabled:opacity-40"
+        // than with the edge of its hover fill. The cable darkens when hovered like the tray's other
+        // controls; the deck lifts instead — see the header.
+        className={`group/deck -mr-1.5 inline-flex h-6 items-center rounded-control px-1.5 text-muted transition-colors
+          duration-fast hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring
+          disabled:cursor-not-allowed disabled:opacity-40 ${deck.present ? "" : "hover:bg-grip/60"}`}
       >
         {deck.present ? (
-          <span className="inline-flex items-center" aria-hidden>
+          <span
+            className="inline-flex items-center transition-transform duration-fast group-hover/deck:-translate-y-px
+              motion-reduce:transition-none"
+            aria-hidden
+          >
             {deck.tiles.map((c, i) => (
               <span
                 key={c.id}
-                // Lands with the bounce — see the header.
-                className="inline-flex shrink-0 animate-pop items-center justify-center rounded-full bg-edge ring-2 ring-chrome
+                // The invisible backing — see the header — and it lands with the bounce.
+                className="inline-flex shrink-0 animate-pop items-center justify-center rounded-full bg-chrome
                   motion-reduce:animate-none"
                 // The first sits on top, as a hand of cards is held; each after it tucks under.
-                style={{ width: TRAY_BLOB, height: TRAY_BLOB, marginLeft: i === 0 ? 0 : TUCK, zIndex: MAX_TILES - i, position: "relative" }}
+                style={{ width: TRAY_BACK, height: TRAY_BACK, marginLeft: i === 0 ? 0 : TUCK, zIndex: MAX_TILES - i, position: "relative" }}
               >
-                <img src={c.logoUrl ?? ""} alt="" width={13} height={13} className="block" draggable={false} />
+                <img src={c.logoUrl ?? ""} alt="" width={TRAY_LOGO} height={TRAY_LOGO} className="block" draggable={false} />
               </span>
             ))}
             {deck.overflow > 0 && (
-              // A PILL, AS WIDE AGAIN AS THE TUCK, and padded by it. It sits under the blob before
-              // it like the rest, and a plain circle lost its "+" behind that blob; this way the
-              // count is centred in the part that shows. Keyed by the count, so a new count bounces.
+              // The count, on the same invisible backing and tucked the same way, padded by the tuck
+              // so it is centred in the part that shows. Keyed by the count, so a new count bounces.
               <span
                 key={deck.overflow}
-                className="inline-flex shrink-0 animate-pop items-center justify-center rounded-full bg-edge text-tiny text-muted
-                  ring-2 ring-chrome motion-reduce:animate-none"
-                style={{ height: TRAY_BLOB, minWidth: TRAY_BLOB - TUCK, paddingLeft: -TUCK, paddingRight: 2, marginLeft: TUCK, position: "relative" }}
+                className="inline-flex shrink-0 animate-pop items-center justify-center rounded-full bg-chrome text-tiny
+                  text-muted motion-reduce:animate-none"
+                style={{ height: TRAY_BACK, minWidth: TRAY_BACK - TUCK, paddingLeft: -TUCK, paddingRight: 2, marginLeft: TUCK, position: "relative" }}
               >
                 +{deck.overflow}
               </span>
