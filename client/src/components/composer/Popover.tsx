@@ -29,6 +29,7 @@ export function Popover({
   label,
   align = "left",
   width,
+  bare = false,
   children,
 }: {
   open: boolean;
@@ -38,6 +39,12 @@ export function Popover({
   label: string;
   align?: "left" | "right";
   width?: number;
+  /**
+   * No surface of its own — no panel, border, padding or shadow, and no slide of its own — for a
+   * row of marks that float by themselves: the tray's connector logos on their blobs. Everything
+   * that makes it a menu (role, arrow keys, Esc, focus returned) is unchanged.
+   */
+  bare?: boolean;
   children: React.ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -118,9 +125,11 @@ export function Popover({
       id={id}
       role="menu"
       aria-label={label}
-      className={`absolute bottom-full z-30 mb-1.5 animate-slide-in rounded-card border border-edge
-        bg-elevated p-1 shadow-floating motion-reduce:animate-none
-        ${align === "right" ? "right-0" : "left-0"}`}
+      className={`absolute bottom-full z-30 mb-1.5 ${align === "right" ? "right-0" : "left-0"} ${
+        bare
+          ? ""
+          : "animate-slide-in rounded-card border border-edge bg-elevated p-1 shadow-floating motion-reduce:animate-none"
+      }`}
       style={{ minWidth: width ?? 240 }}
     >
       {children}

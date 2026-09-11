@@ -116,8 +116,9 @@ export function TrayConnectors({
         )}
       </button>
       {/* Right-aligned to the trigger, which sits at the tray's right end: a row opening leftwards
-          stays over the composer instead of running off past it. */}
-      <Popover open={open} onClose={() => setOpen(false)} triggerRef={triggerRef} label="Connectors" align="right" width={0}>
+          stays over the composer instead of running off past it. And BARE — no panel behind the
+          row, just the logos on their blobs, the product owner's call on 2026-09-11. */}
+      <Popover open={open} onClose={() => setOpen(false)} triggerRef={triggerRef} label="Connectors" align="right" width={0} bare>
         <div ref={rowRef} onKeyDown={onRowKey} className="flex items-center gap-1.5">
           {options.map((o) => {
             const on = selected.includes(o.id);
