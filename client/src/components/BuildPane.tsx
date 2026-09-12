@@ -23,7 +23,7 @@ import {
 } from "../store/providerStore.ts";
 import {
   sendApplyEdit, sendAskRecord, sendBranchRun, sendChat, sendDiscardEdit, sendDiscardPlan, sendDispatchWork,
-  sendEditTurn, sendSelectVariant, sendStopChat,
+  sendCreateThread, sendEditTurn, sendSelectVariant, sendStopChat,
   sendEdit, sendExplain, sendGenerate, sendLoadWorkItem, sendPlanAgent, sendPromoteTestInput, sendRun,
 } from "../lib/socket.ts";
 import { useEvalStore } from "../store/evalStore.ts";
@@ -346,6 +346,94 @@ function CitedProse({ text, cites }: {
  * turn." A stream that died before its first token has no text at all, so the line is the whole of
  * what there is to render — which is exactly when it matters most.
  */
+/**
+ * §7.2's ACTIONS, as the controls they are.
+ *
+ * DRAWN FROM THE ACTION IDS, NEVER FROM THE SENTENCE. §7.2's column is "action offered" and two of
+ * the five are real links rather than words — "open the credential settings — a real link, not
+ * prose telling them to go look." A renderer that matched on the copy would break the first time a
+ * sentence was reworded, and §7 spends a whole table getting those sentences right.
+ *
+ * EVERY ONE IS TAB-REACHABLE WITH A FOCUS RING, which §14.2 asks for by name: "every interactive
+ * element in a turn — stop, regenerate, edit, retry, sibling switcher — is reachable by tab and
+ * shows a focus ring." These are buttons in the flow, so that is true by construction.
+ *
+ * AN ACTION THIS CLIENT DOES NOT KNOW RENDERS NOTHING, rather than a button that does nothing — a
+ * server running ahead of a client is a real state during a rolling deploy, and §7's own rule is
+ * that a control which cannot act should not be there.
+ */
+function FailureActions({ turn, agentId }: { turn: ReplyTurn; agentId: string | null }) {
+  const turns = useChatStore((s) => threadFor(
+    { threads: s.threads, pending: s.pending }, useThreadStore.getState().activeThreadId,
+  ));
+  const actions = turn.actions ?? [];
+  if (actions.length === 0) return null;
+
+  const retry = (): void => {
+    // THE SAME MESSAGE, AS A SECOND ANSWER TO THE SAME TURN. Retry is a regeneration — §6.2's
+    // machinery, not a second mechanism — so the failed attempt is kept as a sibling and the retry
+    // does not append a duplicate question to the thread.
+    if (!turn.itemId) return;
+    const prompt = promptForRegenerate(turns, turn);
+    if (prompt) sendChat(prompt, agentId, { regenerateOf: turn.itemId });
+  };
+
+  const control = (id: string): React.ReactNode => {
+    switch (id) {
+      case "retry":
+        return (
+          <button key={id} type="button" onClick={retry} className={secondaryBtn}>
+            Retry
+          </button>
+        );
+      case "open_credentials":
+        return (
+          <button
+            key={id}
+            type="button"
+            // §7.2: A REAL LINK. The provider keys dialog is the surface that exists for this, and
+            // it opens on the provider that failed rather than on a list to hunt through.
+            onClick={() => useUiStore.getState().openSecretsForProvider("anthropic")}
+            className={secondaryBtn}
+          >
+            Add a key
+          </button>
+        );
+      case "switch_model":
+        return (
+          <button
+            key={id}
+            type="button"
+            // THE SELECTOR RATHER THAN A CHOICE MADE FOR THEM. Which model to move to is a
+            // judgement about cost and capability, and a button that picked one would be spending
+            // somebody's money on a guess.
+            onClick={() => useUiStore.getState().focusChat()}
+            title="Choose a different model in the composer"
+            className={secondaryBtn}
+          >
+            Switch model
+          </button>
+        );
+      case "new_thread":
+        return (
+          <button key={id} type="button" onClick={() => sendCreateThread(agentId)} className={secondaryBtn}>
+            Start a new thread
+          </button>
+        );
+      case "edit_message":
+        return (
+          <span key={id} className="text-caption text-faint">
+            Edit your message above to change what was asked
+          </span>
+        );
+      default:
+        return null;
+    }
+  };
+
+  return <div className="mt-1.5 flex flex-wrap items-center gap-2">{actions.map(control)}</div>;
+}
+
 function ReplyStopped({ turn }: { turn: ReplyTurn }) {
   const { status } = turn;
   if (status !== "stopped" && status !== "interrupted" && status !== "error") return null;
@@ -374,6 +462,13 @@ function ReplyStopped({ turn }: { turn: ReplyTurn }) {
             // reconnect is already doing.
             ? (turn.text ? "Interrupted — the connection dropped mid-answer." : "Interrupted before the answer started.")
             : turn.error || "The answer failed."}
+        {/* §7.3: THE AUTOMATIC RETRY IS STATED IN THE TURN, before it happens. "Auto-retry is
+            bounded and visible: at most one automatic retry, with the retry stated in the turn,
+            never a silent loop." A retry nobody was told about is indistinguishable from a
+            conversation that answered twice for no reason. */}
+        {turn.retrying && (
+          <span className="ml-1 text-faint">Trying once more…</span>
+        )}
       </span>
     </div>
   );
@@ -393,6 +488,14 @@ function ReplyTurnView({ turn }: { turn: ReplyTurn }) {
         <span className="animate-stream-pulse text-faint motion-reduce:animate-none">▋</span>
       )}
       <ReplyStopped turn={turn} />
+      {/* §7.2's ACTIONS, and only where the failure was classified — an unclassified error keeps
+          the sentence it always had and offers nothing, because there is nothing a control could
+          change about a refusal or a shape check. Not while a retry is already in flight: the turn
+          has just said it is trying again, and a Retry button beside that sentence invites a second
+          attempt nobody asked for. */}
+      {turn.status === "error" && !turn.retrying && (
+        <FailureActions turn={turn} agentId={turn.agentId || null} />
+      )}
     </div>
   );
 }

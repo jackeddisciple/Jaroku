@@ -183,6 +183,24 @@ export interface ReplyTurn extends TurnAnchor {
    */
   error?: string;
   /**
+   * §7: WHAT KIND OF FAILURE IT WAS, and what the turn offers to do about it.
+   *
+   * BESIDE `error` RATHER THAN INSTEAD OF IT, because the two answer different questions and both
+   * have a reader. `error` is the sentence; this is the class the controls are drawn from — §7.2's
+   * actions are real buttons and a real link, so a renderer deriving them by matching on the prose
+   * would break the first time the copy was reworded.
+   *
+   * ALL OPTIONAL, AND THAT IS THE HONEST SHAPE. A refusal, a shape check and the no-key path all
+   * fail with a sentence and no provider behind them — so an unclassified failure renders as the
+   * sentence it always was, with no Retry button on something retrying cannot change.
+   */
+  failure?: string;
+  actions?: string[];
+  /** §7.2's countdown, in seconds, when the provider said how long. */
+  retryAfter?: number;
+  /** §7.3: the server is about to try once itself, and the turn says so BEFORE it happens. */
+  retrying?: boolean;
+  /**
    * §6.5's metadata, arriving with the answer rather than derived from it.
    *
    * The model that produced THIS reply, the effort actually spent on it, and §5.4's two counts once
@@ -308,7 +326,7 @@ interface ChatState {
   editError: (e: In & { message: string; problems?: string[]; agentId?: string; proposalId?: string }) => void;
 
   // --- explain (unified composer): a streaming prose reply, no code change ---
-  replyStarted: (e: In & { agentId: string; question: string; regenerateOf?: string }) => void;
+  replyStarted: (e: In & { agentId: string; question: string; regenerateOf?: string; turnId?: string }) => void;
   /** §5.4: show a different one of this turn's answers. See the implementation. */
   switchVariant: (e: In & { turnId: string; ordinal: number }) => void;
   replyDelta: (e: In & { agentId: string; text: string }) => void;
@@ -317,7 +335,11 @@ interface ChatState {
     usage?: GenUsage;
     citations?: { id: string; status: string; agent_name: string; created_at: string }[];
   }) => void;
-  replyError: (e: In & { agentId: string; message: string }) => void;
+  replyError: (e: In & {
+    agentId: string; message: string;
+    /** §7's classification, when the server could name one. See `ReplyTurn.failure`. */
+    failure?: string; actions?: string[]; retry_after?: number; retrying?: boolean;
+  }) => void;
   /**
    * §5: THE CONNECTION WENT AWAY WHILE AN ANSWER WAS ARRIVING.
    *
@@ -743,7 +765,7 @@ export const useChatStore = create<ChatState>((set) => ({
 
   // --- explain (streaming prose reply, no code change) -------------------
 
-  replyStarted: ({ threadId, agentId, question, regenerateOf }) =>
+  replyStarted: ({ threadId, agentId, question, regenerateOf, turnId: itemId }) =>
     set((s) => {
       const turns = turnsIn(s, threadId);
       // §5.4: A REGENERATION REPLACES THE ANSWER RATHER THAN APPENDING A SECOND CONVERSATION.
@@ -766,12 +788,22 @@ export const useChatStore = create<ChatState>((set) => ({
               ...prior,
               status: "streaming" as const,
               text: "",
+              // KEPT OR SET, never lost: a regeneration is the same turn, so its id is the same id.
+              ...(itemId ? { itemId } : {}),
               // §6.2: A REGENERATION STARTS CLEAN. `error` used to survive the spread, so
               // regenerating a failed turn — which §6.2 explicitly allows — produced a successful
               // answer still carrying "rate limited by anthropic" underneath it. The previous
               // failure is not a fact about the new attempt, and the partial that failed is kept as
               // a sibling either way.
+              //
+              // §7'S CLASSIFICATION GOES WITH IT, for the same reason and one more: the actions are
+              // CONTROLS. A successful answer still carrying `actions: ["open_credentials"]` would
+              // render a credential link under a reply that proved the credential works.
               error: undefined,
+              failure: undefined,
+              actions: undefined,
+              retryAfter: undefined,
+              retrying: false,
               priorVariants: [...(prior.priorVariants ?? []), prior.text],
             })),
           };
@@ -783,7 +815,14 @@ export const useChatStore = create<ChatState>((set) => ({
         ...putTurns(s, threadId, [
           ...turns,
           { id: turnId(), role: "user", text: question },
-          { id: turnId(), role: "jaroku", kind: "reply", status: "streaming", agentId, text: "" },
+          {
+            id: turnId(), role: "jaroku", kind: "reply", status: "streaming", agentId, text: "",
+            // THE DURABLE ROW, FROM THE MOMENT THE ANSWER STARTS. Every turn-level control gates on
+            // it — regenerate, note, pin, feedback, the switcher, §7's retry — and until the server
+            // started sending it, all of them were unreachable on a live turn and appeared only
+            // after a reload.
+            ...(itemId ? { itemId } : {}),
+          },
         ]),
       };
     }),
@@ -885,7 +924,7 @@ export const useChatStore = create<ChatState>((set) => ({
       ]);
     }),
 
-  replyError: ({ threadId, agentId, message }) =>
+  replyError: ({ threadId, agentId, message, failure, actions, retry_after, retrying }) =>
     set((s) => {
       const key = threadId ?? s.streamingThreadId ?? undefined;
       const turns = turnsIn(s, key);
@@ -895,7 +934,18 @@ export const useChatStore = create<ChatState>((set) => ({
         // `text: open.text || message`, which threw the failure away whenever there was a partial —
         // so a stream that died after two hundred tokens showed two hundred tokens and nothing to
         // say anything had gone wrong. "Partial output is kept… with the failure below them."
-        ? replaceTurn(turns, open.id, { ...open, status: "error" as const, error: message })
+        ? replaceTurn(turns, open.id, {
+          ...open,
+          status: "error" as const,
+          error: message,
+          // SPREAD RATHER THAN SET, so a `retrying` turn whose RETRY also fails keeps the class the
+          // second attempt reported rather than losing it to an undefined — and so an unclassified
+          // failure leaves a previously-classified turn's controls alone.
+          ...(failure ? { failure } : {}),
+          ...(actions ? { actions } : {}),
+          ...(retry_after !== undefined ? { retryAfter: retry_after } : {}),
+          retrying: retrying === true,
+        })
         : [...turns, { id: turnId(), role: "jaroku" as const, kind: "info" as const, tone: "error" as const, text: message }];
       return { streamingAgentId: null, streamingThreadId: null, ...putTurns(s, key, next) };
     }),

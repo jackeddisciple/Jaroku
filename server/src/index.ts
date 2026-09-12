@@ -168,6 +168,7 @@ import {
 import { openCheckpointStore } from "./checkpoints/store.ts";
 import { introspectGraph, introspectGraphCached, type GraphResult } from "./graphIntrospect.ts";
 import { streamExplain, EXPLAIN_MODEL, EXPLAIN_MAX_TOKENS } from "./explainer.ts";
+import { classifyProviderFailure } from "./providerFailure.ts";
 import {
   chatContext, conversationWindow, CHAT_MODEL, CHAT_MAX_TOKENS, TRUNCATION_NOTICE,
   type ItemForWindow,
@@ -12662,6 +12663,9 @@ async function explainAgent(ctx: TenantContext, cmd: ExplainCommand): Promise<vo
   replyOut({
     type: "started", agentId: cmd.agentId, question: cmd.question,
     ...(cmd.regenerateOf && replyTurn ? { regenerateOf: replyTurn } : {}),
+    // THE SAME GAP, ON THE SAME CHANNEL. An explain answer's turn controls were unreachable until a
+    // reload for exactly the reason a chat answer's were.
+    ...(replyTurn ? { turnId: replyTurn } : {}),
   });
   let context = await buildExplainContext(ctx, cmd);
   // §7's attachments, resolved at SEND TIME rather than at attach time — a chip made five minutes
@@ -12969,6 +12973,17 @@ const chatting = new Set<string>();
 const chatStops = new Map<string, () => void>();
 
 /**
+ * The longest §7.3's automatic retry will wait before handing the decision back.
+ *
+ * A CEILING RATHER THAN THE PROVIDER'S NUMBER UNBOUNDED. A rate limit that says "retry after 3600"
+ * is a rate limit somebody should decide about — a conversation that parked itself for an hour with
+ * a countdown on it would be indistinguishable from one that had silently died, which is the dead
+ * turn §7 exists to remove wearing a timer. Past this, the turn keeps its Retry control and the
+ * user presses it.
+ */
+const RETRY_CEILING_MS = 30_000;
+
+/**
  * Stop whatever is answering in this conversation — §6.1.
  *
  * IT REFUSES AUDIBLY WHEN THERE IS NOTHING TO STOP. §14.1 says `Esc` with no stream open "clears
@@ -13253,7 +13268,13 @@ async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<voi
     const regenerateOf = cmd.regenerateOf && turn ? turn : undefined;
     relay.broadcastReply(
       ctx,
-      { type: "started", agentId: cmd.agentId ?? "", question: message, ...(regenerateOf ? { regenerateOf } : {}) },
+      {
+        type: "started", agentId: cmd.agentId ?? "", question: message,
+        ...(regenerateOf ? { regenerateOf } : {}),
+        // THE ROW THIS ANSWER BELONGS TO, which every turn-level control gates on — see the
+        // event's own note. Written a line above and available the whole time.
+        ...(turn ? { turnId: turn } : {}),
+      },
       thread,
     );
 
@@ -13277,6 +13298,20 @@ async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<voi
     // metadata column on `turn_variants` is per-variant rather than per-turn.
     const settle = await openVariant(ctx, turn, model, "anthropic", effort);
 
+    // §7.3's ONE RETRY, and the flag that makes "one" true rather than intended. It is this
+    // dispatch's own local, so a retried attempt starts with its own `false` — which would be an
+    // unbounded loop if the flag lived on the module. What stops it is that the retry carries
+    // `regenerateOf`, so a second failure attaches to the same turn and the client sees one turn
+    // with two failed attempts rather than a thread filling with them; and §16's "a failure on the
+    // automatic retry" is exactly that second attempt, whose own `onError` reports
+    // `retrying: false` because `cmd.regenerateOf` was set by the first.
+    let retried = Boolean(cmd.regenerateOf);
+    // UNREF'D AND NEVER CLEARED, which is a decision rather than an omission: it fires once, and a
+    // process shutting down must not be held open by a retry nobody is waiting for. There is
+    // nothing to cancel it FOR — a user who does not want the retry has already been told it is
+    // coming, and pressing Retry themselves is the same dispatch.
+    let retryTimer: NodeJS.Timeout | undefined;
+    void retryTimer;
     // THE ANSWER AS IT ACCUMULATES, because it is what gets stored: §4.2 needs the reply in the
     // next turn's context, and the deltas are the only place the whole of it exists. Kept here
     // rather than read back off the client, which is the one copy that could disagree.
@@ -13359,11 +13394,73 @@ async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<voi
           }
           relay.broadcastReply(ctx, { type: "stopped", agentId: cmd.agentId ?? "" }, thread);
         },
-        onError: (m) => {
-          // AND ON THE FAILURE PATH TOO. §7's rule arrives in its own commit; the half that belongs
-          // here is that whatever arrived before the failure is what the conversation remembers.
+        /**
+         * §7: A PROVIDER FAILURE, CLASSIFIED, NAMED AND ACTIONABLE — never a dead turn.
+         *
+         * THE PARTIAL IS KEPT, on screen and in the record. §7.3: "if 200 tokens arrived before a
+         * mid-stream 5xx, those 200 tokens stay, marked interrupted, with the failure below them" —
+         * and the record half matters as much, because the next turn's memory reads from it.
+         *
+         * THE MESSAGE IS THE CLASSIFIER'S, NOT THE ENGINE'S. `streamExplain`'s own sentence is
+         * "explain failed (…). Raw context: …", which is the right answer for `explain` — its
+         * fallback is to hand the facts back — and is the wrong one here: it buries the reason in
+         * prose and then prints the whole context block into a conversation. The classifier reads
+         * the thrown value's status and headers instead, and the copy is §7.2's.
+         *
+         * AND IT IS SCRUBBED BEFORE IT IS SENT OR STORED. `classifyProviderFailure` runs the body
+         * through the narrowed scrubber (v0.2.4) — §7.3, both directions — because a provider that
+         * echoes the request echoes the credential in it, which v0.2.1 already paid for once.
+         *
+         * §7.3's ONE AUTOMATIC RETRY IS STATED IN THE TURN BEFORE IT HAPPENS. "Auto-retry is
+         * bounded and visible: at most one automatic retry, with the retry stated in the turn, never
+         * a silent loop." `retried` is this dispatch's own flag, so the retry cannot recurse: the
+         * second attempt's failure carries `retrying: false` and stops there.
+         */
+        onError: (m, cause) => {
+          // WHATEVER ARRIVED IS WHAT THE CONVERSATION REMEMBERS, written before anything is said
+          // about the failure — so a reader and the next turn's model see the same partial answer.
           if (answer) settle({ body: answer });
-          relay.broadcastReply(ctx, { type: "error", agentId: cmd.agentId ?? "", message: m }, thread);
+          const classified = cause !== undefined
+            ? classifyProviderFailure(cause, {
+              provider: "anthropic",
+              model,
+              timeoutSeconds: undefined,
+            })
+            : null;
+          // AN UNCLASSIFIED ERROR IS THE MESSAGE IT ALWAYS WAS. The no-key path and this module's
+          // own refusals throw nothing, and inventing a class for them would put a Retry button on
+          // a sentence retrying cannot change.
+          if (!classified) {
+            relay.broadcastReply(ctx, { type: "error", agentId: cmd.agentId ?? "", message: m }, thread);
+            return;
+          }
+          const willRetry = classified.autoRetry && !retried;
+          relay.broadcastReply(
+            ctx,
+            {
+              type: "error",
+              agentId: cmd.agentId ?? "",
+              message: classified.message,
+              failure: classified.class,
+              actions: classified.actions,
+              ...(classified.retryAfterSeconds !== undefined ? { retry_after: classified.retryAfterSeconds } : {}),
+              retrying: willRetry,
+            },
+            thread,
+          );
+          if (willRetry) {
+            retried = true;
+            // AFTER THE WAIT THE PROVIDER ASKED FOR, bounded so a bad `retry-after` cannot park a
+            // conversation for an hour. A rate limit that says "wait an hour" is a rate limit the
+            // user should decide about, which is what the Retry control is for.
+            const waitMs = Math.min((classified.retryAfterSeconds ?? 1) * 1000, RETRY_CEILING_MS);
+            retryTimer = setTimeout(() => {
+              // THE SLOT IS RELEASED BY THE `finally` BELOW BEFORE THIS FIRES, so the retry is an
+              // ordinary dispatch rather than one that has to be let past its own guard.
+              void chatWithJaroku(ctx, { ...cmd, threadId: thread, regenerateOf: turn ?? undefined });
+            }, waitMs);
+            retryTimer.unref?.();
+          }
         },
       },
       chatKey,

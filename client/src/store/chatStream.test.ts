@@ -388,5 +388,114 @@ console.log("\nsiblings after a reload");
   check("every sibling survives switching", reply()?.siblings?.length === 3, reply()?.siblings?.length);
 }
 
+// --- the durable turn id, from the moment the answer starts -----------------------------------
+//
+// WHAT THIS ROW EXISTS FOR. `itemId` on a reply turn was only ever set by `hydrate`, so every
+// control that gates on a durable id — regenerate (§6.2), the note, the pin, the feedback, the
+// sibling switcher, and §7's retry, which IS a regeneration — was unreachable on a LIVE turn and
+// appeared only after a reload. The server had written the `thread_items` row before broadcasting
+// `started` the whole time; it simply was not sending the id.
+
+console.log("\nthe durable turn id arrives with the answer");
+{
+  reset();
+  store().replyStarted({ threadId: T, agentId: A, question: "why?", turnId: "i7" });
+  check("a live reply carries its durable id", reply()?.itemId === "i7", reply()?.itemId);
+  // WITHOUT IT, NOTHING IS REGENERABLE — which is what `canRerunTurn` gates on, and was the whole
+  // of the defect.
+  reset();
+  store().replyStarted({ threadId: T, agentId: A, question: "why?" });
+  check("an event without one leaves it absent rather than guessing", reply()?.itemId === undefined, reply()?.itemId);
+  // A REGENERATION IS THE SAME TURN, so its id must survive the replace.
+  reset();
+  store().replyStarted({ threadId: T, agentId: A, question: "why?", turnId: "i7" });
+  store().replyDelta({ threadId: T, agentId: A, text: "first" });
+  store().replyDone({ threadId: T, agentId: A });
+  store().replyStarted({ threadId: T, agentId: A, question: "why?", regenerateOf: "i7", turnId: "i7" });
+  check("a regeneration keeps the same durable id", reply()?.itemId === "i7", reply()?.itemId);
+  check("...and is the same turn", replies().length === 1, replies().length);
+}
+
+// --- §7: a classified failure keeps the partial, names itself, and offers something ----------
+//
+// THE STORE'S HALF OF §7. The classification itself is `test:provider-failure`'s — ten classes,
+// their copy and their actions, over a pure function. What this asserts is that the turn CARRIES
+// it: the class and the actions are fields the renderer draws controls from, and a turn that lost
+// them to a spread would render a named failure as an unnamed one.
+
+console.log("\n§7 — a classified failure on the turn");
+{
+  reset();
+  store().replyStarted({ threadId: T, agentId: A, question: "summarise the run", turnId: "i-rate" });
+  store().replyDelta({ threadId: T, agentId: A, text: "The run started at 10:04 and " });
+  store().replyError({
+    threadId: T, agentId: A,
+    message: "Rate limited by Claude. Retry in 20s.",
+    failure: "rate_limited", actions: ["retry"], retry_after: 20, retrying: true,
+  });
+
+  // §7.3: PARTIAL OUTPUT IS KEPT, with the failure below it.
+  check("the partial survives a classified failure", reply()?.text === "The run started at 10:04 and ", reply()?.text);
+  check("the class is on the turn", reply()?.failure === "rate_limited", reply()?.failure);
+  check("...and the actions the renderer draws from", reply()?.actions?.join(",") === "retry", reply()?.actions);
+  check("...and the countdown", reply()?.retryAfter === 20, reply()?.retryAfter);
+  // §7.3: THE RETRY IS STATED BEFORE IT HAPPENS.
+  check("...and that a retry is coming", reply()?.retrying === true, reply()?.retrying);
+
+  // THE SECOND ATTEMPT LANDS ON THE SAME TURN, which is what `turnId` on `started` made possible:
+  // the retry is a regeneration, and a regeneration attaches by the durable id. Modelled as the
+  // real sequence — the server re-dispatches, `started` arrives with `regenerateOf`, then the
+  // second failure — because skipping the `started` is what made this row pass for the wrong reason.
+  store().replyStarted({ threadId: T, agentId: A, question: "summarise the run", regenerateOf: "i-rate", turnId: "i-rate" });
+  store().replyError({
+    threadId: T, agentId: A,
+    message: "Rate limited by Claude. Retry in 20s.",
+    failure: "rate_limited", actions: ["retry"], retry_after: 20, retrying: false,
+  });
+  // §7.3 BOUNDS AUTO-RETRY TO ONE, so the second failure must stop promising a third.
+  check("a second failure stops promising a retry", reply()?.retrying === false, reply()?.retrying);
+  check("...and still offers the manual one", reply()?.actions?.includes("retry") === true, reply()?.actions);
+  check("...on one turn rather than two", replies().length === 1, replies().length);
+  check("...and one question", turns().filter((t) => t.role === "user").length === 1, turns().length);
+}
+
+console.log("\na failure with no classification behind it");
+{
+  reset();
+  store().replyStarted({ threadId: T, agentId: A, question: "hi" });
+  // A REFUSAL, A SHAPE CHECK, THE NO-KEY PATH: these fail with a sentence and no provider behind
+  // them, and inventing a class for them would put a Retry button on something retrying cannot
+  // change.
+  store().replyError({ threadId: T, agentId: A, message: "still answering in this conversation — one at a time" });
+  check("it is still a visible failure", reply()?.status === "error", reply());
+  check("...with its sentence", reply()?.error?.includes("one at a time") === true, reply()?.error);
+  check("...and no invented class", reply()?.failure === undefined, reply()?.failure);
+  check("...and no controls", reply()?.actions === undefined, reply()?.actions);
+}
+
+console.log("\nregenerating a classified failure");
+{
+  reset();
+  store().replyStarted({ threadId: T, agentId: A, question: "why?" });
+  store().replyError({
+    threadId: T, agentId: A, message: "No API key configured for Claude.",
+    failure: "no_credential", actions: ["open_credentials"],
+  });
+  const t0 = reply()!;
+  useChatStore.setState((st) => ({
+    threads: { ...st.threads, [T]: (st.threads[T] ?? []).map((t) => (t.id === t0.id ? { ...t, itemId: "i1" } : t)) },
+  }));
+  store().replyStarted({ threadId: T, agentId: A, question: "why?", regenerateOf: "i1" });
+  store().replyDelta({ threadId: T, agentId: A, text: "Because the retry budget ran out." });
+  store().replyDone({ threadId: T, agentId: A });
+  // THE CONTROLS GO WITH THE FAILURE. A successful answer still carrying
+  // `actions: ["open_credentials"]` would render a credential link under a reply that just PROVED
+  // the credential works.
+  check("a successful retry drops the class", reply()?.failure === undefined, reply()?.failure);
+  check("...and the controls with it", reply()?.actions === undefined, reply()?.actions);
+  check("...and the sentence", reply()?.error === undefined, reply()?.error);
+  check("...and answers", reply()?.text === "Because the retry budget ran out.", reply()?.text);
+}
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 (globalThis as { process?: { exit(code: number): void } }).process?.exit(fail === 0 ? 0 : 1);

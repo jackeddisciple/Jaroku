@@ -1912,7 +1912,14 @@ export type ServerMessage =
   | { channel: "enforcement"; type: "enforcement"; state: EnforcementStateView; history: EnforcementRowView[] }
   | { channel: "enforcement"; type: "notice"; message: string }
   | { channel: "enforcement"; type: "error"; message: string }
-  | (InThread & { channel: "reply"; type: "started"; agentId: string; question: string; regenerateOf?: string })
+  // `turnId` IS THE DURABLE `thread_items` ROW this answer belongs to. Without it `itemId` on a
+  // live reply turn was only ever filled in by `hydrate`, so regenerate, note, pin, feedback, the
+  // sibling switcher and §7's retry were all unreachable until a reload — every one of them gates
+  // on a durable id, and the server had written the row before sending this event.
+  | (InThread & {
+      channel: "reply"; type: "started"; agentId: string; question: string;
+      regenerateOf?: string; turnId?: string;
+    })
   | (InThread & { channel: "reply"; type: "delta"; agentId: string; text: string })
   // `citations` ARRIVES WITH `done` AND NOT WITH THE TEXT — Part 3 §7.4. A `[work:…]` marker can be
   // split across two deltas, so a chip drawn mid-stream is half a citation and a stray bracket. Only
@@ -1927,7 +1934,14 @@ export type ServerMessage =
   // the usage because a stopped call's counts arrive by a different route from a finished one's:
   // `finalMessage()` never resolves on an aborted stream, so there is no `done` to ride.
   | (InThread & { channel: "reply"; type: "stopped"; agentId: string; usage?: GenUsage })
-  | (InThread & { channel: "reply"; type: "error"; agentId: string; message: string })
+  // §7: THE CLASSIFICATION RIDES THE `error` EVENT rather than arriving as a new type — every
+  // client already renders this one, and a second type would make a named failure look different
+  // from an unnamed one, which is the inconsistency §7 exists to remove. All four fields are
+  // optional: an unclassified error (a refusal, a shape check) is the message it always was.
+  | (InThread & {
+      channel: "reply"; type: "error"; agentId: string; message: string;
+      failure?: string; actions?: string[]; retry_after?: number; retrying?: boolean;
+    })
   | GenMessage
   | BillingMessage
   | EditMessage

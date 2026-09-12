@@ -285,7 +285,15 @@ console.log("\nthe store is instantiated, written and read — outside a test");
   // route, so it is the command a regeneration actually goes out on now. A count here rather than a
   // per-command check because what fails is an OMISSION — a command that grew a regenerate path and
   // did not carry the turn it is a second answer to writes a second QUESTION, silently.
-  check("the five composer commands carry the turn a re-run is OF", (relay.match(/regenerateOf\?: string;/g) ?? []).length === 5);
+  // ANCHORED TO ITS OWN LINE, WHICH IS WHAT MAKES THIS COUNT COMMANDS. The `started` REPLY EVENT
+  // also carries `regenerateOf` — it has to, so every tab replaces the same turn — and it declares
+  // the field inline inside a one-line union member. An unanchored match counted that too and read
+  // as a sixth command, which is the shape of false alarm a count is most likely to produce.
+  check(
+    "the five composer commands carry the turn a re-run is OF",
+    (relay.match(/^ {2}regenerateOf\?: string;$/gm) ?? []).length === 5,
+    String((relay.match(/^ {2}regenerateOf\?: string;$/gm) ?? []).length),
+  );
   check("...verified server-side rather than taken on the client's word", /async function turnForRegenerate\(/.test(index));
   check("...and used instead of writing a second user message", /cmd\.regenerateOf\s*\n?\s*\? await turnForRegenerate/.test(index));
 

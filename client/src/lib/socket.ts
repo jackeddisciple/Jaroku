@@ -675,6 +675,8 @@ function dispatch(msg: ServerMessage): void {
       else if (msg.type === "delta") c.replyDelta(msg);
       else if (msg.type === "done") c.replyDone(msg);
       else if (msg.type === "stopped") c.replyStopped(msg);
+      // §7: THE CLASSIFICATION RIDES THIS EVENT, so the store gets the class and the actions along
+      // with the sentence. An older server sends neither and the turn renders as it always did.
       else if (msg.type === "error") c.replyError(msg);
       break;
     }

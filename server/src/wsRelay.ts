@@ -1799,7 +1799,21 @@ export type EditEvent =
 // The "explain" reply rides its own channel too, parallel to trace/gen/edit/debug — a streaming
 // prose answer that never touches the trace store or the frozen event schema.
 export type ReplyEvent =
-  | { type: "started"; agentId: string; question: string; regenerateOf?: string }
+  /**
+   * `turnId` IS THE DURABLE ROW THIS ANSWER BELONGS TO, and it was missing.
+   *
+   * WHAT ITS ABSENCE COST. The server writes the `thread_items` row BEFORE it broadcasts this
+   * event, so the id existed the whole time and simply was not sent — and `itemId` on a client's
+   * reply turn was therefore only ever filled in by `hydrate`. Every control that needs a durable
+   * turn was consequently unreachable on a LIVE one: regenerate (§6.2 — `canRerunTurn` requires
+   * it), the note, the pin, the feedback, the sibling switcher, and §7's retry, which is a
+   * regeneration. The comment beside those controls says they "appear when the turn does", which
+   * was true of a reloaded turn and never of a fresh one.
+   *
+   * OPTIONAL, because one caller has no row to name: a refusal belongs to no session, and the
+   * no-key and fixture paths answer without one being written.
+   */
+  | { type: "started"; agentId: string; question: string; regenerateOf?: string; turnId?: string }
   | { type: "delta"; agentId: string; text: string }
   /**
    * §6.5 METADATA, WHEN THERE IS ANY. Absent on an answer that had nothing to report, which is
@@ -1831,7 +1845,27 @@ export type ReplyEvent =
    * aborted stream, so there is no `onUsage` to ride.
    */
   | { type: "stopped"; agentId: string; usage?: unknown }
-  | { type: "error"; agentId: string; message: string };
+  /**
+   * §7: A FAILURE, CLASSIFIED — the same event `error` always was, with three fields on it.
+   *
+   * NOT A NEW EVENT TYPE, deliberately. Every client already renders `error` on this channel, and a
+   * second type would mean a turn that failed in a way the server could name renders differently
+   * from one it could not — which is precisely the inconsistency §7 exists to remove. So the
+   * classification RIDES the event and is optional: an unclassified `error` (the explain path's
+   * fallback, a refusal, a shape check) is exactly the message it was.
+   *
+   * `failure` IS THE CLASS, `actions` ARE WHAT THE TURN OFFERS, and `retry_after` is the countdown.
+   * The client renders controls from the action ids rather than from the sentence, because §7.2's
+   * actions are real links and buttons — "a real link, not prose telling them to go look."
+   */
+  | {
+      type: "error"; agentId: string; message: string;
+      failure?: string;
+      actions?: string[];
+      retry_after?: number;
+      /** Whether the server is about to try once itself — §7.3's bounded, VISIBLE retry. */
+      retrying?: boolean;
+    };
 
 // Eval rides its own channel too, parallel to trace/gen/edit/debug/reply.
 //

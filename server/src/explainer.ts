@@ -10,6 +10,7 @@
 import { existsSync, readFileSync } from "node:fs";
 
 import { anthropicClient } from "./claude.ts";
+import { faultError, injectedFault } from "./providerFailure.ts";
 import type { EffortPlan } from "./effort.ts";
 
 export const EXPLAIN_MODEL = process.env.JAROKU_EXPLAIN_MODEL ?? "claude-haiku-4-5";
@@ -121,7 +122,19 @@ export function usageFromPartial(
 export interface ExplainCallbacks {
   onDelta: (text: string) => void;
   onDone: () => void;
-  onError: (message: string) => void;
+  /**
+   * The failure, as a sentence AND as the thing that was thrown.
+   *
+   * `cause` IS THE ADDITION §7 NEEDED. This callback used to receive only a formatted string —
+   * "explain failed (…). Raw context: …" — which is a fine answer for `explain`, whose fallback is
+   * to hand the facts back, and is unusable for classification: the status, the `retry-after`
+   * header and the provider's own error code are all fields on the thrown object, and a caller
+   * given a sentence has to parse them back out of prose somebody wrote.
+   *
+   * OPTIONAL, because the no-key and fixture paths produce no thrown error — and because one of the
+   * error paths is this module's own message rather than a provider's.
+   */
+  onError: (message: string, cause?: unknown) => void;
   /**
    * §6.1: THE ANSWER WAS STOPPED, and what it had spent by then.
    *
@@ -303,6 +316,15 @@ export async function streamExplain(
     // below — by the request and by the usage report — so the id that was ASKED and the id that is
     // PRICED cannot be two different strings.
     const model = ask?.model ?? EXPLAIN_MODEL;
+    // §16's FAULT, THROWN WHERE A REAL ONE WOULD BE — inside this try, so it travels the same
+    // path with the same `cause` and the same partial-output behaviour as a provider's own. A
+    // harness that threw from outside would be testing the harness.
+    //
+    // BEFORE THE REQUEST FOR THE ORDINARY CASE, and after the first tokens for `:mid` — which is
+    // the half §7.3 is about: "if 200 tokens arrived before a mid-stream 5xx, those 200 tokens
+    // stay." A fault that could only fire before the stream opened would never exercise it.
+    const fault = injectedFault();
+    if (fault && !fault.mid) throw faultError(fault.class);
     const stream = anthropicClient(apiKey).messages.stream({
       model,
       max_tokens: EXPLAIN_MAX_TOKENS,
@@ -339,7 +361,8 @@ export async function streamExplain(
           }]),
       ],
     });
-    stream.on("text", (t: string) => cb.onDelta(t));
+    let sawText = 0;
+    stream.on("text", (t: string) => { sawText += t.length; cb.onDelta(t); });
     // §6.1: THE HANDLE, HANDED OVER THE MOMENT THERE IS SOMETHING TO STOP.
     //
     // `stopped` IS THIS CLOSURE'S OWN FLAG AND NOT `stream.aborted`. The SDK's flag is true after
@@ -357,14 +380,29 @@ export async function streamExplain(
     let final: Awaited<ReturnType<typeof stream.finalMessage>> | null = null;
     try {
       final = await stream.finalMessage();
+      // §16's MID-STREAM FAULT, thrown once real text has arrived — so the caller's partial is
+      // genuinely non-empty and §7.3's "partial output is kept" is a claim about the same code path
+      // a provider's own 5xx would take.
+      if (fault?.mid && sawText > 0) throw faultError(fault.class);
     } catch (err) {
       // AN ABORT REJECTS `finalMessage()`, which is the SDK's contract and is why this is a catch
       // rather than a check: there is no resolved message to read on a stopped stream.
-      if (!stopped) throw err;
-      // THE COUNTS THE CALL ACTUALLY SPENT, off the partially-accumulated message — see
-      // `usageFromPartial` for why neither zero nor the projected amount is acceptable here.
-      cb.onStopped?.(usageFromPartial(model, stream.currentMessage));
-      return;
+      if (stopped) {
+        // THE COUNTS THE CALL ACTUALLY SPENT, off the partially-accumulated message — see
+        // `usageFromPartial` for why neither zero nor the projected amount is acceptable here.
+        cb.onStopped?.(usageFromPartial(model, stream.currentMessage));
+        return;
+      }
+      // §7.3: "COST INCURRED BEFORE A FAILURE IS RECORDED HONESTLY. A failed call that consumed
+      // input tokens did cost money."
+      //
+      // THE SAME READ THE STOP PATH MAKES, for the same reason: a mid-stream 5xx rejects
+      // `finalMessage()` too, so the usage report that fires on a completed call does not fire — and
+      // a failure that silently cost nothing is the same silent zero v0.1.9 refuses everywhere else.
+      // Absent when the failure beat the first `message_start`, which is genuinely unknown.
+      const spent = usageFromPartial(model, stream.currentMessage);
+      if (spent) cb.onUsage?.(spent);
+      throw err;
     }
     // Reported before `onDone` so a caller that meters cannot see the answer complete and the
     // charge arrive afterwards — the same "record first, then say it happened" order the trace
@@ -380,6 +418,11 @@ export async function streamExplain(
     return;
   } catch (err) {
     // Surface the failure but still hand back the factual context rather than nothing.
-    cb.onError(`explain failed (${(err as Error).message}). Raw context:\n\n${context}`);
+    //
+    // AND HAND THE CALLER THE THROWN VALUE. §7 classifies on the status, the `retry-after` header
+    // and the provider's own error code, all of which are fields rather than prose — so a caller
+    // given only the sentence below would have to parse them back out of a string this function
+    // composed. `explain`'s two callers ignore the second argument and keep the behaviour they had.
+    cb.onError(`explain failed (${(err as Error).message}). Raw context:\n\n${context}`, err);
   }
 }
