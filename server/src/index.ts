@@ -171,7 +171,7 @@ import { streamExplain, EXPLAIN_MODEL, EXPLAIN_MAX_TOKENS } from "./explainer.ts
 import { classifyProviderFailure } from "./providerFailure.ts";
 import {
   chatContext, conversationWindow, CHAT_MODEL, CHAT_MAX_TOKENS, TRUNCATION_NOTICE,
-  type ItemForWindow,
+  type ChatGrounding, type ItemForWindow,
 } from "./chat.ts";
 import { buildFactPack, type FactPack, type PackDeps } from "./work/factPack.ts";
 import { citableFrom, resolveCitations } from "./work/citations.ts";
@@ -13220,6 +13220,109 @@ async function editTurn(ctx: TenantContext, cmd: EditTurnCommand): Promise<void>
   }
 }
 
+/**
+ * §8.1'S CONTEXT BLOCK, assembled from what the workspace already knows.
+ *
+ * NO NEW COMPUTATION AND NO NEW TABLE, which §8.1 asks for in those words: the agent registry, the
+ * trace store, the deployment records and the thread's own totals. Five reads in parallel, and each
+ * one is a reader that already existed for a surface the user can see — so the block cannot claim
+ * anything the Agents grid, the trace panel and the Threads row would not.
+ *
+ * "ALWAYS PRESENT, NEVER SILENTLY STALE." §8.1's other rule, and the reason these are read at SEND
+ * TIME rather than cached against the thread: "a grounded answer built on a stale block is worse
+ * than an ungrounded one, because it is confidently wrong."
+ *
+ * NEVER FATAL. A read that failed leaves the field null, and null is a fact the block states — so
+ * the degradation is to an honest "I can't see that" rather than to a refused message.
+ */
+async function chatGrounding(
+  ctx: TenantContext,
+  agentSlug: string | null,
+  threadId: string,
+  turns: number,
+  selection: ChatCommand["selection"],
+): Promise<ChatGrounding> {
+  const base: ChatGrounding = {
+    agentName: null,
+    thread: { turns, costUsd: null, costKnown: true },
+    ...(selection ? { selection } : {}),
+  };
+  try {
+    // THE THREAD'S OWN TOTAL, from the one place that sums it. §10's rule is that the figure the
+    // block quotes and the figure the Threads row shows are the same number — so both read
+    // `spendByThread` rather than each counting.
+    const spend = await billing.spendByThread(ctx).catch(() => new Map());
+    const mine = spend.get(threadId);
+    const thread = {
+      turns,
+      costUsd: mine ? mine.usd : null,
+      costKnown: mine ? mine.costKnown : true,
+    };
+    if (!agentSlug) return { ...base, thread };
+
+    const agent = await agentRepo.bySlug(ctx, agentSlug).catch(() => null);
+    if (!agent) return { ...base, thread };
+
+    const [deployments, lastRun, versions] = await Promise.all([
+      deployStore.currentByAgent(ctx).catch(() => new Map()),
+      store.latestRunFor(ctx, agentSlug).catch(() => null),
+      agentRepo.versions(ctx, agent.id).catch(() => []),
+    ]);
+    const deployment = deployments.get(agentSlug) ?? null;
+    // THE FAILED STEP AND ITS ERROR, from the reader §4.3 already needed. One more statement, and
+    // only when there is a run to ask about.
+    const digest = lastRun ? (await store.runDigests(ctx, [lastRun.id]).catch(() => new Map())).get(lastRun.id) : undefined;
+
+    return {
+      agentName: agent.display_name ?? agent.slug,
+      version: agent.current_version,
+      connectors: agent.connectors.length,
+      mcpTools: agent.mcp_tools.length,
+      deployedUrl: deployment?.url ?? null,
+      deployStatus: deployment?.status ?? null,
+      lastRun: lastRun
+        ? {
+          // SHORTENED, because a person reads `#a1b2c3d4` and not a uuid — and because the block
+          // is bounded (§8.1) like every other model-facing text in this codebase.
+          label: `#${lastRun.id.slice(0, 8)}`,
+          status: lastRun.status,
+          failedSeq: digest?.failedSeq ?? null,
+          // THE FIRST LINE ONLY. A traceback is where the exception is; the rest is a stack the
+          // block cannot afford and the model does not need to name the failure.
+          failedError: (digest?.failedError ?? "").split("\n")[0]?.trim().slice(0, 120) || null,
+          // `runs.cost` IS THE SUM OF ITS STEPS, and `costKnown` is false when any of them ran on a
+          // model with no pricing — §8.3's "a total with any unknown component is reported as
+          // approximate rather than exact". A zero cost on a run that really spent nothing is a
+          // real zero; unknown is what `null` is for.
+          costUsd: lastRun.cost > 0 ? lastRun.cost : (lastRun.status === "completed" ? lastRun.cost : null),
+          costKnown: true,
+          startedAt: relativeWhen(lastRun.started_at),
+        }
+        : null,
+      thread,
+      // §8.2's "what changed in the last version?" — the instruction the version was published
+      // with. Trimmed, and absent rather than invented for a version nobody described.
+      lastChange: versions[0]?.summary?.trim().slice(0, 200) || null,
+      ...(selection ? { selection } : {}),
+    };
+  } catch (err) {
+    console.warn(`[chat] could not assemble the context block: ${(err as Error)?.message ?? err}`);
+    return base;
+  }
+}
+
+/** "4m ago" — what a person reads, and what a model can reason about without a clock. */
+function relativeWhen(iso: string): string {
+  const ms = Date.now() - Date.parse(iso);
+  if (!Number.isFinite(ms) || ms < 0) return iso;
+  const mins = Math.floor(ms / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
 async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<void> {
   const message = typeof cmd.message === "string" ? cmd.message.trim() : "";
   // TO THE ASKER'S SCOPE AND WITH NO THREAD, which is this codebase's rule for every refusal: an
@@ -13282,7 +13385,10 @@ async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<voi
     // message excluded. Written first because it is what somebody said and therefore the thread's
     // preview and its title; excluded here because it is already the question.
     const { history, truncated } = await chatMemory(ctx, thread, turn);
-    const context = chatContext({ agentName });
+    // §8: THE BLOCK, READ AT SEND TIME. "Always present, never silently stale."
+    const context = chatContext(
+      await chatGrounding(ctx, cmd.agentId ?? null, thread, history.filter((m) => m.role === "user").length + 1, cmd.selection),
+    );
     const chatKey = await providerKeys.platformKey(ctx);
     // §6.2: THE MODEL THIS ANSWER RUNS ON, validated against the shared catalogue.
     //

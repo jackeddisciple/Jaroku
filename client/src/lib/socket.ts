@@ -1465,7 +1465,12 @@ export function sendChat(
    * menu changed the wrong setting and the answer came back on the same model under a label
    * promising otherwise.
    */
-  opts?: { regenerateOf?: string; model?: string },
+  opts?: {
+    regenerateOf?: string;
+    model?: string;
+    /** §8.1's `selection:` line. Three fields, not the step — see the command's own note. */
+    selection?: { seq: number; type: string; name: string };
+  },
 ): void {
   send({
     cmd: "chat", message,
@@ -1473,6 +1478,7 @@ export function sendChat(
     threadId: activeThread(),
     ...(opts?.regenerateOf ? { regenerateOf: opts.regenerateOf } : {}),
     ...(opts?.model ? { model: opts.model } : {}),
+    ...(opts?.selection ? { selection: opts.selection } : {}),
   });
 }
 

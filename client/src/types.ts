@@ -2141,7 +2141,13 @@ export type ClientCommand =
   // §6.2's `regenerateOf` is what makes a regeneration a SIBLING rather than a second question, and
   // `model` is what makes "regenerate with a different model" true — the menu used to set the RUN's
   // model and dispatch a call that ignored it.
-  | { cmd: "chat"; message: string; agentId?: string; threadId?: string; regenerateOf?: string; model?: string }
+  | {
+      cmd: "chat"; message: string; agentId?: string; threadId?: string;
+      regenerateOf?: string; model?: string;
+      // §8.1's `selection:` line — three fields, not the step. `explain` carries the whole step
+      // because explaining one is the job; this only has to say WHICH step is open.
+      selection?: { seq: number; type: string; name: string };
+    }
   // §6.1's Stop. It names the conversation and nothing else: there is at most one answer in flight
   // per thread, so a turn id would be a second identifier for the same thing.
   | { cmd: "stopChat"; threadId?: string }

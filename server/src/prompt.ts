@@ -766,7 +766,17 @@ const RECORD_FIELD_CHARS = 400;
 /** A value that is genuinely unknown, spelled the way every other surface spells it. */
 const UNKNOWN = "unknown";
 
-function money(cost: number | null, complete: boolean): string {
+/**
+ * How a cost reads to a MODEL — and there is one answer, shared by every block a model is given.
+ *
+ * EXPORTED SINCE §8, because the chat route's context block has the same three states to render and
+ * the same rule to obey: "§10 AND §11: unknown is `null` rendered as a word, never `$0.00`. A
+ * partial total says so rather than presenting itself as a confident figure." A second formatter in
+ * `chat.ts` would be a second answer to "what does an unknown cost look like", and the two would
+ * disagree the first time either was edited — on the one class of figure this product treats as its
+ * most serious (v0.1.9: a model with no pricing rendering as free).
+ */
+export function money(cost: number | null, complete: boolean): string {
   // §10 AND §11: unknown is `null` rendered as a word, never `$0.00`. A partial total says so
   // rather than presenting itself as a confident figure — the `+` the client renders, in words.
   if (cost === null) return UNKNOWN;

@@ -650,6 +650,33 @@ export class TraceStore {
   }
 
   /**
+   * The most recent run of one agent — §8.1's `last run:` line.
+   *
+   * ONE INDEXED READ AND NO WINDOW. Every other reader on this store that answers "what has this
+   * agent been doing" takes a `since` and aggregates, because it is drawing a sparkline or counting
+   * a week. This answers "what happened last", which has no period: an agent whose only run was a
+   * fortnight ago still has a last run, and §8.2's "why did the last run fail?" is asked about it
+   * exactly then.
+   *
+   * BY SLUG, because `runs.agent_id` holds the slug — the frozen schema's own spelling, and the one
+   * every other reader here uses.
+   *
+   * `null` RATHER THAN AN EMPTY SHAPE for an agent that has never run. §8.1 needs the difference:
+   * "an agent with no runs" is a fact the block states, and a zeroed run row would be §8.3's
+   * failure — the product describing a run that did not happen.
+   */
+  async latestRunFor(ctx: TenantContext, agentSlug: string): Promise<Run | null> {
+    const row = await this.q(ctx).get<Record<string, unknown>>(
+      `SELECT ${cols(RUN_COLUMNS)} FROM runs
+        WHERE workspace_id = ? AND agent_id = ?
+        ORDER BY started_at DESC, id ASC
+        LIMIT 1`,
+      [ctx.workspaceId, agentSlug],
+    );
+    return (row as Run | undefined) ?? null;
+  }
+
+  /**
    * One line's worth of outcome per run — §4.3's `[run failed at step 7: TimeoutError]`.
    *
    * WHY A READER OF ITS OWN, beside `runOutcomes` and `firstFailedStepFor`. Those two answer the

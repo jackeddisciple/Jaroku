@@ -13,6 +13,8 @@
 //
 //   npm run test:chat
 
+import { money } from "./prompt.ts";
+
 /**
  * The model a chat message is answered on.
  *
@@ -42,10 +44,69 @@ export const CHAT_MODEL = process.env.JAROKU_CHAT_MODEL ?? "claude-haiku-4-5";
  */
 export const CHAT_MAX_TOKENS = 900;
 
-/** What the context block knows about the agent a conversation is open on. */
+/**
+ * §8.1's CONTEXT BLOCK, as the four facts it is assembled from.
+ *
+ * THIS IS WHERE THE NICHE IS, and §8 opens by saying so: "a generic chat wrapper can answer 'what
+ * is LangGraph'. Only Jaroku can answer 'why did step 7 fail in this run' or 'what has this agent
+ * cost me this week' — because only Jaroku has the trace, the versions and the per-step cost
+ * accounting sitting right there."
+ *
+ * EVERY FIELD IS NULLABLE AND EVERY NULL IS A FACT. §8.3 is the rule the whole shape serves: "the
+ * chat route may not invent facts about the user's own system. If the context block does not contain
+ * the answer, the reply says it doesn't have that rather than producing a plausible one." So an
+ * agent with no runs has `lastRun: null` and the block SAYS there have been none — it does not omit
+ * the line, because an omitted line is an absence a model fills in.
+ *
+ * ASSEMBLED FROM EXISTING SOURCES, WITH NO NEW COMPUTATION AND NO NEW TABLE (§8.1): the agent
+ * registry, the trace store, the deployment records and the thread's own totals. The caller reads
+ * them; this renders them.
+ */
 export interface ChatGrounding {
   /** The agent's display name, or null for a thread with `agent_id` null. */
   agentName: string | null;
+  /** Its current version number. Null when there is no agent, never 0 for one that exists. */
+  version?: number | null;
+  /**
+   * How many tools it has, split the way the product splits them.
+   *
+   * REVIEWED CONNECTORS AND MCP TOOLS COUNTED APART, because §8.2's "what tools does it have?" is
+   * answered from "the current version's TOOLS, reviewed vs MCP marked" — and the distinction is
+   * the whole of what makes one trustworthy and the other not.
+   */
+  connectors?: number;
+  mcpTools?: number;
+  /** The live URL, when there is a live deployment. Null covers both "not deployed" and "gone". */
+  deployedUrl?: string | null;
+  /** What `deployments.status` says right now, for the difference between deploying and live. */
+  deployStatus?: string | null;
+  /** §8.1's `last run:` line. Null means this agent has never run, which the block states. */
+  lastRun?: {
+    /** The run id, shortened by the caller — a person reads `#482`, not a uuid. */
+    label: string;
+    status: string;
+    /** The first failed step and its first line, when it failed. */
+    failedSeq?: number | null;
+    failedError?: string | null;
+    /** `runs.cost`, and `costKnown` false when any step ran on an unpriced model. */
+    costUsd: number | null;
+    costKnown: boolean;
+    startedAt: string;
+  } | null;
+  /** §8.1's `this thread:` line. */
+  thread?: {
+    turns: number;
+    costUsd: number | null;
+    costKnown: boolean;
+  };
+  /**
+   * §8.1's `selection:` line — "omitted when nothing selected", which is the one line that IS
+   * omitted rather than stated. An absent selection is not a fact about the workspace; it is the
+   * ordinary state of the composer.
+   */
+  selection?: { seq: number; type: string; name: string } | null;
+  /** What the last version changed, for §8.2's "what changed in the last version?". */
+  lastChange?: string | null;
 }
 
 /**
@@ -61,12 +122,81 @@ export interface ChatGrounding {
  * caller happens to hand over.
  */
 export function chatContext(g: ChatGrounding): string {
-  const lines = [
-    g.agentName
-      ? `agent:       ${g.agentName}`
-      : `agent:       none — this conversation has no agent yet (the planning stage)`,
-  ];
-  return `JAROKU CONTEXT\n\n${lines.join("\n")}`;
+  const lines: string[] = [];
+
+  // ── agent ─────────────────────────────────────────────────────────────────────────────────────
+  if (!g.agentName) {
+    // §8.1'S ABSENT-AGENT RULE. "When no agent is selected — the planning stage, a thread with
+    // `agent_id` null — the block says that plainly rather than being omitted, so the model knows
+    // the difference between 'no agent' and 'agent unknown'."
+    lines.push("agent:       none — this conversation has no agent yet (the planning stage)");
+  } else {
+    const parts = [g.agentName];
+    if (typeof g.version === "number") parts.push(`v${g.version}`);
+    const tools = (g.connectors ?? 0) + (g.mcpTools ?? 0);
+    if (g.connectors !== undefined || g.mcpTools !== undefined) {
+      // REVIEWED AND MCP NAMED APART. §8.2 answers "what tools does it have?" with "reviewed vs MCP
+      // marked", and the split is the whole of what makes one trustworthy and the other not.
+      parts.push(
+        tools === 0
+          ? "no tools"
+          : `${tools} tool${tools === 1 ? "" : "s"}`
+            + (g.mcpTools ? ` (${g.connectors ?? 0} reviewed, ${g.mcpTools} from MCP)` : ""),
+      );
+    }
+    // §8.2's "is it deployed?" — the deployment record and the live URL, and the status where it is
+    // neither live nor absent.
+    if (g.deployedUrl) parts.push(`deployed at ${g.deployedUrl}`);
+    else if (g.deployStatus && g.deployStatus !== "removed") parts.push(`deployment ${g.deployStatus}`);
+    else parts.push("not deployed");
+    lines.push(`agent:       ${parts.join(" · ")}`);
+  }
+
+  // ── last run ──────────────────────────────────────────────────────────────────────────────────
+  if (g.agentName) {
+    if (!g.lastRun) {
+      // STATED, NOT OMITTED — §16's "an agent with no runs" attack, and §8.3's rule. A model given
+      // no line about runs writes about what the agent would do; one told there have been none says
+      // there have been none.
+      lines.push("last run:    none — this agent has never been run");
+    } else {
+      const r = g.lastRun;
+      const what = r.status === "error"
+        ? (r.failedSeq !== null && r.failedSeq !== undefined
+          ? `failed at step ${r.failedSeq}${r.failedError ? ` (${r.failedError})` : ""}`
+          : "failed")
+        // "STILL RUNNING" IS ITS OWN ANSWER. §16 attacks a run in flight, and a run that has not
+        // finished has no outcome to report — calling it completed would be the product describing
+        // something that has not happened.
+        : r.status === "running" ? "still running"
+          : r.status === "paused" ? "paused"
+            : "completed";
+      lines.push(`last run:    ${r.label} · ${what} · ${money(r.costUsd, r.costKnown)} · ${r.startedAt}`);
+    }
+  }
+
+  // ── this thread ───────────────────────────────────────────────────────────────────────────────
+  if (g.thread) {
+    // §8.2's "how much has this cost?" is answered "thread total, then agent total — STATING WHICH
+    // it answered", so the line names what the figure is about rather than being a bare number.
+    lines.push(
+      `this thread: ${g.thread.turns} turn${g.thread.turns === 1 ? "" : "s"}`
+      + ` · ${money(g.thread.costUsd, g.thread.costKnown)} spent in this conversation`,
+    );
+  }
+
+  // ── what the last version changed ─────────────────────────────────────────────────────────────
+  if (g.lastChange) lines.push(`last change: ${g.lastChange}`);
+
+  // ── selection ─────────────────────────────────────────────────────────────────────────────────
+  // THE ONE LINE THAT IS OMITTED RATHER THAN STATED (§8.1). An absent selection is not a fact about
+  // the workspace — it is the ordinary state of the composer, and a line saying "nothing selected"
+  // on every message would be noise in a block a model reads on every turn.
+  if (g.selection) {
+    lines.push(`selection:   step ${g.selection.seq} (${g.selection.type} ${g.selection.name})`);
+  }
+
+  return `JAROKU CONTEXT — the developer's own workspace, as it is right now\n\n${lines.join("\n")}`;
 }
 
 // ── §4: thread-scoped conversation memory ───────────────────────────────────────────────────────

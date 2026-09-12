@@ -1553,6 +1553,20 @@ export type ChatCommand = {
    */
   regenerateOf?: string;
   /**
+   * §8.1: WHAT IS SELECTED IN THE UI, when anything is.
+   *
+   * ONE BOUNDED DESCRIPTOR RATHER THAN THE STEP. `ExplainCommand` carries the whole step — its
+   * input, its output, its error — because explaining one is the whole job. A chat message that
+   * happens to be sent with a step selected needs the block to SAY which step, and nothing more:
+   * §8.1's line is `selection: step 7 (tool_call get_weather)`, and the payload is exactly those
+   * three fields.
+   *
+   * WHEN THIS IS EVEN SET, since §3.3 rule 3 sends a selection plus a question to `explain`: a
+   * message that is neither a question nor fix/re-run phrasing, with a step selected. "hi" with
+   * step 7 open is the ordinary case.
+   */
+  selection?: { seq: number; type: string; name: string };
+  /**
    * §6.2: ANSWER IT ON THIS MODEL INSTEAD.
    *
    * "Regenerating on a different model is a legitimate and useful thing to do, and the two replies
@@ -4478,6 +4492,10 @@ export class WsRelay {
           // the two above it.
           } else if (msg.cmd === "chat" && typeof msg.message === "string") {
             void withContext((ctx) => this.onCommand?.(msg, ctx));
+            // THE SELECTION IS NOT SHAPE-CHECKED HERE, deliberately: it is read by exactly one
+            // function, which reads three fields off it and renders them into a bounded line, and a
+            // malformed one produces a malformed line rather than reaching anything. The fields
+            // that decide where the message GOES are checked above.
           // NO REQUIRED FIELD AT ALL, which is the one guard on this channel with nothing to check:
           // the thread is optional and everything else about the command is its name. A `stopChat`
           // with no thread stops nothing, which is the safe direction and needs no validation to

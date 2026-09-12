@@ -1955,7 +1955,14 @@ export function BuildPane({
        * carrying them here would silently spend an attachment budget on a greeting.
        */
       case "chat":
-        sendChat(trimmed, activeAgentId);
+        sendChat(trimmed, activeAgentId, {
+          // §8.1's `selection:` line, when something is selected. Three fields rather than the
+          // step: the block says WHICH step is open, and `explain` is the route that carries a
+          // step's input, output and error because explaining one is its whole job.
+          ...(selectedStep
+            ? { selection: { seq: selectedStep.seq, type: selectedStep.type, name: selectedStep.name } }
+            : {}),
+        });
         break;
       case "generate": {
         // Never straight to generation: the plan gate is the only way in, so nothing gets

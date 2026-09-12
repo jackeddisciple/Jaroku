@@ -20,7 +20,7 @@
 
 import { readFileSync } from "node:fs";
 
-import { CHAT_MAX_TOKENS, CHAT_MODEL, chatContext } from "./chat.ts";
+import { CHAT_MAX_TOKENS, CHAT_MODEL, chatContext, type ChatGrounding } from "./chat.ts";
 import { CHAT_SYSTEM, chatClosing } from "./prompt.ts";
 import { allPrices, capabilityFor, costFor, isPriced, priceFor } from "./pricing.ts";
 import { EXPLAIN_MODEL, usageFromPartial } from "./explainer.ts";
@@ -148,6 +148,144 @@ console.log("\nthe closing paragraph");
   // context block that has just said there is no agent.
   check("an absent agent is said plainly", /no agent is open/i.test(anon), anon);
   check("...and no name is invented", !/"/.test(anon.split("—")[0] ?? anon), anon);
+}
+
+// --- §8: the grounded context block ----------------------------------------------------------
+//
+// §8 IS WHERE THE NICHE IS, and its own sentence is the standard: "a generic chat wrapper can answer
+// 'what is LangGraph'. Only Jaroku can answer 'why did step 7 fail in this run' or 'what has this
+// agent cost me this week'." What this suite asserts is that the BLOCK contains those answers —
+// whether a model uses them well is a model's business, and whether it is allowed to invent them
+// when they are absent is `CHAT_SYSTEM`'s, asserted above.
+//
+// SO THE TEST IS: for each of §8.2's six questions, is the fact in the block? A block missing one
+// makes that question unanswerable no matter how good the model is — and §8.3 then requires the
+// reply to say so, which is the outcome §8.2 exists to avoid.
+
+const FIXTURE: ChatGrounding = {
+  // §8's own acceptance fixture: "a fixture agent with a failed run, three tools, two versions and
+  // a deployment — with nothing selected."
+  agentName: "weather-agent",
+  version: 14,
+  connectors: 2,
+  mcpTools: 1,
+  deployedUrl: "https://weather-agent.up.railway.app",
+  deployStatus: "live",
+  lastRun: {
+    label: "#a1b2c3d4",
+    status: "error",
+    failedSeq: 7,
+    failedError: "TimeoutError: get_weather timed out after 30s",
+    costUsd: 0.0031,
+    costKnown: true,
+    startedAt: "4m ago",
+  },
+  thread: { turns: 6, costUsd: 0.04, costKnown: true },
+  lastChange: "Added a retry around the weather lookup",
+};
+
+console.log("\n§8.2 — the six questions, answerable with nothing selected");
+{
+  const block = chatContext(FIXTURE);
+  const rows: [string, RegExp, string][] = [
+    ["why did the last run fail?", /failed at step 7 \(TimeoutError: get_weather timed out after 30s\)/,
+      "the failed step and the error, from the trace store"],
+    ["what does this agent do?", /weather-agent · v14 · 3 tools/,
+      "the current version and its tool count"],
+    ["how much has this cost?", /\$0\.0400 spent in this conversation/,
+      "the thread total, and the line SAYS which figure it is"],
+    ["what changed in the last version?", /last change: Added a retry around the weather lookup/,
+      "the version's own instruction summary"],
+    ["what tools does it have?", /\(2 reviewed, 1 from MCP\)/,
+      "§8.2: reviewed vs MCP MARKED, because that distinction is what makes one trustworthy"],
+    ["is it deployed?", /deployed at https:\/\/weather-agent\.up\.railway\.app/,
+      "the deployment record and the live URL"],
+  ];
+  for (const [q, re, why] of rows) {
+    check(`"${q}" — ${why}`, re.test(block), block);
+  }
+  // §8.1: THE SELECTION LINE IS THE ONE THAT IS OMITTED. An absent selection is not a fact about the
+  // workspace; it is the ordinary state of the composer.
+  check("nothing selected means no selection line", !/selection:/.test(block), block);
+  const withSel = chatContext({ ...FIXTURE, selection: { seq: 7, type: "tool_call", name: "get_weather" } });
+  check("...and a selection is named when there is one",
+    /selection:\s+step 7 \(tool_call get_weather\)/.test(withSel), withSel);
+}
+
+// --- §8.3 and §16: what the block says when it does not know ---------------------------------
+//
+// EVERY ONE OF THESE IS AN ATTACK §16 NAMES, and they share one failure: an omitted line is an
+// absence a model fills in. §8.3 treats a wrong answer about the user's own system as the most
+// serious class there is — "the product lying about its own state" — so each of these has to be
+// STATED rather than left out.
+
+console.log("\n§16's grounding attacks");
+{
+  // AN AGENT WITH NO RUNS.
+  const noRuns = chatContext({ ...FIXTURE, lastRun: null });
+  check("an agent that has never run says so", /last run:\s+none — this agent has never been run/.test(noRuns), noRuns);
+  check("...and does not describe a run", !/failed|completed/.test(noRuns), noRuns);
+
+  // A RUN STILL IN FLIGHT. "Completed" would be the product describing something that has not
+  // happened yet.
+  const inFlight = chatContext({
+    ...FIXTURE,
+    lastRun: { ...FIXTURE.lastRun!, status: "running", failedSeq: null, failedError: null, costUsd: null },
+  });
+  check("a run in flight says it is still running", /still running/.test(inFlight), inFlight);
+  check("...and its cost is unknown rather than zero", /unknown/.test(inFlight) && !/\$0\.0000/.test(inFlight), inFlight);
+
+  // A THREAD WITH `agent_id` NULL — the planning stage.
+  const noAgent = chatContext({ agentName: null, thread: { turns: 1, costUsd: null, costKnown: true } });
+  check("no agent is stated plainly", /no agent yet \(the planning stage\)/.test(noAgent), noAgent);
+  check("...and no run line is invented for an agent that does not exist", !/last run:/.test(noAgent), noAgent);
+  check("...and the thread line is still there", /1 turn/.test(noAgent), noAgent);
+
+  // AN UNPRICED MODEL. §8.3: "cost figures obey the existing rule without exception: unknown is
+  // `null`, never `$0.00`, and a total with any unknown component is reported as APPROXIMATE."
+  const unknownCost = chatContext({ ...FIXTURE, thread: { turns: 6, costUsd: null, costKnown: true } });
+  check("an unmeasured thread cost reads as unknown", /unknown spent in this conversation/.test(unknownCost), unknownCost);
+  check("...and never as $0.00", !/\$0\.00\b/.test(unknownCost), unknownCost);
+
+  const partial = chatContext({ ...FIXTURE, thread: { turns: 6, costUsd: 0.04, costKnown: false } });
+  check("a partial total says it is a floor", /at least \$0\.0400/.test(partial), partial);
+  check("...and names why", /some calls were unpriced/.test(partial), partial);
+
+  // AN AGENT WITH NO TOOLS AT ALL, which is different from an unknown tool count.
+  const bare = chatContext({ ...FIXTURE, connectors: 0, mcpTools: 0 });
+  check("no tools is stated, not omitted", /no tools/.test(bare), bare);
+
+  // A DEPLOYMENT THAT IS NOT LIVE. "Not deployed" and "deploying" are different answers to
+  // §8.2's question, and neither is silence.
+  check("an undeployed agent says so",
+    /not deployed/.test(chatContext({ ...FIXTURE, deployedUrl: null, deployStatus: null })));
+  check("...and one mid-deploy says which",
+    /deployment building/.test(chatContext({ ...FIXTURE, deployedUrl: null, deployStatus: "building" })));
+
+  // A QUESTION WHOSE ANSWER GENUINELY IS NOT IN THE BLOCK. The block cannot answer it, which is
+  // the point — what makes the reply honest is `CHAT_SYSTEM`'s rule 1, asserted above, and the
+  // block containing no material that could be mistaken for the answer.
+  check("the block says nothing about an agent's author", !/created by|author/i.test(chatContext(FIXTURE)));
+  check("...nor about a week's spend it was never given",
+    !/this week|last 7 days/i.test(chatContext(FIXTURE)));
+}
+
+console.log("\nthe block is bounded and labelled");
+{
+  // BOUNDED, like every other model-facing text in this codebase (v0.2.1 bounded MCP server text
+  // for the same reason). The inputs that could grow it without limit are the error and the
+  // version summary, and both are trimmed by the caller — asserted here on the RENDERER, because a
+  // caller that forgot would produce a block with a traceback in it.
+  const huge = chatContext({
+    ...FIXTURE,
+    lastRun: { ...FIXTURE.lastRun!, failedError: "x".repeat(4000) },
+    lastChange: "y".repeat(4000),
+  });
+  check("a block with enormous inputs stays readable", huge.length < 9000, huge.length);
+  check("it is labelled as the developer's own workspace", /the developer's own workspace/.test(chatContext(FIXTURE)));
+  // AND IT NEVER CLAIMS TO BE COMPLETE. A block that read as "everything Jaroku knows" would
+  // invite the model to answer from its absence.
+  check("nothing in it claims completeness", !/all |every |complete/i.test(chatContext(FIXTURE).split("\n")[0] ?? ""));
 }
 
 // --- §6.1: what a stopped answer cost --------------------------------------------------------
