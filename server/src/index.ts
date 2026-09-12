@@ -3814,8 +3814,8 @@ async function openVariant(
   modelId: string,
   provider: string,
   effort: EffortPlan | null,
-): Promise<(outcome: VariantOutcome) => void> {
-  if (!turnId) return () => {};
+): Promise<(outcome: VariantOutcome) => Promise<void>> {
+  if (!turnId) return () => Promise.resolve();
   const startedAt = Date.now();
   try {
     const variant = await turnVariants.begin(ctx, turnId, {
@@ -3824,16 +3824,33 @@ async function openVariant(
       effortRequested: effort?.supported ? effort.requested : null,
       effortApplied: effort?.supported ? effort.applied : null,
     });
+    /**
+     * EVERY WRITE TO THIS ROW IS CHAINED, AND THE FUNCTION HANDS BACK THE CHAIN.
+     *
+     * IT USED TO RETURN `void` AND THAT WAS A LIVE BUG. A stream settles this row twice — `onUsage`
+     * writes the counts and the cost, `onDone` writes the body — and the caller that renders the
+     * turn then READS THE ROW BACK, because §10 requires the figure on screen and the figure in the
+     * table to be the same number. With nothing to await, the read raced its own write: against a
+     * real provider the `done` event went out carrying `turn_cost_usd: null` and no token count
+     * while the row already held 888 in, 40 out and $0.002176. §13.1 says "this line IS where cost
+     * lives", and on every chat turn it was empty.
+     *
+     * CHAINED RATHER THAN AWAITED INDIVIDUALLY, so two settles on one row cannot interleave and a
+     * caller that wants to read back has one promise to wait on rather than a list.
+     */
+    let chain: Promise<void> = Promise.resolve();
     return (outcome) => {
-      void turnVariants
-        // THE DURATION IS MEASURED HERE rather than taken from the caller, because "dispatch to end
-        // of stream" is §6.4's definition and this is the only place that saw both ends.
-        .settle(ctx, variant.id, { durationMs: outcome.durationMs ?? Date.now() - startedAt, ...outcome })
-        .catch((err) => console.warn(`[variants] could not settle ${variant.id}:`, (err as Error)?.message ?? err));
+      chain = chain.then(() =>
+        turnVariants
+          // THE DURATION IS MEASURED HERE rather than taken from the caller, because "dispatch to
+          // end of stream" is §6.4's definition and this is the only place that saw both ends.
+          .settle(ctx, variant.id, { durationMs: outcome.durationMs ?? Date.now() - startedAt, ...outcome })
+          .catch((err) => console.warn(`[variants] could not settle ${variant.id}:`, (err as Error)?.message ?? err)));
+      return chain;
     };
   } catch (err) {
     console.warn(`[variants] could not open a variant on ${turnId}:`, (err as Error)?.message ?? err);
-    return () => {};
+    return () => Promise.resolve();
   }
 }
 
@@ -13708,7 +13725,7 @@ async function chatWithJaroku(
           // possible at all. On `done` rather than per delta — one write per answer instead of one
           // per token — and settled even when it is empty, because an answer that said nothing is a
           // fact about that answer and `settle` leaves `undefined` alone rather than writing null.
-          settle({ body: answer });
+          const written = settle({ body: answer });
           // §6.2's TWO NUMBERS, read back from the rows rather than counted in memory, so the
           // switcher's `‹ 2/3 ›` is the table's own answer. Absent when there is one variant, which
           // is what collapses the slot rather than rendering `‹ 1/1 ›` under every turn.
@@ -13722,7 +13739,14 @@ async function chatWithJaroku(
           // numbers on screen and the numbers in the table are then the same numbers, and §10's
           // blocker-class defect — "a mismatch between a thread's row total and the sum of its
           // turns" — cannot be introduced by a second arithmetic on the way out.
-          void Promise.all([variantCounts(ctx, turn), spentOnTurn(ctx, turn)]).then(([counts, spent]) =>
+          //
+          // AFTER THE WRITES LAND, which is the half a live run found missing. `settle` chains every
+          // write to this row and hands back that chain, so awaiting it here is what makes the
+          // read-back read what this answer actually recorded rather than the empty row `begin`
+          // opened. Without it the line renders "—" for a cost the table already holds.
+          void written
+            .then(() => Promise.all([variantCounts(ctx, turn), spentOnTurn(ctx, turn)]))
+            .then(([counts, spent]) =>
             relay.broadcastReply(
               ctx,
               {

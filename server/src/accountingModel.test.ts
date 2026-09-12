@@ -158,5 +158,34 @@ console.log("\n§11.2 reaches the effort adapter too");
     !/await effortForThread\(ctx, \w+, GENERATION_MODEL\b/.test(index), "");
 }
 
+
+// --- A LIVE RUN: the read-back must not race its own write ------------------------------------
+//
+// §10's RULE IS THAT THE FIGURE ON SCREEN AND THE FIGURE IN THE TABLE ARE THE SAME NUMBER, and the
+// chat route honours it by reading the row back rather than doing a second arithmetic on the way
+// out. Against a real provider that read LOST: `settle` was fire-and-forget, so the `done` event
+// went out carrying `turn_cost_usd: null` and no token count while the row already held 888 in, 44
+// out and $0.002216. Every chat turn rendered "—" for a cost the database knew.
+//
+// SOURCE-READ, because reproducing it needs a provider, a socket and a database. What is checkable
+// here is that the writes are awaited before the read and that both payloads carry the figures.
+
+console.log("\n§10 — the read-back waits for the write");
+{
+  const index = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+
+  // `settle` HANDS BACK ITS CHAIN, so a caller can wait for it. A `void` return is what made the
+  // race possible, and there is nothing a caller could have done about it.
+  check("openVariant returns a settle that can be awaited",
+    /Promise<\(outcome: VariantOutcome\) => Promise<void>>/.test(index), "openVariant's signature");
+  check("...and its writes are chained rather than fired in parallel",
+    /chain = chain\.then\(\(\) =>/.test(index), "the chain");
+
+  // THE PAYLOAD WAITS. One `.then` off the settle chain before the read-back.
+  check("the done payload reads back after its write lands",
+    /void written\s*\n\s*\.then\(\(\) => Promise\.all\(\[variantCounts\(ctx, turn\), spentOnTurn\(ctx, turn\)\]\)\)/.test(index),
+    "done's read-back");
+}
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 process.exit(fail === 0 ? 0 : 1);
