@@ -1420,6 +1420,15 @@ jobs:
           # loop. The anchors are the load-bearing part: a rule matching "thanks" anywhere would
           # send "thanks, now fix the retry logic" to a route that cannot edit anything.
           npm run test:chat-route
+          # §9'S INDICATOR, and §16.2's regression check beside it. Both properties have a wrong
+          # answer that looks right on screen for the first second: `animate-pulse` fades to 50% and
+          # reads as DISABLED — v0.2.2 replaced it across nine live elements for that reason, and a
+          # new element using it reintroduces a fixed bug — and an indicator that sat beside the
+          # text rather than giving way to it would keep saying "Thinking…" above a finished
+          # paragraph. The animate-pulse half sweeps the whole client, with comments stripped first:
+          # three files explain at length why it is NOT used, and a raw search reads every one of
+          # those sentences as a relapse.
+          npm run test:thinking-indicator
           # §5'S STATE MACHINE, and every wrong answer in it looks plausible on screen. A dropped
           # socket leaving a turn `streaming` blinks a caret under a sentence that ended mid-word,
           # for ever; marking it `done` presents half a sentence as the whole answer. A failure that

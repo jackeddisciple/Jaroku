@@ -474,17 +474,55 @@ function ReplyStopped({ turn }: { turn: ReplyTurn }) {
   );
 }
 
+/**
+ * §9: THE THINKING INDICATOR, while there is nothing yet to read.
+ *
+ * THE EXISTING INDICATOR FROM v0.1.11, NOT A SECOND VISUAL LANGUAGE FOR WAITING. `PlanCard` says
+ * "Planning…" in `text-run` while a plan streams; this is the same sentence in the same colour at
+ * the same size, and §9's instruction is exactly that: "reuse the existing indicator from v0.1.11.
+ * Do not introduce a second visual language for waiting."
+ *
+ * `stream-pulse`, NEVER `animate-pulse` — §9 again, and v0.2.2's reason: "v0.2.2 replaced the
+ * latter across nine live elements because fading to 50% reads as disabled. A new element using the
+ * wrong one reintroduces a fixed bug." `stream-pulse` breathes between full and near-full opacity;
+ * `animate-pulse` fades to half, which on a live element reads as a control that has been switched
+ * off. `test:thinking-indicator` is the suite that would catch a relapse.
+ *
+ * IT GIVES WAY THE MOMENT THE FIRST TOKEN LANDS, which is the clause that decides where it lives:
+ * §9's "the indicator gives way to streamed text the moment the first token lands; it does not sit
+ * alongside partial text." So the caller renders this OR the prose, never both — where the plan
+ * card keeps its own word above the streaming text, because a plan is a card being built and this
+ * is a sentence being spoken.
+ *
+ * AND NO STATIC SPINNER ANYWHERE IN THIS PATH (§9). This product has never had one; the reason is
+ * the same reason `stream-pulse` exists — a spinner says "busy" and a pulse says "arriving", and
+ * only one of those is true of a stream.
+ */
+function ThinkingIndicator() {
+  return (
+    <div className="text-label text-run animate-stream-pulse motion-reduce:animate-none">
+      Thinking…
+    </div>
+  );
+}
+
 function ReplyTurnView({ turn }: { turn: ReplyTurn }) {
   // The store has the whole answer as of this frame; this is how much of it is painted. See
   // lib/useStreamedText.ts — an explanation arrives from the model in clause-sized chunks, and
   // without this the caret sits still for a second and then a paragraph appears at once.
   const text = useStreamedText(turn.text, turn.status === "streaming");
+  // §9: WAITING AND ARRIVING ARE DIFFERENT STATES AND ONLY ONE IS ON SCREEN AT A TIME. Before this
+  // the empty-and-streaming case rendered a bare `▋` on a blank line — which is a caret with no
+  // text in front of it, and reads as a cursor rather than as work happening.
+  const waiting = turn.status === "streaming" && text.length === 0;
   return (
     <div className="text-label whitespace-pre-wrap break-words text-ink">
-      {turn.citations && turn.citations.length > 0
-        ? <CitedProse text={text} cites={turn.citations} />
-        : <Prose text={text} />}
-      {turn.status === "streaming" && (
+      {waiting ? <ThinkingIndicator /> : (
+        turn.citations && turn.citations.length > 0
+          ? <CitedProse text={text} cites={turn.citations} />
+          : <Prose text={text} />
+      )}
+      {turn.status === "streaming" && !waiting && (
         <span className="animate-stream-pulse text-faint motion-reduce:animate-none">▋</span>
       )}
       <ReplyStopped turn={turn} />

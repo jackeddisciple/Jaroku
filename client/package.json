@@ -24,6 +24,7 @@
     "test:menu-clip": "tsx src/components/menuClip.test.ts",
     "test:graph-icons": "tsx src/components/graphIcons.test.ts",
     "test:chat-stream": "tsx src/store/chatStream.test.ts",
+    "test:thinking-indicator": "tsx src/components/thinkingIndicator.test.ts",
     "test:chat-route": "tsx src/lib/chatRoute.test.ts",
     "test:composer-bar": "tsx src/lib/composerBar.test.ts",
     "test:recent-agent": "tsx src/lib/recentAgent.test.ts",
