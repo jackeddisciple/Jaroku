@@ -13792,7 +13792,7 @@ async function chatWithJaroku(
           // prices them — so a stopped answer is neither free nor charged for tokens it never
           // produced. No counts at all means no cost written, which leaves the column null:
           // unknown, not zero.
-          settle({
+          const stoppedWritten = settle({
             body: answer,
             // §6.1: "RETAINS THE PARTIAL TURN MARKED AS STOPPED." The body is the retaining half
             // and this is the marking — the only caller that can know, because a completion
@@ -13823,7 +13823,43 @@ async function chatWithJaroku(
               provider,
             });
           }
-          relay.broadcastReply(ctx, { type: "stopped", agentId: cmd.agentId ?? "" }, thread);
+          /**
+           * §10 ON A STOPPED TURN, AND A LIVE RUN IS WHAT FOUND THIS MISSING.
+           *
+           * This event used to carry nothing but the agent id. The record was complete — 891 in, 2
+           * out, $0.001802, `stopped = true`, the partial body — and the screen showed none of it:
+           * `metaForTurn` returns null for a turn with no usage, so stopping an answer left a turn
+           * with no model, no duration, no token count and no cost under it.
+           *
+           * §10 IS EXPLICIT THAT THIS IS THE CASE THAT MATTERS: "a stopped, interrupted or failed
+           * turn records the cost actually incurred." Recording it and not showing it satisfies
+           * half the sentence, and the half it drops is the one a person reads.
+           *
+           * THE SAME PAYLOAD `done` SENDS, read back from the row after the writes land — so a
+           * stopped turn and a finished one describe themselves the same way, and the figure on
+           * screen is the figure in the table.
+           */
+          void stoppedWritten
+            .then(() => Promise.all([variantCounts(ctx, turn), spentOnTurn(ctx, turn)]))
+            .then(([counts, spent]) =>
+              relay.broadcastReply(
+                ctx,
+                {
+                  type: "stopped",
+                  agentId: cmd.agentId ?? "",
+                  usage: {
+                    model, provider,
+                    ...effortFields(effort),
+                    ...counts,
+                    ...spent,
+                    route: "chat",
+                    ...(typeof cmd.routeReason === "string" && cmd.routeReason.trim()
+                      ? { route_reason: cmd.routeReason.trim().slice(0, 200) }
+                      : {}),
+                  },
+                },
+                thread,
+              ));
         },
         /**
          * §7: A PROVIDER FAILURE, CLASSIFIED, NAMED AND ACTIONABLE — never a dead turn.

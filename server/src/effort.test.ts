@@ -345,14 +345,20 @@ console.log("\nand the adapter is actually called, at every dispatch that shippe
   // §6.2's TWO FIELDS, so the chip reports what was spent and the clamp marker can fire at all.
   check("the usage payload carries both levels", /function effortFields\(/.test(index));
   check("...requested AND applied, never one of them", /effort: plan\.applied, effort_requested: plan\.requested/.test(index));
-  // FIVE SINCE §6.2: the plan, the generation, the edit, the reply and the chat turn. The fifth
-  // arrived with the sibling switcher — a regenerated chat answer has to report the effort IT ran
-  // at, not the conversation's current setting, which is the same reason every metadata column on
-  // `turn_variants` is per-variant. This counter is why the fourth was noticed here rather than by
-  // somebody looking at a chip, and the fifth is exactly the same shape of omission.
+  // SIX SINCE A LIVE RUN: the plan, the generation, the edit, the reply, the chat turn that
+  // finished and the chat turn that was STOPPED. The fifth arrived with the sibling switcher — a
+  // regenerated chat answer has to report the effort IT ran at, not the conversation's current
+  // setting, which is the same reason every metadata column on `turn_variants` is per-variant.
+  //
+  // THE SIXTH IS THE ONE THIS COUNTER WOULD HAVE CAUGHT AND DIDN'T, because the payload it belongs
+  // to did not exist: stopping an answer broadcast `{ type: "stopped", agentId }` and nothing else,
+  // so there was no usage object to leave a level out of. A real stop against a real provider
+  // showed a turn with no metadata row at all — no model, no duration, no tokens, no cost — while
+  // the row held 891 in, 2 out and $0.001802. An omission a counter cannot see is the argument for
+  // driving the thing rather than only reading it.
   check(
     "...on the plan, the generation, the edit, the reply and the chat turn",
-    (index.match(/\.\.\.effortFields\(/g) ?? []).length === 5,
+    (index.match(/\.\.\.effortFields\(/g) ?? []).length === 6,
     String((index.match(/\.\.\.effortFields\(/g) ?? []).length),
   );
   // AND THE SLIDER'S STOPS RIDE THE CATALOGUE, from the same adapter — never a client's own table.

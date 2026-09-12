@@ -181,10 +181,24 @@ console.log("\n§10 — the read-back waits for the write");
   check("...and its writes are chained rather than fired in parallel",
     /chain = chain\.then\(\(\) =>/.test(index), "the chain");
 
-  // THE PAYLOAD WAITS. One `.then` off the settle chain before the read-back.
+  // BOTH PAYLOADS WAIT. One `.then` off the settle chain before the read-back, on the done path
+  // and on the stopped path.
   check("the done payload reads back after its write lands",
     /void written\s*\n\s*\.then\(\(\) => Promise\.all\(\[variantCounts\(ctx, turn\), spentOnTurn\(ctx, turn\)\]\)\)/.test(index),
     "done's read-back");
+  check("the stopped payload does too",
+    /void stoppedWritten\s*\n\s*\.then\(\(\) => Promise\.all\(\[variantCounts\(ctx, turn\), spentOnTurn\(ctx, turn\)\]\)\)/.test(index),
+    "stopped's read-back");
+
+  // AND THE STOPPED EVENT DESCRIBES ITSELF THE WAY A FINISHED ONE DOES. A turn with no usage gets
+  // no metadata row at all — `metaForTurn` returns null — so an empty payload is an invisible turn,
+  // which is what a real stop produced while the row held 891 in, 2 out and $0.001802.
+  const stoppedAt = index.indexOf('type: "stopped"');
+  check("the stopped event exists", stoppedAt > 0, String(stoppedAt));
+  const payload = index.slice(Math.max(0, stoppedAt - 400), stoppedAt + 500);
+  for (const field of ["model, provider", "effortFields(effort)", "...counts", "...spent", 'route: "chat"']) {
+    check(`...and carries ${field}`, payload.includes(field), payload.slice(0, 200));
+  }
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
