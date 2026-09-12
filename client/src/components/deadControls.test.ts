@@ -143,6 +143,52 @@ console.log("\nand the one that did is gone rather than hidden");
   );
 }
 
+
+// --- §16.1: tab through every turn action ------------------------------------------------------
+//
+// THE ATTACK IS A FOCUS-ORDER ONE and the property behind it is that every pressable thing in the
+// turn-action row is a REAL button. A styled `div` with an `onClick` looks identical, works with a
+// mouse, and is invisible to Tab — so the row would be unreachable for anybody not using one, and
+// `chatKeys` deliberately leaves `Tab` alone (`press("Tab") === null`) precisely so the browser's
+// own traversal is what moves through it.
+//
+// THE CLIENT-WIDE HALF IS `tabIndex={-1}` AND NOT "a div with an onClick", which this suite
+// originally swept for and which found twelve pre-existing matches, every one of them correct on
+// inspection: a backdrop scrim carrying `aria-hidden` whose keyboard path is Esc, and wrappers
+// whose focusable child is the actual control. A `div` with a handler is a defect only when it IS
+// the control, and that is not decidable from the tag alone — so the broad sweep would have been a
+// rule that fires on the right shape for the wrong reason.
+
+console.log("\n§16.1 — every pressable thing is reachable by Tab");
+{
+  // NOTHING IS TAKEN OUT OF THE TAB ORDER, swept over the whole client. This is the form of the
+  // rule that IS decidable from the text: `tabIndex={-1}` on a button is how a row becomes
+  // mouse-only without looking any different.
+  const negative: string[] = [];
+  for (const { path, text } of FILES) {
+    for (const m of text.matchAll(/<button\b[^>]{0,600}?tabIndex=\{-1\}/gs)) negative.push(`${path}: ${m[0].slice(0, 40)}`);
+  }
+  check(negative.length === 0, `no button is removed from the tab order${negative.length ? ` — ${negative.join("; ")}` : ""}`);
+
+  // THE TURN-ACTION ROW SPECIFICALLY, since that is the surface §16.1 names. Every control in it
+  // goes through `ActionButton`, which renders a `<button type="button">` with an `aria-label` and
+  // a focus ring — so the row is traversable and the focused control is visible while traversing.
+  const actions = FILES.find((f) => f.path.endsWith("composer/TurnActions.tsx"));
+  check(actions !== undefined, "found the turn-action row");
+  if (actions) {
+    check(/type="button"/.test(actions.text), "its shared control is a real button");
+    check(/aria-label=/.test(actions.text), "...with an accessible name");
+    check(/focus-visible:shadow-focusring/.test(actions.text), "...and a visible focus ring");
+    check(!/tabIndex/.test(actions.text), "...and nothing in it touches tabIndex");
+    // AND NO CONTROL IN THE ROW IS A BARE ELEMENT. Every `onClick` in the file either lands on a
+    // real `<button>` or is passed as a prop to one — asserted by counting, because a new control
+    // added as a `div` would break the equality rather than needing a pattern to describe it.
+    const handlers = [...actions.text.matchAll(/onClick=/g)].length;
+    const onBare = [...actions.text.matchAll(/<(div|span)\b[^>]{0,600}?onClick=/gs)].length;
+    check(handlers > 0 && onBare === 0, `all ${handlers} handlers in the row are on buttons or props (${onBare} bare)`);
+  }
+}
+
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
 // Reached through globalThis, like every other suite here: the client has no @types/node on
 // purpose, so that a component touching `process` fails to compile rather than fails to run.
