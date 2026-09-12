@@ -709,5 +709,72 @@ console.log("\n§16 — a dropped socket interrupts every live answer");
   check("...and the live one is interrupted", (inB()[0] as { status: string }).status === "interrupted");
 }
 
+
+// --- A LIVE RELAUNCH: the metadata row is rebuilt from the record ------------------------------
+//
+// FOUND BY REOPENING A REAL THREAD. `hydrate` used to synthesise the model, the provider and the
+// switcher's two numbers and nothing else, so a reopened conversation rendered
+//
+//   ◆ claude-sonnet-5   ‹ 2/2 ›
+//
+// under an answer whose row held `medium`, 8796ms, 1,594 tokens and $0.008788. Four of the line's
+// eight slots vanished on every reload — §6.2's effort, §6.4's duration and both of §13.1's
+// figures — while the table held all of them. §13.1 says "this line IS where cost lives."
+
+console.log("\n§6.2, §6.4, §13.1 — the line survives a reload");
+{
+  reset();
+  store().hydrate(T, [{
+    id: "i1", kind: "message", ref_id: null, role: "user",
+    body: "explain the retry", created_at: "2026-09-12T10:00:00.000Z",
+    answers: [
+      { ordinal: 1, body: "A first answer.", model: "claude-haiku-4-5", provider: "anthropic",
+        effort: null, effortRequested: null, durationMs: 1262, tokensIn: 1570, tokensOut: 14, costUsd: 0.00328 },
+      { ordinal: 2, body: "A second, on a different model.", selected: true,
+        model: "claude-sonnet-5", provider: "anthropic", effort: "medium", effortRequested: "high",
+        durationMs: 8796, tokensIn: 894, tokensOut: 700, costUsd: 0.008788 },
+    ],
+  }]);
+  const r = replies()[0] as { usage?: Record<string, unknown>; siblings?: unknown[] } | undefined;
+  const u = r?.usage ?? {};
+  check("the selected sibling's model is on the line", u["model"] === "claude-sonnet-5", JSON.stringify(u));
+  check("...its effort", u["effort"] === "medium", String(u["effort"]));
+  // §6.2's CLAMP IS DERIVABLE, which is the reason both levels are kept rather than one.
+  check("...and what was asked for, so a clamp still shows",
+    u["effort_requested"] === "high", String(u["effort_requested"]));
+  check("...its duration", u["duration_ms"] === 8796, String(u["duration_ms"]));
+  check("...its token total", u["total_tokens"] === 1594, String(u["total_tokens"]));
+  check("...and its cost", u["turn_cost_usd"] === 0.008788, String(u["turn_cost_usd"]));
+  check("...with the switcher's numbers beside them",
+    u["variant_ordinal"] === 2 && u["variant_total"] === 2, JSON.stringify(u));
+  check("...and both siblings still reachable", r?.siblings?.length === 2, String(r?.siblings?.length));
+
+  // A TURN FROM BEFORE THESE FIELDS WERE SENT measures nothing, and nothing is invented for it:
+  // `presentSlots` collapses a null slot, and a zero would claim the turn was instant and free.
+  reset();
+  store().hydrate(T, [{
+    id: "i1", kind: "message", ref_id: null, role: "user", body: "old turn",
+    created_at: "2026-09-12T10:00:00.000Z", answers: [{ ordinal: 1, body: "An answer from before." }],
+  }]);
+  const old = (replies()[0] as { usage?: Record<string, unknown> } | undefined)?.usage ?? {};
+  check("an answer with no figures claims none",
+    old["duration_ms"] === undefined && old["total_tokens"] === undefined, JSON.stringify(old));
+  check("...and its cost is unknown rather than zero", old["turn_cost_usd"] === null, String(old["turn_cost_usd"]));
+
+  // HALF-MEASURED IS STILL MEASURED: a stop before the first output token has an input count and
+  // no output one, and the total is what it is rather than absent.
+  reset();
+  store().hydrate(T, [{
+    id: "i1", kind: "message", ref_id: null, role: "user", body: "stopped early",
+    created_at: "2026-09-12T10:00:00.000Z",
+    answers: [{ ordinal: 1, body: "The cheapest is", stopped: true, model: "claude-sonnet-5",
+                durationMs: 3170, tokensIn: 891, tokensOut: 2, costUsd: 0.001802 }],
+  }]);
+  const st = replies()[0] as { status: string; usage?: Record<string, unknown> };
+  check("a stopped turn keeps its marker and its figures",
+    st.status === "stopped" && st.usage?.["total_tokens"] === 893 && st.usage?.["turn_cost_usd"] === 0.001802,
+    JSON.stringify({ status: st.status, usage: st.usage }));
+}
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 (globalThis as { process?: { exit(code: number): void } }).process?.exit(fail === 0 ? 0 : 1);

@@ -5018,6 +5018,26 @@ const relay = new WsRelay({
             // §6.1: AND WHETHER IT FINISHED (migration 077). Without this a reopened thread
             // rebuilt a deliberately stopped half-answer as a completed one.
             stopped: v.stopped,
+            /**
+             * §6.2, §6.4, §13.1: THE FIGURES THE LINE IS MADE OF, and a live relaunch is what
+             * found them missing.
+             *
+             * Every one of these is recorded per variant and none of them was sent, so a reopened
+             * thread rendered `◆ claude-sonnet-5  ‹ 2/2 ›` and nothing else: no effort, no
+             * duration, no token count, no cost — on turns whose rows held `medium`, 8796ms, 1594
+             * tokens and $0.008788. §13.1 says "this line IS where cost lives", and after a reload
+             * it did not live anywhere.
+             *
+             * THE SAME NAMES THE LIVE PAYLOAD USES, so `hydrate` fills `usage` with the same shape
+             * `done` delivers and the row renders identically whether the turn just arrived or was
+             * read back a week later.
+             */
+            effort: v.effort_applied,
+            effortRequested: v.effort_requested,
+            durationMs: v.duration_ms,
+            tokensIn: v.tokens_in,
+            tokensOut: v.tokens_out,
+            costUsd: v.cost_usd,
             // §13.3: EACH SIBLING'S OWN MODEL, so two answers generated on different models show
             // different chips after a reload as well as during the session. Null where nothing
             // recorded one, which is honest — a backfilled variant has no model and a chip that

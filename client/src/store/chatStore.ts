@@ -479,35 +479,44 @@ export const useChatStore = create<ChatState>((set) => ({
               id: turnId(), itemId: it.id, role: "jaroku", kind: "reply",
               status: shown.stopped ? "stopped" : "done",
               agentId, text: shown.body,
-              ...(answered.length > 1
-                ? {
-                  siblings: answered,
-                  // THE SWITCHER'S NUMBERS, from the record. `usage` is where the metadata row reads
-                  // them, and a reloaded turn had none — so a regenerated turn came back looking
-                  // like a single answer with two bodies nobody could reach.
-                  usage: {
-                    // `cost_usd: null` AND NOT `0` — v0.1.9's rule, and §16.2 re-checks it. These
-                    // counts are a scaffold for the switcher's numbers, not a measurement: a
-                    // rehydrated turn's tokens and cost are not in this row. A zero here is a
-                    // figure nobody measured sitting in the field a cost renderer would read, and
-                    // `—` is what the formatter already does with null.
-                    input_tokens: 0, output_tokens: 0,
-                    cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: null,
-                    variant_ordinal: answered.indexOf(shown) + 1,
-                    variant_total: answered.length,
-                    ...(shown.model ? { model: shown.model } : {}),
-                    ...(shown.provider ? { provider: shown.provider } : {}),
-                  },
-                }
-                : shown.model
-                  ? {
-                    usage: {
-                      input_tokens: 0, output_tokens: 0,
-                      cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: null,
-                      model: shown.model, ...(shown.provider ? { provider: shown.provider } : {}),
-                    },
-                  }
+              ...(answered.length > 1 ? { siblings: answered } : {}),
+              /**
+               * §6.2, §6.4 AND §13.1: THE LINE, REBUILT FROM THE RECORD.
+               *
+               * A LIVE RELAUNCH IS WHAT FOUND THIS. This used to synthesise the switcher's two
+               * numbers and the model and nothing else, so a reopened conversation rendered
+               * `◆ claude-sonnet-5  ‹ 2/2 ›` under an answer whose row held `medium`, 8796ms, 1594
+               * tokens and $0.008788. §13.1 says "this line IS where cost lives" and after a reload
+               * it lived nowhere; §6.2's effort and §6.4's duration went the same way.
+               *
+               * `?? null` THROUGHOUT, NEVER `?? 0`. An answer from before these fields were sent
+               * measured nothing, and `presentSlots` collapses a null slot while a zero would claim
+               * the turn was instant and free — v0.1.9's rule, which §16.2 re-checks.
+               *
+               * `total_tokens` IS THE SUM AND IS ABSENT WHEN NEITHER HALF WAS MEASURED, which is
+               * what `spentOnTurn` does on the live path — so the same turn reads the same either
+               * way, whether it just arrived or was read back a week later.
+               */
+              usage: {
+                input_tokens: shown.tokensIn ?? 0,
+                output_tokens: shown.tokensOut ?? 0,
+                cache_read_input_tokens: 0,
+                cache_creation_input_tokens: 0,
+                cost_usd: null,
+                ...(answered.length > 1
+                  ? { variant_ordinal: answered.indexOf(shown) + 1, variant_total: answered.length }
                   : {}),
+                ...(shown.model ? { model: shown.model } : {}),
+                ...(shown.provider ? { provider: shown.provider } : {}),
+                ...(shown.effort ? { effort: shown.effort } : {}),
+                ...(shown.effortRequested ? { effort_requested: shown.effortRequested } : {}),
+                ...(shown.durationMs !== null && shown.durationMs !== undefined
+                  ? { duration_ms: shown.durationMs } : {}),
+                ...(shown.tokensIn !== null && shown.tokensIn !== undefined)
+                  || (shown.tokensOut !== null && shown.tokensOut !== undefined)
+                  ? { total_tokens: (shown.tokensIn ?? 0) + (shown.tokensOut ?? 0) } : {},
+                turn_cost_usd: shown.costUsd ?? null,
+              },
             }];
 
           if (it.kind === "message" && it.role === "user") {

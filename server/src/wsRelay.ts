@@ -2699,6 +2699,20 @@ export interface ThreadItemView {
      * what they read as then, and inventing a marker would mark answers nobody stopped.
      */
     stopped?: boolean;
+    /**
+     * §6.2, §6.4 and §13.1's FIGURES, so the metadata row survives a reload.
+     *
+     * All six are recorded per variant and none of them used to be sent, so a reopened thread
+     * rendered the model and the switcher and nothing else — no effort, no duration, no tokens, no
+     * cost, on turns whose rows held all four. `null` where the row holds null, which is the
+     * honest gap: a backfilled variant measured nothing and a zero would claim it was free.
+     */
+    effort?: string | null;
+    effortRequested?: string | null;
+    durationMs?: number | null;
+    tokensIn?: number | null;
+    tokensOut?: number | null;
+    costUsd?: number | null;
     /** §13.3: the model that produced THIS sibling. "Regenerating on a different model must be
      *  visible as exactly that" — so each answer names its own rather than sharing the turn's. */
     model?: string | null;
