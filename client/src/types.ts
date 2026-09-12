@@ -1234,6 +1234,15 @@ export interface ThreadItemView {
     body: string;
     /** §6.2: the one the conversation means (migration 074). False on a turn nobody switched. */
     selected?: boolean;
+    /**
+     * §6.1: THIS ANSWER WAS STOPPED PARTWAY (migration 077).
+     *
+     * The client rebuilds a reply turn from this row, and without the flag it rebuilt every kept
+     * answer as a finished one — so a half-answer somebody cut off read as the whole reply after a
+     * reload. Absent on answers from before the column existed, which reads as finished: that is
+     * what they read as then, and inventing a marker would mark answers nobody stopped.
+     */
+    stopped?: boolean;
     /** §13.3: the model that produced THIS sibling. "Regenerating on a different model must be
      *  visible as exactly that" — so each answer names its own rather than sharing the turn's. */
     model?: string | null;

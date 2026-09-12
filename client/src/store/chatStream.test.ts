@@ -231,8 +231,9 @@ console.log("\na reconnect");
   // record — which is what a reload has and what makes the switcher's numbers and each answer's
   // model survive one.
   check("...and the other is switchable", rs[1]?.siblings?.length === 2, rs[1]?.siblings);
-  // A REHYDRATED ANSWER IS A RECORD, NOT A STREAM THAT STOPPED.
-  check("rehydrated answers are done", rs.every((r) => r.status === "done"), rs.map((r) => r.status));
+  // A REHYDRATED ANSWER IS A RECORD, NOT A STREAM THAT STOPPED — for answers that FINISHED. The
+  // ones that were stopped come back as stopped since migration 077; see the §16 section below.
+  check("rehydrated answers that finished are done", rs.every((r) => r.status === "done"), rs.map((r) => r.status));
   check("every turn keeps its durable id", rs.every((r) => Boolean(r.itemId)), rs.map((r) => r.itemId));
   // THE NON-MESSAGE ITEM STILL STUBS, unchanged.
   check("a run still rehydrates as a note",
@@ -569,6 +570,73 @@ console.log("\na regeneration re-evaluates the band");
   check("...and the message it was asked with is kept",
     reply()?.askedWith === "something to watch my inbox", String(reply()?.askedWith));
 }
+
+
+// --- §16.1's DESKTOP ROW: relaunch with an interrupted turn -----------------------------------
+//
+// THE BUG. `hydrate` rebuilt every kept answer as `status: "done"`, with a comment explaining that
+// "an answer read out of a table is not a stream that stopped". That is right about a dropped
+// SOCKET and wrong about a STOP, and the two had been collapsed:
+//
+//   §6.1 keeps a stopped answer "marked as stopped, never discards what arrived". `onStopped`
+//   settles the variant with the partial prose and prices what it spent — so the body survived a
+//   relaunch and the marking did not, because there was no column for it.
+//
+// SO THE GESTURE THAT REPRODUCED IT WAS TWO STEPS: stop an answer, reopen the app. The half-answer
+// came back with no marker, reading as the whole reply — §5's own sentence, "a short answer and a
+// cut-off answer are different things, and only one of them is safe to read as the reply", in the
+// case where there is no longer a stream to interrupt. Migration 077 adds the column.
+
+console.log("\n§16 — a stopped answer survives a relaunch as stopped");
+{
+  reset();
+  store().hydrate(T, [
+    {
+      id: "i1", kind: "message", ref_id: null, role: "user",
+      body: "summarise every run from last week", created_at: "2026-09-12T10:00:00.000Z",
+      answers: [{ ordinal: 1, body: "The first three runs all failed at step 7 because the", stopped: true }],
+    },
+    {
+      id: "i2", kind: "message", ref_id: null, role: "user",
+      body: "and the cost?", created_at: "2026-09-12T10:01:00.000Z",
+      answers: [{ ordinal: 1, body: "Four cents." }],
+    },
+  ]);
+  const rs = replies();
+  check("both answers come back", rs.length === 2, rs.length);
+  check("the stopped one is marked stopped", rs[0]?.status === "stopped", rs[0]?.status);
+  // THE PARTIAL PROSE IS INTACT. §6.1 "never discards what arrived", and the marker is in addition
+  // to the text rather than instead of it.
+  check("...with what had arrived", rs[0]?.text.endsWith("because the") === true, rs[0]?.text);
+  // AND THE ONE THAT FINISHED IS UNTOUCHED, which is the half that makes the flag a distinction
+  // rather than a blanket.
+  check("the finished one is still done", rs[1]?.status === "done", rs[1]?.status);
+
+  // AN ANSWER FROM BEFORE THE COLUMN EXISTED reads as finished — `stopped` absent, not false. That
+  // is what those answers read as before 077, so nothing already in a thread changes meaning.
+  reset();
+  store().hydrate(T, [{
+    id: "i1", kind: "message", ref_id: null, role: "user", body: "hi",
+    created_at: "2026-09-12T10:00:00.000Z", answers: [{ ordinal: 1, body: "Hello." }],
+  }]);
+  check("an answer with no flag reads as finished", replies()[0]?.status === "done", replies()[0]?.status);
+
+  // THE SELECTED SIBLING DECIDES, so stopping a regeneration and switching back to the finished
+  // answer shows a finished turn — the status follows the answer on screen, not the turn.
+  reset();
+  store().hydrate(T, [{
+    id: "i1", kind: "message", ref_id: null, role: "user", body: "explain the retry",
+    created_at: "2026-09-12T10:00:00.000Z",
+    answers: [
+      { ordinal: 1, body: "The retry backs off exponentially.", selected: true },
+      { ordinal: 2, body: "The retry backs off expo", stopped: true },
+    ],
+  }]);
+  check("the status follows the selected sibling", replies()[0]?.status === "done", replies()[0]?.status);
+  check("...and switching to the stopped one is still possible",
+    replies()[0]?.siblings?.length === 2, replies()[0]?.siblings);
+}
+
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 (globalThis as { process?: { exit(code: number): void } }).process?.exit(fail === 0 ? 0 : 1);

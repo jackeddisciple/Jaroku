@@ -1,0 +1,34 @@
+-- 077_turn_variant_stopped — whether an answer finished, or was stopped partway.
+--
+-- §16'S PASS FOUND THIS, and the gap is one the code's own comment already described. §6.1's rule
+-- is that a stopped answer "retains the partial turn MARKED AS STOPPED, never discards what
+-- arrived", and migration 073's `body` implemented the retaining half: `onStopped` settles the
+-- variant with whatever prose had arrived, priced for what it actually spent. The MARKING had
+-- nowhere to live.
+--
+-- SO IT SURVIVED ONLY AS LONG AS THE TAB DID. In-session the turn carries `status: "stopped"` and
+-- renders §6.1's marker; `chatStore.hydrate` rebuilds a reply from this table as `status: "done"`,
+-- because "done" was the only thing the record could support. Stop an answer, reopen the app, and
+-- the half-answer reads as the whole one — which is the exact failure §5 names in one sentence: "a
+-- short answer and a cut-off answer are different things, and only one of them is safe to read as
+-- the reply."
+--
+-- IT IS NOT THE SAME QUESTION AS `interrupted` AND THAT IS WHY IT IS ONE COLUMN, not a status
+-- enum. A dropped socket is a fact about a CONNECTION and it is over: the record holds what was
+-- kept, nothing more is coming, and reopening a thread to be told the network once faltered would
+-- be a sentence about infrastructure. Being stopped is a fact about the ANSWER — somebody pressed
+-- a button because they had read enough, and the prose is deliberately incomplete for ever. The
+-- first belongs to the session; the second belongs to the row.
+--
+-- DEFAULT FALSE AND NO BACKFILL, like 074. Every variant already in a thread was either completed
+-- or stopped in a session that has ended, and there is no column to tell them apart after the
+-- fact — so they read as completed, which is what they read as before this column existed. An
+-- invented flag would put a marker on answers nobody stopped.
+--
+-- AN EXPAND: a defaulted boolean the running version does not select. No contract step.
+
+ALTER TABLE turn_variants ADD COLUMN stopped boolean NOT NULL DEFAULT false;
+
+-- NO INDEX, unlike 074. `selected` is indexed because it is a PREDICATE — the read is "this turn's
+-- selected variant". This column is never searched on: it is projected alongside the body of a row
+-- the turn key already found, so an index would be a write cost with no read to pay for it.

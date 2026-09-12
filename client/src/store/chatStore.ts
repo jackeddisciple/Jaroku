@@ -456,16 +456,28 @@ export const useChatStore = create<ChatState>((set) => ({
           // `priorVariants`, which is the same field a live regeneration fills and therefore the
           // same switcher, rather than a second mechanism for the rehydrated case.
           //
-          // `done`, NEVER `interrupted`. What comes back is a record of what was said, and an
-          // answer read out of a table is not a stream that stopped: whatever happened to the
-          // connection at the time, this is the whole of what was kept.
+          // `done` OR `stopped`, NEVER `interrupted` — and §16's pass is why that is three words
+          // rather than one.
+          //
+          // INTERRUPTED IS NOT PERSISTED, and that part was right: a dropped socket is a fact about
+          // a connection, it is over, and reopening a thread to be told the network once faltered
+          // would be a sentence about infrastructure rather than about the answer.
+          //
+          // BEING STOPPED IS A FACT ABOUT THE PROSE, which this originally treated the same way and
+          // should not have. Somebody pressed Stop because they had read enough; the answer is
+          // deliberately incomplete for ever, and §6.1 keeps it "marked as stopped". Rebuilding it
+          // as `done` presented a half-answer as the whole one after a reload — §5's own sentence,
+          // "a short answer and a cut-off answer are different things, and only one of them is safe
+          // to read as the reply", applied to the case where there is no stream left to interrupt.
+          // Migration 077 is the column that makes the marker survive the session.
           const answered = (it.answers ?? []).filter((a) => a.body.trim().length > 0);
           // §6.2: THE ONE SOMEBODY SWITCHED TO, else the newest — the same rule the server's window
           // applies, deliberately, so the screen and the model read the same answer.
           const shown = [...answered].reverse().find((a) => a.selected === true) ?? answered[answered.length - 1];
           const reply = (agentId: string): ChatTurn[] =>
             !shown ? [] : [{
-              id: turnId(), itemId: it.id, role: "jaroku", kind: "reply", status: "done",
+              id: turnId(), itemId: it.id, role: "jaroku", kind: "reply",
+              status: shown.stopped ? "stopped" : "done",
               agentId, text: shown.body,
               ...(answered.length > 1
                 ? {

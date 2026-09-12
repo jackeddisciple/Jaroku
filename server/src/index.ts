@@ -4998,6 +4998,9 @@ const relay = new WsRelay({
             ordinal: v.ordinal,
             body: v.body as string,
             selected: v.selected,
+            // §6.1: AND WHETHER IT FINISHED (migration 077). Without this a reopened thread
+            // rebuilt a deliberately stopped half-answer as a completed one.
+            stopped: v.stopped,
             // §13.3: EACH SIBLING'S OWN MODEL, so two answers generated on different models show
             // different chips after a reload as well as during the session. Null where nothing
             // recorded one, which is honest — a backfilled variant has no model and a chip that
@@ -13741,6 +13744,10 @@ async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<voi
           // unknown, not zero.
           settle({
             body: answer,
+            // §6.1: "RETAINS THE PARTIAL TURN MARKED AS STOPPED." The body is the retaining half
+            // and this is the marking — the only caller that can know, because a completion
+            // settles through the same function and must leave the column alone.
+            stopped: true,
             ...(u
               ? {
                 tokensIn: u.input,

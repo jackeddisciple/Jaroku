@@ -68,6 +68,18 @@ export interface TurnVariant {
    * choice to record.
    */
   selected: boolean;
+  /**
+   * §6.1: THIS ANSWER WAS STOPPED PARTWAY (migration 077).
+   *
+   * The rule is "retains the partial turn MARKED AS STOPPED, never discards what arrived", and
+   * `body` above is the retaining half. This is the marking — without it a reopened thread
+   * rebuilt every kept answer as a finished one, so a half-answer somebody had deliberately cut
+   * off read as the whole reply.
+   *
+   * NOT THE SAME AS INTERRUPTED. A dropped socket is a fact about a connection and it is over; a
+   * stop is a fact about the prose, and the prose is incomplete for ever.
+   */
+  stopped: boolean;
   created_at: string;
 }
 
@@ -96,6 +108,14 @@ export interface VariantOutcome {
    * keeps a stopped turn in conversation memory as what it actually was.
    */
   body?: string | null;
+  /**
+   * §6.1's MARKER, written by the one caller that knows: `onStopped`.
+   *
+   * ABSENT ON AN ORDINARY SETTLE rather than `false`, so a completion never writes the column at
+   * all — `put` skips `undefined`, and the default already says "finished". Only a stop has
+   * something to record here.
+   */
+  stopped?: boolean;
 }
 
 const nowIso = (): string => new Date().toISOString();
@@ -129,6 +149,7 @@ export class TurnVariantStore {
       // from Postgres, and `Boolean(0)` and `Boolean("0")` disagree — which is the whole reason
       // `test:boolean-literals` exists in this repository.
       selected: asBool(row["selected"]),
+      stopped: asBool(row["stopped"]),
       created_at: String(row["created_at"]),
     };
   }
@@ -137,7 +158,7 @@ export class TurnVariantStore {
   async forTurn(ctx: TenantContext, turnId: string): Promise<TurnVariant[]> {
     const rows = await this.q(ctx).all<Record<string, unknown>>(
       `SELECT id, turn_id, ordinal, model_id, provider, effort_requested, effort_applied,
-              duration_ms, tokens_in, tokens_out, cost_usd, agent_version_id, body, selected, created_at
+              duration_ms, tokens_in, tokens_out, cost_usd, agent_version_id, body, selected, stopped, created_at
          FROM turn_variants
         WHERE workspace_id = ? AND turn_id = ?
         ORDER BY ordinal ASC`,
@@ -217,6 +238,7 @@ export class TurnVariantStore {
     put("cost_usd", outcome.costUsd);
     put("agent_version_id", outcome.agentVersionId);
     put("body", outcome.body);
+    put("stopped", outcome.stopped);
     if (sets.length === 0) return;
 
     params.push(ctx.workspaceId, variantId);
@@ -281,7 +303,7 @@ export class TurnVariantStore {
     const holes = turnIds.map(() => "?").join(", ");
     const rows = await this.q(ctx).all<Record<string, unknown>>(
       `SELECT id, turn_id, ordinal, model_id, provider, effort_requested, effort_applied,
-              duration_ms, tokens_in, tokens_out, cost_usd, agent_version_id, body, selected, created_at
+              duration_ms, tokens_in, tokens_out, cost_usd, agent_version_id, body, selected, stopped, created_at
          FROM turn_variants
         WHERE workspace_id = ? AND turn_id IN (${holes})
         ORDER BY turn_id ASC, ordinal ASC`,
