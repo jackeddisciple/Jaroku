@@ -137,6 +137,9 @@ export const COMMAND_CAPABILITY: Record<string, string> = {
   stopChat: "agent:read",
   // §6.2's switcher — a view change, so the authority to look. See the server's copy.
   selectVariant: "agent:read",
+  // §6.3's fork — the authority to open a conversation, which is what it produces. See the server's
+  // copy for why writing a row is not a write in the sense that matters here.
+  editTurn: "agent:read",
   listAgentGrid: "agent:read",
   loadAgentDetail: "agent:read",
   loadAgentVersion: "agent:read",

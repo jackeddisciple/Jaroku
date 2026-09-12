@@ -108,6 +108,7 @@
     "test:conversation-routes": "tsx src/http/conversations.test.ts",
     "test:permission-shield": "tsx src/permissionShield.test.ts",
     "test:attachments": "tsx src/attachments.test.ts",
+    "test:thread-branch": "tsx src/threadBranch.test.ts",
     "test:chat-memory": "tsx src/chatMemory.test.ts",
     "test:chat": "tsx src/chat.test.ts",
     "test:turn-variants": "tsx src/turnVariants.test.ts",

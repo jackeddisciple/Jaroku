@@ -174,6 +174,10 @@ export const COMMAND_ENTITLEMENT: Record<string, EntitlementKind | typeof NO_ENT
   stopChat: NO_ENTITLEMENT,
   // Reading an answer that has already been paid for costs nothing and counts against nothing.
   selectVariant: NO_ENTITLEMENT,
+  // §6.3's fork. It opens a thread, and `createThread` is `NO_ENTITLEMENT` for the reason this one
+  // is: there is no such thing as a workspace's Nth conversation, the way there is an Nth agent or
+  // an Nth seat. The ANSWER it triggers is bounded where every chat answer is.
+  editTurn: NO_ENTITLEMENT,
   diagnoseFile: NO_ENTITLEMENT,
   planAgent: NO_ENTITLEMENT,
   discardPlan: NO_ENTITLEMENT,

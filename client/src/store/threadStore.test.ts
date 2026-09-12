@@ -31,6 +31,9 @@ const thread = (over: Partial<ThreadView> = {}): ThreadView => ({
   agent_id: "a1",
   agent_name: "stripe_webhook",
   agent_deleted: false,
+  // §6.3's lineage. Null on a fixture nobody forked; `...over` still lets a case set them.
+  parent_thread_id: null,
+  branch_from_turn: null,
   title: "Stripe webhook retry logic",
   title_is_custom: false,
   created_by: "u1",

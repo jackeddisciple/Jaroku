@@ -1039,6 +1039,15 @@ export interface ThreadView {
   last_activity_at: string;
   archived_at: string | null;
   status: ThreadStatus;
+  /**
+   * §6.3: the conversation this one was forked from, and at which turn (migration 075).
+   *
+   * ON THE ROW BECAUSE THE LIST IS WHERE LINEAGE IS RENDERED — with the fork glyph and the
+   * `branch @3` label the run history already uses. §6.3: "do not invent a second lineage visual
+   * language." Both null on a thread nobody forked, which is almost all of them.
+   */
+  parent_thread_id: string | null;
+  branch_from_turn: number | null;
   /** §4.3's state fragment: one decision-relevant fact, or null when there is nothing to say. */
   fragment: string | null;
   /**
@@ -1359,12 +1368,14 @@ export type AgentMessage =
 /** Threads. Full snapshots, plus the single row `loadThread` answers the asking client with. */
 export type ThreadMessage =
   | { channel: "threads"; type: "threads"; threads: ThreadView[]; counts: ThreadCounts }
-  // `reason` says which of the two things that answer with one row this is: `loaded` answers a
-  // `loadThread` the client sent because it was already opening that thread, and `created` is a row
-  // `createThread` just made that nothing has opened yet — see the socket's handler.
+  // `reason` says which of the three things that answer with one row this is: `loaded` answers a
+  // `loadThread` the client sent because it was already opening that thread, `created` is a row
+  // `createThread` just made that nothing has opened yet, and `branched` is §6.3's fork — a new
+  // thread carrying the copied prefix, which the client opens for the same reason a branched RUN
+  // takes focus (v0.1.6). See the socket's handler.
   | {
       channel: "threads"; type: "thread"; thread: ThreadView; items: ThreadItemView[];
-      reason: "loaded" | "created";
+      reason: "loaded" | "created" | "branched";
     }
   | { channel: "threads"; type: "error"; message: string; threadId?: string }
   | { channel: "threads"; type: "notice"; message: string; threadId?: string };
@@ -2122,6 +2133,9 @@ export type ClientCommand =
   | { cmd: "stopChat"; threadId?: string }
   // §6.2's switcher, durably. A view change and nothing else — it never moves a published pointer.
   | { cmd: "selectVariant"; turnId: string; ordinal: number }
+  // §6.3: editing an earlier message FORKS the conversation. The original is never modified — same
+  // guarantee as v0.1.5's parent runs — so this produces a new thread rather than changing one.
+  | { cmd: "editTurn"; threadId: string; turnId: string; message: string }
   // Eval: dataset CRUD. Every mutation is answered with a fresh snapshot on the "eval"
   // channel, so the client never reconciles a partial update against local state.
   | { cmd: "createDataset"; agentId: string; name: string }

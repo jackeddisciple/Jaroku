@@ -175,7 +175,7 @@ import {
 import { buildFactPack, type FactPack, type PackDeps } from "./work/factPack.ts";
 import { citableFrom, resolveCitations } from "./work/citations.ts";
 import { CHAT_SYSTEM, chatClosing, CONVERSATION_SYSTEM, conversationClosing, renderRecord } from "./prompt.ts";
-import type { AskRecordCommand, ChatCommand, ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCommand, InboxCommand, ProviderSnapshot, SelectVariantCommand, StopChatCommand } from "./wsRelay.ts";
+import type { AskRecordCommand, ChatCommand, ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCommand, InboxCommand, EditTurnCommand, ProviderSnapshot, SelectVariantCommand, StopChatCommand } from "./wsRelay.ts";
 import type { ListWorkCommand, WorkCommand, WorkSnapshotWire } from "./wsRelay.ts";
 import { loadRuntimeEnv } from "./env.ts";
 import { installLogRedaction, protectEnv, protectSecret } from "./obs/log.ts";
@@ -7437,6 +7437,10 @@ const HIGH_COST_SHARE = 0.25;
 
 const THREAD_COMMAND_NAMES = new Set([
   "createThread", "renameThread", "archiveThread", "restoreThread",
+  // §6.3's fork. In the set as well as handled, which is what `test:channels` asserts and why: a
+  // command whose refusals answer on `threads` and whose name is not here would fall through to
+  // `handleEvalCommand` the day somebody reorders the dispatch chain.
+  "editTurn",
 ]);
 
 /**
@@ -7764,6 +7768,11 @@ async function threadSnapshot(ctx: TenantContext): Promise<ThreadSnapshot> {
       last_activity_at: row.last_activity_at,
       archived_at: row.archived_at,
       status,
+      // §6.3's lineage, straight off the row. Derived from nothing — which is the point: a fork
+      // records where it came from at the moment it is made, so the marker cannot disagree with the
+      // history the way an inferred one could.
+      parent_thread_id: row.parent_thread_id,
+      branch_from_turn: row.branch_from_turn,
       fragment,
       // UNKNOWN IS NOT ZERO, and a thread nothing has been spent in is a third case again. Null
       // means "nothing has cost anything yet" — a thread opened a minute ago — and `cost_known:
@@ -7958,6 +7967,15 @@ async function handleThreadCommand(ctx: TenantContext, cmd: ThreadCommand): Prom
     // and let whatever the driver threw become a workspace-wide message.
     if (cmd.cmd !== "createThread" && typeof cmd.threadId !== "string") {
       refuseThread(ctx, "that command needs a thread");
+      return;
+    }
+
+    // §6.3's FORK, first among the mutations because it is the one that makes a thread out of
+    // another one. Its own function rather than inline, for the reason `createThread`'s body is
+    // inline and this is not: forking reads a thread's items, decides what its turns caused, copies
+    // a prefix and dispatches an answer — four things, none of which belongs in a switch arm.
+    if (cmd.cmd === "editTurn") {
+      await editTurn(ctx, cmd);
       return;
     }
 
@@ -13053,6 +13071,137 @@ async function selectVariant(ctx: TenantContext, cmd: SelectVariantCommand): Pro
     // the record disagree until the next snapshot, and a sentence about it would be a sentence
     // about a switcher.
     console.warn(`[variants] could not select ${cmd.ordinal} on ${cmd.turnId}:`, (err as Error)?.message ?? err);
+  }
+}
+
+/**
+ * What a user's turn CAUSED, in the words the record can support — §6.3's side-effect rule.
+ *
+ * §6.3: "a turn that produced a side effect — an applied edit, a confirmed plan, a started run — is
+ * NOT editable in place. Those turns fork from the point BEFORE the side effect and say so, because
+ * the side effect already happened on disk and a fork cannot unhappen it."
+ *
+ * IT NAMES WHAT `thread_items` HOLDS AND NOTHING MORE. §6.5 asks for an explanation "naming the
+ * side effect", and the honest name is the kind of thing that happened: a proposal row says a change
+ * was proposed, and whether it was ever APPLIED lives in the editor's memory rather than in this
+ * table. Saying "an edit was applied" about a proposal somebody discarded would be the product
+ * lying about its own state, which §8.3 treats as the most serious class there is — so this says
+ * what is written down.
+ *
+ * THE WINDOW IS "UNTIL THE NEXT USER MESSAGE", because that is what "this turn produced" means in a
+ * conversation: everything between what somebody said and what they said next is the consequence of
+ * the first.
+ */
+function sideEffectsAfter(
+  items: readonly { id: string; kind: ThreadItemKind; role: "user" | null }[],
+  turnId: string,
+): string[] {
+  const at = items.findIndex((i) => i.id === turnId);
+  if (at < 0) return [];
+  const named: Partial<Record<ThreadItemKind, string>> = {
+    generation: "an agent was generated",
+    proposal: "a change to the code was proposed",
+    run: "a run was started",
+    work: "a job was given to a deployed agent",
+    eval: "an eval was run",
+  };
+  const out: string[] = [];
+  for (let i = at + 1; i < items.length; i++) {
+    const item = items[i];
+    if (!item) continue;
+    if (item.kind === "message" && item.role === "user") break;
+    const name = named[item.kind];
+    // DE-DUPLICATED, so three runs from one message read as "a run was started" once. The sentence
+    // is about what KIND of thing cannot be unhappened, not about how many there were.
+    if (name && !out.includes(name)) out.push(name);
+  }
+  return out;
+}
+
+/**
+ * §6.3: EDIT AN EARLIER MESSAGE BY FORKING THE THREAD.
+ *
+ * THE PARENT IS NOT TOUCHED. Every write below goes to the new thread; `threadStore.branch` issues
+ * no statement against the parent or its items, and §6.5's acceptance is exactly that — "leaves the
+ * original 5-turn thread byte-identical, asserted in a test".
+ *
+ * AND IT DOES NOT RE-RUN ANYTHING. §6.3: "editing does not re-run anything that was run. It forks
+ * the conversation, not the execution." The prefix that is copied is the questions and one line per
+ * consequence; nothing here reaches the run pool, the generator or the editor, and the fork
+ * deliberately does not copy `turn_variants` — so no cost the parent already accounted for is
+ * duplicated into a thread that never spent it.
+ */
+async function editTurn(ctx: TenantContext, cmd: EditTurnCommand): Promise<void> {
+  const message = typeof cmd.message === "string" ? cmd.message.trim() : "";
+  const refuse = (m: string): void =>
+    relay.broadcastThreads(ctx, { type: "error", message: m, threadId: cmd.threadId });
+  if (!message) return refuse("an edited message still has to say something");
+
+  try {
+    const items = await threadStore.itemsFor(ctx, cmd.threadId);
+    const at = items.findIndex((i) => i.id === cmd.turnId);
+    // ABSENT RATHER THAN FORBIDDEN, and the same sentence for both — this codebase's rule wherever
+    // an id crosses a tenant boundary. A scoped read of another workspace's thread returns no
+    // items, so a foreign turn id is simply not in the list.
+    if (at < 0) return refuse("no such turn in this conversation");
+    const turn = items[at]!;
+    // §6.3: ONLY A USER MESSAGE. "An assistant reply is regenerated (§6.2), not edited — the product
+    // does not offer to put words in the model's mouth and then treat them as something the model
+    // said." Checked against the ROW rather than against what the client claims the turn is.
+    if (turn.kind !== "message" || turn.role !== "user") {
+      return refuse("only your own messages can be edited — an answer is regenerated instead");
+    }
+
+    const effects = sideEffectsAfter(items, cmd.turnId);
+    // 1-BASED, because `branch @3` is a position somebody counted and `branch` slices `atTurn - 1`.
+    const forked = await threadStore.branch(ctx, cmd.threadId, at + 1, { title: message });
+
+    // §6.3: AND SAY SO. The fork starts before the side effect, and the side effect still happened —
+    // so the fork opens with a line naming it rather than pretending the timeline is clean. This is
+    // the same honesty v0.1.10 applied when a refused confirmation no longer consumed the plan:
+    // state the real situation.
+    if (effects.length > 0) {
+      await threadStore.addItem(ctx, forked.id, {
+        kind: "message",
+        role: null,
+        body:
+          `Forked before this message's consequences. ${effects.join(", ")} in the original `
+          + `conversation, and that has not been undone.`,
+      });
+    }
+
+    // THE ROW AND ITS COPIED PREFIX, TO THE SOCKET THAT ASKED — which is what makes v0.1.6's
+    // "automatic branch focus after creation, with the copied execution prefix loaded immediately"
+    // true rather than a promise the client has to chase with a second request.
+    //
+    // ONE SNAPSHOT, READ TWICE, exactly as `createThread` does it: the broadcast is the list and
+    // this is one row of the same list, so building each from its own scan would cost two full
+    // reads of the workspace to produce two views that are required to agree.
+    const snapshot = await threadSnapshot(ctx);
+    relay.broadcastThreads(ctx, { type: "threads", ...snapshot });
+    const made = snapshot.threads.find((t) => t.id === forked.id);
+    if (made) {
+      relay.sendThreads(ctx, ctx.requestId, {
+        type: "thread",
+        reason: "branched",
+        thread: made,
+        items: await threadStore.itemsFor(ctx, forked.id),
+      });
+    }
+
+    // THE EDITED MESSAGE IS TURN N OF THE FORK, and the answer is generated fresh from there — which
+    // is `chatWithJaroku`'s ordinary path against the new thread. Reusing it rather than inlining a
+    // second dispatch is what keeps the fork's answer identical to any other: the same grounded
+    // context, the same window, the same ceilings, the same accounting. It also writes the edited
+    // message as the fork's own turn, so nothing above has to.
+    void chatWithJaroku(ctx, {
+      cmd: "chat", message, threadId: forked.id,
+      ...(forked.agent_id ? { agentId: forked.agent_id } : {}),
+    });
+  } catch (err) {
+    const m = (err as Error)?.message ?? String(err);
+    console.error(`[threads] could not fork ${cmd.threadId} at ${cmd.turnId}: ${m}`);
+    refuse(m);
   }
 }
 

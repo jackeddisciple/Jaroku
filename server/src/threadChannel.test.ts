@@ -97,6 +97,9 @@ async function snapshot(ctx: TenantContext): Promise<{ threads: ThreadView[]; co
       eval_progress: null,
       agent_active: 1,
       cost_share_high: false,
+      // §6.3's lineage. Null on a fixture nobody forked, which is the ordinary row.
+      parent_thread_id: null,
+      branch_from_turn: null,
     } satisfies ThreadView;
   });
   counts.all = counts.needs_you + counts.running + counts.recent;

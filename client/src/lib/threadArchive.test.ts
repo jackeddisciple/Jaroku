@@ -21,6 +21,9 @@ const row = (status: ThreadStatus, fragment: string | null): ThreadView => ({
   agent_id: "api_gateway",
   agent_name: "api_gateway",
   agent_deleted: false,
+  // §6.3's lineage (migration 075). Null on a fixture nobody forked, which is the ordinary row.
+  parent_thread_id: null,
+  branch_from_turn: null,
   title: "Stripe webhook retry logic",
   title_is_custom: false,
   created_by: "u1",

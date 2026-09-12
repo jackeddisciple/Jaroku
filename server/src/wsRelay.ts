@@ -1593,6 +1593,7 @@ export type ChatCommand = {
  * a variant PRODUCED; the published pointer lives on the agent and is moved by the publish path
  * alone." Nothing on this path touches a version, publishes anything, or re-runs anything.
  */
+
 export type SelectVariantCommand = {
   cmd: "selectVariant";
   /** A `thread_items` id — the turn whose answers are being switched between. */
@@ -1654,6 +1655,7 @@ export type ClientCommand =
   | ChatCommand
   | StopChatCommand
   | SelectVariantCommand
+  | EditTurnCommand
   | EvalCommand
   | McpCommand
   | ListInboxCommand
@@ -1725,6 +1727,7 @@ export type ForwardedCommand =
   | ChatCommand
   | StopChatCommand
   | SelectVariantCommand
+  | EditTurnCommand
   | EvalCommand
   | McpCommand
   | ProviderCommand
@@ -2320,15 +2323,51 @@ export type RestoreThreadCommand = { cmd: "restoreThread"; threadId: string };
 export type LoadThreadCommand = { cmd: "loadThread"; threadId: string };
 
 /** Thread-channel commands, grouped so the forwarding switch stays readable. */
+/**
+ * §6.3: EDIT AN EARLIER MESSAGE BY FORKING THE CONVERSATION.
+ *
+ * IT IS NOT AN EDIT AND THE NAME IS DELIBERATE ABOUT THAT. Nothing in the parent thread changes —
+ * "the original thread is never modified. Same guarantee as v0.1.5's parent runs: read-only,
+ * always." What arrives is a NEW thread carrying turns 1..N−1, with the edited message as turn N
+ * and a fresh answer under it.
+ *
+ * WHY A FORK RATHER THAN A TRUNCATION. §6.3: "editing an earlier message is where most products
+ * quietly delete everything that came after it. Jaroku should not, because it already has the
+ * primitive that makes deletion unnecessary." The primitive is run branching, and this is the same
+ * operation on a different sequence.
+ *
+ * ONLY A USER MESSAGE. An assistant reply is REGENERATED (§6.2), never edited: "the product does
+ * not offer to put words in the model's mouth and then treat them as something the model said."
+ * Enforced at the dispatch by reading the row's kind and role, because the turn id is the client's.
+ */
+export type EditTurnCommand = {
+  cmd: "editTurn";
+  /** The conversation being forked. */
+  threadId: string;
+  /** A `thread_items` id — the user message being replaced. */
+  turnId: string;
+  /** What it should have said. */
+  message: string;
+};
+
 export type ThreadCommand =
   | CreateThreadCommand
   | RenameThreadCommand
   | ArchiveThreadCommand
-  | RestoreThreadCommand;
+  | RestoreThreadCommand
+  // §6.3'S FORK IS A THREAD COMMAND, and that is where `test:channels` insisted it belong rather
+  // than a preference. Its refusals answer on `threads` — a fork produces a ROW, and a row is
+  // rendered in the list and in the thread view — and this file's rule is that a command answering
+  // on a channel is handled by that channel's handler. A branch of its own in the dispatch chain
+  // routed it correctly and left it out of the set, which is the shape that falls through to the
+  // eval handler the day somebody reorders the chain.
+  | EditTurnCommand;
 
-// The four that MUTATE. The two reads are not here because they are answered locally — see the
+// The five that MUTATE. The two reads are not here because they are answered locally — see the
 // header above, and see `dispatch`, where each has a branch of its own.
-const THREAD_COMMANDS = new Set(["createThread", "renameThread", "archiveThread", "restoreThread"]);
+const THREAD_COMMANDS = new Set([
+  "createThread", "renameThread", "archiveThread", "restoreThread", "editTurn",
+]);
 
 /**
  * One thread, as a row is rendered (§4.3).
@@ -2359,6 +2398,18 @@ export interface ThreadView {
   last_activity_at: string;
   archived_at: string | null;
   status: ThreadStatus;
+  /**
+   * §6.3: THE CONVERSATION THIS ONE WAS FORKED FROM, and at which turn (migration 075).
+   *
+   * ON THE ROW BECAUSE THE LIST IS WHERE LINEAGE IS RENDERED. §6.3: "the branched thread appears in
+   * the Threads list as a thread, because it is one, with its lineage visible in history" — and the
+   * marker is the fork glyph and the `branch @3` label the run history already uses, which is the
+   * same instruction its rendering half gives: "do not invent a second lineage visual language."
+   *
+   * Both null on a thread nobody forked, which is almost all of them.
+   */
+  parent_thread_id: string | null;
+  branch_from_turn: number | null;
   /** §4.3's state fragment: one decision-relevant fact, or null when there is nothing to say. */
   fragment: string | null;
   /**
@@ -2593,7 +2644,13 @@ export type ThreadEvent =
   // BECAUSE it was already opening that thread. `created` is the row `createThread` just made, and
   // nothing had opened it — the client showed the new row in the list and left it there, so `+ New
   // thread` produced a permanently empty, permanently untitled row that no work could reach.
-  | { type: "thread"; thread: ThreadView; items: ThreadItemView[]; reason: "loaded" | "created" }
+  //
+  // `branched` IS THE THIRD AND IT REUSES THIS EVENT RATHER THAN ADDING ONE (§6.3). A fork is a row
+  // plus its copied prefix, answered to the socket that asked for it, which is precisely what this
+  // message already is — and §6.3's requirement is v0.1.6's verbatim: "automatic branch focus after
+  // creation, with the copied execution prefix loaded immediately". A `branched` event of its own
+  // would be a second way to say "open this thread, here is what is in it".
+  | { type: "thread"; thread: ThreadView; items: ThreadItemView[]; reason: "loaded" | "created" | "branched" }
   | { type: "error"; message: string; threadId?: string }
   | { type: "notice"; message: string; threadId?: string };
 
@@ -3430,6 +3487,10 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   stopChat: "reply",
   // Switching between a turn's answers is the same conversation, so a refusal belongs beside it.
   selectVariant: "reply",
+  // §6.3's fork answers on `threads` — it produces a ROW, and the Threads list and the thread view
+  // are both where a row is rendered. Its ANSWER then streams on `reply` like any other, because
+  // the fork's new turn is an ordinary question.
+  editTurn: "threads",
   createDataset: "eval", renameDataset: "eval", deleteDataset: "eval", listDatasets: "eval",
   loadDataset: "eval", addExample: "eval", updateExample: "eval", deleteExample: "eval",
   promoteTestInput: "eval", startEval: "eval", cancelEval: "eval", loadRubric: "eval",
@@ -4390,6 +4451,11 @@ export class WsRelay {
           } else if (msg.cmd === "stopChat") {
             void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "selectVariant" && typeof msg.turnId === "string" && typeof msg.ordinal === "number") {
+            void withContext((ctx) => this.onCommand?.(msg, ctx));
+          } else if (
+            msg.cmd === "editTurn" && typeof msg.threadId === "string"
+            && typeof msg.turnId === "string" && typeof msg.message === "string"
+          ) {
             void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "listMcpServers") {
             void this.answer(ws, async (ctx) => ({

@@ -245,6 +245,24 @@ export function ThreadRow({
       {/* line 1: glyph, title, time */}
       <div className="flex items-center gap-2">
         <span className="shrink-0"><ThreadGlyph status={thread.status} /></span>
+        {/* §6.3: A FORK KEEPS ITS FORK MARK, and it is the SAME mark and the same label the run
+            history already uses — `Icon.agents.fork` at `ICON.xs` in `text-faint`, beside the
+            status capsule, exactly as `RunRow` draws it for a branched run. §6.3's instruction is
+            in those words: "the fork is rendered with the same indentation and branch-marker
+            vocabulary v0.1.6 already established for run history… do not invent a second lineage
+            visual language."
+            THE LABEL IS `branch @3` FOR THE SAME REASON. It is the sentence v0.1.6 chose, and a
+            reader who has seen it on a run knows what it means on a conversation without being
+            told — which is the whole return on having one vocabulary. */}
+        {thread.parent_thread_id && (
+          <span
+            className="shrink-0 text-faint"
+            title={thread.branch_from_turn !== null ? `branch @${thread.branch_from_turn}` : "branch"}
+            aria-label={thread.branch_from_turn !== null ? `Forked at turn ${thread.branch_from_turn}` : "Forked"}
+          >
+            <Icon.agents.fork size={ICON.xs} />
+          </span>
+        )}
         {editing ? (
           // §5's inline rename. Enter saves, Escape cancels, and the click that lands in the field
           // must not also open the thread — hence the stopPropagation, which is the only place this

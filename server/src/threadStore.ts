@@ -73,6 +73,24 @@ export interface Thread {
    * opening another one is cheap.
    */
   mode: ThreadMode;
+  /**
+   * §6.3: the conversation this one was forked from, or null (migration 075).
+   *
+   * THE MIRROR OF `runs.parent_run_id`, deliberately named to read the same way. v0.1.5 built this
+   * operation one level down — fork from a boundary, copy the prefix, leave the parent immutable —
+   * and §6.3's insight is that editing turn 3 of a thread IS forking at turn 3. Two lineage models
+   * that read alike is the point.
+   */
+  parent_thread_id: string | null;
+  /**
+   * Which turn of the parent the fork happened at — 1-based, and what `branch @3` renders.
+   *
+   * A NUMBER RATHER THAN A `thread_items` ID. The label is a position somebody counted, and an id
+   * would render as a uuid; it would also have to survive the parent's turns being read in a
+   * different order, which `created_at` ordering does not promise for two writes in one
+   * millisecond.
+   */
+  branch_from_turn: number | null;
 }
 
 /**
@@ -257,7 +275,8 @@ function nextItemIso(): string {
 // Explicit rather than `SELECT *`: `workspace_id` is on every row and belongs on none of the
 // snapshots a client receives. The same reason the MCP registry lists its columns out.
 const COLUMNS = `id, agent_id, agent_name_snapshot, title, title_is_custom, created_by,
-                 created_at, last_activity_at, archived_at, status, mode`;
+                 created_at, last_activity_at, archived_at, status, mode,
+                 parent_thread_id, branch_from_turn`;
 
 export class ThreadStore {
   /** Shares the trace store's database: same file, single writer. See TraceStore.database(). */
@@ -279,6 +298,17 @@ export class ThreadStore {
       // `0` false on one driver and `false` false on both, which is the sort of parity bug that
       // only shows up in production.
       title_is_custom: asBool(row["title_is_custom"]),
+      // §6.3's lineage, coerced for the same reason `title_is_custom` is. `branch_from_turn` is a
+      // real `integer` on Postgres and arrives as a number; SQLite is typeless enough that a
+      // column written by one driver's repository and read back can be either — and `asInt` is the
+      // one place this codebase decides what a stored integer IS. Null stays null: a thread that
+      // was not forked has no turn index, and `asInt(null)` defaulting to 0 would render
+      // `branch @0` under every conversation in the product.
+      parent_thread_id: (row["parent_thread_id"] as string | null) ?? null,
+      branch_from_turn:
+        row["branch_from_turn"] === null || row["branch_from_turn"] === undefined
+          ? null
+          : asInt(row["branch_from_turn"]),
     } as unknown as Thread;
   }
 
@@ -612,6 +642,117 @@ export class ThreadStore {
     );
     await this.touch(ctx, threadId, now);
     return id;
+  }
+
+  /**
+   * §6.3: FORK THIS CONVERSATION AT A TURN.
+   *
+   * WHAT IT IS, IN ONE LINE: turns 1..N−1 of the parent are copied into a new thread, the parent is
+   * not touched at all, and the lineage is recorded. The edited message and the answer to it are
+   * the CALLER's business — this writes the prefix and the row, exactly as `copyRunPrefix` writes a
+   * run's prefix and leaves the runner to continue from there.
+   *
+   * THE PARENT IS READ-ONLY, ALWAYS. Same guarantee as v0.1.5's parent runs, and the reason §6.3
+   * gives for preferring a fork to a deletion: "most products quietly delete everything that came
+   * after it." Nothing below issues an UPDATE or a DELETE against the parent or its items. The
+   * §6.5 acceptance is that the original thread is byte-identical afterwards, and that is a
+   * property of this method containing no write to it.
+   *
+   * ONE TRANSACTION, so a fork is either a thread with its prefix or nothing at all. A half-copied
+   * conversation is worse than a failed one: it renders as a thread that lost turns, which is
+   * exactly the outcome the fork exists to avoid.
+   *
+   * THE PREFIX IS COPIED, NOT REFERENCED, and that is the same decision `copyRunPrefix` made: "so
+   * the parent is never mutated and the branch is self-contained and independently inspectable." A
+   * fork that pointed at its parent's rows would be a conversation whose history changes when
+   * somebody archives something else.
+   *
+   * ITEM IDS ARE FRESH. `thread_items.id` is what notes, pins, feedback and variants hang off, so a
+   * copy that kept the parent's ids would make a note on the parent's turn 2 appear on the fork's —
+   * and a variant written against the fork would attach to the parent's answer. New ids, and the
+   * bodies and kinds carried across.
+   *
+   * WHAT IS DELIBERATELY NOT COPIED: `turn_variants`. The prefix is the QUESTIONS and what they
+   * caused; the answers belong to the conversation that produced them, and copying them would
+   * duplicate every recorded cost into a thread that never spent it — so the fork's total would
+   * include money the parent already accounted for. §6.3 is about forking the conversation, not
+   * the accounting.
+   */
+  async branch(
+    ctx: TenantContext,
+    fromThreadId: string,
+    atTurn: number,
+    t: { title?: string; createdBy?: string | null } = {},
+  ): Promise<Thread> {
+    if (!Number.isInteger(atTurn) || atTurn < 1) throw new RangeError("a turn index starts at 1");
+    const parent = await this.get(ctx, fromThreadId);
+    // A THREAD THIS WORKSPACE DOES NOT HAVE IS REFUSED HERE, with the same sentence "gone" gets —
+    // the rule `addItem` states at length. The scoped read is what makes it true; the FK on the
+    // pair (migration 075, Postgres only) is the backstop.
+    if (!parent) throw new ThreadNotHere(fromThreadId);
+
+    const items = await this.itemsFor(ctx, fromThreadId);
+    // TURNS 1..N−1, so the edited message REPLACES turn N rather than following it. `atTurn` is
+    // 1-based because that is what the `branch @3` label means, so the slice is `atTurn - 1`.
+    const prefix = items.slice(0, atTurn - 1);
+
+    const id = randomUUID();
+    const now = nowIso();
+    await this.db.scoped(ctx.workspaceId, async (q) => {
+      await q.run(
+        `INSERT INTO threads (id, workspace_id, agent_id, agent_name_snapshot, title,
+                              title_is_custom, created_by, created_at, last_activity_at,
+                              archived_at, status, mode, parent_thread_id, branch_from_turn)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'idle', ?, ?, ?)`,
+        [
+          id, ctx.workspaceId,
+          // THE SAME AGENT AND THE SAME SNAPSHOT. A fork of a conversation about an agent is a
+          // conversation about that agent; and if the agent is already gone, the fork inherits the
+          // name snapshot rather than rendering as a thread about nothing.
+          parent.agent_id, parent.agent_name_snapshot,
+          (t.title ? capTitle(t.title) : "") || parent.title,
+          // NEVER CUSTOM. A fork's title is inherited, not typed — so auto-titling from the edited
+          // message may still improve it (§5), which is what somebody forking to try a different
+          // question would want.
+          0,
+          t.createdBy ?? ctx.actorUserId ?? null,
+          now, now,
+          // THE PARENT'S MODE, because the fork holds the same kinds of item. A build thread's fork
+          // is a build thread; §4's enforcement would refuse the copied items otherwise.
+          parent.mode,
+          fromThreadId, atTurn,
+        ],
+      );
+      for (const item of prefix) {
+        await q.run(
+          `INSERT INTO thread_items (id, workspace_id, thread_id, kind, ref_id, role, body, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          // `created_at` IS CARRIED ACROSS RATHER THAN RE-STAMPED, because these rows are the same
+          // moments in the same conversation and the order is the only ordering they have. Stamping
+          // them now would compress the whole prefix into one millisecond and leave `nextItemIso`'s
+          // monotonic clock to invent an order for them.
+          [randomUUID(), ctx.workspaceId, id, item.kind, item.ref_id, item.role, item.body, item.created_at],
+        );
+      }
+    });
+    return (await this.get(ctx, id))!;
+  }
+
+  /**
+   * Every thread forked from this one, newest first — what §6.3's lineage renders from.
+   *
+   * SCOPED AND INDEXED (migration 075's `threads_parent`), because the Threads list asks this for a
+   * row rather than scanning: a fork marker on a parent needs to know it has children, and a
+   * per-row scan of the workspace's threads would be the N+1 the grid's own suite exists to refuse.
+   */
+  async childrenOf(ctx: TenantContext, threadId: string): Promise<Thread[]> {
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT ${COLUMNS} FROM threads
+        WHERE workspace_id = ? AND parent_thread_id = ?
+        ORDER BY created_at DESC, id ASC`,
+      [ctx.workspaceId, threadId],
+    );
+    return rows.map(ThreadStore.hydrate);
   }
 
   /** What somebody said, in order. §4.3's preview is the last of these; §5's title is the first. */

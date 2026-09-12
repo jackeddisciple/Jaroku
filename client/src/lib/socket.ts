@@ -654,7 +654,13 @@ function dispatch(msg: ServerMessage): void {
         // added a permanently empty, permanently untitled row that no work could ever land in.
         // `loaded` is the other case and must not re-navigate: it answers a `loadThread` this
         // client sent BECAUSE it was already opening that thread.
-        if (msg.reason === "created") openThread(msg.thread, { haveConversation: true });
+        // §6.3: A FORK TAKES FOCUS, exactly as a branched RUN does (v0.1.6: "automatic branch focus
+        // after creation, with the copied execution prefix loaded immediately"). The prefix is
+        // already in `items` and has just been hydrated above, so the new thread opens showing the
+        // conversation it inherited rather than an empty pane that fills in a moment later.
+        if (msg.reason === "created" || msg.reason === "branched") {
+          openThread(msg.thread, { haveConversation: true });
+        }
       }
       else if (msg.type === "error") t.setError(msg.message);
       // A notice is not an error and must not render as one. Nothing on this channel sends one yet;
@@ -1488,6 +1494,21 @@ export function sendChat(
  * who switched back to the first answer read answer one while every following reply was answered
  * against answer three.
  */
+/**
+ * §6.3: edit an earlier message by FORKING the conversation.
+ *
+ * IT CHANGES NOTHING IN THE THREAD IT IS SENT FROM, which is the whole guarantee and the reason the
+ * function is not called `sendEditMessage`. What comes back is a new thread carrying turns 1..N−1
+ * with the edited message as turn N — answered on the `threads` channel with `reason: "branched"`,
+ * which the client opens the way a branched RUN takes focus.
+ *
+ * NOTHING IS UPDATED OPTIMISTICALLY. The fork is a row the server writes and a prefix it copies;
+ * a client that moved first would have to guess a thread id and then reconcile the real one.
+ */
+export function sendEditTurn(threadId: string, turnId: string, message: string): void {
+  send({ cmd: "editTurn", threadId, turnId, message });
+}
+
 export function sendSelectVariant(turnId: string, ordinal: number): void {
   send({ cmd: "selectVariant", turnId, ordinal });
 }

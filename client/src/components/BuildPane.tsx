@@ -13,7 +13,8 @@ import { orderedFiles, useBuildStore } from "../store/buildStore.ts";
 import { useAccountOnboardingStore } from "../store/accountOnboardingStore.ts";
 import {
   isPlanning, pendingPlanId, threadFor, useChatStore,
-  type ChatTurn, type GenTurn, type PlanTurn, type ProposalTurn, type ReplyTurn, type WorkTurn,
+  type ChatTurn, type GenTurn, type PlanTurn, type ProposalTurn, type ReplyTurn, type UserTurn,
+  type WorkTurn,
 } from "../store/chatStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { inputKey, useUiStore } from "../store/uiStore.ts";
@@ -22,7 +23,7 @@ import {
 } from "../store/providerStore.ts";
 import {
   sendApplyEdit, sendAskRecord, sendBranchRun, sendChat, sendDiscardEdit, sendDiscardPlan, sendDispatchWork,
-  sendSelectVariant, sendStopChat,
+  sendEditTurn, sendSelectVariant, sendStopChat,
   sendEdit, sendExplain, sendGenerate, sendLoadWorkItem, sendPlanAgent, sendPromoteTestInput, sendRun,
 } from "../lib/socket.ts";
 import { useEvalStore } from "../store/evalStore.ts";
@@ -37,6 +38,7 @@ import { WorkGate } from "./WorkGate.tsx";
 import { useWorkStore } from "../store/workStore.ts";
 import { threadById } from "../store/threadStore.ts";
 import { fmtCost, fmtTokens } from "../lib/format.ts";
+import { secondaryBtn } from "./buttons.ts";
 import { Chip, chipClass } from "./Chip.tsx";
 import { ChoiceRow, type Choice } from "./ChoiceRow.tsx";
 import { DiffCard } from "./DiffCard.tsx";
@@ -610,16 +612,144 @@ function rerunTurn(
   });
 }
 
-function Turn({ turn, isLastGen }: { turn: ChatTurn; isLastGen: boolean }) {
-  if (turn.role === "user") {
+/**
+ * §6.3: EDIT YOUR OWN MESSAGE — which forks the conversation rather than rewriting it.
+ *
+ * AN INLINE EDITOR IN THE TURN, not a dialog. §14.2: "entering edit mode: focus moves into the
+ * inline editor with the existing text selected; Esc cancels and returns focus to the composer with
+ * the draft intact." A modal would take the conversation off screen at the moment somebody is
+ * reading it to decide what to change.
+ *
+ * IT SAYS WHAT WILL HAPPEN BEFORE IT HAPPENS. The control reads "Fork from here", not "Save",
+ * because §6.3's whole point is that nothing is overwritten: the original thread stays exactly as
+ * it is and a new one opens with the turns before this one. A button labelled Save would promise
+ * the thing this deliberately does not do.
+ *
+ * ONLY ON A USER MESSAGE, and the server checks the row's own kind and role besides — the client's
+ * copy of that rule hides the control, and the server's is what enforces it.
+ */
+function UserTurnView({ turn, threadId }: { turn: UserTurn; threadId: string | null }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(turn.text);
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  // §14.2: FOCUS MOVES IN WITH THE TEXT SELECTED, so the commonest edit — replace the whole
+  // sentence — is one keystroke rather than a select-all somebody has to think about.
+  useEffect(() => {
+    if (!editing) return;
+    const el = ref.current;
+    if (!el) return;
+    el.focus();
+    el.select();
+  }, [editing]);
+
+  const fork = (): void => {
+    const next = draft.trim();
+    // UNCHANGED TEXT FORKS NOTHING. A fork whose edited message is identical to its parent's is a
+    // duplicate conversation somebody would have to clean up, and the honest reading of pressing
+    // the control without typing is that they changed their mind.
+    if (!next || !threadId || !turn.itemId || next === turn.text.trim()) {
+      setEditing(false);
+      setDraft(turn.text);
+      return;
+    }
+    sendEditTurn(threadId, turn.itemId, next);
+    setEditing(false);
+  };
+
+  if (editing) {
     return (
-      // The `›` it replaces was a prompt character — it said "input", not "you". At the top of a
-      // scrolled-back thread, the question is whose turn this was, and a face answers that faster
-      // than punctuation does.
       <TurnRow marker={<UserCircleIcon size={ICON.sm} className="text-faint" />}>
-        <span className="text-ink text-label whitespace-pre-wrap break-words">{turn.text}</span>
+        <div className="rounded-card border border-edge bg-panel p-2">
+          <textarea
+            ref={ref}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              // §14.2: "Esc cancels and returns focus to the composer with the draft intact." The
+              // draft here is the EDITOR's, and cancelling restores the message rather than
+              // leaving a half-typed change on screen that looks saved.
+              if (e.key === "Escape") {
+                e.preventDefault();
+                setEditing(false);
+                setDraft(turn.text);
+                useUiStore.getState().focusChat();
+                return;
+              }
+              // ⌘↵ FORKS, which is the composer's own send chord. One gesture for "send this
+              // sentence", wherever the sentence is being typed.
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                fork();
+              }
+            }}
+            rows={Math.min(8, Math.max(2, draft.split("\n").length + 1))}
+            className="w-full resize-none bg-transparent text-label text-ink outline-none placeholder:text-faint"
+            aria-label="Edit this message"
+          />
+          <div className="mt-1.5 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={fork}
+              title="Open a new thread with the turns before this one, and this message changed"
+              className={secondaryBtn}
+            >
+              Fork from here
+            </button>
+            <button
+              type="button"
+              onClick={() => { setEditing(false); setDraft(turn.text); useUiStore.getState().focusChat(); }}
+              className="text-caption text-faint transition-colors duration-fast hover:text-ink"
+            >
+              Cancel
+            </button>
+            {/* SAID BEFORE IT HAPPENS, not after. Somebody about to press this needs to know the
+                original is kept — otherwise the honest expectation is that their history is about
+                to be rewritten, which is what every other product does here. */}
+            <span className="ml-auto text-tiny text-faint">
+              This conversation is kept — a new one opens with the turns above
+            </span>
+          </div>
+        </div>
       </TurnRow>
     );
+  }
+
+  return (
+    // The `›` it replaces was a prompt character — it said "input", not "you". At the top of a
+    // scrolled-back thread, the question is whose turn this was, and a face answers that faster
+    // than punctuation does.
+    <TurnRow marker={<UserCircleIcon size={ICON.sm} className="text-faint" />}>
+      <div className="group/user flex items-start gap-1.5">
+        <span className="min-w-0 flex-1 text-ink text-label whitespace-pre-wrap break-words">{turn.text}</span>
+        {/* ON HOVER OR FOCUS, NEVER HIDDEN FROM THE KEYBOARD — the rule §5 already holds for the
+            assistant action row, for the same reason: "must be reachable in tab order". Opacity
+            rather than `display: none`, because a hidden element is not focusable and
+            `focus-within` could never fire for it. */}
+        {turn.itemId && threadId && (
+          <button
+            type="button"
+            onClick={() => { setDraft(turn.text); setEditing(true); }}
+            aria-label="Edit this message"
+            title="Edit — forks a new thread from here and keeps this one"
+            className="shrink-0 rounded-control p-1 text-faint opacity-0 transition-opacity duration-fast
+              hover:text-ink focus-visible:opacity-100 focus-visible:outline-none focus-visible:shadow-focusring
+              group-hover/user:opacity-100 motion-reduce:transition-none"
+          >
+            {/* THE SAME MARK THE "Revise" CHOICE CARD ALREADY USES for the same verb — changing
+                what you asked for. One glyph per verb is the icon system's whole rule, and this
+                file's existing pencil is that glyph. */}
+            <PencilIcon size={ICON.xs} />
+          </button>
+        )}
+      </div>
+    </TurnRow>
+  );
+}
+
+function Turn({ turn, isLastGen, threadId }: { turn: ChatTurn; isLastGen: boolean; threadId: string | null }) {
+  if (turn.role === "user") {
+    return <UserTurnView turn={turn} threadId={threadId} />;
   }
   if (turn.kind === "plan") {
     return (
@@ -2067,7 +2197,7 @@ export function BuildPane({
           // The id on the wrapper is what §4.5's resume scrolls to. One place, rather than a ref
           // inside each of the four card components.
           <div key={t.id} data-turn-id={t.id}>
-            <Turn turn={t} isLastGen={t.id === lastGenId} />
+            <Turn turn={t} isLastGen={t.id === lastGenId} threadId={activeThreadId} />
           </div>
         ))}
       </div>

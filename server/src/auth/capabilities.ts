@@ -572,6 +572,14 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   // header is explicit that switching never moves a published pointer, and a capability stronger
   // than reading would mean somebody who may read a conversation cannot look at its other answer.
   selectVariant: "agent:read",
+  // §6.3's fork. `agent:read` AND THAT DESERVES THE ARGUMENT, because it writes a row and copies
+  // rows, which looks like a write. What it writes is a CONVERSATION — and opening a conversation
+  // is `createThread`'s authority, which is the same `agent:read` a member who may ask a question
+  // already has. It cannot reach the agent's code: §6.3 is explicit that "editing does not re-run
+  // anything that was run. It forks the conversation, not the execution", and the fork deliberately
+  // does not copy the variants either. Anything stronger would mean somebody who may ask a question
+  // cannot rephrase one they already asked.
+  editTurn: "agent:read",
 
   /**
    * The agent lifecycle: archive, restore, rename.
