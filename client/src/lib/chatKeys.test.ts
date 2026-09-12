@@ -155,5 +155,42 @@ console.log("\na modifier means it is not ours");
   check("Shift+J still moves", press("J", s, { shiftKey: true })?.do === "moveTurn");
 }
 
+
+// --- §16.1: every binding, with a stream open AND closed --------------------------------------
+//
+// THE ROW ASKS FOR THE WHOLE MATRIX and the suite above checked one key in both states (Esc, which
+// is the one whose MEANING changes). Driving the rest found `R`: it returned `regenerate` on the
+// turn that was still arriving, while the button for the same action is rendered under `!streaming`
+// and declines it. The fix is in the caller — see `test:escape-hatches` — and these are the
+// properties that must hold whatever the caller passes.
+
+console.log("\n§16.1 — every binding, stream open and closed");
+{
+  // READING A CONVERSATION WHILE IT ANSWERS IS ORDINARY, so navigation is unchanged by liveness.
+  // A J that stopped working mid-stream would strand somebody halfway up a long thread.
+  for (const streaming of [false, true]) {
+    const where = streaming ? "with a stream open" : "with no stream";
+    const nav = state({ streaming, selectedTurnId: "t1" });
+    check(`J still moves ${where}`, press("j", nav)?.do === "moveTurn");
+    check(`K still moves ${where}`, press("k", nav)?.do === "moveTurn");
+    check(`Enter still expands ${where}`, press("Enter", nav)?.do === "expandTurn");
+    check(`a printable character still starts a draft ${where}`, press("a", nav)?.do === "startDraft");
+    // ↑ IS THE EDIT-AND-BRANCH FLOW AND IT IS ALLOWED MID-STREAM ON PURPOSE: §6.3 forks rather than
+    // mutating, the parent keeps its answer, and opening an editor destroys nothing. Asserted so
+    // the permission is a decision on the record rather than an accident of the ladder.
+    check(`↑ still opens the editor ${where}`, press("ArrowUp", nav)?.do === "editLast");
+  }
+  // AND THE ONE KEY WHOSE MEANING DEPENDS ON LIVENESS is the one the spec gives two rows to.
+  check("Esc stops while streaming", press("Escape", state({ streaming: true }))?.do === "stop");
+  check("...and clears the selection when not",
+    press("Escape", state({ streaming: false, selectedTurnId: "t1" }))?.do === "clearSelection");
+  // NOTHING IS EVER SWALLOWED WITHOUT DOING SOMETHING. A binding that returned an action in one
+  // state and null in the other for the same visible situation is the shape that strands a reader.
+  check("no binding goes dead when a stream opens",
+    ["j", "k", "Enter", "ArrowUp", "Escape"].every((k) =>
+      (press(k, state({ selectedTurnId: "t1", streaming: true })) === null)
+      === (press(k, state({ selectedTurnId: "t1", streaming: false })) === null)));
+}
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 (globalThis as { process?: { exit(code: number): void } }).process?.exit(fail === 0 ? 0 : 1);

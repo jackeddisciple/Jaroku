@@ -122,5 +122,33 @@ console.log("\n§15 — being wrong costs one click, in both directions");
     /planEvidence: routing\.planEvidence/.test(pane), "");
 }
 
+
+// --- §16's pass: the keyboard asks the same question the row does -----------------------------
+//
+// `canRerunTurn` answers "is this the KIND of turn that can be re-run" and says where the other
+// half lives: "a `streaming` one is excluded AT THE ROW rather than here, because that is a liveness
+// question." `TurnActions` renders Regenerate under `!streaming`, so the button declines a turn that
+// is still arriving. The keydown handler asked only `canRerunTurn`, so `R` on the streaming turn
+// dispatched a regeneration the server then refused as a second message in a live conversation —
+// one action, two paths, two answers, and the visible control was the one that was right.
+
+console.log("\n§16 — R cannot regenerate a turn that is still arriving");
+{
+  const at = pane.indexOf("selectedIsRegenerable:");
+  check("the keydown handler computes it", at > 0, String(at));
+  const expr = pane.slice(at, at + 400);
+  check("...from canRerunTurn", /canRerunTurn\(sel\)/.test(expr), expr.slice(0, 160));
+  // THE LIVENESS HALF, in the same expression. Asserted as the property rather than as a string:
+  // what matters is that a streaming reply is excluded, however that is spelled.
+  check("...and excludes a streaming reply",
+    /status\s*===\s*"streaming"/.test(expr) && /!\(|!==/.test(expr), expr.slice(0, 260));
+  // AND THE ROW'S OWN GATE IS STILL THERE, so the two paths cannot drift apart again silently.
+  const actions = strip(readFileSync(`${HERE}composer/TurnActions.tsx`, "utf8"));
+  check("the row still hides Regenerate while streaming",
+    /\{!streaming && onRegenerate &&/.test(actions));
+  check("...and Regenerate-with too", /\{!streaming && onRegenerateWith &&/.test(actions));
+}
+
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 (globalThis as { process?: { exit(code: number): void } }).process?.exit(fail === 0 ? 0 : 1);

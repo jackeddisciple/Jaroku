@@ -2101,7 +2101,17 @@ export function BuildPane({
       const action = chatKeyAction(e, {
         streaming: turns.streamingThreadId !== null,
         selectedTurnId,
-        selectedIsRegenerable: sel !== null && canRerunTurn(sel),
+        // THE SAME QUESTION THE ROW ASKS, and §16's pass found it being asked only there.
+        //
+        // `canRerunTurn` deliberately answers "is this the kind of turn that can be re-run" and says
+        // so: "a `streaming` one is excluded AT THE ROW rather than here, because that is a liveness
+        // question." `TurnActions` does exactly that — it renders Regenerate under `!streaming` — so
+        // the button declines a turn that is still arriving. This path never asked, so `R` on the
+        // streaming turn dispatched a regeneration that the server then refused for being a second
+        // message in a conversation already answering. One action, two paths, two answers.
+        selectedIsRegenerable:
+          sel !== null && canRerunTurn(sel)
+          && !(sel.role === "jaroku" && sel.kind === "reply" && sel.status === "streaming"),
         composerEmpty: text.trim().length === 0,
         typing: isTypingTarget(e.target),
         viewOwnsScreen: ui.navView !== null,
