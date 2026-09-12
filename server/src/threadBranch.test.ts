@@ -23,6 +23,7 @@ import { randomUUID } from "node:crypto";
 import { openTestSqlite, testContext } from "./db/testDb.ts";
 import { newRequestId, systemContextFor } from "./db/tenant.ts";
 import { ThreadNotHere, ThreadStore } from "./threadStore.ts";
+import { sideEffectsAfter } from "./sideEffects.ts";
 import { TurnVariantStore } from "./turnVariants.ts";
 import type { Db } from "./db/db.ts";
 import type { TenantContext } from "./db/tenant.ts";
@@ -220,6 +221,83 @@ console.log("\nwhat a fork does not copy");
   check("...with its cost intact", (await h.variants.forTurn(A, turn))[0]?.cost_usd === 0.0042);
 
   await h.close();
+}
+
+// --- §6.5: editing a turn that produced a side effect -----------------------------------------
+//
+// §6.5's ACCEPTANCE: "attempting to edit a turn that applied an edit is refused with an explanation
+// NAMING THE SIDE EFFECT." And §6.3's rule behind it: "a turn that produced a side effect — an
+// applied edit, a confirmed plan, a started run — is not editable IN PLACE. Those turns fork from
+// the point BEFORE the side effect and say so, because the side effect already happened on disk and
+// a fork cannot unhappen it."
+//
+// THIS HAD NO COVERAGE UNTIL THIS PASS, which is why it is here rather than in the feature commit:
+// `sideEffectsAfter` decides what a fork says about itself, and it is a pure function over the
+// items — so every case is checkable and none of them was checked.
+
+console.log("\n§6.5 — what a turn's consequences are called");
+{
+  const items = (...rows: [string, "user" | null, string | null][]) =>
+    rows.map(([kind, role, body], i) => ({ id: `i${i}`, kind: kind as never, role, body }));
+
+  // THE WINDOW IS "UNTIL THE NEXT USER MESSAGE", because that is what "this turn produced" means in
+  // a conversation: everything between what somebody said and what they said next.
+  const withEdit = items(
+    ["message", "user", "add a retry"],
+    ["proposal", null, null],
+    ["message", "user", "and a jitter"],
+    ["run", null, null],
+  );
+  const effects = sideEffectsAfter(withEdit, "i0");
+  check("a message that produced a proposal names it", effects.length === 1, effects.join(" | "));
+  check("...in the words the record can support",
+    effects[0] === "a change to the code was proposed", String(effects[0]));
+  // NOT THE NEXT MESSAGE'S CONSEQUENCES. The run belongs to "and a jitter", not to "add a retry".
+  check("...and not the next message's", !effects.some((e) => e.includes("run")), effects.join(" | "));
+
+  // THE SECOND MESSAGE'S OWN.
+  const second = sideEffectsAfter(withEdit, "i2");
+  check("the second message names its run", second[0] === "a run was started", String(second[0]));
+
+  // A MESSAGE THAT CAUSED NOTHING SAYS NOTHING, which is the ordinary case — most turns in a chat
+  // thread are a question and an answer.
+  const plain = items(["message", "user", "why?"], ["message", "user", "and?"]);
+  check("a message with no consequences names none", sideEffectsAfter(plain, "i0").length === 0);
+
+  // EVERY KIND THAT CANNOT BE UNHAPPENED, each named for what the RECORD holds rather than for what
+  // §6.3's prose guesses. §6.3 says "an applied edit"; `thread_items` holds a `proposal` row and
+  // whether it was ever APPLIED lives in the editor's memory — so this says "a change was
+  // proposed". Saying "applied" about one somebody discarded would be the product lying about its
+  // own state, which §8.3 treats as the most serious class there is.
+  for (const [kind, expected] of [
+    ["generation", "an agent was generated"],
+    ["proposal", "a change to the code was proposed"],
+    ["run", "a run was started"],
+    ["work", "a job was given to a deployed agent"],
+    ["eval", "an eval was run"],
+  ] as const) {
+    const one = sideEffectsAfter(items(["message", "user", "do it"], [kind, null, null]), "i0");
+    check(`${kind} is named "${expected}"`, one[0] === expected, one.join(" | "));
+  }
+
+  // A PLAN IS DELIBERATELY NOT A SIDE EFFECT. §6.3 lists "a confirmed plan" — and a plan ROW is a
+  // plan that was WRITTEN, not one that was confirmed: confirming it produces the `generation` row
+  // above. A fork before a written-but-unconfirmed plan unhappens nothing, so claiming otherwise
+  // would be a sentence about a consequence that did not occur.
+  const planned = sideEffectsAfter(items(["message", "user", "a support agent"], ["plan", null, null]), "i0");
+  check("a written plan is not a side effect", planned.length === 0, planned.join(" | "));
+
+  // DE-DUPLICATED: three runs from one message read as one sentence. What the line is about is what
+  // KIND of thing cannot be unhappened, not how many there were.
+  const three = sideEffectsAfter(
+    items(["message", "user", "run it"], ["run", null, null], ["run", null, null], ["run", null, null]),
+    "i0",
+  );
+  check("three runs read as one consequence", three.length === 1, three.join(" | "));
+
+  // A TURN THAT IS NOT IN THE LIST NAMES NOTHING rather than throwing — a client's id that this
+  // workspace does not own resolves to no items at all, and the fork refuses it separately.
+  check("an unknown turn names nothing", sideEffectsAfter(withEdit, "nope").length === 0);
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
