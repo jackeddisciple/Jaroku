@@ -618,6 +618,16 @@ jobs:
           # Its other half is v0.2.1's lesson — an error body is scrubbed before it is shown OR
           # stored, because a provider that echoes the request echoes the credential in it.
           npm run test:provider-failure
+          # §10'S ONE BLOCKER-CLASS PROPERTY: "a mismatch between a thread's row total and the sum
+          # of its turns." Neither figure is wrong on its own — that is what makes it worth a suite.
+          # `turn_variants.cost_usd` is what a TURN records and `usage_events` is what the LEDGER
+          # records; they are summed over different rows by different code, and the only thing
+          # making them agree is that both price the same counts through the same `costFor`. Every
+          # case here is one §16 names by name: a stopped stream, a failed turn, three
+          # regenerations, an unpriced model, a model switch mid-thread. The unpriced one is the
+          # sharpest — null all the way down, excluded from the total, and the row reporting a FLOOR
+          # rather than an answer, because a zero anywhere in that chain reads as "this was free".
+          npm run test:chat-cost
 
       # THE INBOX DESTINATION, in a step of its own from its first suite — the same reason the two
       # steps above are separate rather than appended to whichever step had room. A reader looking

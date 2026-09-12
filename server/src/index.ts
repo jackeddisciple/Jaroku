@@ -286,7 +286,7 @@ import {
   PROVIDER_ENV_KEY, isProviderId, isRealProvider, providerLabel, providerStatus, verifyProviderKey,
   type ProviderId,
 } from "./providers.ts";
-import { allPrices, capabilityFor, effortLabelsFor, isPriced } from "./pricing.ts";
+import { allPrices, capabilityFor, costFor, effortLabelsFor, isPriced } from "./pricing.ts";
 import { DeployStore, isInFlight as isDeployInFlight, type Deployment } from "./deployStore.ts";
 import { DeployOps } from "./deployOps.ts";
 import { DeployDispatcher } from "./deployDispatch.ts";
@@ -3840,6 +3840,51 @@ async function turnForRegenerate(ctx: TenantContext, turnId: string): Promise<st
     return row ? turnId : null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * §10: WHAT THE SELECTED ANSWER TO THIS TURN SPENT, as the row recorded it.
+ *
+ * READ BACK RATHER THAN CARRIED, so the figure on screen is the figure in the table. A closure that
+ * remembered its own counts would be a second arithmetic, and §10's blocker-class defect is exactly
+ * two arithmetics disagreeing: "a mismatch between a thread's row total and the sum of its turns".
+ *
+ * THE SELECTED VARIANT, not the sum of them. §13.1 says the provenance line "is where cost lives"
+ * and it describes THIS response — while §10 says "all siblings count toward the thread total",
+ * which is the THREAD's figure and comes from `usage_events`. One line per answer, one total per
+ * conversation, and neither is derived from the other.
+ *
+ * ABSENT WHERE NOTHING WAS RECORDED, never zero. An unpriced model, a stop before the first token
+ * and the no-key path all leave the column null — and §10's rule is that unknown is excluded from
+ * totals rather than contributing zero.
+ */
+async function spentOnTurn(
+  ctx: TenantContext,
+  turnId: string | null,
+): Promise<{ turn_cost_usd?: number | null; total_tokens?: number }> {
+  if (!turnId) return {};
+  try {
+    const rows = await turnVariants.forTurn(ctx, turnId);
+    // THE SELECTED ONE, else the newest — the same rule the window assembler applies, so the line
+    // under an answer describes the answer above it.
+    const newestFirst = [...rows].reverse();
+    const v = newestFirst.find((r) => r.selected) ?? newestFirst[0];
+    if (!v) return {};
+    const tokens = (v.tokens_in ?? 0) + (v.tokens_out ?? 0);
+    return {
+      // §13.1's COST, AND `null` TRAVELS AS `null`. An unpriced model recorded none, and the line
+      // renders "unknown" — sending nothing at all would be indistinguishable from a turn the
+      // server had not finished measuring.
+      turn_cost_usd: v.cost_usd,
+      // §13.1's TOKENS: "total for the turn", which is the sum a person reads rather than the four
+      // counts `summarizeUsage` prices apart. Absent when nothing measured either half — a stop
+      // before the first `message_start` has no counts, and a zero there would claim it spent
+      // nothing when what is true is that nobody knows.
+      ...(v.tokens_in !== null || v.tokens_out !== null ? { total_tokens: tokens } : {}),
+    };
+  } catch {
+    return {};
   }
 }
 
@@ -13444,7 +13489,37 @@ async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<voi
             payer: chatKey ? "workspace" : "platform",
             threadId: thread,
           });
-          settle({ tokensIn: u.input, tokensOut: u.output });
+          /**
+           * §10: WHAT THIS TURN COST, on the turn.
+           *
+           * THROUGH THE SHARED PRICING FILE AND NOTHING ELSE. `costFor` reads
+           * `runtime/pricing.json` — the same table the Python interceptor reads for a per-step
+           * cost — so §10's "no second pricing path" is true by construction rather than by care.
+           * Cached tokens are priced at the cached rate by the same call, which is v0.1.9's rule
+           * and the reason the multipliers live in that file.
+           *
+           * `null` RATHER THAN ZERO FOR AN UNPRICED MODEL. §10: "an unpriced chat model shows cost
+           * unknown and is excluded from totals rather than contributing zero." `costFor` returns
+           * null for a model with no entry, and `settle` writes exactly what it is given — so the
+           * column holds null, the turn renders "unknown", and a SUM over the column skips it.
+           * Coalescing to 0 here would make an unpriced turn read as free, which is the single
+           * failure v0.1.9 exists to prevent.
+           *
+           * AND IT IS THE SAME ARITHMETIC THE LEDGER DID one line above. §10's blocker-class
+           * defect is "a mismatch between a thread's row total and the sum of its turns" — both
+           * figures now come from `costFor` over the same four counts, so they cannot disagree
+           * about anything except which rows they sum.
+           */
+          settle({
+            tokensIn: u.input,
+            tokensOut: u.output,
+            costUsd: costFor(u.model, {
+              inputTokens: u.input,
+              outputTokens: u.output,
+              cacheReadTokens: u.cacheRead,
+              cacheWriteTokens: u.cacheWrite,
+            }),
+          });
         },
         onDone: () => {
           // §4: THE BODY IS SETTLED ON THE VARIANT, which is what makes the next turn's memory
@@ -13459,13 +13534,24 @@ async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<voi
           // AND EACH SIBLING'S OWN MODEL RIDES WITH THEM. §13.3: "regenerating on a different model
           // must be visible as exactly that" — so the payload names the model that answered THIS
           // time, never the conversation's current setting.
-          void variantCounts(ctx, turn).then((counts) =>
+          // §10 AND §13: THE FIGURES THE TURN RENDERS, read back from the row that recorded them.
+          //
+          // FROM THE VARIANT RATHER THAN FROM THE CLOSURE, which is the decision worth naming: the
+          // numbers on screen and the numbers in the table are then the same numbers, and §10's
+          // blocker-class defect — "a mismatch between a thread's row total and the sum of its
+          // turns" — cannot be introduced by a second arithmetic on the way out.
+          void Promise.all([variantCounts(ctx, turn), spentOnTurn(ctx, turn)]).then(([counts, spent]) =>
             relay.broadcastReply(
               ctx,
               {
                 type: "done",
                 agentId: cmd.agentId ?? "",
-                usage: { model, provider: "anthropic", ...effortFields(effort), ...counts },
+                usage: {
+                  model, provider: "anthropic",
+                  ...effortFields(effort),
+                  ...counts,
+                  ...spent,
+                },
               },
               thread,
             ),
@@ -13486,7 +13572,26 @@ async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<voi
          * on the no-key path.
          */
         onStopped: (u) => {
-          settle({ body: answer, ...(u ? { tokensIn: u.input, tokensOut: u.output } : {}) });
+          // §10: "A STOPPED, INTERRUPTED OR FAILED TURN RECORDS THE COST ACTUALLY INCURRED." The
+          // counts come off the aborted stream (see `usageFromPartial`), and the same `costFor`
+          // prices them — so a stopped answer is neither free nor charged for tokens it never
+          // produced. No counts at all means no cost written, which leaves the column null:
+          // unknown, not zero.
+          settle({
+            body: answer,
+            ...(u
+              ? {
+                tokensIn: u.input,
+                tokensOut: u.output,
+                costUsd: costFor(u.model, {
+                  inputTokens: u.input,
+                  outputTokens: u.output,
+                  cacheReadTokens: u.cacheRead,
+                  cacheWriteTokens: u.cacheWrite,
+                }),
+              }
+              : {}),
+          });
           if (u) {
             meterPlatformCall(ctx, "llm.explain", {
               model: u.model,

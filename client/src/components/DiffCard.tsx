@@ -362,7 +362,7 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
           {turn.usage && (
             <span className="ml-auto text-faint text-tiny tabular-nums">
               {fmtCost(turn.usage.cost_usd)}
-              {turn.usage.cache_read_input_tokens > 0 && " · cache hit"}
+              {(turn.usage.cache_read_input_tokens ?? 0) > 0 && " · cache hit"}
             </span>
           )}
         </div>

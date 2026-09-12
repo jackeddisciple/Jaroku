@@ -135,11 +135,26 @@ export interface AgentSummary {
 }
 
 export interface GenUsage {
-  input_tokens: number;
-  output_tokens: number;
-  cache_read_input_tokens: number;
-  cache_creation_input_tokens: number;
-  cost_usd: number;
+  /**
+   * THE FOUR COUNTS AND THE FIGURE, AND THEY ARE OPTIONAL — which is the honest shape rather than a
+   * widening for convenience.
+   *
+   * THEY WERE REQUIRED AND THE REPLY PATH HAS NEVER SENT THEM. A plan, a generation and an edit all
+   * go through `summarizeUsage`, which fills all five; an explain answer's `done` event carries
+   * `{ ...effortFields, ...variantCounts }` and nothing else, because the explainer reports its
+   * usage on a separate callback and the counts are what the metadata row needed. So on every reply
+   * turn in the product, `turn.usage.cost_usd` was typed `number` and was `undefined` — a type lie
+   * nothing had read yet, which §13's provenance line is about to.
+   *
+   * AND `cost_usd` IS NULLABLE BESIDES, which is v0.1.9's rule in the type system: "unknown is
+   * `null`, never `$0.00`". An unpriced model records no cost, and `fmtCost` already renders null as
+   * `—` rather than as a zero. A required `number` could only have held a lie.
+   */
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cost_usd?: number | null;
 
   // --- what §6's metadata row reports ----------------------------------------------------------
   //
@@ -169,6 +184,27 @@ export interface GenUsage {
   /** §5.4's switcher — the two numbers in "2/2". Absent means a single response. */
   variant_ordinal?: number;
   variant_total?: number;
+
+  // --- §13's provenance line ---------------------------------------------------------------------
+  //
+  // NAMED FOR THE LINE RATHER THAN REUSING THE FOUR COUNTS ABOVE, and the reason is what each is
+  // about. Those four are what ONE CALL reported — uncached input, output, cache reads, cache
+  // writes — and they exist because `summarizeUsage` prices them apart. §13.1 asks for "Tokens.
+  // Total for the turn", which is their sum and is the number a person reads; and for a cost that
+  // is "§10's figure. Not duplicated elsewhere on the turn — this line IS where cost lives."
+  //
+  // READ BACK FROM `turn_variants` RATHER THAN SUMMED HERE, so the figure on screen is the figure
+  // in the table. §10's blocker-class defect is two arithmetics disagreeing.
+
+  /** §13.1's token count: the total this response spent. Absent when nothing measured it. */
+  total_tokens?: number;
+  /**
+   * §13.1's cost, and §10's rule about it.
+   *
+   * `null` IS AN ANSWER AND IT IS NOT ZERO. An unpriced model records no cost, and the line renders
+   * "unknown" — never `$0.00`, which would read as "this was free".
+   */
+  turn_cost_usd?: number | null;
 }
 
 // The pre-generation plan (server/src/planProtocol.ts). Hand-mirrored like every other

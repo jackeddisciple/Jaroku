@@ -177,6 +177,10 @@ function GenTurnView({ turn, isLive }: { turn: GenTurn; isLive: boolean }) {
   // Finished (or a generation from earlier in the session). The plan is part of what this
   // agent cost, so it's shown as its own term rather than folded in silently — the gate has to
   // be able to justify its own price.
+  // `?? 0` ON A FIGURE THAT MAY NOW BE NULL. A plan whose model had no pricing contributes nothing
+  // to this sum rather than making the whole total unknown — which is the right direction here and
+  // is what the `title` below says out loud: the generation's own figure and the plan's are shown
+  // as two terms, so a missing one is visible as a missing term rather than hidden in a total.
   const planCost = turn.planUsage?.cost_usd ?? 0;
   const stats: Stat[] = [
     {
@@ -200,13 +204,17 @@ function GenTurnView({ turn, isLive }: { turn: GenTurn; isLive: boolean }) {
       // Through `fmtCost`, like everywhere else. Written by hand it was always four decimals,
       // so a sub-cent generation read as $0.0000 here and as $0.00000 through the helper two
       // cards away — the same cost, shown two ways, one of them rounded to nothing.
-      value: fmtCost(turn.usage.cost_usd + planCost),
+      // `?? null` RATHER THAN `?? 0`, because this is the figure somebody reads as "what this cost".
+      // `fmtCost` renders null as `—`, which is v0.1.9's answer: unknown is not zero.
+      value: fmtCost(turn.usage.cost_usd === null || turn.usage.cost_usd === undefined
+        ? null
+        : turn.usage.cost_usd + planCost),
       title:
         planCost > 0
           ? `${fmtCost(turn.usage.cost_usd)} to generate + ${fmtCost(planCost)} to plan`
           : undefined,
     });
-    if (turn.usage.cache_read_input_tokens > 0) {
+    if ((turn.usage.cache_read_input_tokens ?? 0) > 0) {
       stats.push({
         icon: <ZapIcon size={STAT_ICON} />,
         value: fmtTokens(turn.usage.cache_read_input_tokens, "short"),
@@ -486,7 +494,7 @@ function ReplyStopped({ turn }: { turn: ReplyTurn }) {
  * latter across nine live elements because fading to 50% reads as disabled. A new element using the
  * wrong one reintroduces a fixed bug." `stream-pulse` breathes between full and near-full opacity;
  * `animate-pulse` fades to half, which on a live element reads as a control that has been switched
- * off. `test:thinking-indicator` is the suite that would catch a relapse.
+ * off. `test:colour-system` is the suite that would catch a relapse.
  *
  * IT GIVES WAY THE MOMENT THE FIRST TOKEN LANDS, which is the clause that decides where it lives:
  * §9's "the indicator gives way to streamed text the moment the first token lands; it does not sit
