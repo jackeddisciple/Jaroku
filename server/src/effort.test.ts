@@ -321,14 +321,15 @@ console.log("\nand the adapter is actually called, at every dispatch that shippe
 
   check("index.ts resolves the level through the settings chain", /async function effortForThread\(/.test(index));
   check("...calling the one adapter rather than translating inline", /planEffort\(modelId, level, undefined, maxOutputTokens\)/.test(index));
-  // FIVE SINCE PART 3, and the fifth is the one worth naming: answering a question from the record
-  // is a model call the composer can start, on `JAROKU_EXPLAIN_MODEL`, in a thread whose
-  // conversation settings carry an effort level exactly as a build thread's do. A dispatch left out
-  // of this count is a request that goes out at the provider's default while the chip beside it
-  // says High — which is the silence this whole block exists to have caught once already.
+  // SIX SINCE §2'S CHAT ROUTE, and the sixth is the one this counter was written to catch. Chat is
+  // the composer's DEFAULT destination — the model call somebody starts by typing anything at all —
+  // in a thread whose conversation settings carry an effort level exactly as a build thread's do. A
+  // dispatch left out of this count is a request that goes out at the provider's default while the
+  // chip beside it says High, which is the silence this whole block exists to have caught once
+  // already, and it would have been silent on the highest-volume call in the product.
   check(
-    "...at all five model calls the composer can start",
-    (index.match(/await effortForThread\(/g) ?? []).length === 5,
+    "...at all six model calls the composer can start",
+    (index.match(/await effortForThread\(/g) ?? []).length === 6,
     String((index.match(/await effortForThread\(/g) ?? []).length),
   );
 

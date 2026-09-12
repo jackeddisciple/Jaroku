@@ -5084,6 +5084,11 @@ const COMMAND_RATE_ACTIONS: Partial<Record<string, RateAction>> = {
   // let somebody exhaust one and keep spending through the other, on the same model, at the same
   // price — which is two limits adding up to no limit.
   askRecord: "agent.explain",
+  // AND CHAT, IN THE SAME BUCKET, on the same argument one line up — and it matters more here than
+  // for either of the other two. Chat is the composer's DEFAULT route since §3, so it is the
+  // highest-volume model call in the product; a command that spends a call and names no bucket is
+  // an unbounded one, and this is the one that would be typed into all day.
+  chat: "agent.explain",
   run: "run.start",
   branchRun: "run.start",
   resumeRun: "run.start",

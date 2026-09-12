@@ -163,6 +163,11 @@ export const COMMAND_ENTITLEMENT: Record<string, EntitlementKind | typeof NO_ENT
   // with `explain` because it is the same model on the same key, and the spend ceiling underneath
   // both. Two limits on one call is the arrangement that adds up to no limit.
   askRecord: NO_ENTITLEMENT,
+  // AND CHAT, beside both, with nothing new to say: there is no such thing as a workspace's Nth
+  // message, the way there is an Nth agent or an Nth seat. What it costs is a model call, bounded
+  // by the `agent.explain` bucket it shares with the two above and by §12's chat ceilings, which
+  // are the limit written for this route specifically.
+  chat: NO_ENTITLEMENT,
   diagnoseFile: NO_ENTITLEMENT,
   planAgent: NO_ENTITLEMENT,
   discardPlan: NO_ENTITLEMENT,

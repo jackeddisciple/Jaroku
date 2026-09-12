@@ -550,6 +550,17 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   // container. No dispatch, no run, no spend on the agent's key. It reads `work_items` and answers
   // from them, so it is the same authority as opening the Cockpit and reading the same rows by eye.
   askRecord: "agent:read",
+  // AND CHAT IS THE THIRD READ ON THIS CHANNEL, at the same authority and for a stricter version of
+  // the same argument. §2.2: "the chat route NEVER writes. It does not generate files, apply edits,
+  // move a version pointer, start a run, start a deploy, or resolve an MCP confirmation." So it is
+  // `agent:read` — the authority of reading the agent's own screen, which is exactly what the
+  // grounded context block (§8) is assembled from.
+  //
+  // IT IS GATED EVEN THOUGH `agentId` IS OPTIONAL, which is the case worth naming: a chat message
+  // with no agent is §8.1's planning stage and has nothing to authorise, and one WITH an agent
+  // reads that agent's version, tools, last run and spend. Leaving it ungated because the common
+  // case is harmless is how a read path acquires an agent it was never checked against.
+  chat: "agent:read",
 
   /**
    * The agent lifecycle: archive, restore, rename.
@@ -1001,6 +1012,11 @@ export const COMMAND_AGENT_CAPABILITY: Record<string, AgentCapability> = {
   // put them back together at the only layer that is actually enforced, and somebody with read
   // access to an agent would be unable to ask what it had done.
   askRecord: "view",
+  // `view`, on the same argument one scope up and for the same reason it sits beside `explain`
+  // rather than beside `dispatchWork`: §2.2's boundary means a chat message cannot change anything,
+  // so the authority it needs is the authority to look. Somebody with read access to an agent must
+  // be able to ask what it does, and somebody without it must not learn what it does by asking.
+  chat: "view",
   // The datasets belonging to an agent, and what a comparison would cost. Both are reads, and the
   // second is the estimate the entitlement gate deliberately leaves ungated for the same reason: a
   // workspace at its limit has to be able to find out what going over would cost, and a person who

@@ -128,6 +128,10 @@ export const COMMAND_CAPABILITY: Record<string, string> = {
   // container. Mirrored from the server's table — the client's copy is advisory and is used to hide
   // controls, never trusted.
   askRecord: "agent:read",
+  // §2's chat route, at the same authority: §2.2 means it cannot change anything, so what it needs
+  // is the authority to look. Mirrored from the server's table — the client's copy is advisory and
+  // is used to hide controls, never trusted.
+  chat: "agent:read",
   listAgentGrid: "agent:read",
   loadAgentDetail: "agent:read",
   loadAgentVersion: "agent:read",
@@ -503,6 +507,9 @@ export const COMMAND_AGENT_CAPABILITY: Record<string, AgentCapability> = {
   // classifier exists so that a question and a command are different things; giving them one
   // capability would put them back together at the layer that is actually enforced.
   askRecord: "view",
+  // §2's chat route. `view`, beside `explain` and `askRecord`, for the reason §2.2 gives: it
+  // answers and offers, and it never writes.
+  chat: "view",
   listDatasets: "view",
   estimateEval: "view",
   getActivityFeed: "view",
