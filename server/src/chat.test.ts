@@ -357,5 +357,26 @@ console.log("\n§16 — a deleted agent says so");
   check("...and does not read as gone", !/gone —/.test(never), never);
 }
 
+console.log("\n§16 — an unrecognised run status names itself");
+{
+  const base = {
+    agentName: "Weather Agent", version: 1,
+    thread: { turns: 1, costUsd: null, costKnown: true },
+  };
+  const run = { label: "#abcd1234", costUsd: null, costKnown: true, startedAt: "4m ago" };
+  // `RunStatus` IS CLOSED AT THREE TODAY so nothing reaches this arm in production — the point is
+  // that the next status anybody adds is not silently reported to the model as a finished run.
+  const odd = chatContext({ ...base, lastRun: { ...run, status: "cancelled" } });
+  check("an unknown status is not called completed", !/completed/.test(odd), odd);
+  check("...it is named", /cancelled/.test(odd), odd);
+  // ...AND THE THREE REAL ONES ARE UNCHANGED.
+  check("error still reads as failed",
+    /failed/.test(chatContext({ ...base, lastRun: { ...run, status: "error", failedSeq: 7 } })));
+  check("running still reads as still running",
+    /still running/.test(chatContext({ ...base, lastRun: { ...run, status: "running" } })));
+  check("completed still reads as completed",
+    /completed/.test(chatContext({ ...base, lastRun: { ...run, status: "completed" } })));
+}
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 process.exit(fail === 0 ? 0 : 1);

@@ -216,7 +216,12 @@ export function chatContext(g: ChatGrounding): string {
         // something that has not happened.
         : r.status === "running" ? "still running"
           : r.status === "paused" ? "paused"
-            : "completed";
+            // AN UNRECOGNISED STATUS NAMES ITSELF rather than reading as "completed". `RunStatus` is
+            // closed at three today, so nothing reaches this arm — but the client's union already
+            // carries a fourth value the server's does not, and the next status anybody adds would
+            // have been reported to the model as a finished run. A latent hazard rather than a live
+            // bug, closed because the honest branch costs one expression.
+            : r.status === "completed" ? "completed" : r.status;
       lines.push(`last run:    ${r.label} · ${what} · ${money(r.costUsd, r.costKnown)} · ${r.startedAt}`);
     }
   }
