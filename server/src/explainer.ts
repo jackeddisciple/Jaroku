@@ -129,6 +129,23 @@ export async function streamExplain(
     /** The rules. `prompt.ts` owns every one of them — see `CONVERSATION_SYSTEM`. */
     system?: string;
     /**
+     * The model to ask, when it is not this module's own.
+     *
+     * IT RIDES WITH THE RULES BECAUSE THE CALLER THAT CHANGES ONE CHANGES THE OTHER. A different
+     * kind of question asked under different instructions is also a question worth asking a
+     * different model — §11's chat route runs on the cheapest capable one, while explain stays on
+     * `EXPLAIN_MODEL` — and a separate positional argument would be a second way to say the same
+     * thing about the same call.
+     *
+     * IT IS REPORTED BACK ON `onUsage` AS ITSELF rather than as `EXPLAIN_MODEL`, which is the half
+     * that matters for money: `costFor` prices whatever id it is handed, so a model named here and
+     * metered as something else is the v0.1.10 accounting bug in a new place.
+     *
+     * Omitted means the explain call that shipped, byte for byte — the same discipline as `effort`
+     * being spread rather than set.
+     */
+    model?: string;
+    /**
      * Who is asking, for the one label in the user message that names them.
      *
      * IT IS NOT COSMETIC. The message says "Developer's question", and the developer who built an
@@ -177,8 +194,12 @@ export async function streamExplain(
     return;
   }
   try {
+    // THE MODEL THE CALLER NAMED, falling back to this module's own. One resolution, read twice
+    // below — by the request and by the usage report — so the id that was ASKED and the id that is
+    // PRICED cannot be two different strings.
+    const model = ask?.model ?? EXPLAIN_MODEL;
     const stream = anthropicClient(apiKey).messages.stream({
-      model: EXPLAIN_MODEL,
+      model,
       max_tokens: EXPLAIN_MAX_TOKENS,
       // SPREAD RATHER THAN SET, so a call with no plan is byte-identical to the one that shipped —
       // and the budget inside it was already validated against THIS call's max_tokens by the adapter,
@@ -197,7 +218,7 @@ export async function streamExplain(
     // charge arrive afterwards — the same "record first, then say it happened" order the trace
     // ingest chain keeps between persisting a step and broadcasting it.
     cb.onUsage?.({
-      model: EXPLAIN_MODEL,
+      model,
       input: final.usage?.input_tokens ?? 0,
       output: final.usage?.output_tokens ?? 0,
       cacheRead: final.usage?.cache_read_input_tokens ?? 0,

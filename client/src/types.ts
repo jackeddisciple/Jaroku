@@ -2074,6 +2074,11 @@ export type ClientCommand =
   | { cmd: "cancelRun"; runId: string }
   | { cmd: "branchRun"; fromRunId: string; atSeq: number; editNode?: string; editedState?: Record<string, unknown> }
   | { cmd: "explain"; agentId: string; question: string; subject: ExplainSubject; github?: GithubAttachment[]; threadId?: string }
+  // §2's chat route. `agentId` is OPTIONAL and every other command on the reply channel requires
+  // one: §8.1's planning stage is a thread with no agent, and that is exactly when somebody types
+  // "hi". Answered on "reply" like `explain` and `askRecord` — see server/src/wsRelay.ts's
+  // `ChatCommand` for why it is a third command rather than a flag on one of them.
+  | { cmd: "chat"; message: string; agentId?: string; threadId?: string }
   // Eval: dataset CRUD. Every mutation is answered with a fresh snapshot on the "eval"
   // channel, so the client never reconciles a partial update against local state.
   | { cmd: "createDataset"; agentId: string; name: string }

@@ -897,3 +897,68 @@ ${jobs}`;
 export function conversationClosing(agentName: string): string {
   return `You may answer as "${agentName}" in the first person where a job in the record supports it. Where no job in the record supports it, say you have no record of it. Cite every claim with [work:<id>].`;
 }
+
+// ── The chat route ──────────────────────────────────────────────────────────────────────────────
+//
+// §2's conversation, and the rules that keep it grounded in the one thing only Jaroku knows.
+//
+// HERE RATHER THAN AT THE DISPATCH SITE, with the other four. `prompt.ts` is the module every
+// prompt lives in, and §7.3's precedent is explicit about why: a prompt is code that is never
+// compiled, so the only thing that notices a deleted paragraph is something that looks for it — and
+// what looks for these is `test:chat-honesty`, which reads them off this constant.
+//
+// WHY IT IS NOT `CONVERSATION_SYSTEM`. That one answers from a RECORD of jobs a deployed agent ran,
+// under citation rules, for an operator. This one answers a developer who is building an agent, and
+// its material is the agent itself — the version, the tools, the last run, what the thread has
+// spent. Two different sources of truth with two different honesty failures, so two sets of rules;
+// one constant serving both would be a prompt that had to hedge about which it was.
+
+/**
+ * The chat route's rules.
+ *
+ * RULE 1 IS THE WHOLE POINT AND IS DELIBERATELY FIRST. §8.3: "a wrong answer about a general topic
+ * is an ordinary model limitation; a wrong answer about THIS user's own agent, trace or spend is the
+ * product lying about its own state." This codebase has treated that class as its most serious
+ * since v0.0.2 ("a corrupted or reordered trace is a lying product") and v0.1.9 (a model with no
+ * pricing rendering as free), so the instruction that protects it goes where a model reads it first.
+ *
+ * AND RULE 2 IS WHAT MAKES §2.2 TRUE FROM THE MODEL'S SIDE. The route cannot write — nothing below
+ * the dispatch reaches the generator, the editor or the run pool — but a reply that SAYS "I've added
+ * that tool for you" is a lie about a write that did not happen, and no amount of plumbing prevents
+ * a sentence. So the boundary is stated as a rule as well as enforced as a code path.
+ */
+export const CHAT_SYSTEM = `You are Jaroku, talking to the developer who is building an agent with you.
+
+WHAT YOU ARE WORKING FROM. You are given a CONTEXT BLOCK about the developer's own workspace: which agent is open, its version and tools, its last run and how that run ended, what this conversation has cost. That block is the only thing you know about their system. You cannot see their screen, run anything, or look anything up.
+
+THE RULES, IN ORDER OF HOW MUCH DAMAGE BREAKING THEM DOES:
+
+1. NEVER INVENT A FACT ABOUT THEIR OWN SYSTEM. If the context block does not contain the answer, say you do not have it — "I can't see that from here" is a complete answer. Do not guess a version number, a tool name, a step number, an error, a cost or a deployment state. A plausible wrong answer about their agent is worse than no answer, because they have no way to tell it from a real one.
+
+2. YOU CANNOT CHANGE ANYTHING FROM THIS CONVERSATION. You do not write files, edit code, publish a version, start a run, deploy, or approve anything. Never say or imply that you have. Where a change is what they want, say what the change would be and tell them to ask for it — the composer will route that to the build path, where they see a plan or a diff before anything lands.
+
+3. UNKNOWN IS NOT ZERO. A model with no pricing entry costs UNKNOWN, never $0.00. A total with any unknown component is approximate, and say so. Never present a floor as a total.
+
+4. ANSWER THE QUESTION THAT WAS ASKED. General questions about agents, Python, LangGraph, prompting or model choice are fair game and you should answer them well, from your own knowledge, without pretending the context block is involved.
+
+5. DO NOT DESCRIBE THE CONTEXT BLOCK. It is what you know, not what they asked about. Do not narrate it back, list it, or open with a summary of it.
+
+HOW TO WRITE IT. A few sentences, plainly. No preamble, no restating the question, no bullet list unless you are genuinely listing several things. No sign-off. You are talking to somebody in the middle of building something.`;
+
+/**
+ * The last paragraph of a chat message — the agent's own name, and the two rules worth repeating.
+ *
+ * THE SAME SHAPE AND THE SAME ARGUMENT AS `conversationClosing`: `CHAT_SYSTEM` cannot hold a name
+ * that changes per agent without costing the prompt cache on every message, and the rules most
+ * likely to be dropped on a long context are the ones furthest from the end.
+ *
+ * `null` FOR A THREAD WITH NO AGENT, rather than a sentence naming one that does not exist. §8.1
+ * requires the model to know the difference between "no agent" and "agent unknown", and the context
+ * block says which; a closing that invented a name here would contradict it.
+ */
+export function chatClosing(agentName: string | null): string {
+  const who = agentName
+    ? `The agent open in this conversation is "${agentName}".`
+    : `No agent is open in this conversation yet — the developer is still deciding what to build.`;
+  return `${who} If the answer is not in the context above, say you cannot see it rather than guessing. You cannot change anything from this conversation.`;
+}

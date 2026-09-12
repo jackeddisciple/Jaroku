@@ -168,10 +168,11 @@ import {
 import { openCheckpointStore } from "./checkpoints/store.ts";
 import { introspectGraph, introspectGraphCached, type GraphResult } from "./graphIntrospect.ts";
 import { streamExplain, EXPLAIN_MODEL, EXPLAIN_MAX_TOKENS } from "./explainer.ts";
+import { chatContext, CHAT_MODEL, CHAT_MAX_TOKENS } from "./chat.ts";
 import { buildFactPack, type FactPack, type PackDeps } from "./work/factPack.ts";
 import { citableFrom, resolveCitations } from "./work/citations.ts";
-import { CONVERSATION_SYSTEM, conversationClosing, renderRecord } from "./prompt.ts";
-import type { AskRecordCommand, ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCommand, InboxCommand, ProviderSnapshot } from "./wsRelay.ts";
+import { CHAT_SYSTEM, chatClosing, CONVERSATION_SYSTEM, conversationClosing, renderRecord } from "./prompt.ts";
+import type { AskRecordCommand, ChatCommand, ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCommand, InboxCommand, ProviderSnapshot } from "./wsRelay.ts";
 import type { ListWorkCommand, WorkCommand, WorkSnapshotWire } from "./wsRelay.ts";
 import { loadRuntimeEnv } from "./env.ts";
 import { installLogRedaction, protectEnv, protectSecret } from "./obs/log.ts";
@@ -5044,6 +5045,7 @@ async function dispatchCommand(cmd: ForwardedCommand, ctx: TenantContext): Promi
     else if (cmd.cmd === "branchRun") void branchRun(ctx, cmd.fromRunId, cmd.atSeq, cmd.editNode, cmd.editedState);
     else if (cmd.cmd === "explain") explainAgent(ctx, cmd);
     else if (cmd.cmd === "askRecord") void answerFromRecord(ctx, cmd);
+    else if (cmd.cmd === "chat") void chatWithJaroku(ctx, cmd);
     else if (AGENT_COMMAND_NAMES.has(cmd.cmd)) void handleAgentCommand(ctx, cmd as AgentCommand);
     else if (MCP_COMMAND_NAMES.has(cmd.cmd)) void handleMcpCommand(ctx, cmd as McpCommand);
     else if (DEPLOY_COMMAND_NAMES.has(cmd.cmd)) void handleDeployCommand(ctx, cmd as DeployChannelCommand);
@@ -12836,6 +12838,120 @@ async function answerFromRecord(ctx: TenantContext, cmd: AskRecordCommand): Prom
     // a throw between claiming the slot and starting the stream would otherwise leave the whole
     // conversation surface answering "one at a time" until a restart.
     explaining = false;
+  }
+}
+
+// --- the chat route (§2) ---------------------------------------------------------------------
+//
+// A CONVERSATIONAL REPLY, AND THE COMPOSER'S DEFAULT DESTINATION. §0: "most messages are not build
+// requests, and the composer has no route for them." This is that route.
+//
+// IT NEVER WRITES, AND THAT IS A PROPERTY OF WHAT THIS FUNCTION CAN REACH rather than a rule it
+// follows. Nothing below calls the generator, the editor, the planner, the run pool, the deploy
+// layer or the MCP confirmation path. It reads the thread, asks a model, and streams prose. §2.2's
+// boundary is therefore checkable by reading this function, which is the same way §3's "a question
+// never touches the container" is checkable by reading `answerFromRecord`.
+//
+// ITS SLOT IS PER THREAD, WHICH IS THE ONE PLACE IT DEPARTS FROM ITS TWO SIBLINGS ON THIS CHANNEL.
+// `explainAgent` and `answerFromRecord` share a single module-level `explaining` flag and refuse a
+// second question with "already answering — one at a time". That is defensible for a surface
+// somebody reaches by selecting a trace step; it is not defensible for the composer's DEFAULT
+// route, where the second message is the ordinary case — §4.4 requires two threads on one agent to
+// be independent, and a process-wide lock makes them anything but. So the guard is a set of thread
+// ids, and two conversations answer at once while one conversation still answers one at a time.
+//
+// AND ITS EVENTS CARRY THEIR THREAD EXPLICITLY rather than through the `replyThread` module
+// variable `replyOut` reads. Two concurrent answers cannot share one variable naming where the
+// current one goes, and a local is what makes each closure's answer land in its own session —
+// exactly what `answerFromRecord` already does with its `const thread = replyThread`.
+const chatting = new Set<string>();
+
+async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<void> {
+  const message = typeof cmd.message === "string" ? cmd.message.trim() : "";
+  // TO THE ASKER'S SCOPE AND WITH NO THREAD, which is this codebase's rule for every refusal: an
+  // empty message belongs to nobody's conversation, and attaching one would file an error in a
+  // session that did not cause it.
+  if (!message) {
+    relay.broadcastReply(ctx, { type: "error", agentId: cmd.agentId ?? "", message: "say something" });
+    return;
+  }
+
+  // THE AGENT IS RESOLVED BEFORE THE THREAD, and an id this workspace does not own resolves to
+  // ABSENT rather than to a refusal — the rule every id-taking command here follows, because a
+  // refusal confirms the id exists and turns the socket into an enumeration oracle.
+  //
+  // AND AN ABSENT AGENT IS NOT AN ERROR HERE. §8.1: a thread with `agent_id` null is the planning
+  // stage, and it is exactly when chat is most useful. `null` flows into the context block, which
+  // says the absence out loud.
+  const agent = cmd.agentId ? await agentRepo.bySlug(ctx, cmd.agentId).catch(() => null) : null;
+  const agentName = agent ? (agent.display_name ?? agent.slug) : null;
+
+  const thread = await threadForWork(ctx, cmd.threadId, cmd.agentId ?? null);
+  if (chatting.has(thread)) {
+    relay.broadcastReply(
+      ctx,
+      { type: "error", agentId: cmd.agentId ?? "", message: "still answering in this conversation — one at a time" },
+      thread,
+    );
+    return;
+  }
+  chatting.add(thread);
+
+  try {
+    // WHAT SOMEBODY SAID IS THE THREAD'S OWN MESSAGE, so a chat turn titles a new session and
+    // becomes §4.3's preview like every other thing a person types. "how much has this cost me"
+    // is exactly the line that makes a conversation recognisable a week later.
+    const turn = await noteUserMessage(ctx, thread, message);
+    relay.broadcastReply(ctx, { type: "started", agentId: cmd.agentId ?? "", question: message }, thread);
+
+    const context = chatContext({ agentName });
+    const chatKey = await providerKeys.platformKey(ctx);
+    const effort = await effortForThread(ctx, thread, CHAT_MODEL, CHAT_MAX_TOKENS);
+    // §10'S ROW, OPENED AROUND THE RESPONSE, with the model that is about to answer on it. Chat is
+    // the route most likely to be regenerated on a DIFFERENT model, which is the whole reason every
+    // metadata column on `turn_variants` is per-variant rather than per-turn.
+    const settle = await openVariant(ctx, turn, CHAT_MODEL, "anthropic", effort);
+
+    await streamExplain(
+      context,
+      message,
+      {
+        onDelta: (text) => relay.broadcastReply(ctx, { type: "delta", agentId: cmd.agentId ?? "", text }, thread),
+        onUsage: (u) => {
+          // METERED AS THE PLATFORM'S OWN THINKING, under the kind it shares with explain and with
+          // Part 3's answers — the same model on the same key, and a second kind for a third caller
+          // would be a third thing to remember to add up. The model comes from the EVENT rather
+          // than from this file's constant, so the figure prices what was actually asked.
+          meterPlatformCall(ctx, "llm.explain", {
+            model: u.model,
+            inputTokens: u.input,
+            outputTokens: u.output,
+            cacheReadTokens: u.cacheRead,
+            cacheWriteTokens: u.cacheWrite,
+            payer: chatKey ? "workspace" : "platform",
+            threadId: thread,
+          });
+          settle({ tokensIn: u.input, tokensOut: u.output });
+        },
+        onDone: () => relay.broadcastReply(ctx, { type: "done", agentId: cmd.agentId ?? "" }, thread),
+        onError: (m) => relay.broadcastReply(ctx, { type: "error", agentId: cmd.agentId ?? "", message: m }, thread),
+      },
+      chatKey,
+      effort,
+      // THE RULES AND THE MODEL COME FROM ELSEWHERE, and not one sentence of instruction is written
+      // in this file — the same discipline `answerFromRecord` keeps. `prompt.ts` owns the rules;
+      // `chat.ts` owns which model reads them.
+      { system: CHAT_SYSTEM, model: CHAT_MODEL, askedBy: "Developer", closing: chatClosing(agentName) },
+    );
+  } catch (err) {
+    const m = (err as Error)?.message ?? String(err);
+    console.error(`[chat] answering failed: ${m}`);
+    relay.broadcastReply(ctx, { type: "error", agentId: cmd.agentId ?? "", message: m }, thread);
+  } finally {
+    // IN A `finally`, for the reason `answerFromRecord`'s is: everything above is awaited, so a
+    // throw between claiming the slot and finishing the stream would otherwise leave this
+    // conversation answering "one at a time" until a restart.
+    chatting.delete(thread);
   }
 }
 

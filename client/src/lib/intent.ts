@@ -3,6 +3,16 @@
 // that already have one (edit/fix reuse sendEdit, rerun reuses branchRun). Only "explain" is a
 // new, lightweight path. Routing is pure keyword/pattern heuristics — no per-message LLM call; a
 // mis-route just needs a rephrase, so the cost of a classifier isn't warranted.
+//
+// AND ONE OF THE DESTINATIONS IS NOW A CONVERSATION. Every message this function saw used to
+// become a plan, an edit or an explanation, because those were the only places to send one — so
+// "hi" produced a plan card, in the first ten seconds of somebody's first session. `chat` is the
+// route for a message that is none of the five, and it is deliberately the CHEAP side of the
+// asymmetry: routed to chat when a plan was wanted costs a rephrase, and routed to plan when a
+// greeting was meant costs a real generation call and makes the product look like it cannot read
+// plain language.
+//
+//   npm run test:chat-route
 
 import type { Step } from "../types.ts";
 import { jsonPretty } from "./format.ts";
@@ -13,6 +23,27 @@ export type ExplainSubject =
   | { kind: "agent" };
 
 export type Intent =
+  /**
+   * NOTHING IS BEING BUILT, EDITED, EXPLAINED, FIXED OR RE-RUN — somebody is talking.
+   *
+   * THE ROUTE THAT WAS MISSING, and the one the composer spends most of its messages on. Every
+   * sentence typed into this box used to become a plan, an edit or an explanation, because those
+   * were the only destinations there were: "hi" produced a plan card, and a plan card is an
+   * expensive, visually heavy, multi-step artefact. The fix is not a better plan card — it is that
+   * MOST MESSAGES ARE NOT BUILD REQUESTS and there was no route for them.
+   *
+   * IT NEVER WRITES. It does not generate files, apply an edit, move a version pointer, start a
+   * run, start a deploy or resolve an MCP confirmation. It answers, and where an action is
+   * warranted it OFFERS the route rather than taking it. That is the same boundary the composer's
+   * ⊕ attach menu already holds — attach brings context in, it never triggers a write — and the
+   * same reason the Threads list shows which threads need you without letting you apply their diffs
+   * from the row. A conversational surface that can quietly mutate an agent is exactly the thing
+   * this product's trust model is built to not have.
+   *
+   * IT CARRIES NO FIELDS, which is the whole shape of it: every other intent names the thing it
+   * acts on, and this one acts on nothing.
+   */
+  | { kind: "chat" }
   /**
    * `into` NAMES AN EXISTING ROW TO BUILD INTO, and is absent for the ordinary case.
    *
@@ -66,6 +97,25 @@ export type ComposerContext = {
   agentIsDraft?: boolean;
 };
 
+/**
+ * A message that is social and nothing else — the one thing no other route can want.
+ *
+ * A CLOSED LIST, AND DELIBERATELY NOT THE SHAPE §3 WARNS ABOUT. The unbounded-pattern-list failure
+ * is pattern-matching TOWARD the expensive route: every miss produces another pattern for "this is
+ * a build request", and every such pattern widens the false-positive surface on the side where
+ * being wrong costs a generation. This matches toward the cheap route, over a vocabulary that does
+ * not grow — a greeting, a thanks, a farewell, an acknowledgement — and a miss here costs nothing
+ * because the message simply falls through to where it went before.
+ *
+ * ANCHORED AT BOTH ENDS. `^…$` is what makes it the WHOLE message rather than a word in one:
+ * "thanks, now fix the retry logic" is an edit request that happens to open politely, and a rule
+ * that matched "thanks" anywhere would send it to a route that cannot edit anything. The optional
+ * trailing punctuation and the optional second word are there because "hi!", "hey there" and
+ * "thanks so much" are the same message.
+ */
+const RE_SOCIAL =
+  /^(hi|hii+|hey|hello|hiya|yo|sup|howdy|morning|good (morning|afternoon|evening)|thanks|thank you|thx|ty|cheers|ok|okay|k|cool|nice|great|awesome|perfect|got it|sounds good|never ?mind|nvm|bye|goodbye|see ya|later|test|testing|ping)\b[\s!.,?]*(there|all|again|jaroku|so much|a lot|very much|mate|man|folks)?[\s!.,?]*$/i;
+
 const RE_EXPLAIN = /^(why|what|whats|what's|how|when|where|which|who|explain|describe|tell me|walk me)\b|\bexplain\b/i;
 const RE_RERUN = /\b(re-?run|retry|run again|try again|re-?execute|from (here|step|this|that))\b/i;
 const RE_FIX = /\b(fix|repair|resolve|debug|correct|patch|make (it|this|that) (work|pass|succeed))\b/i;
@@ -76,6 +126,19 @@ const RE_FIX = /\b(fix|repair|resolve|debug|correct|patch|make (it|this|that) (w
  *  is already on screen awaiting a decision, a revision of it. */
 export function classifyIntent(text: string, ctx: ComposerContext): Intent {
   const t = text.trim();
+  // FIRST IN THE LADDER, ABOVE EVEN THE PENDING-PLAN RULE, and that ordering is the decision.
+  //
+  // Every rung below this one sends the message somewhere that spends money: a plan, a revision of
+  // a plan, a generation into a draft, an edit, an explanation. "hi" belongs at none of them, and
+  // ranking this check lower would put the commonest first sentence in the product behind whichever
+  // of those matched first — which is the defect §0 opens with.
+  //
+  // IT OUTRANKS `pendingPlanId` DELIBERATELY. The standing rule is that while a plan awaits a
+  // decision a typed message is feedback on THAT plan, and it is the right rule for a sentence. It
+  // is not the right rule for "thanks": re-planning against a greeting costs a real call and
+  // produces a card nobody asked for, and a plan is only abandoned by Discard either way — so the
+  // card is still there, unchanged, when the conversation moves on.
+  if (RE_SOCIAL.test(t)) return { kind: "chat" };
   if (!ctx.agentId) {
     return ctx.pendingPlanId ? { kind: "replan", planId: ctx.pendingPlanId } : { kind: "generate" };
   }
@@ -110,6 +173,10 @@ export function classifyIntent(text: string, ctx: ComposerContext): Intent {
  *  routing is transparent and teachable. */
 export function routeLabel(intent: Intent): string {
   switch (intent.kind) {
+    // NOT "chat", WHICH NAMES THE MECHANISM. Every other label in this function says what will
+    // HAPPEN in the words a person would use, and this one has to as well — a preview reading "chat"
+    // beside a send button tells somebody the name of a route rather than what pressing it does.
+    case "chat": return "answer, without building anything";
     case "generate": return intent.into ? `plan ${intent.into}` : "plan a new agent";
     case "replan": return "revise the plan";
     case "edit":

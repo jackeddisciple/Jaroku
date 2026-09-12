@@ -1417,6 +1417,21 @@ export function sendBranchRun(
 ): void {
   send({ cmd: "branchRun", fromRunId, atSeq, editNode, editedState });
 }
+/**
+ * §2's chat route: a conversational reply, on the "reply" channel like the other two.
+ *
+ * `agentId` IS OPTIONAL AND EVERY OTHER COMMAND ON THIS CHANNEL REQUIRES ONE. §8.1: a thread with
+ * no agent is the planning stage, and chat is most useful exactly then — "hi" on an empty chat is
+ * §0's opening example. Sent as absent rather than as an empty string so the server's own
+ * "no agent" and "an agent I could not resolve" stay different answers.
+ *
+ * IT NEVER WRITES. There is no apply, no confirm and no second command that follows this one —
+ * which is §2.2, and is checkable by reading this function.
+ */
+export function sendChat(message: string, agentId?: string | null): void {
+  send({ cmd: "chat", message, ...(agentId ? { agentId } : {}), threadId: activeThread() });
+}
+
 // Unified composer "explain": ask for a prose answer about a step / node / the agent, built from
 // in-context data. Answered on the "reply" channel (chatStore), never a code change.
 export function sendExplain(

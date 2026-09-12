@@ -1512,6 +1512,36 @@ export type AskRecordCommand = {
   threadId?: string;
 };
 
+/**
+ * A conversational message — §2's route, and the composer's default one.
+ *
+ * A COMMAND OF ITS OWN RATHER THAN A FOURTH `ExplainSubject` OR A FLAG ON `explain`, for the same
+ * reason `askRecord` is separate from `explain`: the three ground their answers in three different
+ * sources of truth, and the whole product promise is that those are never confused. `explain`
+ * grounds in an agent's CODE — the step you selected, the node you clicked, the prompt and tools on
+ * disk. `askRecord` grounds in the RECORD of jobs a deployed agent ran. This grounds in the
+ * WORKSPACE's own state — which agent is open, its last run, what the thread has spent — and
+ * answers general questions from the model's own knowledge besides. Three commands with three
+ * context builders is what makes that a property of the code rather than a claim in a comment.
+ *
+ * `agentId` IS OPTIONAL AND THAT IS §8.1. A thread with `agent_id` null is the planning stage:
+ * somebody has opened Jaroku and typed "hi" before deciding what to build. Every other command on
+ * this channel requires an agent because none of them has anything to say without one; this one is
+ * most useful exactly then.
+ *
+ * IT ANSWERS ON THE REPLY CHANNEL, which is the one thing all three share: prose streaming into a
+ * conversation is a thing this product already does, and a second channel for it would be a second
+ * set of client-side plumbing for the same four events.
+ */
+export type ChatCommand = {
+  cmd: "chat";
+  message: string;
+  /** The agent open in this conversation, when there is one. See above. */
+  agentId?: string;
+  /** The session this was said in. See RunCommand.threadId. */
+  threadId?: string;
+};
+
 export type ExplainCommand = {
   cmd: "explain";
   agentId: string;
@@ -1556,6 +1586,7 @@ export type ClientCommand =
   | BranchRunCommand
   | ExplainCommand
   | AskRecordCommand
+  | ChatCommand
   | EvalCommand
   | McpCommand
   | ListInboxCommand
@@ -1624,6 +1655,7 @@ export type ForwardedCommand =
   | BranchRunCommand
   | ExplainCommand
   | AskRecordCommand
+  | ChatCommand
   | EvalCommand
   | McpCommand
   | ProviderCommand
@@ -3278,6 +3310,11 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   // conversation with a question in it and no reply of any kind, which reads as Jaroku having
   // silently ignored somebody.
   askRecord: "reply",
+  // AND THE THIRD ON THIS CHANNEL, on the same argument. A refusal has to arrive where the answer
+  // would have: the conversation renders prose from `reply`, so a refused chat message sent
+  // anywhere else would leave a question in the thread with no reply of any kind beneath it, which
+  // reads as Jaroku having silently ignored somebody.
+  chat: "reply",
   createDataset: "eval", renameDataset: "eval", deleteDataset: "eval", listDatasets: "eval",
   loadDataset: "eval", addExample: "eval", updateExample: "eval", deleteExample: "eval",
   promoteTestInput: "eval", startEval: "eval", cancelEval: "eval", loadRubric: "eval",
@@ -4223,6 +4260,13 @@ export class WsRelay {
           // INTO `explain`: see `AskRecordCommand` for why a question about what happened and a
           // question about what the code does are two commands.
           } else if (msg.cmd === "askRecord" && typeof msg.agentId === "string" && typeof msg.question === "string") {
+            void withContext((ctx) => this.onCommand?.(msg, ctx));
+          // AND THE THIRD, WITH ONE FIELD FEWER TO INSIST ON. §8.1: a chat message is the one thing
+          // on this channel that is useful with NO agent — a thread with `agent_id` null is the
+          // planning stage, and "what can you build for me?" is asked exactly then. So the sentence
+          // is required and the agent is not, which is the whole difference between this guard and
+          // the two above it.
+          } else if (msg.cmd === "chat" && typeof msg.message === "string") {
             void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "listMcpServers") {
             void this.answer(ws, async (ctx) => ({

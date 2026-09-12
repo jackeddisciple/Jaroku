@@ -21,7 +21,7 @@ import {
   canBuild, isRunnable, modelName, providerLabelOf, runProviders, useProviderStore,
 } from "../store/providerStore.ts";
 import {
-  sendApplyEdit, sendAskRecord, sendBranchRun, sendDiscardEdit, sendDiscardPlan, sendDispatchWork,
+  sendApplyEdit, sendAskRecord, sendBranchRun, sendChat, sendDiscardEdit, sendDiscardPlan, sendDispatchWork,
   sendEdit, sendExplain, sendGenerate, sendLoadWorkItem, sendPlanAgent, sendPromoteTestInput, sendRun,
 } from "../lib/socket.ts";
 import { useEvalStore } from "../store/evalStore.ts";
@@ -1623,6 +1623,18 @@ export function BuildPane({
     }));
 
     switch (intent.kind) {
+      /**
+       * §2'S ROUTE, AND THE ONLY CASE IN THIS SWITCH THAT SENDS NO CONTEXT WITH IT.
+       *
+       * NO ATTACHMENTS, DELIBERATELY. Every other branch here rides `attachRefs` because every
+       * other branch produces something an attachment should ground — a plan, an edit, an
+       * explanation. A chat message is grounded in the workspace's own state, which the server
+       * assembles (§8); the ⊕ picker's refs belong to the message that asked for work, and
+       * carrying them here would silently spend an attachment budget on a greeting.
+       */
+      case "chat":
+        sendChat(trimmed, activeAgentId);
+        break;
       case "generate": {
         // Never straight to generation: the plan gate is the only way in, so nothing gets
         // built that the user hasn't seen described first.
