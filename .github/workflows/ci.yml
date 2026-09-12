@@ -593,6 +593,14 @@ jobs:
           # a deleted paragraph in the prompt produces no error anywhere — a prompt is code that is
           # never compiled, so the only thing that notices is something that looks for it.
           npm run test:chat
+          # §4'S WINDOW, and every assertion in it is a property of the ASSEMBLY rather than of the
+          # database — which is why `conversationWindow` takes rows as data. A pronoun resolving
+          # depends on turn 1 being in the window and attributed to the right speaker; a model
+          # handed its own previous words as the USER's reads them as something the user asserted.
+          # Its sharpest pair is the budget: oldest-first with no hole in the middle, because a gap
+          # a model cannot see is a gap it will answer across. Its last block is live, because
+          # §4.4's two boundaries are properties of a WHERE clause that no mock can check.
+          npm run test:chat-memory
 
       # THE INBOX DESTINATION, in a step of its own from its first suite — the same reason the two
       # steps above are separate rather than appended to whichever step had room. A reader looking

@@ -649,6 +649,57 @@ export class TraceStore {
     return out;
   }
 
+  /**
+   * One line's worth of outcome per run — §4.3's `[run failed at step 7: TimeoutError]`.
+   *
+   * WHY A READER OF ITS OWN, beside `runOutcomes` and `firstFailedStepFor`. Those two answer the
+   * questions the Threads derivation asks: how many steps failed, and which step to open. This
+   * answers the question a SENTENCE asks — which step, and what it said — and it needs `seq` and
+   * `error` where neither of the others carries them. Deriving it from `firstFailedStepFor` would
+   * mean a second read per run to turn a step id into a step.
+   *
+   * TWO STATEMENTS FOR ANY NUMBER OF RUNS, batched exactly as its two neighbours are, because this
+   * is called once per chat message over a whole window of a thread's items — the place an N+1
+   * would be invisible in review and instant in a long conversation.
+   *
+   * THE WINDOW FUNCTION PICKS THE FIRST FAILURE, not the last. A run that failed at step 7 and then
+   * failed again at 9 failed at 7: the second error is usually the first one's consequence, and a
+   * summary naming the later one points somebody at the wrong place.
+   */
+  async runDigests(
+    ctx: TenantContext,
+    runIds: readonly string[],
+  ): Promise<Map<string, { status: string; failedSeq: number | null; failedError: string | null }>> {
+    const out = new Map<string, { status: string; failedSeq: number | null; failedError: string | null }>();
+    if (runIds.length === 0) return out;
+    for (const chunk of batches([...new Set(runIds)], 200)) {
+      const holes = chunk.map(() => "?").join(", ");
+      const runs = await this.q(ctx).all<Record<string, unknown>>(
+        `SELECT id, status FROM runs WHERE workspace_id = ? AND id IN (${holes})`,
+        [ctx.workspaceId, ...chunk],
+      );
+      for (const r of runs) {
+        out.set(String(r["id"]), { status: String(r["status"]), failedSeq: null, failedError: null });
+      }
+      const failed = await this.q(ctx).all<Record<string, unknown>>(
+        `SELECT run_id, seq, error FROM (
+           SELECT run_id, seq, error, ROW_NUMBER() OVER (PARTITION BY run_id ORDER BY seq ASC) AS rn
+             FROM steps
+            WHERE workspace_id = ? AND error IS NOT NULL AND run_id IN (${holes})
+         ) ranked
+          WHERE rn = 1`,
+        [ctx.workspaceId, ...chunk],
+      );
+      for (const f of failed) {
+        const at = out.get(String(f["run_id"]));
+        if (!at) continue;
+        at.failedSeq = asInt(f["seq"]);
+        at.failedError = (f["error"] as string | null) ?? null;
+      }
+    }
+    return out;
+  }
+
   /** How many runs one agent has started since a moment. The denominator for a cost per run. */
   async runCountSince(ctx: TenantContext, agentSlug: string, since: string): Promise<number> {
     const row = await this.q(ctx).get<{ n: unknown }>(

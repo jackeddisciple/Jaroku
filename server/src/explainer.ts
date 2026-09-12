@@ -146,6 +146,25 @@ export async function streamExplain(
      */
     model?: string;
     /**
+     * THE CONVERSATION SO FAR — §4, and the one argument that turns this into a chat.
+     *
+     * REAL TURNS RATHER THAN A TRANSCRIPT PASTED INTO `context`. The cheap version folds the
+     * history into the context string, and it is worse in two ways that both bite: a model handed
+     * its own previous words as quoted material inside a user message treats them as something the
+     * user said about it, and the provider's prompt cache has nothing stable to key on because the
+     * one message changes completely on every turn. Real `assistant` turns fix both — the prefix is
+     * byte-identical from one message to the next, so it caches, and the model's own turns are its
+     * own turns.
+     *
+     * ASSEMBLED BY THE CALLER, like `context`. This module knows how to ask a model a question; it
+     * does not know what a thread is, and `test:db-boundary` is what keeps that true — it imports no
+     * store and takes no context.
+     *
+     * Omitted means the single-shot call that shipped, which is what `explain` still is: §4.1 is
+     * explicit that explain is deliberately single-shot and "grounded strictly in the selection".
+     */
+    history?: readonly { role: "user" | "assistant"; content: string }[];
+    /**
      * Who is asking, for the one label in the user message that names them.
      *
      * IT IS NOT COSMETIC. The message says "Developer's question", and the developer who built an
@@ -206,11 +225,33 @@ export async function streamExplain(
       // not against whatever the model could theoretically produce.
       ...(effort?.thinking?.type === "enabled" ? { thinking: effort.thinking } : {}),
       system: ask?.system ?? SYSTEM,
-      messages: [{
-        role: "user",
-        content: `Context:\n${context}\n\n${ask?.askedBy ?? "Developer"}'s question: ${question}`
-          + (ask?.closing ? `\n\n${ask.closing}` : ""),
-      }],
+      messages: [
+        // THE CONTEXT BLOCK IS ITS OWN TURN WHEN THERE IS A HISTORY, and folded into the question
+        // when there is not. Two reasons, and the first is the one that matters: a conversation's
+        // turns have to stay in order, and a context block prepended to the LAST user message would
+        // put the state of the world after everything that was said about it. The second is the
+        // cache — the block and the history are the stable prefix, and the question is the only part
+        // that changes.
+        //
+        // AND THE NO-HISTORY SHAPE IS BYTE-IDENTICAL TO WHAT SHIPPED, which is what keeps `explain`
+        // and Part 3's answers exactly the calls they were.
+        ...(ask?.history && ask.history.length > 0
+          ? [
+            { role: "user" as const, content: `Context:\n${context}` },
+            { role: "assistant" as const, content: "Understood — I have the context." },
+            ...ask.history.map((m) => ({ role: m.role, content: m.content })),
+            {
+              role: "user" as const,
+              content: `${ask?.askedBy ?? "Developer"}'s question: ${question}`
+                + (ask?.closing ? `\n\n${ask.closing}` : ""),
+            },
+          ]
+          : [{
+            role: "user" as const,
+            content: `Context:\n${context}\n\n${ask?.askedBy ?? "Developer"}'s question: ${question}`
+              + (ask?.closing ? `\n\n${ask.closing}` : ""),
+          }]),
+      ],
     });
     stream.on("text", (t: string) => cb.onDelta(t));
     const final = await stream.finalMessage();

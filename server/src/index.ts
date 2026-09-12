@@ -89,7 +89,7 @@ import { ConversationSettingsStore, DEFAULT_PERMISSION_MODE, type PermissionMode
 import { offeredLevels, planEffort, type EffortPlan } from "./effort.ts";
 import { ConversationConnectorStore } from "./conversationConnectors.ts";
 import { TurnInteractionStore } from "./turnInteraction.ts";
-import { TurnVariantStore } from "./turnVariants.ts";
+import { TurnVariantStore, type VariantOutcome } from "./turnVariants.ts";
 import { classOf, mustConfirm } from "./permissionShield.ts";
 import { attachTurn, turnRoutes, type Attachable, type RequestedAttachment, type TurnRouteDeps } from "./http/turns.ts";
 import { AttachmentStore } from "./attachmentStore.ts";
@@ -168,7 +168,10 @@ import {
 import { openCheckpointStore } from "./checkpoints/store.ts";
 import { introspectGraph, introspectGraphCached, type GraphResult } from "./graphIntrospect.ts";
 import { streamExplain, EXPLAIN_MODEL, EXPLAIN_MAX_TOKENS } from "./explainer.ts";
-import { chatContext, CHAT_MODEL, CHAT_MAX_TOKENS } from "./chat.ts";
+import {
+  chatContext, conversationWindow, CHAT_MODEL, CHAT_MAX_TOKENS, TRUNCATION_NOTICE,
+  type ItemForWindow,
+} from "./chat.ts";
 import { buildFactPack, type FactPack, type PackDeps } from "./work/factPack.ts";
 import { citableFrom, resolveCitations } from "./work/citations.ts";
 import { CHAT_SYSTEM, chatClosing, CONVERSATION_SYSTEM, conversationClosing, renderRecord } from "./prompt.ts";
@@ -3785,7 +3788,7 @@ async function openVariant(
   modelId: string,
   provider: string,
   effort: EffortPlan | null,
-): Promise<(outcome: { durationMs?: number; tokensIn?: number; tokensOut?: number; costUsd?: number }) => void> {
+): Promise<(outcome: VariantOutcome) => void> {
   if (!turnId) return () => {};
   const startedAt = Date.now();
   try {
@@ -12636,8 +12639,19 @@ ${attached}`;
   // which is the whole of what the store's header promises and what nothing was writing.
   const replyEffort = await effortForThread(ctx, replyThread, EXPLAIN_MODEL, EXPLAIN_MAX_TOKENS);
   const settleReply = await openVariant(ctx, replyTurn, EXPLAIN_MODEL, "anthropic", replyEffort);
+  // §4: WHAT THIS ANSWER SAID, so it is in the window the NEXT message is sent with.
+  //
+  // AN EXPLAIN REPLY IS AN ASSISTANT REPLY. §4.2 puts "user messages and assistant replies" in the
+  // conversation context, and a thread where the explain turns were invisible would be one where
+  // "why did that happen?" after an explanation answered as though nothing had been explained. The
+  // call itself stays single-shot — §4.1 is explicit that explain is grounded strictly in the
+  // selection — so this writes into memory without reading from it.
+  let explained = "";
   void streamExplain(context, cmd.question, {
-    onDelta: (text) => replyOut({ type: "delta", agentId: cmd.agentId, text }),
+    onDelta: (text) => {
+      explained += text;
+      replyOut({ type: "delta", agentId: cmd.agentId, text });
+    },
     // Only fires when a model was actually asked. The no-key path streams the raw context and
     // completes without a call, and a workspace must not be billed for the fallback.
     onUsage: (u) => {
@@ -12656,6 +12670,7 @@ ${attached}`;
     },
     onDone: () => {
       explaining = false;
+      settleReply({ body: explained });
       // THE COUNTS, ON THE PAYLOAD THAT RENDERS THEM. Absent when there is one variant, so the
       // metadata row's slot collapses rather than showing `‹ 1/1 ›` on every turn in the product.
       void variantCounts(ctx, replyTurn).then((counts) =>
@@ -12666,7 +12681,14 @@ ${attached}`;
         }),
       );
     },
-    onError: (message) => { explaining = false; replyOut({ type: "error", agentId: cmd.agentId, message }); },
+    onError: (message) => {
+      explaining = false;
+      // WHATEVER ARRIVED IS WHAT THE CONVERSATION REMEMBERS. `streamExplain`'s error path hands back
+      // the factual context rather than nothing, and an answer that got half way there is still
+      // half an answer — dropping it would make the next turn's memory disagree with the screen.
+      if (explained) settleReply({ body: explained });
+      replyOut({ type: "error", agentId: cmd.agentId, message });
+    },
   }, explainKey, replyEffort);
 }
 
@@ -12811,6 +12833,9 @@ async function answerFromRecord(ctx: TenantContext, cmd: AskRecordCommand): Prom
           settle({ tokensIn: u.input, tokensOut: u.output });
         },
         onDone: () => {
+          // §4: THE SAME WRITE, for the same reason. An operate thread's answers are assistant
+          // replies too, and a question asked after one has to be able to see it.
+          settle({ body: answer });
           const { cited, invented } = resolveCitations(answer, citable);
           // AN INVENTED CITATION IS LOGGED AND NOT SENT. It stays on screen as the bare text it
           // always was, which is §7.4's whole point — and the line here is the only measurement
@@ -12871,6 +12896,57 @@ async function answerFromRecord(ctx: TenantContext, cmd: AskRecordCommand): Prom
 // exactly what `answerFromRecord` already does with its `const thread = replyThread`.
 const chatting = new Set<string>();
 
+/**
+ * §4'S WINDOW, READ FROM THE THREAD THE MESSAGE IS IN.
+ *
+ * THREE STATEMENTS FOR A WHOLE CONVERSATION, and that number is the point rather than a boast. The
+ * obvious implementation reads the items, then reads each one's variants, then reads each run — an
+ * N+1 twice over, on the path a person types into all day. `forTurns` and `runDigests` both take a
+ * LIST for exactly this reason, and both already existed: the first for the metadata row, the second
+ * added beside `runOutcomes` because a sentence needs the step and the error where a badge needed
+ * only a count.
+ *
+ * IT READS ONLY THIS THREAD AND ONLY THIS WORKSPACE. Every call below takes the context first — the
+ * property `test:db-boundary` makes structural — so §4.4's two boundaries hold by construction
+ * rather than by care: two threads on one agent cannot see each other's turns because neither read
+ * is given the other's id, and a workspace switch carries nothing across because the scope is the
+ * first parameter of all three.
+ *
+ * NEVER FATAL. A window that could not be read is a reply with no memory, which is the product as it
+ * was a commit ago; a message refused because a history read failed would be a worse answer than an
+ * amnesiac one.
+ */
+async function chatMemory(
+  ctx: TenantContext,
+  threadId: string,
+  excludeTurn: string | null,
+): Promise<{ history: { role: "user" | "assistant"; content: string }[]; truncated: boolean }> {
+  try {
+    const items = await threadStore.itemsFor(ctx, threadId);
+    if (items.length === 0) return { history: [], truncated: false };
+    const variants = await turnVariants.forTurns(ctx, items.map((i) => i.id));
+    const runIds = items.filter((i) => i.kind === "run" && i.ref_id).map((i) => i.ref_id as string);
+    const runs = await store.runDigests(ctx, runIds);
+    const forWindow: ItemForWindow[] = items.map((i) => ({
+      kind: i.kind,
+      role: i.role,
+      body: i.body,
+      // THE ITEM'S OWN ID IS WHAT `exclude` NAMES, and `ref_id` is what a run summary needs. They
+      // are different columns and conflating them would exclude nothing and summarise nothing.
+      refId: i.kind === "run" ? i.ref_id : i.id,
+      answers: (variants.get(i.id) ?? []).map((v) => ({ ordinal: v.ordinal, body: v.body })),
+    }));
+    // THE RUN ITEMS CARRY `ref_id` AS THEIR `refId`, so `exclude` — which names a `thread_items`
+    // id — is matched against the item id for everything else. Passing the turn being answered is
+    // what stops the current message arriving twice: once as history and once as the question.
+    const window = conversationWindow(forWindow, runs, { exclude: excludeTurn });
+    return { history: window.messages, truncated: window.truncated };
+  } catch (err) {
+    console.warn(`[chat] could not assemble the conversation window: ${(err as Error)?.message ?? err}`);
+    return { history: [], truncated: false };
+  }
+}
+
 async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<void> {
   const message = typeof cmd.message === "string" ? cmd.message.trim() : "";
   // TO THE ASKER'S SCOPE AND WITH NO THREAD, which is this codebase's rule for every refusal: an
@@ -12909,6 +12985,10 @@ async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<voi
     const turn = await noteUserMessage(ctx, thread, message);
     relay.broadcastReply(ctx, { type: "started", agentId: cmd.agentId ?? "", question: message }, thread);
 
+    // §4: THE PRECEDING TURNS OF THIS THREAD, read AFTER the message was written and with that
+    // message excluded. Written first because it is what somebody said and therefore the thread's
+    // preview and its title; excluded here because it is already the question.
+    const { history, truncated } = await chatMemory(ctx, thread, turn);
     const context = chatContext({ agentName });
     const chatKey = await providerKeys.platformKey(ctx);
     const effort = await effortForThread(ctx, thread, CHAT_MODEL, CHAT_MAX_TOKENS);
@@ -12917,11 +12997,18 @@ async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<voi
     // metadata column on `turn_variants` is per-variant rather than per-turn.
     const settle = await openVariant(ctx, turn, CHAT_MODEL, "anthropic", effort);
 
+    // THE ANSWER AS IT ACCUMULATES, because it is what gets stored: §4.2 needs the reply in the
+    // next turn's context, and the deltas are the only place the whole of it exists. Kept here
+    // rather than read back off the client, which is the one copy that could disagree.
+    let answer = "";
     await streamExplain(
       context,
       message,
       {
-        onDelta: (text) => relay.broadcastReply(ctx, { type: "delta", agentId: cmd.agentId ?? "", text }, thread),
+        onDelta: (text) => {
+          answer += text;
+          relay.broadcastReply(ctx, { type: "delta", agentId: cmd.agentId ?? "", text }, thread);
+        },
         onUsage: (u) => {
           // METERED AS THE PLATFORM'S OWN THINKING, under the kind it shares with explain and with
           // Part 3's answers — the same model on the same key, and a second kind for a third caller
@@ -12938,15 +13025,40 @@ async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<voi
           });
           settle({ tokensIn: u.input, tokensOut: u.output });
         },
-        onDone: () => relay.broadcastReply(ctx, { type: "done", agentId: cmd.agentId ?? "" }, thread),
-        onError: (m) => relay.broadcastReply(ctx, { type: "error", agentId: cmd.agentId ?? "", message: m }, thread),
+        onDone: () => {
+          // §4: THE BODY IS SETTLED ON THE VARIANT, which is what makes the next turn's memory
+          // possible at all. On `done` rather than per delta — one write per answer instead of one
+          // per token — and settled even when it is empty, because an answer that said nothing is a
+          // fact about that answer and `settle` leaves `undefined` alone rather than writing null.
+          settle({ body: answer });
+          relay.broadcastReply(ctx, { type: "done", agentId: cmd.agentId ?? "" }, thread);
+        },
+        onError: (m) => {
+          // AND ON THE FAILURE PATH TOO. §7's rule arrives in its own commit; the half that belongs
+          // here is that whatever arrived before the failure is what the conversation remembers.
+          if (answer) settle({ body: answer });
+          relay.broadcastReply(ctx, { type: "error", agentId: cmd.agentId ?? "", message: m }, thread);
+        },
       },
       chatKey,
       effort,
       // THE RULES AND THE MODEL COME FROM ELSEWHERE, and not one sentence of instruction is written
       // in this file — the same discipline `answerFromRecord` keeps. `prompt.ts` owns the rules;
       // `chat.ts` owns which model reads them.
-      { system: CHAT_SYSTEM, model: CHAT_MODEL, askedBy: "Developer", closing: chatClosing(agentName) },
+      {
+        system: CHAT_SYSTEM,
+        model: CHAT_MODEL,
+        askedBy: "Developer",
+        history,
+        // §4.2: THE MODEL IS TOLD THE CONVERSATION WAS TRUNCATED rather than handed a silently
+        // shortened history it will treat as complete. In the closing paragraph because that is
+        // where the rules that carry data go — the notice is about THIS message's window, and
+        // putting it in the system prompt would cost the prompt cache on every message to say
+        // something true of a few of them.
+        closing: truncated
+          ? `${TRUNCATION_NOTICE}\n\n${chatClosing(agentName)}`
+          : chatClosing(agentName),
+      },
     );
   } catch (err) {
     const m = (err as Error)?.message ?? String(err);

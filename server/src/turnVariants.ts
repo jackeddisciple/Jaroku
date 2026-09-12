@@ -45,6 +45,20 @@ export interface TurnVariant {
   cost_usd: number | null;
   /** What this variant produced. NEVER what is published — see the header. */
   agent_version_id: string | null;
+  /**
+   * WHAT THIS ANSWER SAID (migration 073). Null on every variant that is not prose.
+   *
+   * IT IS HERE AND NOT IN A TABLE OF ITS OWN, and migration 073 makes the whole argument: there is
+   * already exactly one row per answer, keyed by the turn it answers and numbered by the switcher a
+   * person reads, so a second table would have needed the same key, the same ordinal and the same
+   * tenancy and would have had to be kept in step on every write.
+   *
+   * NULL FOR A PLAN, A GENERATION AND A PROPOSAL. Those variants produced a card, a file list and a
+   * diff — each of which lives in its own table — and none of them belongs in a text column. Only
+   * an answer has a body, which is also why the column has no backfill: a variant that answered
+   * before anything was keeping the words did not answer with an empty string.
+   */
+  body: string | null;
   created_at: string;
 }
 
@@ -63,6 +77,16 @@ export interface VariantOutcome {
   tokensOut?: number | null;
   costUsd?: number | null;
   agentVersionId?: string | null;
+  /**
+   * What this answer said, once it has finished saying it.
+   *
+   * ON `settle` RATHER THAN ON `begin`, because at `begin` there is nothing to write: the row is
+   * opened before the first token arrives, which is the whole reason the metadata it carries is
+   * per-variant. A stopped or interrupted answer settles with the PARTIAL body, which is §6.1's
+   * rule — "retains the partial turn marked as stopped, never discards what arrived" — and is what
+   * keeps a stopped turn in conversation memory as what it actually was.
+   */
+  body?: string | null;
 }
 
 const nowIso = (): string => new Date().toISOString();
@@ -91,6 +115,7 @@ export class TurnVariantStore {
       tokens_out: asNum(row["tokens_out"]),
       cost_usd: asNum(row["cost_usd"]),
       agent_version_id: (row["agent_version_id"] as string | null) ?? null,
+      body: (row["body"] as string | null) ?? null,
       created_at: String(row["created_at"]),
     };
   }
@@ -99,7 +124,7 @@ export class TurnVariantStore {
   async forTurn(ctx: TenantContext, turnId: string): Promise<TurnVariant[]> {
     const rows = await this.q(ctx).all<Record<string, unknown>>(
       `SELECT id, turn_id, ordinal, model_id, provider, effort_requested, effort_applied,
-              duration_ms, tokens_in, tokens_out, cost_usd, agent_version_id, created_at
+              duration_ms, tokens_in, tokens_out, cost_usd, agent_version_id, body, created_at
          FROM turn_variants
         WHERE workspace_id = ? AND turn_id = ?
         ORDER BY ordinal ASC`,
@@ -178,6 +203,7 @@ export class TurnVariantStore {
     put("tokens_out", outcome.tokensOut);
     put("cost_usd", outcome.costUsd);
     put("agent_version_id", outcome.agentVersionId);
+    put("body", outcome.body);
     if (sets.length === 0) return;
 
     params.push(ctx.workspaceId, variantId);
@@ -202,7 +228,7 @@ export class TurnVariantStore {
     const holes = turnIds.map(() => "?").join(", ");
     const rows = await this.q(ctx).all<Record<string, unknown>>(
       `SELECT id, turn_id, ordinal, model_id, provider, effort_requested, effort_applied,
-              duration_ms, tokens_in, tokens_out, cost_usd, agent_version_id, created_at
+              duration_ms, tokens_in, tokens_out, cost_usd, agent_version_id, body, created_at
          FROM turn_variants
         WHERE workspace_id = ? AND turn_id IN (${holes})
         ORDER BY turn_id ASC, ordinal ASC`,

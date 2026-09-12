@@ -1,0 +1,41 @@
+-- 073_turn_variant_body — what each answer actually SAID, so a conversation can remember it.
+--
+-- THIS REVERSES A DECISION MIGRATION 044 MADE DELIBERATELY, and that is worth stating plainly
+-- rather than slipping in. 044's rule was that `thread_items` holds the user's prose and none of
+-- Jaroku's: "Jaroku's half of the conversation is streamed on the gen / edit / reply channels and
+-- rebuilt from them, so a second copy here would be a transcript nothing reads." That was true and
+-- it is no longer, for three reasons that all arrived with the chat route:
+--
+--   §4.2 — A CHAT TURN IS SENT WITH THE PRECEDING TURNS OF ITS THREAD as conversation context, and
+--   half a conversation is not context. "what about the second one?" is only answerable if the
+--   first one is still in scope, and the thing that named the second one was Jaroku's reply.
+--
+--   §6.2 — REGENERATE NEVER DESTROYS THE PREVIOUS REPLY. "Both are retained, and the turn renders a
+--   compact switcher." Both were retained in the browser's memory and died with the tab, so a
+--   reload left a `turn_variants` row saying what an answer cost beside no answer.
+--
+--   §6.3 — EDITING A MESSAGE FORKS THE THREAD, copying turns 1..N−1. A fork that copied only the
+--   user's half would open on a conversation with every question in it and no answers.
+--
+-- SO IT IS ONE NULLABLE COLUMN ON THE TABLE THAT ALREADY RECORDS WHAT EACH ANSWER COST, and not a
+-- transcript table. That is the narrowest possible place to put it and the reason is `turn_variants`
+-- own shape: there is already exactly one row per answer, keyed by the turn it answers and numbered
+-- by the switcher a person reads. A second table would have needed the same key, the same ordinal
+-- and the same tenancy, and would have had to be kept in step with this one on every write.
+--
+-- NULLABLE, AND MOST ROWS WILL KEEP IT NULL. A plan, a generation and a proposal are variants with
+-- no prose — what they produced is a card, a file list and a diff, all of which live in their own
+-- tables and none of which belongs in a text column. Only an answer has a body. The backfill is
+-- therefore deliberately absent: every variant that predates this column answered before anything
+-- was keeping the words, and writing an empty string into it would claim those answers were empty.
+--
+-- AN EXPAND AND NOTHING ELSE. A nullable column with no default and no constraint: the version
+-- currently serving does not select it, cannot be rejected by it, and is unaffected by its
+-- presence. No `jaroku:contract-step` override is needed and none is here.
+--
+-- WHY IT IS NOT CAPPED IN THE SCHEMA. `CHAT_MAX_TOKENS` bounds what a reply can be before it is
+-- ever written, and `conversationWindow` bounds what is read back out — so the cap lives where the
+-- decision is, twice, rather than as a length a migration would have to guess at. The one thing a
+-- column cap would add is a write that fails on a reply somebody is reading on screen.
+
+ALTER TABLE turn_variants ADD COLUMN body text;
