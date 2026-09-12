@@ -39,6 +39,19 @@ const USAGE: GenUsage = {
   cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: 0.0027,
 };
 
+/**
+ * A failed step, for the selection-aware routing case.
+ *
+ * HERE SINCE §3, because `explain` requires a selection now: a question with nothing selected is a
+ * conversation. Only the fields the router reads are meaningful.
+ */
+const FAILED_STEP = {
+  id: "s7", run_id: "r1", seq: 7, type: "tool_call" as const, name: "get_weather",
+  input: {}, output: null, state_before: null, state_after: null,
+  tokens: null, cost: null, latency_ms: 120, error: "TimeoutError", parent_step_id: null,
+  started_at: "2026-09-12T10:00:00.000Z",
+};
+
 /** A plan costs a fraction of a generation — that ratio is the point of the gate. */
 const PLAN_USAGE: GenUsage = {
   input_tokens: 1410, output_tokens: 480,
@@ -78,9 +91,17 @@ const userTexts = () => turns().filter((t) => t.role === "user").map((t) => (t a
   check("agent selected beats a pending plan", i.kind === "edit", i);
 }
 
-// 4 — question phrasing still routes to explain with an agent selected, plan or no plan.
+// 4 — question phrasing still routes to explain with a step selected, plan or no plan.
+//
+//     THE STEP IS THE PART THAT MAKES IT `explain` SINCE §3. A question with nothing selected is a
+//     conversation now — §8.2 answers "why did the last run fail?" from the grounded context block
+//     rather than from an explain call with no selection to ground it in. What this case is about
+//     is unchanged and is the pending plan: it must not hijack a question, whichever route the
+//     question takes.
 {
-  const i = classifyIntent("why did this fail?", { agentId: "support_bot", pendingPlanId: "p1" });
+  const i = classifyIntent("why did this fail?", {
+    agentId: "support_bot", pendingPlanId: "p1", step: FAILED_STEP,
+  });
   check("explain still reachable with a plan pending", i.kind === "explain", i);
 }
 
@@ -124,8 +145,13 @@ const userTexts = () => turns().filter((t) => t.role === "user").map((t) => (t a
   const ordinary = classifyIntent("triage inbound support email", { agentId: "tracey" });
   check("without the flag it is still an edit", ordinary.kind === "edit", ordinary);
   // A GENERATE WITH NO TARGET STILL SAYS "a new agent", so the two labels stay distinguishable.
+  //
+  // A REAL BRIEF RATHER THAN "x", SINCE §3. This row is about the LABEL, and "x" was a convenient
+  // string to reach it with — a string that now routes to chat, because §3.5 asks for exactly that
+  // ("ambiguous one-word messages" resolve to chat, every time). The assertion is unchanged; what
+  // it is driven with is a sentence that genuinely asks for an agent.
   check("an untargeted generate keeps its old label",
-    routeLabel(classifyIntent("x", { agentId: null })) === "plan a new agent");
+    routeLabel(classifyIntent("an agent that watches my inbox", { agentId: null })) === "plan a new agent");
 }
 
 // --- turn lifecycle -------------------------------------------------------------------

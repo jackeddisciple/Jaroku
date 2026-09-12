@@ -10,13 +10,13 @@
 // suite, stays untouched and must still pass. Two suites over one function is deliberate here: one
 // says what the router learned, the other says what it must not have forgotten.
 //
-// §3.5'S FORTY-MESSAGE FIXTURE TABLE LANDS IN THIS FILE, in the commit that inverts the default.
-// This commit's table is the social subset — the messages no other route can want — because that
-// is what this commit actually changed.
+// §3.5'S FIXTURE TABLE IS THE BULK OF THIS FILE, and its rule is the one that makes it worth
+// having: EVERY AMBIGUOUS CASE ASSERTS CHAT, EXPLICITLY, WITH A COMMENT SAYING WHY. A table of
+// unambiguous rows is a table that passes on a router with no judgement in it at all.
 //
 //   npm run test:chat-route
 
-import { classifyIntent, routeLabel, type ComposerContext } from "./intent.ts";
+import { classifyIntent, routeLabel, routeMessage, type ComposerContext, type Intent } from "./intent.ts";
 import type { Step } from "../types.ts";
 
 let fail = 0;
@@ -90,7 +90,12 @@ console.log("\na social opener on a real request is still the real request");
 {
   const ctx: ComposerContext = { agentId: "weather_agent" };
   check('"thanks, now add a retry" → edit', route("thanks, now add a retry", ctx) === "edit", route("thanks, now add a retry", ctx));
-  check('"hi, can you explain the graph" → explain', route("hi, can you explain the graph", ctx) === "explain", route("hi, can you explain the graph", ctx));
+  // WITH A NODE SELECTED, because that is what makes it `explain` once §3 has landed: a question
+  // with nothing selected is a conversation now. What this row is for is unchanged — the social
+  // rule must not swallow the request behind the opener.
+  const onNode: ComposerContext = { agentId: "weather_agent", nodeId: "router" };
+  check('"hi, can you explain the graph" (node selected) → explain',
+    route("hi, can you explain the graph", onNode) === "explain", route("hi, can you explain the graph", onNode));
   check('"ok so the webhook is wrong" → edit', route("ok so the webhook is wrong", ctx) === "edit", route("ok so the webhook is wrong", ctx));
   // A BUILD REQUEST THAT OPENS WITH A GREETING IS STILL A BUILD REQUEST.
   check('"hey, build me an inbox watcher" → generate', route("hey, build me an inbox watcher", { agentId: null }) === "generate",
@@ -146,6 +151,188 @@ console.log("\nthe chat intent carries nothing actionable");
   const i = classifyIntent("hi", { agentId: "weather_agent", pendingPlanId: "p1", step: FAILED });
   check("chat wins over every selection", i.kind === "chat", i);
   check("...and has exactly one field", Object.keys(i).join(",") === "kind", Object.keys(i));
+}
+
+// --- §3.5's fixture table --------------------------------------------------------------------
+//
+// FORTY-SIX ROWS, and the `why` column is not decoration: §3.5 asks for a comment on every
+// ambiguous case saying why the ambiguity resolves the way it does, and a table is where that can
+// be written once per row rather than buried in prose.
+//
+// READ THE `want` COLUMN DOWNWARDS. Most of it says `chat`, and that is §3.2's asymmetry made
+// visible: a wrong chat route costs a rephrase and one click, a wrong plan route costs a real
+// generation call and a plan card in response to a greeting.
+
+console.log("\n§3.5's fixture table");
+{
+  const NO_AGENT: ComposerContext = { agentId: null };
+  const AGENT: ComposerContext = { agentId: "weather_agent" };
+  const ON_FAILED: ComposerContext = { agentId: "weather_agent", step: FAILED };
+  const ON_NODE: ComposerContext = { agentId: "weather_agent", nodeId: "router" };
+
+  const table: { text: string; ctx: ComposerContext; want: Intent["kind"]; why: string }[] = [
+    // ── greetings ────────────────────────────────────────────────────────────────────────────
+    { text: "hi", ctx: NO_AGENT, want: "chat", why: "§0's opening example: a greeting is never a build request" },
+    { text: "hello there", ctx: NO_AGENT, want: "chat", why: "a greeting with a second word is the same greeting" },
+    { text: "good evening", ctx: AGENT, want: "chat", why: "an agent on screen does not make a greeting an edit" },
+    { text: "thanks!", ctx: AGENT, want: "chat", why: "trailing punctuation does not change what was said" },
+
+    // ── general questions, with nothing selected ─────────────────────────────────────────────
+    { text: "what can you do", ctx: NO_AGENT, want: "chat", why: "§3.5 names this one: a question about Jaroku, not a brief" },
+    { text: "what is langgraph", ctx: NO_AGENT, want: "chat", why: "a general question; §8.3 lets chat answer it from its own knowledge" },
+    { text: "which model should I use for classification", ctx: NO_AGENT, want: "chat", why: "advice, and nothing in it asks for a thing to exist" },
+    { text: "does this support python 3.13", ctx: NO_AGENT, want: "chat", why: "a yes/no question about the product" },
+
+    // ── questions about the current agent — §8.2's six, and the case §3 moved ────────────────
+    { text: "what does this agent do", ctx: AGENT, want: "chat", why: "§8.2: answered from the grounded context block, not from an explain with no selection" },
+    { text: "why did the last run fail", ctx: AGENT, want: "chat", why: "§8.2: the trace store has the answer and chat is where it is read out" },
+    { text: "how much did this cost", ctx: AGENT, want: "chat", why: "§3.5 names this one; the thread's own total answers it" },
+    { text: "what tools does it have", ctx: AGENT, want: "chat", why: "§8.2: the current version's TOOLS, and no code changes hands" },
+    { text: "is it deployed", ctx: AGENT, want: "chat", why: "§8.2: a deployment record, read not written" },
+    { text: "what changed in the last version", ctx: AGENT, want: "chat", why: "§8.2: agent_versions, read not written" },
+    // A YES/NO QUESTION OPENS WITH NO WH-WORD AT ALL, which is the half `RE_EXPLAIN` never had to
+    // catch and the half §8.2 is full of. Found by this table rather than by a user.
+    { text: "does it have retries", ctx: AGENT, want: "chat", why: "an auxiliary plus 'it' asks about the agent" },
+    { text: "did the last run pass", ctx: AGENT, want: "chat", why: "a past-tense question about the record" },
+    { text: "can it read Gmail", ctx: AGENT, want: "chat", why: "'can IT' asks about capability" },
+    { text: "and the cost?", ctx: AGENT, want: "chat", why: "AMBIGUOUS: a follow-up with no opener; the question mark is the only marker and no change verb precedes it" },
+    // ...AND THE POLITE IMPERATIVE THAT MUST NOT BE MISTAKEN FOR ONE. "can YOU" asks Jaroku to act.
+    { text: "can you add a LIMIT clause", ctx: AGENT, want: "edit", why: "'can YOU' is a request, not a question — the subject after the auxiliary decides it" },
+    { text: "add a retry there?", ctx: AGENT, want: "edit", why: "a change verb in front of a question mark is still a change request" },
+
+    // ── ...and the same questions WITH a selection, where §3.3 rule 3 still wins ─────────────
+    { text: "why did this fail?", ctx: ON_FAILED, want: "explain", why: "a selected step says what the question is about — selection-aware routing is unchanged" },
+    { text: "what does this node do", ctx: ON_NODE, want: "explain", why: "a selected node wins, exactly as it did in v0.1.7" },
+    { text: "fix this", ctx: ON_FAILED, want: "fix", why: "a selected FAILED step plus fix phrasing is still fix" },
+    { text: "run it again from here", ctx: ON_FAILED, want: "rerun", why: "a selected step plus re-run phrasing is still rerun" },
+
+    // ── edit requests ────────────────────────────────────────────────────────────────────────
+    { text: "add a LIMIT clause to the query", ctx: AGENT, want: "edit", why: "a change to an agent that exists; the default with one selected is unchanged" },
+    { text: "use gpt-5.6-terra instead", ctx: AGENT, want: "edit", why: "a statement about an existing agent, not a question" },
+    { text: "make the tone warmer", ctx: AGENT, want: "edit", why: "an imperative about the agent on screen" },
+    { text: "triage inbound support email", ctx: AGENT, want: "edit", why: "a capability described AT an existing agent reads as 'make it do this'" },
+    // §3.1'S OWN FALSE-POSITIVE EXAMPLE, in both contexts. It is "a noun phrase plus a capability"
+    // and it is an edit request — the pattern-toward-plan shape would have claimed it.
+    { text: "fix the retry logic in my webhook agent", ctx: AGENT, want: "edit", why: "§3.1: an edit request that any plan-ward pattern would misread" },
+    { text: "fix the retry logic in my webhook agent", ctx: NO_AGENT, want: "chat", why: "§3.1 again, with nothing to edit — so the cheap side, with §15.1 one click away" },
+
+    // ── explicit build requests in English ───────────────────────────────────────────────────
+    { text: "build me an agent that watches my inbox", ctx: NO_AGENT, want: "generate", why: "§0's fourth case: a verb, a thing and what it does" },
+    { text: "create a bot that posts to slack when a deploy fails", ctx: NO_AGENT, want: "generate", why: "three signals, and a trigger clause besides" },
+    { text: "I need something to watch my inbox", ctx: NO_AGENT, want: "generate", why: "§3.1: a genuine brief that names no artifact word — the placeholder carries it" },
+    { text: "a support agent", ctx: NO_AGENT, want: "generate", why: "a bare indefinite artifact phrase IS a brief; v0.1.7 asserted this and it still holds" },
+    { text: "an inbox watcher", ctx: NO_AGENT, want: "generate", why: "same shape, and why the artifact list holds agent-ish nouns and not only 'agent'" },
+    { text: "can you build me a tool that summarises PDFs", ctx: NO_AGENT, want: "generate", why: "a request phrased as a question is still a request — 'can you' proposes Jaroku does it" },
+    { text: "when a customer emails us, reply with the refund policy", ctx: NO_AGENT, want: "generate", why: "a trigger and an action is what an agent IS; worth the threshold alone" },
+    { text: "every time a PR opens, run the tests and comment", ctx: NO_AGENT, want: "generate", why: "the same shape without a comma after the trigger's own clause" },
+
+    // ── build requests in Hinglish and casual phrasing ───────────────────────────────────────
+    { text: "kuch aisa jo mails padhe aur summary bheje", ctx: NO_AGENT, want: "generate", why: "§3.1's own Hinglish example; `jo` is the relative pronoun doing the work" },
+    { text: "ek agent banao jo slack pe post kare", ctx: NO_AGENT, want: "generate", why: "banao + agent + jo — three signals, none of them English patterns" },
+    { text: "mujhe ek bot chahiye jo invoices padhe", ctx: NO_AGENT, want: "generate", why: "chahiye is the ask; bot is the thing; jo says what it does" },
+    { text: "something that scrapes a page every hour", ctx: NO_AGENT, want: "generate", why: "casual phrasing with no artifact word and no build verb" },
+
+    // ── asking HOW is not asking for it ──────────────────────────────────────────────────────
+    { text: "how do I build an agent that watches my inbox", ctx: NO_AGENT, want: "chat", why: "AMBIGUOUS: it scores three plan signals and is a question about approach — the guard wins, and §15.1 is one click" },
+    { text: "what's the best way to summarise email", ctx: NO_AGENT, want: "chat", why: "AMBIGUOUS: advice or a brief; §3.2 says the cheap side" },
+    { text: "is it possible to make a bot that reads Stripe", ctx: NO_AGENT, want: "chat", why: "AMBIGUOUS: a capability question wearing a brief's clothes" },
+
+    // ── ambiguous one-word messages — §3.5 asks for these by name ────────────────────────────
+    { text: "x", ctx: NO_AGENT, want: "chat", why: "AMBIGUOUS: one character carries no evidence at all, and plan needs positive evidence" },
+    { text: "email", ctx: NO_AGENT, want: "chat", why: "AMBIGUOUS: a noun on its own could be a brief or a topic; uncertain resolves to chat every time" },
+    { text: "slack", ctx: NO_AGENT, want: "chat", why: "AMBIGUOUS: the name of a connector is not a request to build against it" },
+    { text: "agent", ctx: NO_AGENT, want: "chat", why: "AMBIGUOUS: one artifact word is one signal, and one signal is below the bar by design" },
+    { text: "inbox", ctx: NO_AGENT, want: "chat", why: "AMBIGUOUS: a domain noun with no ask around it" },
+    { text: "?", ctx: NO_AGENT, want: "chat", why: "AMBIGUOUS: punctuation; §16 attacks this and it must not reach a model call that writes" },
+    { text: "🙂", ctx: NO_AGENT, want: "chat", why: "§16's single-emoji attack: no signal, so the cheap side" },
+    { text: "https://example.com/docs", ctx: NO_AGENT, want: "chat", why: "§16's only-a-URL attack: a link is context, never a brief" },
+  ];
+
+  // AT LEAST FORTY, ASSERTED. §3.5 asks for the number, and a table that quietly shrank in a
+  // refactor would still pass every row it had left.
+  check(`the table has at least 40 rows (${table.length})`, table.length >= 40, table.length);
+
+  for (const r of table) {
+    const got = route(r.text, r.ctx);
+    check(`${r.want.padEnd(8)} "${r.text.slice(0, 46)}" — ${r.why}`, got === r.want, { got, want: r.want });
+  }
+
+  // AND EVERY `chat` ROW IN THE TABLE CARRIES A REASON, which is §3.3 rule 5: the router records
+  // which route it took and why, for EVERY message. A route with an empty reason would render an
+  // empty provenance line in §13, which reads as meaning something.
+  for (const r of table) {
+    const { reason } = routeMessage(r.text, r.ctx);
+    check(`...and "${r.text.slice(0, 34)}" records why`, reason.trim().length > 0 && reason.endsWith("."), reason);
+  }
+}
+
+// --- §15.1's band, which is what makes the escape hatch discoverable ------------------------
+//
+// A BAND AND NOT A NUMBER — §13.2: "do not expose a raw confidence number. A score without a scale
+// invites the user to reason about a number they cannot calibrate." What leaves the router is one
+// of three words, and §15.1 shows its card on exactly one of them.
+
+console.log("\n§15.1's plan-evidence band");
+{
+  const NO_AGENT: ComposerContext = { agentId: null };
+  const band = (t: string): string => routeMessage(t, NO_AGENT).planEvidence;
+
+  check('"hi" has no plan evidence', band("hi") === "none", band("hi"));
+  check('"x" has no plan evidence', band("x") === "none", band("x"));
+  // ONE SIGNAL IS `near`, which is precisely the case §15.1 exists for: the router read it as a
+  // conversation and might have been wrong, so the reply offers the build route once.
+  check('"fix the retry logic in my webhook agent" is near', band("fix the retry logic in my webhook agent") === "near",
+    band("fix the retry logic in my webhook agent"));
+  check('"how do I build an agent that watches my inbox" is near or better',
+    band("how do I build an agent that watches my inbox") !== "none",
+    band("how do I build an agent that watches my inbox"));
+  check('"build me an agent that watches my inbox" is confident',
+    band("build me an agent that watches my inbox") === "confident",
+    band("build me an agent that watches my inbox"));
+  // THE BAND NEVER LEAKS A NUMBER, asserted on the type's own values rather than on a string shape:
+  // three words, and none of them is arithmetic.
+  for (const t of ["hi", "x", "a support agent", "build me a bot that reads email"]) {
+    check(`"${t}" bands rather than scores`, ["none", "near", "confident"].includes(band(t)), band(t));
+  }
+}
+
+// --- §16's routing attacks, run here rather than saved for the hardening pass ---------------
+//
+// THE POINT OF RUNNING THEM NOW is that every one of them is a pure function call, and a pure
+// property asserted in a suite is a property that cannot regress quietly. The hardening pass is for
+// what needs a running app.
+
+console.log("\n§16's routing attacks");
+{
+  const NO_AGENT: ComposerContext = { agentId: null };
+  check("an empty message routes without throwing", route("", NO_AGENT) === "chat", route("", NO_AGENT));
+  check("whitespace only → chat", route("   \n\t  ", NO_AGENT) === "chat", route("   ", NO_AGENT));
+  // TEN THOUSAND CHARACTERS. Every pattern in the router is linear with no nested quantifier, so
+  // this is about proving there is no backtracking cliff rather than about the route it takes.
+  const huge = "lorem ipsum dolor sit amet ".repeat(400);
+  const started = Date.now();
+  const bigRoute = route(huge, NO_AGENT);
+  const elapsed = Date.now() - started;
+  check(`10,000 characters route in ${elapsed}ms`, elapsed < 250, elapsed);
+  check("...and prose with no ask in it is a conversation", bigRoute === "chat", bigRoute);
+  // ONLY CODE. Pasting a traceback or a function must not produce a plan — somebody pasting code
+  // wants it looked at, and with nothing selected there is nothing to look at but the message.
+  check("only code → chat",
+    route("def handler(event):\n    return {'ok': True}", NO_AGENT) === "chat",
+    route("def handler(event):\n    return {'ok': True}", NO_AGENT));
+  check("a traceback → chat",
+    route("Traceback (most recent call last):\n  File \"agent.py\", line 12\nTimeoutError", NO_AGENT) === "chat",
+    route("Traceback (most recent call last):\n  File \"agent.py\", line 12", NO_AGENT));
+  // A QUESTION PHRASED AS AN IMPERATIVE, which is §16's pair to the build-request-as-a-question row
+  // in the table above.
+  check("a question phrased as an imperative → chat",
+    route("tell me what this agent costs to run", { agentId: "weather_agent" }) === "chat",
+    route("tell me what this agent costs to run", { agentId: "weather_agent" }));
+  // THE SAME MESSAGE, WITH AND WITHOUT A SELECTION. §16 asks for exactly this comparison, and the
+  // two answers must differ — a router that gave the same one would mean the selection was decorative.
+  const withSel = route("why did this fail?", { agentId: "weather_agent", step: FAILED });
+  const without = route("why did this fail?", { agentId: "weather_agent" });
+  check("a selection changes the route", withSel === "explain" && without === "chat", { withSel, without });
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

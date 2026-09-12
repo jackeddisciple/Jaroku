@@ -28,7 +28,7 @@ import { useEvalStore } from "../store/evalStore.ts";
 import { UpsellCard } from "./UpsellCard.tsx";
 import { composerMoment } from "../lib/composerMoment.ts";
 import { AgentTray } from "./composer/AgentTray.tsx";
-import { classifyIntent, fixPrompt, routeLabel } from "../lib/intent.ts";
+import { fixPrompt, routeLabel, routeMessage } from "../lib/intent.ts";
 // PART 3'S SECOND CLASSIFIER — two outcomes, its own module. See its header for why it is not an
 // extension of the table above it.
 import { classifyOperate, operateLabel } from "../lib/operateIntent.ts";
@@ -1224,7 +1224,14 @@ export function BuildPane({
 
   // Route the CURRENT text by (intent + context) — recomputed live so the composer can show where
   // ⌘↵ will send it. Pure heuristics; no per-keystroke network/LLM cost.
-  const intent = classifyIntent(text, {
+  //
+  // THROUGH `routeMessage` RATHER THAN `classifyIntent` SINCE §3, because the decision now carries
+  // two things beside the destination and both have a reader: the one-line REASON §13 renders on the
+  // turn, and the plan-evidence BAND §15.1 reads to decide whether to offer the build route under a
+  // chat reply. §13.2's rule is that neither may be reconstructed afterwards — "a reconstruction can
+  // disagree with the actual decision and then the explanation is itself a lie" — so they are taken
+  // from the same call that produced the route.
+  const routing = routeMessage(text, {
     agentId: activeAgentId, pendingPlanId: planId, step: selectedStep, nodeId: selectedNodeId,
     // What turns a typed description into a build INTO the selected row rather than an edit of it.
     agentIsDraft,
@@ -1232,6 +1239,7 @@ export function BuildPane({
     // to the edit loop — and changes what the route label SAYS, which is the visible half.
     hasReviewComment: github.attachments.some((a) => a.kind === "reviewComment"),
   });
+  const intent = routing.intent;
   const contextLabel = selectedNodeId
     ? `node: ${selectedNodeId}`
     : selectedStep
@@ -2639,8 +2647,14 @@ export function BuildPane({
                       !connected || !text.trim() || overBudget
                       || (composerMode === "test" ? !canRun : busy)
                     }
-                    aria-label={missingKey ? keyAsk : composerMode === "test" ? "Run the agent on this input" : "Send"}
-                    title={missingKey ? keyAsk : composerMode === "test" ? "Run the agent on this input" : `Send (${keyHint("⌘↵")})`}
+                    // §3.4: THE BUTTON AND THE PREVIEW MUST AGREE, BEFORE THE PRESS. The line above
+                    // the bar has named the route since v0.1.7 and this said only "Send" — which was
+                    // survivable while the default was one thing, and is not now that the router
+                    // makes a judgement call on every message. A preview that reads one route beside
+                    // a button that describes none is the class of defect v0.2.2 already paid for
+                    // ("the composer described a context it was about to ignore").
+                    aria-label={missingKey ? keyAsk : composerMode === "test" ? "Run the agent on this input" : `Send — ${routeLabel(intent)}`}
+                    title={missingKey ? keyAsk : composerMode === "test" ? "Run the agent on this input" : `Send — ${routeLabel(intent)} (${keyHint("⌘↵")})`}
                     // The one ink-filled control on the screen, and the only one in this bar that
                     // is not a glyph on open background.
                     //
