@@ -56,6 +56,11 @@ const workAgentA = randomUUID();
 const workAgentB = randomUUID();
 const itemA = randomUUID();
 const itemB = randomUUID();
+// §16.1's conversation fixture — declared out here so the `finally` can clean it up.
+const threadA = randomUUID();
+const forkA = randomUUID();
+const itemOfA = randomUUID();
+const variantOfA = randomUUID();
 const slug = (id: string): string => `rls-${id.slice(0, 8)}`;
 
 /**
@@ -494,6 +499,119 @@ try {
     wrongly.length === 0,
     `audit_log and workspace_members stay policy-free (${wrongly.join(", ") || "correct"})`,
   );
+
+  // --- §16.1's TENANCY ROW: the conversation tables, under the real application role ----------
+  //
+  // "EVERY NEW READ PATH — INCLUDING `parent_thread_id` LOOKUPS — CHECKED UNDER THE REAL
+  // NON-SUPERUSER APPLICATION ROLE, NOT AS THE DATABASE OWNER. v0.2.5's bug hunt found three RLS
+  // failures that passed locally and did nothing in production."
+  //
+  // THE GAP §16 FOUND WAS COVERAGE, NOT ISOLATION. Driven by hand under `SET LOCAL ROLE jaroku_app`
+  // every one of these already returned nothing across the boundary — `turn_variants` carries RLS,
+  // FORCE and a `tenant_isolation` policy from migration 057, and a table-level policy covers
+  // columns added to it later. But this suite asserted none of them: it covered `runs`, `steps`,
+  // `work_items` and the policy inventory, and the conversation tables were reached only through
+  // repository WHERE clauses, which is the half that RLS exists to back up.
+  //
+  // WHAT MADE IT WORTH ASSERTING IS THAT THE TABLE'S CONTENTS CHANGED. Before migration 073
+  // `turn_variants` held numbers — a model id, token counts, a cost. It now holds the prose of
+  // every answer Jaroku has given, so the consequence of a missing policy went from a leaked
+  // token count to a leaked conversation, on a table whose posture nobody re-examined.
+
+  console.log("\n§16.1 — the conversation tables under the app role");
+
+  const SECRET = "prose that belongs to workspace A alone";
+
+  await db.scoped(A, async (tx) => {
+    await tx.run(
+      `INSERT INTO threads (id, workspace_id, title, title_is_custom, created_at, last_activity_at, status, mode)
+       VALUES (?, ?, 'rls parent', false, now(), now(), 'idle', 'build')`,
+      [threadA, A],
+    );
+    // THE FORK, so `parent_thread_id` has something to point at — §16.1 names this lookup.
+    await tx.run(
+      `INSERT INTO threads (id, workspace_id, title, title_is_custom, created_at, last_activity_at,
+                            status, mode, parent_thread_id, branch_from_turn)
+       VALUES (?, ?, 'rls fork', false, now(), now(), 'idle', 'build', ?, 3)`,
+      [forkA, A, threadA],
+    );
+    await tx.run(
+      `INSERT INTO thread_items (id, workspace_id, thread_id, kind, role, body, created_at)
+       VALUES (?, ?, ?, 'message', 'user', 'a private question', now())`,
+      [itemOfA, A, threadA],
+    );
+    await tx.run(
+      `INSERT INTO turn_variants (id, workspace_id, turn_id, ordinal, body, selected, stopped, model_id)
+       VALUES (?, ?, ?, 1, ?, true, false, 'claude-haiku-4-5')`,
+      [variantOfA, A, itemOfA, SECRET],
+    );
+  });
+
+  // FROM B, SCOPED — every read comes back empty rather than refused, which is this codebase's
+  // rule wherever an id crosses a tenant boundary.
+  const acrossScoped = await asApp(B, async (tx) => ({
+    threads: await tx.all(`SELECT id FROM threads`),
+    forks: await tx.all(`SELECT id FROM threads WHERE parent_thread_id = ?`, [threadA]),
+    anyLineage: await tx.all(`SELECT id FROM threads WHERE parent_thread_id IS NOT NULL`),
+    branchPoints: await tx.all(`SELECT id FROM threads WHERE branch_from_turn IS NOT NULL`),
+    items: await tx.all(`SELECT id FROM thread_items`),
+    variants: await tx.all(`SELECT id, body FROM turn_variants`),
+    selected: await tx.all(`SELECT id FROM turn_variants WHERE selected`),
+    stopped: await tx.all(`SELECT id FROM turn_variants WHERE NOT stopped`),
+  }));
+  for (const [what, rows] of Object.entries(acrossScoped)) {
+    check((rows as unknown[]).length === 0, `workspace B sees none of A's ${what} (${(rows as unknown[]).length} row(s))`);
+  }
+  // NAMED DIRECTLY BY ID, which is the attack a WHERE clause alone would not stop if the policy
+  // were missing — the id is a uuid somebody could hold from a log line or a shared screen.
+  const named = await asApp(B, async (tx) => ({
+    thread: await tx.all(`SELECT id FROM threads WHERE id = ?`, [threadA]),
+    item: await tx.all(`SELECT id FROM thread_items WHERE id = ?`, [itemOfA]),
+    variant: await tx.all(`SELECT body FROM turn_variants WHERE id = ?`, [variantOfA]),
+  }));
+  check(named.thread.length === 0, "naming A's thread by id returns nothing");
+  check(named.item.length === 0, "naming A's turn by id returns nothing");
+  check(named.variant.length === 0, "naming A's ANSWER by id returns nothing — migration 073's prose");
+
+  // AND UNSCOPED, which is the one that matters most and the one v0.2.5's bugs were: an unset
+  // `app.workspace_id` makes the policy NULL rather than true, so it admits no row.
+  const unscopedConvo = await asApp(null, async (tx) => ({
+    threads: await tx.all(`SELECT id FROM threads`),
+    items: await tx.all(`SELECT id FROM thread_items`),
+    variants: await tx.all(`SELECT id FROM turn_variants`),
+  }));
+  for (const [what, rows] of Object.entries(unscopedConvo)) {
+    check((rows as unknown[]).length === 0, `an unscoped read of ${what} sees nothing (${(rows as unknown[]).length} row(s))`);
+  }
+
+  // A'S OWN READS STILL WORK, which is what makes the assertions above about isolation rather
+  // than about a broken grant. A policy that admitted nothing at all would pass every check so far.
+  const own = await asApp(A, async (tx) => ({
+    threads: await tx.all<{ id: string }>(`SELECT id FROM threads`),
+    forks: await tx.all<{ id: string }>(`SELECT id FROM threads WHERE parent_thread_id = ?`, [threadA]),
+    variant: await tx.get<{ body: string; selected: boolean; stopped: boolean }>(
+      `SELECT body, selected, stopped FROM turn_variants WHERE id = ?`, [variantOfA]),
+  }));
+  check(own.threads.length >= 2, `A reads its own threads (${own.threads.length})`);
+  check(own.forks.length === 1 && own.forks[0]?.id === forkA, "...and finds its fork through parent_thread_id");
+  check(own.variant?.body === SECRET, "...and its own answer's prose");
+  check(own.variant?.selected === true && own.variant?.stopped === false,
+    "...with both flags migrations 074 and 077 added");
+
+  // WRITING INTO B FROM A IS REFUSED RATHER THAN HIDDEN — `WITH CHECK`, on the table that now
+  // holds conversation text.
+  let convoInsertRefused = false;
+  try {
+    await asApp(A, (tx) =>
+      tx.run(
+        `INSERT INTO threads (id, workspace_id, title, title_is_custom, created_at, last_activity_at, status, mode)
+         VALUES (?, ?, 'smuggled', false, now(), now(), 'idle', 'build')`,
+        [randomUUID(), B],
+      ));
+  } catch {
+    convoInsertRefused = true;
+  }
+  check(convoInsertRefused, "inserting a thread INTO another workspace is refused, not merely hidden");
 } catch (err) {
   // A THROW IS A FAILURE, NOT A CRASH.
   //
@@ -539,6 +657,15 @@ try {
         await tx.run(`DELETE FROM deployments WHERE id = ?`, [`dep_${itemId.slice(0, 8)}`]);
       }));
   }
+  // THE CONVERSATION FIXTURE, before the workspaces. `thread_items` and `turn_variants` cascade
+  // from the workspace, so this is belt-and-braces — and it runs under `scoped` because FORCE RLS
+  // means the owner does not skip its own policies to delete either.
+  await tidy("the conversation fixture", () =>
+    db.scoped(A, async (tx) => {
+      await tx.run(`DELETE FROM turn_variants WHERE turn_id = ?`, [itemOfA]);
+      await tx.run(`DELETE FROM thread_items WHERE thread_id = ?`, [threadA]);
+      await tx.run(`DELETE FROM threads WHERE id IN (?, ?)`, [forkA, threadA]);
+    }));
   await tidy("two workspaces", () => db.run(`DELETE FROM workspaces WHERE id IN (?, ?)`, [A, B]));
   // AND THE TWO PEOPLE, after the workspaces rather than before: `work_items.created_by` references
   // them and cascades from the workspace, not from the user. Unlike everything above this suite,
