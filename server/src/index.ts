@@ -13499,6 +13499,46 @@ async function chatWithJaroku(
   const agentName = agent ? (agent.display_name ?? agent.slug) : null;
 
   const thread = await threadForWork(ctx, cmd.threadId, cmd.agentId ?? null);
+
+  /**
+   * IF THE CLIENT DID NOT NAME THIS THREAD, IT DOES NOT HAVE IT OPEN — SO TELL IT TO OPEN IT.
+   *
+   * FOUND BY TYPING INTO THE REAL APP. From the empty state ("What are we working on today?") the
+   * composer sends no `threadId`, `threadForWork` creates one silently, and the answer streams into
+   * `threads[newId]` while the pane is still rendering `pending`. The question, the answer and the
+   * cost were all recorded and NONE of them appeared: the screen went straight back to the greeting
+   * and the four cards. A person's first message in a fresh session vanished, having been paid for.
+   *
+   * THE CLIENT OPENS A THREAD ONLY ON `reason: "created"` OR `"branched"` — see socket.ts, which
+   * says so: "a thread this client just made is OPENED, not merely filed." Nothing sent that event
+   * for a thread the chat route conjured, because `threadForWork` returns an id and no event.
+   *
+   * `thread !== cmd.threadId` IS THE WHOLE TEST, and it covers the other case too: an agent
+   * selected with no thread open resolves through `ensureForAgent` to that agent's existing
+   * conversation, which the client is equally not showing.
+   *
+   * BEFORE THE QUESTION IS WRITTEN, deliberately. `openThread` hydrates from `items`, and
+   * `replyStarted` appends the question itself — so sending this after `noteUserMessage` would put
+   * the same sentence on screen twice.
+   *
+   * TO THIS CLIENT ALONE (`sendThreads` takes the request id). Another tab must not be navigated
+   * because somebody typed in this one.
+   */
+  if (thread !== cmd.threadId) {
+    try {
+      relay.sendThreads(ctx, ctx.requestId, {
+        type: "thread",
+        reason: "created",
+        thread: await threadView(ctx, thread),
+        items: await threadStore.itemsFor(ctx, thread),
+      });
+    } catch (err) {
+      // NEVER FATAL. Failing to navigate is a worse screen, not a lost answer — the turn still
+      // streams and the thread is still in the list.
+      console.warn(`[chat] could not open the thread for this client: ${(err as Error)?.message ?? err}`);
+    }
+  }
+
   if (chatting.has(thread)) {
     relay.broadcastReply(
       ctx,

@@ -18,6 +18,8 @@
 //
 //   npm run test:thread-channel
 
+import { readFileSync } from "node:fs";
+
 import { randomUUID } from "node:crypto";
 import WebSocket from "ws";
 
@@ -258,6 +260,54 @@ a.ws.close();
 b.ws.close();
 await relay.close();
 await store.close();
+
+
+// --- A LIVE UI RUN: a thread the client did not name has to be OPENED ------------------------
+//
+// FOUND BY TYPING INTO THE REAL APP, in a real browser. From the empty state the composer sends no
+// `threadId`; `threadForWork` creates one silently and returns an id. The answer then streamed into
+// `threads[newId]` while the pane was still rendering `pending`, so the screen went straight back
+// to "What are we working on today?" and the four cards. The question, the answer and $0.00218 were
+// all recorded and NONE of them appeared — a person's first message in a fresh session vanished,
+// having been paid for.
+//
+// THE CLIENT OPENS A THREAD ONLY ON `reason: "created"` OR `"branched"`, which socket.ts states
+// outright: "a thread this client just made is OPENED, not merely filed." Nothing sent that event
+// for a thread the chat route conjured.
+//
+// SOURCE-READ, because reproducing it needs a browser, a socket and a provider. What is checkable
+// here is that the event is sent, to the right audience, on the right condition, at the right
+// moment in the sequence.
+
+console.log("\n§4.3 — a thread the client did not name is opened, not merely filed");
+{
+  const index = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+  const at = index.indexOf("const thread = await threadForWork(ctx, cmd.threadId, cmd.agentId ?? null);");
+  check("found the chat route's thread resolution", at > 0);
+  const region = index.slice(at, at + 2600);
+
+  // THE CONDITION IS THE WHOLE TEST: the client asked for one thread and got another (or asked for
+  // none at all), so it is not showing what the answer is about.
+  check("it fires when the resolved thread is not the one asked for", /if \(thread !== cmd\.threadId\) \{/.test(region));
+  check("...sending the event the client opens on", /type: "thread",\s*\n\s*reason: "created",/.test(region));
+  check("...with the thread's own row", /thread: await threadView\(ctx, thread\)/.test(region));
+  check("...and its items, so the pane hydrates", /items: await threadStore\.itemsFor\(ctx, thread\)/.test(region));
+
+  // TO THIS CLIENT ALONE. `sendThreads` takes a request id; `broadcastThreads` would navigate every
+  // tab in the workspace because somebody typed in one of them.
+  check("...to the client that typed, not the workspace", /relay\.sendThreads\(ctx, ctx\.requestId, \{/.test(region));
+  check("...never broadcast to every tab", !/broadcastThreads\(ctx, \{\s*\n?\s*type: "thread",\s*\n?\s*reason: "created"/.test(region));
+
+  // BEFORE THE QUESTION IS WRITTEN. `openThread` hydrates from `items` and `replyStarted` appends
+  // the question itself, so sending this after `noteUserMessage` puts the same sentence on screen
+  // twice. Asserted as an ORDER, which is the part that would break silently.
+  const eventAt = index.indexOf('reason: "created",', at);
+  const writeAt = index.indexOf("await noteUserMessage(ctx, thread, message)", at);
+  check(`...and before the user's message is recorded (event ${eventAt}, write ${writeAt})`, eventAt > 0 && writeAt > 0 && eventAt < writeAt);
+
+  // AND NEVER FATAL: failing to navigate is a worse screen, not a lost answer.
+  check("...and a failure to navigate is caught", /could not open the thread for this client/.test(region));
+}
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 process.exit(fail === 0 ? 0 : 1);
