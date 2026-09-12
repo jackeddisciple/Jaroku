@@ -291,6 +291,34 @@ export function CommandPalette() {
                 </Item>
               </Command.Group>
 
+              {/* §14.1: "EVERY BINDING IS LISTED IN THE ⌘K PALETTE WITH ITS SHORTCUT SHOWN INLINE,
+                  per the existing rule that shortcuts teach themselves." This file's own header
+                  states that rule; these are the bindings that arrived with the chat surface and
+                  had nowhere to be read.
+
+                  THEY ARE ROWS WITHOUT AN ACTION, WHICH IS THE HONEST SHAPE. Every other entry in
+                  this palette takes you somewhere; these describe keys that act on what is selected
+                  in the conversation behind the palette — and the palette is an overlay, so it owns
+                  the bare keys while it is open (`bareKeys.ts`). A row that dispatched `j` from here
+                  would move a cursor the user cannot see. `disabled` renders them at the same
+                  opacity a genuinely unavailable action gets, which is right: they are documentation
+                  while this surface is up.
+
+                  `R` IS DELIBERATELY NOT REPEATED HERE. It is one key with two owners — the row
+                  above runs the agent, and the same key regenerates the selected turn when there is
+                  one — and listing it twice would read as two shortcuts rather than one whose
+                  meaning depends on the selection. The row below says so instead. */}
+              <Command.Group heading="Conversation" className="mb-1">
+                <Item onSelect={() => {}} disabled kbd="J / K">Next / previous turn</Item>
+                <Item onSelect={() => {}} disabled kbd="Enter">Expand the selected turn</Item>
+                <Item onSelect={() => {}} disabled kbd="R">
+                  Regenerate the selected turn — or run the agent with nothing selected
+                </Item>
+                <Item onSelect={() => {}} disabled kbd="↑">Edit your last message (forks the thread)</Item>
+                <Item onSelect={() => {}} disabled kbd="Esc">Stop the answer arriving</Item>
+                <Item onSelect={() => {}} disabled kbd={keyHint("⌘↵")}>Send</Item>
+              </Command.Group>
+
               <Command.Group heading="Provider" className="mb-1">
                 {catalogue.map((p) => (
                   <Item key={p.id} onSelect={run(() => setProvider(p.id))}>

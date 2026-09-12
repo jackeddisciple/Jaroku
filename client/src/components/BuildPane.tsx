@@ -71,7 +71,8 @@ import { TurnMetadata } from "./composer/TurnMetadata.tsx";
 import { turnSource, metaForTurn, promptForRegenerate } from "../lib/turnSource.ts";
 import { canRerunTurn } from "../lib/rerun.ts";
 import { keyHint } from "../lib/modKey.ts";
-import { paneOwnsBareKey } from "../lib/bareKeys.ts";
+import { isTypingTarget, paneOwnsBareKey } from "../lib/bareKeys.ts";
+import { chatKeyAction } from "../lib/chatKeys.ts";
 import {
   FALLBACK_SETTINGS, useComposerSettingsStore, type Effort, type PermissionMode,
 } from "../store/composerSettingsStore.ts";
@@ -799,19 +800,49 @@ function rerunTurn(
  * ONLY ON A USER MESSAGE, and the server checks the row's own kind and role besides — the client's
  * copy of that rule hides the control, and the server's is what enforces it.
  */
-function UserTurnView({ turn, threadId }: { turn: UserTurn; threadId: string | null }) {
-  const [editing, setEditing] = useState(false);
+function UserTurnView({
+  turn,
+  threadId,
+  /**
+   * WHICH TURN'S EDITOR IS OPEN, LIFTED — §14.1's `↑` is why.
+   *
+   * IT WAS LOCAL AND HAD TO STOP BEING. Each user turn owned its own `editing` boolean, which is the
+   * right shape for a control somebody clicks and the wrong one for a BINDING: `↑` opens the editor
+   * on the last user message, and a keystroke on the window cannot reach a boolean inside one of
+   * forty components. Lifting it also makes "one editor at a time" true rather than incidental —
+   * two open editors in one conversation would be two drafts of two different messages, both
+   * labelled "Fork from here".
+   *
+   * KEYED BY `itemId` RATHER THAN BY THE RENDER KEY, because the binding resolves the last user
+   * message from the store and the durable id is what both halves can agree on.
+   */
+  editingTurnId,
+  setEditingTurnId,
+}: {
+  turn: UserTurn;
+  threadId: string | null;
+  editingTurnId: string | null;
+  setEditingTurnId: (id: string | null) => void;
+}) {
+  const editing = Boolean(turn.itemId) && editingTurnId === turn.itemId;
+  const setEditing = (on: boolean): void => setEditingTurnId(on ? (turn.itemId ?? null) : null);
   const [draft, setDraft] = useState(turn.text);
   const ref = useRef<HTMLTextAreaElement>(null);
 
   // §14.2: FOCUS MOVES IN WITH THE TEXT SELECTED, so the commonest edit — replace the whole
   // sentence — is one keystroke rather than a select-all somebody has to think about.
+  //
+  // AND THE DRAFT IS RESET ON EVERY OPEN, which matters now that the state is lifted: the component
+  // no longer remounts when the editor opens, so a draft abandoned by Cancel would come back the
+  // next time somebody opened the same turn — a change they had explicitly discarded.
   useEffect(() => {
     if (!editing) return;
+    setDraft(turn.text);
     const el = ref.current;
     if (!el) return;
     el.focus();
     el.select();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing]);
 
   const fork = (): void => {
@@ -918,9 +949,24 @@ function UserTurnView({ turn, threadId }: { turn: UserTurn; threadId: string | n
   );
 }
 
-function Turn({ turn, isLastGen, threadId }: { turn: ChatTurn; isLastGen: boolean; threadId: string | null }) {
+function Turn({
+  turn, isLastGen, threadId, editingTurnId, setEditingTurnId,
+}: {
+  turn: ChatTurn;
+  isLastGen: boolean;
+  threadId: string | null;
+  editingTurnId: string | null;
+  setEditingTurnId: (id: string | null) => void;
+}) {
   if (turn.role === "user") {
-    return <UserTurnView turn={turn} threadId={threadId} />;
+    return (
+      <UserTurnView
+        turn={turn}
+        threadId={threadId}
+        editingTurnId={editingTurnId}
+        setEditingTurnId={setEditingTurnId}
+      />
+    );
   }
   if (turn.kind === "plan") {
     return (
@@ -1297,6 +1343,21 @@ export function BuildPane({
     setPrefilled(true);
     if (pendingIdentity.name) setName(pendingIdentity.name);
   }, [pendingIdentity, prefilled]);
+  /**
+   * §14: WHICH TURN THE KEYBOARD HAS SELECTED, and it is local rather than a store.
+   *
+   * ONE TAB'S CURSOR, not a fact about the conversation. Two tabs open on one thread are two people
+   * reading, and a selection in a store would move one reader's cursor because the other pressed
+   * `k` — which is the same argument `chatStore` makes for keying conversations by thread rather
+   * than by agent, one level down.
+   *
+   * A RENDER KEY (`ChatTurn.id`) RATHER THAN THE DURABLE ONE. What this points at is a row on this
+   * screen; `itemId` is what a note or a variant hangs off. The two are deliberately different and
+   * §6.2's regenerate needs the second, which is why the handler resolves it from the turn.
+   */
+  const [selectedTurnId, setSelectedTurnId] = useState<string | null>(null);
+  /** §6.3's inline editor, lifted so §14.1's `↑` can open it. See `UserTurnView`. */
+  const [editingTurnId, setEditingTurnId] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   // MCP tools are selected per TOOL, not per server. Connecting a server makes its tools
   // available to choose from; it grants an agent nothing on its own.
@@ -2007,6 +2068,117 @@ export function BuildPane({
     const last = localStorage.getItem(inputKey(activeAgentId)) ?? "";
     sendRun(last.trim(), provider, model, activeAgentId ?? undefined);
   }, [canRun, activeAgentId, provider, model, providersLoaded, providerStatuses, askForKey]);
+  /**
+   * §14's LISTENER, and it runs BEFORE the `R` one below.
+   *
+   * REGISTERED IN ITS OWN EFFECT rather than folded into that one, because the two answer different
+   * questions and only one of them is about the conversation. This one asks `chatKeyAction` — which
+   * is where every rule lives, with its own suite — and the one below is the existing
+   * run-the-agent binding, untouched. The collision between them is resolved by the TABLE saying
+   * `null` for `R` when nothing is selected, not by either listener knowing about the other.
+   *
+   * §14.2's FOCUS DISCIPLINE IS THE OTHER HALF, and most of it is an absence:
+   *
+   *   AFTER SEND: focus stays in the composer, which clears — `submit` never moves it, so this is
+   *   already true and nothing here may break it.
+   *
+   *   WHILE STREAMING: focus is never stolen. Nothing on the reply channel calls `focus()`, and the
+   *   scroll effect uses `scrollTop` rather than `scrollIntoView` on a focusable node — which is
+   *   what keeps a reply arriving from moving the caret out of a draft.
+   *
+   *   AFTER A STREAM ENDS: focus does not move. "The stream finishing is not a user action and must
+   *   not behave like one."
+   *
+   * What this handler DOES move is the two cases §14.2 names as user actions: `Esc` returns focus
+   * to the composer, and a printable character during navigation does the same and starts a draft.
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const ui = useUiStore.getState();
+      const turns = useChatStore.getState();
+      const list = threadFor({ threads: turns.threads, pending: turns.pending }, activeThreadId);
+      const sel = selectedTurnId ? list.find((t) => t.id === selectedTurnId) ?? null : null;
+      const action = chatKeyAction(e, {
+        streaming: turns.streamingThreadId !== null,
+        selectedTurnId,
+        selectedIsRegenerable: sel !== null && canRerunTurn(sel),
+        composerEmpty: text.trim().length === 0,
+        typing: isTypingTarget(e.target),
+        viewOwnsScreen: ui.navView !== null,
+        paletteOpen: ui.paletteOpen,
+      });
+      if (!action) return;
+      e.preventDefault();
+
+      switch (action.do) {
+        case "stop":
+          sendStopChat();
+          // §14.2: "on Esc: the stream stops AND FOCUS RETURNS TO THE COMPOSER."
+          ui.focusChat();
+          return;
+        case "clearSelection":
+          // §14.1: Esc with no stream open "clears the composer selection state; never closes the
+          // view". `preventDefault` above is what stops it reaching anything that would.
+          setSelectedTurnId(null);
+          return;
+        case "editLast": {
+          // §14.1: "edit the last USER message… opens the §6.3 edit-and-branch flow." The last
+          // one, not the selected one — this binding is the keyboard's shortcut to the thing
+          // somebody most often wants to change.
+          const lastUser = [...list].reverse().find((t) => t.role === "user" && t.itemId);
+          if (lastUser?.itemId && activeThreadId) setEditingTurnId(lastUser.itemId);
+          return;
+        }
+        case "moveTurn": {
+          // ASSISTANT TURNS ONLY, because they are the ones with anything to do: §14.1's Enter
+          // expands one and its R regenerates one, and a cursor that stopped on the user's own
+          // sentences would be two presses out of three landing somewhere with no actions.
+          const stops = list.filter((t) => t.role === "jaroku" && t.kind !== "info");
+          if (stops.length === 0) return;
+          const at = stops.findIndex((t) => t.id === selectedTurnId);
+          const next = at === -1
+            // NOTHING SELECTED STARTS AT THE END, because that is where the conversation is and
+            // where somebody pressing `k` is looking.
+            ? (action.delta === 1 ? 0 : stops.length - 1)
+            : Math.min(stops.length - 1, Math.max(0, at + action.delta));
+          const target = stops[next];
+          if (!target) return;
+          setSelectedTurnId(target.id);
+          // §14.2: "on J/K navigation: FOCUS MOVES TO THE TURN." The wrapper carries
+          // `data-turn-id` for the resume scroll already, so there is one thing to keep in step.
+          const node = scrollRef.current?.querySelector<HTMLElement>(`[data-turn-id="${target.id}"]`);
+          node?.scrollIntoView({ block: "nearest", behavior: "auto" });
+          return;
+        }
+        case "expandTurn":
+          // MATCHES TRACE-STEP BEHAVIOUR (§14.1), which for a conversation turn means opening what
+          // the turn produced: a diff card's files, a plan's sections. The cards own their own
+          // expansion, so this scrolls the turn into full view rather than reaching into them —
+          // which is the honest thing a shared binding can do across four card types.
+          if (selectedTurnId) {
+            scrollRef.current
+              ?.querySelector<HTMLElement>(`[data-turn-id="${selectedTurnId}"]`)
+              ?.scrollIntoView({ block: "start", behavior: "auto" });
+          }
+          return;
+        case "regenerate":
+          if (sel) rerunTurn(list, sel);
+          return;
+        case "startDraft":
+          // §14.2: "typing a printable character returns focus to the composer and starts a draft
+          // WITH THAT CHARACTER, so the keyboard never becomes a trap." Appended to whatever is
+          // there rather than replacing it, because a draft somebody had already started is not
+          // something a stray keystroke should discard.
+          setSelectedTurnId(null);
+          setChatDraft(text + action.char);
+          ui.focusChat();
+          return;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [activeThreadId, selectedTurnId, text, setChatDraft]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "r" && e.key !== "R") return;
@@ -2510,7 +2682,13 @@ export function BuildPane({
           // The id on the wrapper is what §4.5's resume scrolls to. One place, rather than a ref
           // inside each of the four card components.
           <div key={t.id} data-turn-id={t.id}>
-            <Turn turn={t} isLastGen={t.id === lastGenId} threadId={activeThreadId} />
+            <Turn
+              turn={t}
+              isLastGen={t.id === lastGenId}
+              threadId={activeThreadId}
+              editingTurnId={editingTurnId}
+              setEditingTurnId={setEditingTurnId}
+            />
           </div>
         ))}
       </div>

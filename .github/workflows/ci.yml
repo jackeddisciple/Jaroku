@@ -1471,6 +1471,16 @@ jobs:
           # §11.1's "changing one must not change another" is that bug stated as a rule, and this is
           # the rule as an assertion.
           npm run test:chat-model
+          # §14'S BINDINGS, and every rule in the table has a wrong answer that is invisible until
+          # somebody hits it. `↑` inside a draft would move a caret out of the third line of a
+          # paragraph somebody was writing. `R` is ALREADY TAKEN — `BuildPane` binds it to running
+          # the agent, a real run that spends money — so a table claiming it unconditionally would
+          # have made a keystroke on a conversation start a billable run; the selection decides, and
+          # this is that decision. `Esc` with nothing streaming must clear the selection rather than
+          # bubble, or it takes the pane away from somebody who meant to stop a finished answer. And
+          # J/K must have a way out: without §14.2's printable-character escape, the exit from
+          # navigation mode is the mouse, in a surface whose claim is that it needs none.
+          npm run test:chat-keys
           # §5'S STATE MACHINE, and every wrong answer in it looks plausible on screen. A dropped
           # socket leaving a turn `streaming` blinks a caret under a sentence that ended mid-word,
           # for ever; marking it `done` presents half a sentence as the whole answer. A failure that
