@@ -13,8 +13,10 @@
 //
 //   npm run test:provider-failure
 
+import { readFileSync } from "node:fs";
+
 import {
-  classifyProviderFailure, retryAfterFrom, statusFrom,
+  classifyProviderFailure, faultError, retryAfterFrom, statusFrom,
   DEFAULT_RETRY_AFTER_SECONDS, FAILURE_ACTIONS, FAILURE_CLASSES,
   type FailureClass,
 } from "./providerFailure.ts";
@@ -302,6 +304,70 @@ console.log("\n§16's malformed-JSON attack");
   const huge = classifyProviderFailure(thrown("x".repeat(5000)), ANTHROPIC);
   check("a 5,000-character body is trimmed", huge.message.length < 400, huge.message.length);
   check("...and marked as trimmed", huge.message.endsWith("…"), huge.message.slice(-20));
+}
+
+
+// --- §16.1: a failure on the automatic retry --------------------------------------------------
+//
+// §7.3 ALLOWS ONE AUTOMATIC RETRY and the flag that makes "one" true used to be `cmd.regenerateOf`
+// — the field the retry dispatch carries so a second failure attaches to the same turn. Two facts
+// were riding one field and both readings were wrong somewhere:
+//
+//   A USER PRESSING REGENERATE SETS IT TOO, so a regenerated answer that hit a rate limit got no
+//   automatic retry while a first attempt got one.
+//
+//   AND A DISPATCH WHOSE TURN COULD NOT BE WRITTEN CARRIED NOTHING. `turn` is undefined when the
+//   thread write fails, so the retry went out without the field, the retried invocation read its
+//   flag as false, and nothing was left to stop the chain — one paid call every thirty seconds for
+//   as long as the provider kept failing. That is the half that decides the severity: §12 bounds
+//   what a CONVERSATION may spend, and a loop that never returns to the user is not a conversation.
+//
+// SOURCE-READ, because the retry lives inside `chatWithJaroku` — a dispatch that needs a database,
+// a relay and a provider. What is checkable without all three is that the decision is taken from an
+// argument the socket cannot reach.
+
+console.log("\n§16.1 — one retry, and the flag that cannot be spoofed");
+{
+  const index = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+
+  // THE FLAG COMES FROM `internal`, not from the command.
+  check("the retry flag is read from an internal argument",
+    /let retried = internal\?\.isRetry === true;/.test(index), "retried's source");
+  check("...and not from the wire command",
+    !/let retried = Boolean\(cmd\.regenerateOf\)/.test(index), "regenerateOf must not decide it");
+
+  // `internal` IS A SEPARATE PARAMETER, so a client cannot claim to be a retry — `ChatCommand` is
+  // parsed off the socket and anything on it is attacker-controlled.
+  check("it is a parameter rather than a field on ChatCommand",
+    /internal\?: \{ isRetry\?: boolean \}/.test(index), "the signature");
+  const relay = readFileSync(new URL("./wsRelay.ts", import.meta.url), "utf8");
+  check("...and the command type has no such field",
+    !/isRetry/.test(relay), "wsRelay must not carry isRetry");
+
+  // THE RETRY DISPATCH PASSES IT. Without this the chain would never mark itself and the ceiling
+  // would be the only thing between a failing provider and an unbounded loop.
+  check("the retry marks itself", /\{ isRetry: true \}/.test(index), "the retry call");
+
+  // AND IT STILL CARRIES THE TURN, so two failed attempts land on one turn rather than two.
+  check("...while still attaching to the same turn",
+    /regenerateOf: turn \?\? undefined/.test(index), "the retry's regenerateOf");
+
+  // THE WAIT IS STILL BOUNDED, which is the other half of §7.3's "not a silent loop": a provider
+  // that says "wait an hour" does not get to park the conversation for one.
+  check("the wait is bounded by a ceiling",
+    /Math\.min\(\(classified\.retryAfterSeconds \?\? 1\) \* 1000, RETRY_CEILING_MS\)/.test(index),
+    "the bounded wait");
+  check("...and the ceiling is half a minute or less",
+    Number(/RETRY_CEILING_MS = ([\d_]+)/.exec(index)?.[1]?.replace(/_/g, "") ?? 0) <= 30_000,
+    /RETRY_CEILING_MS = ([\d_]+)/.exec(index)?.[1]);
+
+  // ONLY A CLASS THAT CAN CLEAR ON ITS OWN IS RETRIED — the table's own rule, asserted from the
+  // other side: an auto-retry on a missing credential would be a countdown for a condition that
+  // needs a person.
+  for (const cls of ["no_credential", "invalid_credential", "quota_exhausted", "context_too_long", "content_refused"] as const) {
+    const c = classifyProviderFailure(faultError(cls), { provider: "anthropic", model: "claude-haiku-4-5" });
+    check(`${cls} is never auto-retried`, c.autoRetry === false, String(c.autoRetry));
+  }
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

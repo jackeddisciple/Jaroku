@@ -13418,7 +13418,30 @@ async function chatBudget(ctx: TenantContext, threadId: string): Promise<ChatBud
   }
 }
 
-async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<void> {
+/**
+ * `internal` IS NOT PART OF THE COMMAND, and that separation is §16's finding.
+ *
+ * §7.3's one retry used to be recognised by `cmd.regenerateOf` being set — the retry dispatch
+ * carries it so the second attempt attaches to the same turn. Two different facts were riding one
+ * field, and both readings were wrong somewhere:
+ *
+ *   A USER PRESSING REGENERATE SET IT TOO, so a regenerated answer that hit a rate limit got no
+ *   automatic retry at all while a first attempt got one.
+ *
+ *   AND A DISPATCH WHOSE TURN COULD NOT BE WRITTEN CARRIED NOTHING. `turn` is undefined when the
+ *   thread write fails, so the retry went out with no `regenerateOf`, the retried invocation read
+ *   its flag as false, and the chain had nothing left to stop it — one paid call every thirty
+ *   seconds for as long as the provider kept failing.
+ *
+ * A SEPARATE ARGUMENT RATHER THAN A FIELD ON `ChatCommand`, because `ChatCommand` arrives off the
+ * socket: a field there is one a client could set to claim it had already been retried, or to ask
+ * for a retry of its own.
+ */
+async function chatWithJaroku(
+  ctx: TenantContext,
+  cmd: ChatCommand,
+  internal?: { isRetry?: boolean },
+): Promise<void> {
   const message = typeof cmd.message === "string" ? cmd.message.trim() : "";
   // TO THE ASKER'S SCOPE AND WITH NO THREAD, which is this codebase's rule for every refusal: an
   // empty message belongs to nobody's conversation, and attaching one would file an error in a
@@ -13601,14 +13624,17 @@ async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<voi
     // metadata column on `turn_variants` is per-variant rather than per-turn.
     const settle = await openVariant(ctx, turn, model, provider, effort);
 
-    // §7.3's ONE RETRY, and the flag that makes "one" true rather than intended. It is this
-    // dispatch's own local, so a retried attempt starts with its own `false` — which would be an
-    // unbounded loop if the flag lived on the module. What stops it is that the retry carries
-    // `regenerateOf`, so a second failure attaches to the same turn and the client sees one turn
-    // with two failed attempts rather than a thread filling with them; and §16's "a failure on the
-    // automatic retry" is exactly that second attempt, whose own `onError` reports
-    // `retrying: false` because `cmd.regenerateOf` was set by the first.
-    let retried = Boolean(cmd.regenerateOf);
+    // §7.3's ONE RETRY, and the flag that makes "one" true rather than intended.
+    //
+    // FROM `internal`, NEVER FROM THE COMMAND — see the note on this function for the two things
+    // that went wrong while this read `cmd.regenerateOf`. The retry still carries `regenerateOf` so
+    // a second failure attaches to the same turn rather than filling the thread with them; what it
+    // no longer does is use that field to decide whether a retry has already happened.
+    //
+    // §16's "a failure on the automatic retry" is the second attempt, whose own `onError` reports
+    // `retrying: false` because this is true — and it is true whether or not the first attempt
+    // managed to write a turn.
+    let retried = internal?.isRetry === true;
     // UNREF'D AND NEVER CLEARED, which is a decision rather than an omission: it fires once, and a
     // process shutting down must not be held open by a retry nobody is waiting for. There is
     // nothing to cancel it FOR — a user who does not want the retry has already been told it is
@@ -13834,7 +13860,11 @@ async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<voi
             retryTimer = setTimeout(() => {
               // THE SLOT IS RELEASED BY THE `finally` BELOW BEFORE THIS FIRES, so the retry is an
               // ordinary dispatch rather than one that has to be let past its own guard.
-              void chatWithJaroku(ctx, { ...cmd, threadId: thread, regenerateOf: turn ?? undefined });
+              void chatWithJaroku(
+                ctx,
+                { ...cmd, threadId: thread, regenerateOf: turn ?? undefined },
+                { isRetry: true },
+              );
             }, waitMs);
             retryTimer.unref?.();
           }
