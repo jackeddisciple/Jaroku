@@ -330,19 +330,53 @@ function CitedProse({ text, cites }: {
   );
 }
 
+/**
+ * §5: THE ANSWER STOPPED, AND THE TURN SAYS WHICH KIND OF STOPPING IT WAS.
+ *
+ * A LINE UNDER THE TEXT RATHER THAN A COLOUR OVER IT, which is this palette's own rule: colour
+ * carries meaning, and "this answer is incomplete" is a fact about the turn rather than a state of
+ * the prose. Painting the whole paragraph red on a failure — which is what this component did —
+ * says the words are wrong, when the words are fine and there are simply fewer of them than there
+ * should be.
+ *
+ * AND IT IS NEVER BLANK. §7: "never a blank turn. Every failure produces a visible, classified
+ * turn." A stream that died before its first token has no text at all, so the line is the whole of
+ * what there is to render — which is exactly when it matters most.
+ */
+function ReplyStopped({ turn }: { turn: ReplyTurn }) {
+  if (turn.status !== "interrupted" && turn.status !== "error") return null;
+  const interrupted = turn.status === "interrupted";
+  return (
+    <div className={`mt-1.5 flex items-start gap-1.5 text-caption ${interrupted ? "text-muted" : "text-err"}`}>
+      <span className="mt-[2px] shrink-0" aria-hidden>
+        <AlertTriangleIcon size={ICON.xs} />
+      </span>
+      <span className="min-w-0">
+        {interrupted
+          // NO MESSAGE, BECAUSE NOTHING WAS ABLE TO SEND ONE. The socket went away; the honest
+          // sentence names the cause it can be sure of and says what happens next, which the
+          // reconnect is already doing.
+          ? (turn.text ? "Interrupted — the connection dropped mid-answer." : "Interrupted before the answer started.")
+          : turn.error || "The answer failed."}
+      </span>
+    </div>
+  );
+}
+
 function ReplyTurnView({ turn }: { turn: ReplyTurn }) {
   // The store has the whole answer as of this frame; this is how much of it is painted. See
   // lib/useStreamedText.ts — an explanation arrives from the model in clause-sized chunks, and
   // without this the caret sits still for a second and then a paragraph appears at once.
   const text = useStreamedText(turn.text, turn.status === "streaming");
   return (
-    <div className={`text-label whitespace-pre-wrap break-words ${turn.status === "error" ? "text-err" : "text-ink"}`}>
+    <div className="text-label whitespace-pre-wrap break-words text-ink">
       {turn.citations && turn.citations.length > 0
         ? <CitedProse text={text} cites={turn.citations} />
         : <Prose text={text} />}
       {turn.status === "streaming" && (
         <span className="animate-stream-pulse text-faint motion-reduce:animate-none">▋</span>
       )}
+      <ReplyStopped turn={turn} />
     </div>
   );
 }

@@ -795,6 +795,19 @@ async function connect(): Promise<void> {
     if (ws === socket) ws = null;
     if (superseded()) return;
     useTraceStore.getState().setConnection("closed");
+    // §5: AN ANSWER THAT WAS ARRIVING STOPPED ARRIVING, and the turn has to say so.
+    //
+    // HERE RATHER THAN IN THE RECONNECT, because the two are different moments and the user sees
+    // this one. A reconnect may be a second away or fifteen; until it lands, a turn left
+    // `streaming` shows a blinking caret under a sentence that ended mid-word, which reads as the
+    // app still working on it. "An interrupted stream renders as interrupted, not as a short
+    // answer" — and not as a live one either.
+    //
+    // AFTER `superseded()`, so a socket from an era that has ended marks nothing: that era's
+    // conversation has already been reset by the workspace switch, and interrupting a turn in the
+    // NEW workspace because the OLD socket closed would be the leak `switchWorkspace` resets the
+    // stores to prevent, arriving by a different route.
+    useChatStore.getState().replyInterrupted();
     if (stopped) return;
     // §5.2 — THE HANDSHAKE IS THE OTHER THING THAT CAN REFUSE A SWITCH, and it refuses by closing
     // rather than by rejecting. A socket that closes before it ever opened, while a switch is in

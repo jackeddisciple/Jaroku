@@ -18,7 +18,15 @@
 //
 // A reload no longer clears the conversation entirely: `hydrate` rebuilds one from the
 // `thread_items` rows the server keeps, so reopening a thread shows what somebody said and what it
-// caused. Jaroku's own prose is deliberately not stored (migration 044) and does not come back.
+// caused.
+//
+// AND SINCE MIGRATION 073, WHAT JAROKU SAID COMES BACK TOO. Migration 044's rule was that none of
+// Jaroku's prose was stored, so a reopened thread showed every question and a stub per reply; 073
+// reverses it in the narrowest place available — one nullable column on `turn_variants`, which
+// already held one row per answer. §4 needs it (a conversation cannot remember half of itself),
+// §6.2 needs it (both siblings retained, not retained-until-the-tab-closes), and §5 needs it for a
+// reason neither makes obvious: a reconnect re-opens the thread and this store REPLACES, so an
+// empty record would make a dropped socket delete every reply on screen.
 
 import { create } from "zustand";
 import type { AgentPlan, FileDiff, GenUsage, ThreadItemView } from "../types.ts";
@@ -140,9 +148,34 @@ export interface ReplyTurn extends TurnAnchor {
   id: string;
   role: "jaroku";
   kind: "reply";
-  status: "streaming" | "done" | "error";
+  /**
+   * `interrupted` IS NOT `done` AND IT IS NOT `error` — §5, and it is the state this union was
+   * missing.
+   *
+   * "Partial content must never be mistaken for a finished reply — a streaming turn is visibly in
+   * progress until the stream closes, and an interrupted stream renders as interrupted, not as a
+   * short answer." Before this there were three states and a dropped socket produced none of them:
+   * the turn stayed `streaming` for ever, with a caret blinking under a sentence that had stopped
+   * mid-word, which reads as the app still working. Marking it `done` would have been worse — a
+   * half-sentence presented as the whole answer.
+   *
+   * `error` IS FOR A FAILURE THE SERVER NAMED. `interrupted` is for one nobody named: the
+   * connection went away, so there is no message to show and the honest thing to say is that the
+   * answer stopped rather than finished.
+   */
+  status: "streaming" | "done" | "interrupted" | "error";
   agentId: string;
   text: string;
+  /**
+   * Why it failed, BESIDE the text rather than instead of it.
+   *
+   * THIS USED TO OVERWRITE THE ANSWER. `replyError` set `text: open.text || message`, which keeps
+   * the partial and throws the failure away when there IS a partial — so a stream that died after
+   * two hundred tokens showed two hundred tokens and no indication that anything had gone wrong.
+   * §7 is explicit in both directions: "partial output is kept… with the failure below them", and
+   * "never a blank turn". Two fields is the only shape that can do both.
+   */
+  error?: string;
   /**
    * §6.5's metadata, arriving with the answer rather than derived from it.
    *
@@ -265,6 +298,18 @@ interface ChatState {
   }) => void;
   replyError: (e: In & { agentId: string; message: string }) => void;
   /**
+   * §5: THE CONNECTION WENT AWAY WHILE AN ANSWER WAS ARRIVING.
+   *
+   * IT TAKES NO THREAD, deliberately — unlike every other action on this channel. A dropped socket
+   * is not an event about one conversation: it is the absence of the channel that would have said
+   * which. So this marks whatever was streaming, wherever it was streaming, which the store already
+   * tracks in `streamingThreadId` for exactly this kind of question.
+   *
+   * IT IS CALLED BY THE SOCKET AND NEVER BY THE SERVER, which is what makes it different from
+   * `replyError`: there is no message, because nothing was able to send one.
+   */
+  replyInterrupted: () => void;
+  /**
    * A job this conversation just dispatched — Part 3 §6.
    *
    * IT IS NOT AN OPTIMISTIC ROW. The Cockpit's list draws one because it has a placeholder to
@@ -329,9 +374,36 @@ export const useChatStore = create<ChatState>((set) => ({
         // why notes and pins had nothing to attach to: the local `id` beside it is a render key
         // that changes on every reload, and a note keyed on one would move to a different turn the
         // next time somebody opened the thread.
-        [threadId]: items.map((it): ChatTurn => {
+        [threadId]: items.flatMap((it): ChatTurn[] => {
+          // §5: THE ANSWERS COME BACK WITH THE QUESTION (migration 073).
+          //
+          // A REPLY TURN PER EXCHANGE, not per variant. `turn_variants` holds one row per answer
+          // and the SELECTED one is what the conversation shows — the rest go into
+          // `priorVariants`, which is the same field a live regeneration fills and therefore the
+          // same switcher, rather than a second mechanism for the rehydrated case.
+          //
+          // `done`, NEVER `interrupted`. What comes back is a record of what was said, and an
+          // answer read out of a table is not a stream that stopped: whatever happened to the
+          // connection at the time, this is the whole of what was kept.
+          const answered = (it.answers ?? []).filter((a) => a.body.trim().length > 0);
+          const reply = (agentId: string): ChatTurn[] =>
+            answered.length === 0 ? [] : [{
+              id: turnId(), itemId: it.id, role: "jaroku", kind: "reply", status: "done",
+              agentId, text: answered[answered.length - 1]!.body,
+              ...(answered.length > 1
+                ? { priorVariants: answered.slice(0, -1).map((a) => a.body) }
+                : {}),
+            }];
+
           if (it.kind === "message" && it.role === "user") {
-            return { id: turnId(), itemId: it.id, role: "user", text: it.body ?? "" };
+            return [
+              { id: turnId(), itemId: it.id, role: "user", text: it.body ?? "" },
+              // THE AGENT ID IS NOT IN THE ROW AND DOES NOT NEED TO BE. `agentId` on a reply turn
+              // is what `findReply` matches a LIVE stream against; a rehydrated turn is finished,
+              // so nothing will ever look for it, and "" is the honest value for a column that does
+              // not exist rather than a guess at which agent the thread was on at the time.
+              ...reply(""),
+            ];
           }
           // A WORK ITEM REHYDRATES AS A CHIP, NOT AS A SENTENCE, which is the one item kind where
           // the stub would be a worse answer than the row: "Gave the agent a job" tells somebody
@@ -339,9 +411,9 @@ export const useChatStore = create<ChatState>((set) => ({
           // points at something the conversation cannot open — a proposal that did not survive the
           // restart, a plan that was superseded — and a sentence is all there is to say about it.
           if (it.kind === "work" && it.ref_id) {
-            return { id: turnId(), itemId: it.id, role: "jaroku", kind: "work", workItemId: it.ref_id, input: null };
+            return [{ id: turnId(), itemId: it.id, role: "jaroku", kind: "work", workItemId: it.ref_id, input: null }];
           }
-          return { id: turnId(), itemId: it.id, role: "jaroku", kind: "info", tone: "muted", text: stubText(it) };
+          return [{ id: turnId(), itemId: it.id, role: "jaroku", kind: "info", tone: "muted", text: stubText(it) }];
         }),
       },
     })),
@@ -732,9 +804,44 @@ export const useChatStore = create<ChatState>((set) => ({
       const turns = turnsIn(s, key);
       const open = findReply(turns, agentId);
       const next = open
-        ? replaceTurn(turns, open.id, { ...open, status: "error" as const, text: open.text || message })
+        // §7: THE PARTIAL IS KEPT AND THE FAILURE IS RECORDED BESIDE IT. This used to write
+        // `text: open.text || message`, which threw the failure away whenever there was a partial —
+        // so a stream that died after two hundred tokens showed two hundred tokens and nothing to
+        // say anything had gone wrong. "Partial output is kept… with the failure below them."
+        ? replaceTurn(turns, open.id, { ...open, status: "error" as const, error: message })
         : [...turns, { id: turnId(), role: "jaroku" as const, kind: "info" as const, tone: "error" as const, text: message }];
       return { streamingAgentId: null, streamingThreadId: null, ...putTurns(s, key, next) };
+    }),
+
+  /**
+   * §5: a stream that stopped arriving because the socket did.
+   *
+   * NOTHING IS DISCARDED AND NOTHING IS PROMOTED. The text that arrived stays exactly as it is and
+   * the status says it stopped — which is the difference between "here is a short answer" and "the
+   * answer was cut off", and the whole of what §5 asks for. A turn left `streaming` for ever is the
+   * third wrong answer: a caret blinking under a sentence that ended mid-word reads as the app
+   * still working, indefinitely.
+   *
+   * IDEMPOTENT, because a socket can close twice on the way down — `onerror` calls `close()` and
+   * the browser fires `onclose` as well. The `streaming` guard is what makes a second call a no-op
+   * rather than a second interruption of a turn that is already marked.
+   */
+  replyInterrupted: () =>
+    set((s) => {
+      const key = s.streamingThreadId ?? undefined;
+      const turns = turnsIn(s, key);
+      const open = turns.find(
+        (t): t is ReplyTurn => t.role === "jaroku" && t.kind === "reply" && t.status === "streaming",
+      );
+      // NOT AN INFO TURN WHEN THERE IS NOTHING OPEN. A dropped socket with no answer in flight is
+      // the connection banner's business, and this store adding a line about it would put one in
+      // whichever conversation happened to be on screen — which is the defect `pending` exists for.
+      if (!open) return { streamingAgentId: null, streamingThreadId: null };
+      return {
+        streamingAgentId: null,
+        streamingThreadId: null,
+        ...putTurns(s, key, replaceTurn(turns, open.id, { ...open, status: "interrupted" as const })),
+      };
     }),
 }));
 

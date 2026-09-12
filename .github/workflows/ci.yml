@@ -1403,6 +1403,14 @@ jobs:
           # loop. The anchors are the load-bearing part: a rule matching "thanks" anywhere would
           # send "thanks, now fix the retry logic" to a route that cannot edit anything.
           npm run test:chat-route
+          # §5'S STATE MACHINE, and every wrong answer in it looks plausible on screen. A dropped
+          # socket leaving a turn `streaming` blinks a caret under a sentence that ended mid-word,
+          # for ever; marking it `done` presents half a sentence as the whole answer. A failure that
+          # overwrote the partial lost the two hundred tokens that did arrive — which is what the
+          # code did, because one field cannot hold both the answer and the reason it stopped. And a
+          # reconnect replaces the thread from the record, so a record with no answers in it would
+          # delete every reply on screen, silently, on the one path that is supposed to be a repair.
+          npm run test:chat-stream
           # WHICH AGENTS THE COMPOSER'S CHOOSER OFFERS FIRST: the two last worked in, by the same
           # thread-activity rule the session picker and the server use. A pure rule, so a wrong
           # order is a failing line here rather than the wrong two agents on somebody's screen.

@@ -89,7 +89,7 @@ import { ConversationSettingsStore, DEFAULT_PERMISSION_MODE, type PermissionMode
 import { offeredLevels, planEffort, type EffortPlan } from "./effort.ts";
 import { ConversationConnectorStore } from "./conversationConnectors.ts";
 import { TurnInteractionStore } from "./turnInteraction.ts";
-import { TurnVariantStore, type VariantOutcome } from "./turnVariants.ts";
+import { TurnVariantStore, type TurnVariant, type VariantOutcome } from "./turnVariants.ts";
 import { classOf, mustConfirm } from "./permissionShield.ts";
 import { attachTurn, turnRoutes, type Attachable, type RequestedAttachment, type TurnRouteDeps } from "./http/turns.ts";
 import { AttachmentStore } from "./attachmentStore.ts";
@@ -4898,10 +4898,32 @@ const relay = new WsRelay({
   // Scoped, so another workspace's thread id is indistinguishable from one that does not exist.
   // The items come back with the row, because opening a thread that renders somebody else's
   // conversation is the failure §4.5 exists to prevent — see ThreadEvent's `thread` member.
-  loadThread: async (ctx, threadId) =>
-    (await threadStore.get(ctx, threadId))
-      ? { thread: await threadView(ctx, threadId), items: await threadStore.itemsFor(ctx, threadId) }
-      : undefined,
+  loadThread: async (ctx, threadId) => {
+    if (!(await threadStore.get(ctx, threadId))) return undefined;
+    const items = await threadStore.itemsFor(ctx, threadId);
+    // §5: THE ANSWERS COME WITH THE QUESTIONS, so reopening a thread rebuilds the conversation
+    // rather than a list of stubs — and so a RECONNECT, which re-opens the thread and replaces this
+    // tab's copy, cannot silently delete every reply on screen.
+    //
+    // ONE READ FOR THE WHOLE THREAD. `forTurns` takes a list for exactly this reason, and it is the
+    // same call the metadata row already makes; a per-turn read would be one round trip per turn to
+    // draw one screen.
+    const variants: Map<string, TurnVariant[]> = items.length > 0
+      ? await turnVariants.forTurns(ctx, items.map((i) => i.id))
+      : new Map();
+    return {
+      thread: await threadView(ctx, threadId),
+      items: items.map((i) => {
+        // ONLY THE VARIANTS THAT SAID SOMETHING. A plan, a generation and a proposal each open a
+        // variant and none of them has prose, so an `answers` array of nulls would make every card
+        // in the thread look like a reply with an empty body.
+        const answers = (variants.get(i.id) ?? [])
+          .filter((v) => (v.body ?? "").trim().length > 0)
+          .map((v) => ({ ordinal: v.ordinal, body: v.body as string }));
+        return { ...i, ...(answers.length > 0 ? { answers } : {}) };
+      }),
+    };
+  },
   // §4.3's author column needs names, and nothing ever asked for them — see the relay's own note
   // at the initial snapshot. Answered only for a Team workspace: in a personal one the column does
   // not exist, so the list would be a payload on every connection that nothing renders.

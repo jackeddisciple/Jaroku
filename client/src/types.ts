@@ -1148,6 +1148,27 @@ export interface ThreadItemView {
   role: "user" | null;
   body: string | null;
   created_at: string;
+  /**
+   * THE ANSWERS TO THIS TURN, oldest first — §5, and what makes a reload show the conversation.
+   *
+   * `hydrate`'s header used to say "Jaroku's own prose is deliberately not stored (migration 044)
+   * and does not come back", and it was true: a reopened thread showed every question and a stub
+   * per reply. Migration 073 reverses that in the narrowest place it could — one nullable column on
+   * `turn_variants`, which already holds one row per answer — and this field is what carries it.
+   *
+   * WHY IT MATTERS FOR §5 RATHER THAN ONLY FOR §4. "Reconnect … does not duplicate or reorder the
+   * turn." A reconnect re-opens the thread, which REPLACES this tab's copy with the record — so if
+   * the record has no answers, a dropped socket mid-conversation silently deletes every reply on
+   * screen. Carrying them is what makes the replace safe.
+   *
+   * A LIST, BECAUSE A REGENERATED TURN HAS SEVERAL (§6.2). "Both are retained, and the turn renders
+   * a compact switcher." Retained in the browser's memory was retained until the tab closed.
+   *
+   * EMPTY ON EVERY ITEM THAT IS NOT AN EXCHANGE, and on every one answered before 073 existed —
+   * which is honest rather than a gap: those answers were not kept, and an empty string would claim
+   * they were empty.
+   */
+  answers?: { ordinal: number; body: string }[];
 }
 
 // --- the Agents tab ------------------------------------------------------------------------
