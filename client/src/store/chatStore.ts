@@ -201,6 +201,24 @@ export interface ReplyTurn extends TurnAnchor {
   /** §7.3: the server is about to try once itself, and the turn says so BEFORE it happens. */
   retrying?: boolean;
   /**
+   * §15.1: HOW CLOSE THE ROUTER CAME TO SENDING THIS TO THE PLAN ROUTE.
+   *
+   * WHAT IT IS FOR. "[ Build this as an agent ] — shown only when the router's confidence for plan
+   * was CLOSE TO THE THRESHOLD — not on every chat reply, which would be noise." So the band has to
+   * travel with the turn: the offer appears under the answer, and by then the composer has been
+   * cleared and the routing that produced it is gone.
+   *
+   * A BAND AND NEVER A NUMBER (§13.2). "Do not expose a raw confidence number. A score without a
+   * scale invites the user to reason about a number they cannot calibrate."
+   *
+   * AND THE MESSAGE IT WAS, because §15.1 is exact about what the card sends: "clicking it sends
+   * the ORIGINAL USER MESSAGE to the plan route, not the assistant's reply and not a paraphrase."
+   * Walking back through the thread would find it too — and would find the wrong one on a
+   * regenerated turn, where the question is one turn further back than it looks.
+   */
+  planEvidence?: "none" | "near" | "confident";
+  askedWith?: string;
+  /**
    * §6.5's metadata, arriving with the answer rather than derived from it.
    *
    * The model that produced THIS reply, the effort actually spent on it, and §5.4's two counts once
@@ -326,7 +344,11 @@ interface ChatState {
   editError: (e: In & { message: string; problems?: string[]; agentId?: string; proposalId?: string }) => void;
 
   // --- explain (unified composer): a streaming prose reply, no code change ---
-  replyStarted: (e: In & { agentId: string; question: string; regenerateOf?: string; turnId?: string }) => void;
+  replyStarted: (e: In & {
+    agentId: string; question: string; regenerateOf?: string; turnId?: string;
+    /** §15.1's band and the message it was asked with. See `ReplyTurn.planEvidence`. */
+    planEvidence?: "none" | "near" | "confident";
+  }) => void;
   /** §5.4: show a different one of this turn's answers. See the implementation. */
   switchVariant: (e: In & { turnId: string; ordinal: number }) => void;
   replyDelta: (e: In & { agentId: string; text: string }) => void;
@@ -765,7 +787,7 @@ export const useChatStore = create<ChatState>((set) => ({
 
   // --- explain (streaming prose reply, no code change) -------------------
 
-  replyStarted: ({ threadId, agentId, question, regenerateOf, turnId: itemId }) =>
+  replyStarted: ({ threadId, agentId, question, regenerateOf, turnId: itemId, planEvidence }) =>
     set((s) => {
       const turns = turnsIn(s, threadId);
       // §5.4: A REGENERATION REPLACES THE ANSWER RATHER THAN APPENDING A SECOND CONVERSATION.
@@ -790,6 +812,11 @@ export const useChatStore = create<ChatState>((set) => ({
               text: "",
               // KEPT OR SET, never lost: a regeneration is the same turn, so its id is the same id.
               ...(itemId ? { itemId } : {}),
+              // §15.1: THE BAND IS RE-EVALUATED, not inherited. A regeneration routes the same
+              // sentence again, so the evidence is the same — but carrying the old value would be
+              // the one case where it could be stale, and the router has just answered the
+              // question anyway.
+              ...(planEvidence ? { planEvidence } : {}),
               // §6.2: A REGENERATION STARTS CLEAN. `error` used to survive the spread, so
               // regenerating a failed turn — which §6.2 explicitly allows — produced a successful
               // answer still carrying "rate limited by anthropic" underneath it. The previous
@@ -817,6 +844,11 @@ export const useChatStore = create<ChatState>((set) => ({
           { id: turnId(), role: "user", text: question },
           {
             id: turnId(), role: "jaroku", kind: "reply", status: "streaming", agentId, text: "",
+            // §15.1's TWO FIELDS, and the second is the one that keeps the offer honest: the card
+            // sends the ORIGINAL message, so the turn has to remember what it was rather than the
+            // card walking back through the thread and finding the wrong one on a regeneration.
+            ...(planEvidence ? { planEvidence } : {}),
+            askedWith: question,
             // THE DURABLE ROW, FROM THE MOMENT THE ANSWER STARTS. Every turn-level control gates on
             // it — regenerate, note, pin, feedback, the switcher, §7's retry — and until the server
             // started sending it, all of them were unreachable on a live turn and appeared only

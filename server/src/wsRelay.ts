@@ -1582,6 +1582,19 @@ export type ChatCommand = {
    */
   routeReason?: string;
   /**
+   * §15.1: HOW CLOSE THE ROUTER CAME TO THE PLAN THRESHOLD, as a band.
+   *
+   * IT IS ECHOED BACK ON THE `started` EVENT so the offer can appear under the answer — by which
+   * time the composer has been cleared and the routing that produced it is gone. §15.1: the card is
+   * "shown only when the router's confidence for plan was close to the threshold — not on every
+   * chat reply, which would be noise."
+   *
+   * A BAND AND NEVER A NUMBER (§13.2), and an unrecognised value is treated as `none`: the safe
+   * direction is not offering the card, because a card offered on every reply is the noise §15.1 is
+   * guarding against.
+   */
+  planEvidence?: string;
+  /**
    * §6.2: ANSWER IT ON THIS MODEL INSTEAD.
    *
    * "Regenerating on a different model is a legitimate and useful thing to do, and the two replies
@@ -1842,7 +1855,12 @@ export type ReplyEvent =
    * OPTIONAL, because one caller has no row to name: a refusal belongs to no session, and the
    * no-key and fixture paths answer without one being written.
    */
-  | { type: "started"; agentId: string; question: string; regenerateOf?: string; turnId?: string }
+  | {
+      type: "started"; agentId: string; question: string;
+      regenerateOf?: string; turnId?: string;
+      /** §15.1's band, echoed back so the offer can appear under the answer. */
+      planEvidence?: string;
+    }
   | { type: "delta"; agentId: string; text: string }
   /**
    * §6.5 METADATA, WHEN THERE IS ANY. Absent on an answer that had nothing to report, which is

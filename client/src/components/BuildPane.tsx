@@ -2331,6 +2331,9 @@ export function BuildPane({
           // return of the same `routeMessage` call the preview renders from — so the sentence under
           // the turn and the label above the send button describe one decision rather than two.
           routeReason: routing.reason,
+          // §15.1: THE BAND, SO THE OFFER CAN APPEAR UNDER THE ANSWER. By then the composer has
+          // been cleared and this routing is gone, so it has to travel with the message.
+          planEvidence: routing.planEvidence,
           // §8.1's `selection:` line, when something is selected. Three fields rather than the
           // step: the block says WHICH step is open, and `explain` is the route that carries a
           // step's input, output and error because explaining one is its whole job.
@@ -2419,6 +2422,42 @@ export function BuildPane({
     );
 
   let fork: { key: string; question: string; choices: Choice[] } | null = null;
+
+  /**
+   * §15.1: [ Build this as an agent ] — the router was nearly sure, and it was wrong sometimes.
+   *
+   * §15 OPENS WITH THE ARGUMENT: "the router will be wrong sometimes. That is acceptable if being
+   * wrong costs one click." And §13's provenance line is what makes this discoverable — "the user
+   * can see the route was chosen, so a control to change it makes sense."
+   *
+   * SHOWN ONLY ON `near`, WHICH IS THE WHOLE OF ITS DISCIPLINE. "Not on every chat reply, which
+   * would be noise." A message with no build-request signal at all gets nothing; one that scored
+   * below the bar gets the offer once, under the answer it produced.
+   *
+   * `ChoiceRow`, WHICH §15.1 NAMES — "the component that exists precisely to surface the forks a
+   * session is already at as option cards. No new component." It sits in the same slot the plan
+   * gate, the stale plan and the failed step already use, which is also why only one fork shows at
+   * a time: a decision waiting on somebody outranks an offer.
+   *
+   * AND IT SENDS THE ORIGINAL MESSAGE. §15.1: "clicking it sends the original user message to the
+   * plan route, not the assistant's reply and not a paraphrase." `askedWith` is what the turn
+   * remembered, rather than a walk back through the thread — which would find the wrong sentence on
+   * a regenerated turn, where the question is one turn further back than it looks.
+   */
+  const nearMiss = !operating && turns.length > 0
+    ? [...turns].reverse().find(
+      (t): t is ReplyTurn =>
+        t.role === "jaroku" && t.kind === "reply"
+        // THE LAST TURN ONLY, in effect: an offer under an answer three exchanges up is an offer
+        // about a message somebody has moved on from. `find` on the reversed list stops at the
+        // newest reply, and the `status` test keeps it off one still arriving — §15.1's card is a
+        // decision about a finished answer.
+        && (t.status === "done" || t.status === "stopped")
+        && t.planEvidence === "near"
+        && Boolean(t.askedWith),
+    ) ?? null
+    : null;
+
   if (openPlan?.planId && openPlan.status === "pending") {
     fork = {
       key: `plan:${openPlan.planId}`,
@@ -2507,6 +2546,36 @@ export function BuildPane({
           hint: "change nothing",
           icon: XIcon,
           onPick: () => openProposal.proposalId && sendDiscardEdit(openProposal.proposalId),
+        },
+      ],
+    };
+  } else if (nearMiss) {
+    fork = {
+      // KEYED ON THE TURN, so dismissing it dismisses THIS offer rather than the next one too.
+      // `ChoiceRow`'s Skip is per fork, and §15.1's card should come back for a different message.
+      key: `near:${nearMiss.id}`,
+      question: "Did you want an agent for this?",
+      choices: [
+        {
+          id: "build",
+          label: "Build this as an agent",
+          hint: "plan it from what you asked",
+          icon: SparklesIcon,
+          accent: ACCENT.bespoke,
+          primary: true,
+          title: "Send the same message to the plan route",
+          onPick: () => {
+            // THE ORIGINAL MESSAGE, VERBATIM (§15.1). Not the reply, not a paraphrase, and not
+            // whatever is in the composer now.
+            const original = nearMiss.askedWith ?? "";
+            if (!original) return;
+            plannedConnectors.current = connectorKey;
+            const identity = useAccountOnboardingStore.getState().takeFirstAgentIdentity();
+            sendPlanAgent(
+              original, selected, name.trim() || undefined, undefined, selectedMcp, [],
+              { ...(identity ?? {}) },
+            );
+          },
         },
       ],
     };

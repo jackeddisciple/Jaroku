@@ -1472,6 +1472,8 @@ export function sendChat(
     selection?: { seq: number; type: string; name: string };
     /** §13.2's reason, from the router that decided. See the command's own note. */
     routeReason?: string;
+    /** §15.1's band. See the command's own note. */
+    planEvidence?: "none" | "near" | "confident";
   },
 ): void {
   send({
@@ -1482,6 +1484,7 @@ export function sendChat(
     ...(opts?.model ? { model: opts.model } : {}),
     ...(opts?.selection ? { selection: opts.selection } : {}),
     ...(opts?.routeReason ? { routeReason: opts.routeReason } : {}),
+    ...(opts?.planEvidence ? { planEvidence: opts.planEvidence } : {}),
   });
 }
 

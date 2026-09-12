@@ -497,5 +497,78 @@ console.log("\nregenerating a classified failure");
   check("...and answers", reply()?.text === "Because the retry budget ran out.", reply()?.text);
 }
 
+// --- §15.1: the band and the message the build offer sends -----------------------------------
+//
+// §15 OPENS WITH THE ARGUMENT AND IT IS THE RIGHT ONE: "the router will be wrong sometimes. That is
+// acceptable if being wrong costs one click." What this asserts is the two things the card needs
+// from the turn, because by the time it renders the composer has been cleared and the routing that
+// produced the answer is gone:
+//
+//   THE BAND, so the card appears on `near` and nowhere else — "not on every chat reply, which
+//   would be noise."
+//
+//   AND THE ORIGINAL MESSAGE, because §15.1 is exact: "clicking it sends the ORIGINAL USER MESSAGE
+//   to the plan route, not the assistant's reply and not a paraphrase." Walking back through the
+//   thread would find the wrong sentence on a regenerated turn, where the question is one turn
+//   further back than it looks.
+
+console.log("\n§15.1 — the band and the original message ride the turn");
+{
+  reset();
+  store().replyStarted({
+    threadId: T, agentId: A, question: "fix the retry logic in my webhook agent",
+    turnId: "i1", planEvidence: "near",
+  });
+  store().replyDelta({ threadId: T, agentId: A, text: "Which agent do you mean?" });
+  store().replyDone({ threadId: T, agentId: A });
+
+  check("the band is on the turn", reply()?.planEvidence === "near", String(reply()?.planEvidence));
+  // THE MESSAGE AS IT WAS TYPED, kept on the turn rather than recovered from the thread.
+  check("...and the message it was asked with",
+    reply()?.askedWith === "fix the retry logic in my webhook agent", String(reply()?.askedWith));
+  // NOT THE REPLY. The one thing §15.1 forbids the card from sending.
+  check("...which is not the reply", reply()?.askedWith !== reply()?.text, String(reply()?.askedWith));
+}
+
+console.log("\nthe band is absent where the offer would be noise");
+{
+  reset();
+  // A GREETING SCORES NOTHING, so there is no offer to make: `none` is the ordinary case and the
+  // card must not appear on it.
+  store().replyStarted({ threadId: T, agentId: A, question: "hi", turnId: "i1", planEvidence: "none" });
+  store().replyDone({ threadId: T, agentId: A });
+  check("a no-signal message carries `none`", reply()?.planEvidence === "none", String(reply()?.planEvidence));
+
+  reset();
+  // AND AN EVENT WITH NO BAND AT ALL leaves it absent rather than guessing — an older server, or
+  // the explain route, which does not route through §3's scoring.
+  store().replyStarted({ threadId: T, agentId: A, question: "why?", turnId: "i1" });
+  store().replyDone({ threadId: T, agentId: A });
+  check("no band means none is claimed", reply()?.planEvidence === undefined, String(reply()?.planEvidence));
+}
+
+console.log("\na regeneration re-evaluates the band");
+{
+  reset();
+  store().replyStarted({
+    threadId: T, agentId: A, question: "something to watch my inbox",
+    turnId: "i1", planEvidence: "near",
+  });
+  store().replyDone({ threadId: T, agentId: A });
+  // THE SAME SENTENCE ROUTED AGAIN GIVES THE SAME EVIDENCE — so what matters is that the field is
+  // SET from the new event rather than inherited, which is the one case where a stale band could
+  // survive a re-route.
+  store().replyStarted({
+    threadId: T, agentId: A, question: "something to watch my inbox",
+    regenerateOf: "i1", turnId: "i1", planEvidence: "confident",
+  });
+  check("the band comes from the new routing", reply()?.planEvidence === "confident", String(reply()?.planEvidence));
+  check("...on the same turn", replies().length === 1, replies().length);
+  // AND THE ORIGINAL MESSAGE SURVIVES THE REGENERATION, because the card under the second answer
+  // has to send the same sentence the first one was asked with.
+  check("...and the message it was asked with is kept",
+    reply()?.askedWith === "something to watch my inbox", String(reply()?.askedWith));
+}
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 (globalThis as { process?: { exit(code: number): void } }).process?.exit(fail === 0 ? 0 : 1);

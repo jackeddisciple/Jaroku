@@ -13509,6 +13509,15 @@ async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<voi
         // THE ROW THIS ANSWER BELONGS TO, which every turn-level control gates on — see the
         // event's own note. Written a line above and available the whole time.
         ...(turn ? { turnId: turn } : {}),
+        // §15.1's BAND, ECHOED RATHER THAN DERIVED. The router ran in the browser (v0.1.7's own
+        // design) and the server has no message-classification of its own to consult — deriving one
+        // here would be a second router disagreeing with the first about the same sentence.
+        //
+        // ONLY THE THREE WORDS. An unrecognised value is dropped rather than passed through, so a
+        // client cannot make the card appear by sending something else.
+        ...(cmd.planEvidence === "near" || cmd.planEvidence === "confident" || cmd.planEvidence === "none"
+          ? { planEvidence: cmd.planEvidence }
+          : {}),
       },
       thread,
     );

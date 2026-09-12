@@ -1971,6 +1971,8 @@ export type ServerMessage =
   | (InThread & {
       channel: "reply"; type: "started"; agentId: string; question: string;
       regenerateOf?: string; turnId?: string;
+      /** §15.1's band, so the offer can appear under the answer. See the command's own note. */
+      planEvidence?: "none" | "near" | "confident";
     })
   | (InThread & { channel: "reply"; type: "delta"; agentId: string; text: string })
   // `citations` ARRIVES WITH `done` AND NOT WITH THE TEXT — Part 3 §7.4. A `[work:…]` marker can be
@@ -2203,6 +2205,9 @@ export type ClientCommand =
       // server-side: the router runs HERE, by v0.1.7's design, and a reconstruction can disagree
       // with the decision it claims to explain.
       routeReason?: string;
+      // §15.1's band — how close the router came to the plan threshold. Echoed back on `started`
+      // so the offer can appear under the answer, by which time the composer has been cleared.
+      planEvidence?: "none" | "near" | "confident";
     }
   // §6.1's Stop. It names the conversation and nothing else: there is at most one answer in flight
   // per thread, so a turn id would be a second identifier for the same thing.
