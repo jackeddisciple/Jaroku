@@ -732,6 +732,69 @@ export class IdentityRepository {
   }
 
   /**
+   * §12's TWO CHAT CEILINGS, as the workspace has them (migration 076).
+   *
+   * READ PER MESSAGE rather than cached, for the reason `secretsGate` above is: a ceiling is a
+   * setting somebody changes BECAUSE something is happening — a loop, a surprise on the bill — and
+   * one that took effect at the next restart would be one nobody could rely on at the moment they
+   * reached for it.
+   *
+   * A MISSING OR DELETED WORKSPACE ANSWERS THE DEFAULTS, which is the same instinct as answering
+   * `tab` above: failing open on a lookup that returned nothing is how a limit becomes optional.
+   * Zero would be stricter still and is the wrong answer here — it would refuse every chat turn in
+   * a workspace whose row could not be read, which is a lookup failure presented as a policy.
+   */
+  async chatCeilings(ctx: TenantContext): Promise<{ threadUsd: number; dailyUsd: number }> {
+    const row = await this.db
+      .forWorkspace(ctx.workspaceId)
+      .get<{ chat_thread_ceiling_usd: unknown; chat_daily_ceiling_usd: unknown }>(
+        `SELECT chat_thread_ceiling_usd, chat_daily_ceiling_usd
+           FROM workspaces WHERE id = ? AND deleted_at IS NULL`,
+        [ctx.workspaceId],
+      );
+    // `Number(...)` AND NOT `asInt`: these are money. And a value that is not finite — a `numeric`
+    // arriving as a string node-postgres could not parse, a column somehow null — falls back to the
+    // default rather than to `NaN`, which compares false against everything and would make the
+    // ceiling silently unreachable.
+    const num = (v: unknown, fallback: number): number => {
+      const n = Number(v);
+      return Number.isFinite(n) && n >= 0 ? n : fallback;
+    };
+    return {
+      threadUsd: num(row?.chat_thread_ceiling_usd, 0.5),
+      dailyUsd: num(row?.chat_daily_ceiling_usd, 2),
+    };
+  }
+
+  /**
+   * Change them — §12.2: "both ceilings are configurable", and the refusal names "settings".
+   *
+   * CLAMPED AT ZERO HERE because SQLite has no CHECK on these columns (migration 076 explains why
+   * the table is not rewritten for one), so this is where a negative ceiling is refused on that
+   * driver. Postgres refuses it in the schema as well; both, rather than either, is the discipline
+   * every other bounded column in this codebase follows.
+   */
+  async setChatCeilings(
+    ctx: TenantContext,
+    next: { threadUsd?: number; dailyUsd?: number },
+  ): Promise<void> {
+    const sets: string[] = [];
+    const args: unknown[] = [];
+    const put = (col: string, v: number | undefined): void => {
+      if (v === undefined || !Number.isFinite(v)) return;
+      sets.push(`${col} = ?`);
+      args.push(Math.max(0, v));
+    };
+    put("chat_thread_ceiling_usd", next.threadUsd);
+    put("chat_daily_ceiling_usd", next.dailyUsd);
+    if (sets.length === 0) return;
+    args.push(ctx.workspaceId);
+    await this.db
+      .forWorkspace(ctx.workspaceId)
+      .run(`UPDATE workspaces SET ${sets.join(", ")} WHERE id = ?`, args);
+  }
+
+  /**
    * Change it. Owner-gated at the route, audited here.
    *
    * Audited for the same reason a plan change is: "why could a member read our credential list

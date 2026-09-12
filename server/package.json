@@ -110,6 +110,7 @@
     "test:attachments": "tsx src/attachments.test.ts",
     "test:accounting-model": "tsx src/accountingModel.test.ts",
     "test:openai-chat": "tsx src/openaiChat.test.ts",
+    "test:chat-budget": "tsx src/chatBudget.test.ts",
     "test:chat-cost": "tsx src/chatCost.test.ts",
     "test:provider-failure": "tsx src/providerFailure.test.ts",
     "test:thread-branch": "tsx src/threadBranch.test.ts",

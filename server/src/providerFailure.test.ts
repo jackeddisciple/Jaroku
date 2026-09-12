@@ -128,9 +128,14 @@ console.log("\n§7.2 — the ten classes");
   // EVERY CLASS IS COVERED BY THE TABLE, asserted rather than counted by eye — a class added
   // without a row here would be a turn with untested copy.
   const covered = new Set(rows.map((r) => r.want));
-  check(`all ${FAILURE_CLASSES.length} classes have a row`,
-    FAILURE_CLASSES.every((c) => covered.has(c)),
-    FAILURE_CLASSES.filter((c) => !covered.has(c)));
+  // EVERY CLASS A PROVIDER CAN PRODUCE. §12's `budget_reached` is on the union and is deliberately
+  // not here: it is raised by the chat route BEFORE any call, because a provider cannot tell us we
+  // are over our own budget — so there is no error to classify and `test:chat-budget` owns it.
+  const fromProvider = FAILURE_CLASSES.filter((c) => c !== "budget_reached");
+  check(`all ${fromProvider.length} provider classes have a row`,
+    fromProvider.every((c) => covered.has(c)),
+    fromProvider.filter((c) => !covered.has(c)));
+  check("...and the budget class is not one of them", !covered.has("budget_reached"));
 }
 
 // --- §7.3: never a blank turn -----------------------------------------------------------------

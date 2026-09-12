@@ -45,6 +45,24 @@ export const FAILURE_CLASSES = [
   "context_too_long",
   "content_refused",
   "unrecognised",
+  /**
+   * §12: NOT A PROVIDER FAILURE AT ALL, and it is on this list anyway.
+   *
+   * WHY IT BELONGS HERE. A refused chat turn has to render as a named, actionable turn rather than
+   * as a dead one — which is §7's whole subject — and the client already draws exactly that from a
+   * `failure` class and an `actions` list. A second mechanism for "the turn did not happen, and
+   * here is why" would be the inconsistency §7 exists to remove, arriving from the one direction
+   * §7 did not anticipate.
+   *
+   * IT IS NEVER PRODUCED BY `classifyProviderFailure`, because nothing was asked. The chat route
+   * raises it before the call, which is why it has no marker in the classifier below: a provider
+   * cannot tell us we are over our own budget.
+   *
+   * AND IT OFFERS NO ACTION. The remedy is a setting, not a retry — §12.2 names it in the sentence
+   * itself ("raise it in settings or start again tomorrow"), and a Retry button beside that would
+   * invite somebody to press it against a ceiling that has not moved.
+   */
+  "budget_reached",
 ] as const;
 
 export type FailureClass = (typeof FAILURE_CLASSES)[number];
@@ -67,6 +85,18 @@ export const FAILURE_ACTIONS = [
   "switch_model",
   "new_thread",
   "edit_message",
+  /**
+   * §12.2's remedy, as the control the sentence names.
+   *
+   * "The refusal explains itself and names the remedy… 'Daily chat budget reached ($2.00). Raise it
+   * in settings or start again tomorrow.'" A sentence that names a control and does not offer it is
+   * half a remedy, and this product's standing rule is that a blocked control says why AND what to
+   * do about it.
+   *
+   * NOT PRODUCED BY THE CLASSIFIER, like `budget_reached` itself: no provider failure is fixed in
+   * settings.
+   */
+  "open_settings",
 ] as const;
 
 export type FailureAction = (typeof FAILURE_ACTIONS)[number];
@@ -344,15 +374,25 @@ export function classifyProviderFailure(err: unknown, ctx: FailureContext): Clas
 // `mid` IS THE HALF THAT MATTERS. A failure before the first token and a failure after two hundred
 // of them are different code paths and only one of them can lose somebody's partial answer.
 
+/**
+ * The classes a PROVIDER can produce — every one but §12's.
+ *
+ * `budget_reached` IS NOT INJECTABLE AND THE TYPE SAYS SO. It is raised by the chat route before any
+ * call is made, because a provider cannot tell us we are over our own budget — so there is no error
+ * to fabricate for it, and a map entry would have had to invent one. §16 drives that path by setting
+ * the ceiling to zero, which is the real mechanism rather than a simulated one.
+ */
+export type InjectableClass = Exclude<FailureClass, "budget_reached">;
+
 /** What `JAROKU_CHAT_FAULT` may name: a class, optionally `:mid` to fail after some text has landed. */
 export interface InjectedFault {
-  class: FailureClass;
+  class: InjectableClass;
   /** Throw AFTER the first tokens rather than before the request. §7.3's partial-output rule. */
   mid: boolean;
 }
 
 /** The error each class is provoked with — the same shapes `test:provider-failure` classifies. */
-const FAULT_ERRORS: Record<FailureClass, () => Error> = {
+const FAULT_ERRORS: Record<InjectableClass, () => Error> = {
   rate_limited: () => Object.assign(new Error("429 rate_limit_error: injected"), { status: 429, headers: { "retry-after": "20" } }),
   no_credential: () => new Error("ANTHROPIC_API_KEY is not set (injected)"),
   invalid_credential: () => Object.assign(new Error("401 authentication_error: invalid x-api-key (injected)"), { status: 401 }),
@@ -382,8 +422,12 @@ export function injectedFault(env: NodeJS.ProcessEnv = process.env): InjectedFau
     return null;
   }
   const [name, where] = raw.split(":");
-  const cls = (FAILURE_CLASSES as readonly string[]).includes(name ?? "")
-    ? (name as FailureClass)
+  // NAMED AND INJECTABLE, WHICH ARE TWO CHECKS. `budget_reached` is a real class and is not a
+  // provider failure — see `InjectableClass` — so naming it in the variable is a request this
+  // cannot honour, and saying so is better than fabricating an error the classifier would then
+  // read as something else.
+  const cls = name && name !== "budget_reached" && (FAILURE_CLASSES as readonly string[]).includes(name)
+    ? (name as InjectableClass)
     : null;
   if (!cls) {
     console.warn(`[chat] JAROKU_CHAT_FAULT="${raw}" names no known failure class — ignoring.`);
@@ -393,6 +437,6 @@ export function injectedFault(env: NodeJS.ProcessEnv = process.env): InjectedFau
 }
 
 /** The error a named fault throws. Exported so a suite can assert the shapes round-trip. */
-export function faultError(cls: FailureClass): Error {
+export function faultError(cls: InjectableClass): Error {
   return FAULT_ERRORS[cls]();
 }

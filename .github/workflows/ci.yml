@@ -628,6 +628,15 @@ jobs:
           # sharpest — null all the way down, excluded from the total, and the row reporting a FLOOR
           # rather than an answer, because a zero anywhere in that chain reads as "this was free".
           npm run test:chat-cost
+          # §12'S TWO CEILINGS. Its first two acceptance cases are decisions over four numbers and
+          # a boolean, which is why the verdict is pure — a suite that had to stand a server up to
+          # learn whether a warning REPEATS is a suite nobody runs. Its third is not a decision at
+          # all: "an in-flight stream at the moment the ceiling is crossed completes rather than
+          # being killed" is v0.1.9's documented limit, and the only honest way to assert it is to
+          # show there is no ceiling consulted anywhere in the streaming path. The last block reads
+          # the code for that absence, and for §12.2's other one — that a run, a generation, a plan
+          # and an eval do not consult this limit at all, because each has its own.
+          npm run test:chat-budget
           # §11.2, AND THE ONE SUITE IN THIS FILE WRITTEN TO FAIL AGAINST BEHAVIOUR THAT SHIPPED.
           # v0.1.10 recorded it: "the generation model used for cost accounting is fixed in one place
           # regardless of what is configured, and the plan step inherits the same issue." That place

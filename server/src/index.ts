@@ -177,6 +177,9 @@ import { introspectGraph, introspectGraphCached, type GraphResult } from "./grap
 import { streamExplain, EXPLAIN_MODEL, EXPLAIN_MAX_TOKENS } from "./explainer.ts";
 import { classifyProviderFailure } from "./providerFailure.ts";
 import {
+  alreadyWarned, chatBudgetVerdict, type ChatBudgetVerdict,
+} from "./chatBudget.ts";
+import {
   chatContext, conversationWindow, providerOf,
   CHAT_MODEL, CHAT_PROVIDER, CHAT_MAX_TOKENS, TRUNCATION_NOTICE,
   type ChatGrounding, type ItemForWindow,
@@ -13405,6 +13408,53 @@ function relativeWhen(iso: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+/**
+ * §12: what this thread and this workspace have spent on chat, against what they are allowed.
+ *
+ * FOUR READS AND THEY ARE ALL READS SOMETHING ELSE ALREADY MAKES. `spendByThread` is the Threads
+ * row's own figure, `spendSince` is the billing page's, `chatCeilings` is one indexed primary-key
+ * read, and the thread's items were going to be read for §4's window anyway. §12.2's "one source"
+ * is satisfied by not adding a second.
+ *
+ * `llm.explain` IS THE KIND, AND IT COVERS MORE THAN THE CHAT ROUTE — a deviation from §12.1's "all
+ * chat spend in the workspace" worth naming. That kind is every conversational answer: the chat
+ * route, `explain`, and Part 3's answers-from-the-record. They are the same model on the same key
+ * and the same thing from a user's point of view — talking to Jaroku — and §10 chose one kind for
+ * them deliberately ("a second kind for a third caller would be a third thing to remember to add
+ * up"). What §12.2 actually forbids is the ceiling touching anything else: "it must never block a
+ * run, a generation, a deploy or an eval", and none of those is metered under this kind.
+ *
+ * NEVER FATAL. A ceiling that could not be read allows the turn — the same direction
+ * `identityRepo.chatCeilings` takes for a missing row, and for the same reason: a lookup failure
+ * presented as a policy is worse than a message that went through.
+ */
+async function chatBudget(ctx: TenantContext, threadId: string): Promise<ChatBudgetVerdict> {
+  try {
+    const [byThread, today, ceilings, items] = await Promise.all([
+      billing.spendByThread(ctx),
+      // MIDNIGHT UTC, WHICH IS WHAT "PER DAY" HAS TO MEAN HERE. A workspace has no timezone in this
+      // schema, so a local day would be the server's rather than anybody's — and §12.2's remedy
+      // ("start again tomorrow") is a sentence about a boundary that has to be the same one for
+      // every member of a team.
+      billing.spendSince(ctx, `${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`, ["llm.explain"]),
+      bootIdentity.chatCeilings(ctx),
+      threadStore.itemsFor(ctx, threadId),
+    ]);
+    const mine = byThread.get(threadId);
+    return chatBudgetVerdict(
+      {
+        threadUsd: mine ? mine.usd : null,
+        dailyUsd: today.usd,
+        warned: alreadyWarned(items.map((i) => i.body)),
+      },
+      ceilings,
+    );
+  } catch (err) {
+    console.warn(`[chat] could not read the budget: ${(err as Error)?.message ?? err}`);
+    return { allow: true, warn: null };
+  }
+}
+
 async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<void> {
   const message = typeof cmd.message === "string" ? cmd.message.trim() : "";
   // TO THE ASKER'S SCOPE AND WITH NO THREAD, which is this codebase's rule for every refusal: an
@@ -13462,6 +13512,56 @@ async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<voi
       },
       thread,
     );
+
+    /**
+     * §12: THE TWO CEILINGS, CHECKED BEFORE THE CALL AND AFTER THE MESSAGE IS WRITTEN.
+     *
+     * AFTER, DELIBERATELY. §7.3's rule is that "a failure never destroys the user's message. The
+     * message stays in the thread and is retryable without retyping" — and a refusal is a failure
+     * from the user's side. Checking first and returning would drop what somebody typed on the
+     * floor, so the message is the thread's record either way and the refusal sits under it.
+     *
+     * AND IT BOUNDS WHAT IS STARTED, NOT WHAT IS RUNNING — v0.1.9's documented limit, stated the
+     * same way §12.2 asks: "an in-flight stream completes. Do not quietly claim a stronger
+     * guarantee than the eval engine makes." That is a property of this being the only check: there
+     * is nothing in the streaming path that consults a ceiling, so a stream that was allowed to
+     * start cannot be killed by one being crossed underneath it.
+     *
+     * THE SAME FIGURES §10 RECORDS (§12.2). `spendByThread` is what the Threads row renders from
+     * and `spendSince` reads the same table — so the ceiling and the displayed total can never
+     * disagree about what has been spent.
+     */
+    const budget = await chatBudget(ctx, thread);
+    if (!budget.allow) {
+      // §12.2: THE REFUSAL EXPLAINS ITSELF AND NAMES THE REMEDY. "Never a greyed composer with no
+      // sentence." It rides the classified-failure event so the turn renders like any other named
+      // failure — and carries no `actions`, because the remedy is a setting rather than a retry: a
+      // Retry button here would invite somebody to press it against a ceiling that has not moved.
+      relay.broadcastReply(
+        ctx,
+        {
+          type: "error",
+          agentId: cmd.agentId ?? "",
+          message: budget.reason,
+          failure: "budget_reached",
+          // §12.2 NAMES THE REMEDY IN THE SENTENCE — "raise it in settings" — so the sentence's
+          // own remedy is offered as the control. NOT a Retry: the ceiling has not moved, and a
+          // Retry button beside a refusal invites somebody to press it and be refused again.
+          actions: ["open_settings"],
+          retrying: false,
+        },
+        thread,
+      );
+      return;
+    }
+    if (budget.warn) {
+      // §12.1: A VISIBLE WARNING IN THE THREAD, and it does not block — the answer is dispatched
+      // below regardless. Written as a thread item rather than broadcast as a notice, because
+      // §12.2's "once per threshold crossing" needs it to be REMEMBERED, and the record of the
+      // warning is the warning: see `SOFT_WARNING_MARK`.
+      await threadStore.addItem(ctx, thread, { kind: "message", role: null, body: budget.warn })
+        .catch((err) => console.warn(`[chat] could not record the budget warning: ${(err as Error)?.message}`));
+    }
 
     // §4: THE PRECEDING TURNS OF THIS THREAD, read AFTER the message was written and with that
     // message excluded. Written first because it is what somebody said and therefore the thread's

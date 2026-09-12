@@ -395,6 +395,20 @@ function FailureActions({ turn, agentId }: { turn: ReplyTurn; agentId: string | 
             Retry
           </button>
         );
+      case "open_settings":
+        return (
+          <button
+            key={id}
+            type="button"
+            // §12.2 NAMES THE REMEDY IN THE SENTENCE and this is the control it names. The usage
+            // panel is where a workspace's spend and its limits already live, so the ceiling is
+            // raised beside the figure that hit it rather than in a surface of its own.
+            onClick={() => useUiStore.getState().setRightTab("usage")}
+            className={secondaryBtn}
+          >
+            Open settings
+          </button>
+        );
       case "open_credentials":
         return (
           <button
