@@ -486,8 +486,13 @@ export const useChatStore = create<ChatState>((set) => ({
                   // them, and a reloaded turn had none — so a regenerated turn came back looking
                   // like a single answer with two bodies nobody could reach.
                   usage: {
+                    // `cost_usd: null` AND NOT `0` — v0.1.9's rule, and §16.2 re-checks it. These
+                    // counts are a scaffold for the switcher's numbers, not a measurement: a
+                    // rehydrated turn's tokens and cost are not in this row. A zero here is a
+                    // figure nobody measured sitting in the field a cost renderer would read, and
+                    // `—` is what the formatter already does with null.
                     input_tokens: 0, output_tokens: 0,
-                    cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: 0,
+                    cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: null,
                     variant_ordinal: answered.indexOf(shown) + 1,
                     variant_total: answered.length,
                     ...(shown.model ? { model: shown.model } : {}),
@@ -498,7 +503,7 @@ export const useChatStore = create<ChatState>((set) => ({
                   ? {
                     usage: {
                       input_tokens: 0, output_tokens: 0,
-                      cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: 0,
+                      cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: null,
                       model: shown.model, ...(shown.provider ? { provider: shown.provider } : {}),
                     },
                   }
@@ -901,7 +906,7 @@ export const useChatStore = create<ChatState>((set) => ({
           usage: {
             ...(turn.usage ?? {
               input_tokens: 0, output_tokens: 0,
-              cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: 0,
+              cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: null,
             }),
             variant_ordinal: turn.siblings.indexOf(at) + 1,
             variant_total: turn.siblings.length,
