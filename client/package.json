@@ -24,6 +24,7 @@
     "test:menu-clip": "tsx src/components/menuClip.test.ts",
     "test:graph-icons": "tsx src/components/graphIcons.test.ts",
     "test:chat-stream": "tsx src/store/chatStream.test.ts",
+    "test:escape-hatches": "tsx src/components/escapeHatches.test.ts",
     "test:chat-keys": "tsx src/lib/chatKeys.test.ts",
     "test:chat-model": "tsx src/store/chatModel.test.ts",
     "test:thinking-indicator": "tsx src/components/thinkingIndicator.test.ts",

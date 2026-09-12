@@ -2495,6 +2495,52 @@ export function BuildPane({
             useUiStore.getState().prefillChat(openPlan.prompt);
           },
         },
+        /**
+         * §15.2: [ I just wanted to ask ] — the router was wrong in the other direction.
+         *
+         * ALSO A `ChoiceRow` OPTION, which §15.2 asks for by name, and it sits beside Generate and
+         * Revise rather than replacing Discard: those three answer "what do I do with this plan",
+         * and this answers "I did not want a plan". Two different questions, one row.
+         *
+         * IT REUSES THE EXISTING DISCARD PATH (§15.2), "which v0.1.10 specified hands the original
+         * request back to the composer unchanged" — and then routes the same message to chat rather
+         * than leaving it in the box for somebody to press send on. One click, which is §15's whole
+         * standard for being wrong.
+         *
+         * IT DOES NOT DELETE THE TURN OR HIDE WHAT HAPPENED. §15.2: "the plan was produced and paid
+         * for; that stays in the record, consistent with this product never destroying a record as a
+         * side effect." `sendDiscardPlan` marks the card discarded — it does not remove it — so the
+         * conversation still shows the plan, its cost and the answer that followed it.
+         *
+         * NO `prefillChat` HERE, unlike Discard beside it. That one hands the brief back for
+         * somebody to edit; this one is a statement that the brief was never a brief, so putting it
+         * in the composer would be asking them to press send on a sentence they have just told us
+         * was a question.
+         */
+        {
+          id: "just-asking",
+          label: "I just wanted to ask",
+          hint: "answer it instead",
+          icon: LightbulbIcon,
+          title: "Drop the plan and answer the same message as a question",
+          onPick: () => {
+            const asked = openPlan.prompt;
+            if (openPlan.planId) sendDiscardPlan(openPlan.planId);
+            if (!asked.trim()) return;
+            // THE SAME MESSAGE, TO THE CHAT ROUTE. §15.2's acceptance is that it "produces a chat
+            // reply for the same message and leaves the discarded plan visible" — so the sentence
+            // is sent verbatim, and the route is named rather than inferred: this is not the router
+            // being asked again, it is the user overriding it.
+            sendChat(asked, activeAgentId, {
+              routeReason: "You asked for this to be answered rather than built.",
+              // §15.1's CARD MUST NOT THEN APPEAR UNDER THE ANSWER. The message scored well enough
+              // to reach the plan route, so its band would be `confident` — and offering to build
+              // it again, one click after somebody said they did not want that, would be the noise
+              // §15.1 is written to avoid.
+              planEvidence: "none",
+            });
+          },
+        },
       ],
     };
   } else if (openPlan?.planId && openPlan.status === "stale") {

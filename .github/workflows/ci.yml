@@ -1481,6 +1481,14 @@ jobs:
           # J/K must have a way out: without §14.2's printable-character escape, the exit from
           # navigation mode is the mouse, in a surface whose claim is that it needs none.
           npm run test:chat-keys
+          # §15'S TWO ESCAPE HATCHES, and the mistake each one could make would look completely
+          # plausible in review. Both must send the ORIGINAL user message — "not the assistant's
+          # reply and not a paraphrase" — so a `turn.text` reaching either dispatch is what this
+          # reads for. The build offer must be gated on the NEAR band and nothing weaker: gated on
+          # the route being chat, or on a reply existing, it would appear under every answer in the
+          # product, which is the noise §15.1 is written to avoid. And §15.2 must destroy nothing:
+          # "the plan was produced and paid for; that stays in the record."
+          npm run test:escape-hatches
           # §5'S STATE MACHINE, and every wrong answer in it looks plausible on screen. A dropped
           # socket leaving a turn `streaming` blinks a caret under a sentence that ended mid-word,
           # for ever; marking it `done` presents half a sentence as the whole answer. A failure that
