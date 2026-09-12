@@ -568,6 +568,10 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   // nobody else can, because the handle is keyed by a thread id only a scoped resolution could have
   // produced. Anything stronger would mean a member who may ask a question cannot stop their own.
   stopChat: "agent:read",
+  // §6.2's switcher. `agent:read` because it is a VIEW CHANGE and nothing else — `turnVariants.ts`'s
+  // header is explicit that switching never moves a published pointer, and a capability stronger
+  // than reading would mean somebody who may read a conversation cannot look at its other answer.
+  selectVariant: "agent:read",
 
   /**
    * The agent lifecycle: archive, restore, rename.

@@ -175,7 +175,7 @@ import {
 import { buildFactPack, type FactPack, type PackDeps } from "./work/factPack.ts";
 import { citableFrom, resolveCitations } from "./work/citations.ts";
 import { CHAT_SYSTEM, chatClosing, CONVERSATION_SYSTEM, conversationClosing, renderRecord } from "./prompt.ts";
-import type { AskRecordCommand, ChatCommand, ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCommand, InboxCommand, ProviderSnapshot, StopChatCommand } from "./wsRelay.ts";
+import type { AskRecordCommand, ChatCommand, ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCommand, InboxCommand, ProviderSnapshot, SelectVariantCommand, StopChatCommand } from "./wsRelay.ts";
 import type { ListWorkCommand, WorkCommand, WorkSnapshotWire } from "./wsRelay.ts";
 import { loadRuntimeEnv } from "./env.ts";
 import { installLogRedaction, protectEnv, protectSecret } from "./obs/log.ts";
@@ -285,7 +285,7 @@ import {
   PROVIDER_ENV_KEY, isProviderId, isRealProvider, providerLabel, providerStatus, verifyProviderKey,
   type ProviderId,
 } from "./providers.ts";
-import { allPrices, capabilityFor, effortLabelsFor } from "./pricing.ts";
+import { allPrices, capabilityFor, effortLabelsFor, isPriced } from "./pricing.ts";
 import { DeployStore, isInFlight as isDeployInFlight, type Deployment } from "./deployStore.ts";
 import { DeployOps } from "./deployOps.ts";
 import { DeployDispatcher } from "./deployDispatch.ts";
@@ -4919,7 +4919,17 @@ const relay = new WsRelay({
         // in the thread look like a reply with an empty body.
         const answers = (variants.get(i.id) ?? [])
           .filter((v) => (v.body ?? "").trim().length > 0)
-          .map((v) => ({ ordinal: v.ordinal, body: v.body as string }));
+          .map((v) => ({
+            ordinal: v.ordinal,
+            body: v.body as string,
+            selected: v.selected,
+            // §13.3: EACH SIBLING'S OWN MODEL, so two answers generated on different models show
+            // different chips after a reload as well as during the session. Null where nothing
+            // recorded one, which is honest — a backfilled variant has no model and a chip that
+            // guessed would be the one figure in that row nobody measured.
+            model: v.model_id,
+            provider: v.provider,
+          }));
         return { ...i, ...(answers.length > 0 ? { answers } : {}) };
       }),
     };
@@ -5072,6 +5082,7 @@ async function dispatchCommand(cmd: ForwardedCommand, ctx: TenantContext): Promi
     else if (cmd.cmd === "askRecord") void answerFromRecord(ctx, cmd);
     else if (cmd.cmd === "chat") void chatWithJaroku(ctx, cmd);
     else if (cmd.cmd === "stopChat") stopChat(ctx, cmd);
+    else if (cmd.cmd === "selectVariant") void selectVariant(ctx, cmd);
     else if (AGENT_COMMAND_NAMES.has(cmd.cmd)) void handleAgentCommand(ctx, cmd as AgentCommand);
     else if (MCP_COMMAND_NAMES.has(cmd.cmd)) void handleMcpCommand(ctx, cmd as McpCommand);
     else if (DEPLOY_COMMAND_NAMES.has(cmd.cmd)) void handleDeployCommand(ctx, cmd as DeployChannelCommand);
@@ -13004,7 +13015,11 @@ async function chatMemory(
       // THE ITEM'S OWN ID IS WHAT `exclude` NAMES, and `ref_id` is what a run summary needs. They
       // are different columns and conflating them would exclude nothing and summarise nothing.
       refId: i.kind === "run" ? i.ref_id : i.id,
-      answers: (variants.get(i.id) ?? []).map((v) => ({ ordinal: v.ordinal, body: v.body })),
+      // §6.2: `selected` TRAVELS WITH EACH ANSWER, so the window picks the one the conversation
+      // means rather than the one that arrived last.
+      answers: (variants.get(i.id) ?? []).map((v) => ({
+        ordinal: v.ordinal, body: v.body, selected: v.selected,
+      })),
     }));
     // THE RUN ITEMS CARRY `ref_id` AS THEIR `refId`, so `exclude` — which names a `thread_items`
     // id — is matched against the item id for everything else. Passing the turn being answered is
@@ -13014,6 +13029,30 @@ async function chatMemory(
   } catch (err) {
     console.warn(`[chat] could not assemble the conversation window: ${(err as Error)?.message ?? err}`);
     return { history: [], truncated: false };
+  }
+}
+
+/**
+ * §6.2: record which of a turn's answers the conversation means.
+ *
+ * A WRITE THAT CHANGES NO CONTENT. What it moves is which body the window assembler reads back, and
+ * therefore what the model sees on the next turn — which is the half the local switcher could never
+ * do. Nothing here touches a version, a published pointer, or the prose itself.
+ *
+ * SCOPED BY THE STORE, and the refusal is silence. `select` takes a context first and its WHERE is
+ * the tenancy boundary, so a turn id from another workspace finds no row and returns false — which
+ * is the same answer a deleted turn gives, and deliberately so: a refusal that told them apart
+ * would confirm the id exists somewhere.
+ */
+async function selectVariant(ctx: TenantContext, cmd: SelectVariantCommand): Promise<void> {
+  try {
+    await turnVariants.select(ctx, cmd.turnId, cmd.ordinal);
+  } catch (err) {
+    // NEVER FATAL AND NEVER ANNOUNCED. A selection that failed to persist leaves the record naming
+    // the newest answer, which is what it named before anybody pressed anything — so the screen and
+    // the record disagree until the next snapshot, and a sentence about it would be a sentence
+    // about a switcher.
+    console.warn(`[variants] could not select ${cmd.ordinal} on ${cmd.turnId}:`, (err as Error)?.message ?? err);
   }
 }
 
@@ -13049,11 +13088,25 @@ async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<voi
   chatting.add(thread);
 
   try {
-    // WHAT SOMEBODY SAID IS THE THREAD'S OWN MESSAGE, so a chat turn titles a new session and
-    // becomes §4.3's preview like every other thing a person types. "how much has this cost me"
-    // is exactly the line that makes a conversation recognisable a week later.
-    const turn = await noteUserMessage(ctx, thread, message);
-    relay.broadcastReply(ctx, { type: "started", agentId: cmd.agentId ?? "", question: message }, thread);
+    // §6.2: A REGENERATION ATTACHES TO THE TURN IT IS RE-ANSWERING rather than writing a second
+    // message. Two answers to one question, not two questions — which is the difference between a
+    // switcher with something in it and a thread that says the same sentence twice.
+    //
+    // OTHERWISE, WHAT SOMEBODY SAID IS THE THREAD'S OWN MESSAGE, so a chat turn titles a new
+    // session and becomes §4.3's preview like every other thing a person types. "how much has this
+    // cost me" is exactly the line that makes a conversation recognisable a week later.
+    const turn = cmd.regenerateOf
+      ? await turnForRegenerate(ctx, cmd.regenerateOf)
+      : await noteUserMessage(ctx, thread, message);
+    // THE SERVER'S VERIFIED ID, echoed back so every tab replaces the same turn rather than
+    // appending one. A regeneration whose id this workspace does not own carries nothing here and
+    // arrives as an ordinary message, which is the honest degradation.
+    const regenerateOf = cmd.regenerateOf && turn ? turn : undefined;
+    relay.broadcastReply(
+      ctx,
+      { type: "started", agentId: cmd.agentId ?? "", question: message, ...(regenerateOf ? { regenerateOf } : {}) },
+      thread,
+    );
 
     // §4: THE PRECEDING TURNS OF THIS THREAD, read AFTER the message was written and with that
     // message excluded. Written first because it is what somebody said and therefore the thread's
@@ -13061,11 +13114,19 @@ async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<voi
     const { history, truncated } = await chatMemory(ctx, thread, turn);
     const context = chatContext({ agentName });
     const chatKey = await providerKeys.platformKey(ctx);
-    const effort = await effortForThread(ctx, thread, CHAT_MODEL, CHAT_MAX_TOKENS);
+    // §6.2: THE MODEL THIS ANSWER RUNS ON, validated against the shared catalogue.
+    //
+    // NEVER THE CLIENT'S STRING UNCHECKED. A model id decides what gets billed — `costFor` prices
+    // whatever it is handed — so an unrecognised one falls back to the configured default rather
+    // than reaching a provider or a price lookup. `isPriced` is the right test rather than a
+    // hardcoded list: the catalogue is `runtime/pricing.json`, shared with the Python runtime, and a
+    // second list here would be the drift this codebase already refuses everywhere else.
+    const model = typeof cmd.model === "string" && isPriced(cmd.model) ? cmd.model : CHAT_MODEL;
+    const effort = await effortForThread(ctx, thread, model, CHAT_MAX_TOKENS);
     // §10'S ROW, OPENED AROUND THE RESPONSE, with the model that is about to answer on it. Chat is
     // the route most likely to be regenerated on a DIFFERENT model, which is the whole reason every
     // metadata column on `turn_variants` is per-variant rather than per-turn.
-    const settle = await openVariant(ctx, turn, CHAT_MODEL, "anthropic", effort);
+    const settle = await openVariant(ctx, turn, model, "anthropic", effort);
 
     // THE ANSWER AS IT ACCUMULATES, because it is what gets stored: §4.2 needs the reply in the
     // next turn's context, and the deltas are the only place the whole of it exists. Kept here
@@ -13101,7 +13162,24 @@ async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<voi
           // per token — and settled even when it is empty, because an answer that said nothing is a
           // fact about that answer and `settle` leaves `undefined` alone rather than writing null.
           settle({ body: answer });
-          relay.broadcastReply(ctx, { type: "done", agentId: cmd.agentId ?? "" }, thread);
+          // §6.2's TWO NUMBERS, read back from the rows rather than counted in memory, so the
+          // switcher's `‹ 2/3 ›` is the table's own answer. Absent when there is one variant, which
+          // is what collapses the slot rather than rendering `‹ 1/1 ›` under every turn.
+          //
+          // AND EACH SIBLING'S OWN MODEL RIDES WITH THEM. §13.3: "regenerating on a different model
+          // must be visible as exactly that" — so the payload names the model that answered THIS
+          // time, never the conversation's current setting.
+          void variantCounts(ctx, turn).then((counts) =>
+            relay.broadcastReply(
+              ctx,
+              {
+                type: "done",
+                agentId: cmd.agentId ?? "",
+                usage: { model, provider: "anthropic", ...effortFields(effort), ...counts },
+              },
+              thread,
+            ),
+          );
         },
         /**
          * §6.1: SOMEBODY PRESSED STOP, and three things follow from that rather than one.
@@ -13146,7 +13224,7 @@ async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<voi
       // `chat.ts` owns which model reads them.
       {
         system: CHAT_SYSTEM,
-        model: CHAT_MODEL,
+        model,
         askedBy: "Developer",
         history,
         // §4.2: THE MODEL IS TOLD THE CONVERSATION WAS TRUNCATED rather than handed a silently

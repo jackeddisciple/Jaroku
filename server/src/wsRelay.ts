@@ -1540,6 +1540,31 @@ export type ChatCommand = {
   agentId?: string;
   /** The session this was said in. See RunCommand.threadId. */
   threadId?: string;
+  /**
+   * §6.2: THIS IS A SECOND ANSWER TO THE TURN WITH THIS ID, not a new message.
+   *
+   * WHAT MAKES A SIBLING A SIBLING, and the same field `ExplainCommand` carries for the same
+   * reason: without it a regeneration is an ordinary second message, so the thread grows two
+   * questions rather than two answers to one — and the switcher has nothing to switch between.
+   *
+   * VERIFIED, NEVER TAKEN ON THE CLIENT'S WORD. An id this workspace does not own resolves to null
+   * and the dispatch falls back to writing a message, which is the honest degradation: the answer
+   * still arrives, it is simply not recorded as a variant of something.
+   */
+  regenerateOf?: string;
+  /**
+   * §6.2: ANSWER IT ON THIS MODEL INSTEAD.
+   *
+   * "Regenerating on a different model is a legitimate and useful thing to do, and the two replies
+   * must be individually attributable." It was neither before: the composer's
+   * "Regenerate with <model>" menu called `setModel` — which sets the model an agent's RUN goes to —
+   * and then dispatched an explain that ignored the model entirely. So the menu changed the wrong
+   * setting and the answer came back on the same model as before, under a label promising otherwise.
+   *
+   * VALIDATED AGAINST THE PRICING CATALOGUE at the dispatch, never trusted: a model id from a
+   * client decides what gets billed, and `costFor` prices whatever id it is handed.
+   */
+  model?: string;
 };
 
 /**
@@ -1554,6 +1579,28 @@ export type ChatCommand = {
  * `chatting` enforces that — so the thread is the whole address, and a turn id would be a second
  * identifier for the same thing that a client could get wrong.
  */
+/**
+ * §6.2: show a different one of this turn's answers, durably.
+ *
+ * A COMMAND RATHER THAN LOCAL STATE, and that is the whole point of it. The switcher already moved
+ * the answer on screen; what it could not do was change which answer the MODEL reads. §6.2: "only
+ * the selected sibling participates in conversation memory and in the context sent for subsequent
+ * turns" — so somebody who regenerated three times and switched back to the first was reading
+ * answer one while every following turn was answered against answer three, invisibly.
+ *
+ * IT IS A VIEW CHANGE AND NOTHING ELSE. `turnVariants.ts`'s own header states the rule this must
+ * not break: "switching variants is a view change and nothing else. `agent_version_id` records what
+ * a variant PRODUCED; the published pointer lives on the agent and is moved by the publish path
+ * alone." Nothing on this path touches a version, publishes anything, or re-runs anything.
+ */
+export type SelectVariantCommand = {
+  cmd: "selectVariant";
+  /** A `thread_items` id — the turn whose answers are being switched between. */
+  turnId: string;
+  /** 1-based, and it is the number the switcher renders. See `TurnVariantStore.select`. */
+  ordinal: number;
+};
+
 export type StopChatCommand = {
   cmd: "stopChat";
   /** The conversation whose answer should stop. Absent stops nothing, which is the safe direction. */
@@ -1606,6 +1653,7 @@ export type ClientCommand =
   | AskRecordCommand
   | ChatCommand
   | StopChatCommand
+  | SelectVariantCommand
   | EvalCommand
   | McpCommand
   | ListInboxCommand
@@ -1676,6 +1724,7 @@ export type ForwardedCommand =
   | AskRecordCommand
   | ChatCommand
   | StopChatCommand
+  | SelectVariantCommand
   | EvalCommand
   | McpCommand
   | ProviderCommand
@@ -2504,7 +2553,16 @@ export interface ThreadItemView {
    * which is honest rather than a gap: those answers were not kept, and an empty string would claim
    * they were empty.
    */
-  answers?: { ordinal: number; body: string }[];
+  answers?: {
+    ordinal: number;
+    body: string;
+    /** §6.2: the one the conversation means (migration 074). False on a turn nobody switched. */
+    selected?: boolean;
+    /** §13.3: the model that produced THIS sibling. "Regenerating on a different model must be
+     *  visible as exactly that" — so each answer names its own rather than sharing the turn's. */
+    model?: string | null;
+    provider?: string | null;
+  }[];
 }
 
 export type ThreadEvent =
@@ -3370,6 +3428,8 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   // AND STOPPING ONE, on the same channel as the answer it stops. A refusal — "nothing is
   // answering in that conversation" — belongs beside the turn somebody was looking at.
   stopChat: "reply",
+  // Switching between a turn's answers is the same conversation, so a refusal belongs beside it.
+  selectVariant: "reply",
   createDataset: "eval", renameDataset: "eval", deleteDataset: "eval", listDatasets: "eval",
   loadDataset: "eval", addExample: "eval", updateExample: "eval", deleteExample: "eval",
   promoteTestInput: "eval", startEval: "eval", cancelEval: "eval", loadRubric: "eval",
@@ -4328,6 +4388,8 @@ export class WsRelay {
           // with no thread stops nothing, which is the safe direction and needs no validation to
           // reach.
           } else if (msg.cmd === "stopChat") {
+            void withContext((ctx) => this.onCommand?.(msg, ctx));
+          } else if (msg.cmd === "selectVariant" && typeof msg.turnId === "string" && typeof msg.ordinal === "number") {
             void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "listMcpServers") {
             void this.answer(ws, async (ctx) => ({

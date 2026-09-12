@@ -226,7 +226,11 @@ console.log("\na reconnect");
   // §6.2: BOTH SIBLINGS ARE RETAINED, and the selected one is what is shown. Retained in the
   // browser's memory was retained until the tab closed.
   check("the selected sibling is on screen", rs[1]?.text === "A second answer.", rs[1]?.text);
-  check("...and the other is switchable", rs[1]?.priorVariants?.length === 1, rs[1]?.priorVariants);
+  // THROUGH `siblings` SINCE §6.2, not `priorVariants`. The two arrive at different moments and
+  // that is the whole distinction: `priorVariants` is this session's own swap, and `siblings` is the
+  // record — which is what a reload has and what makes the switcher's numbers and each answer's
+  // model survive one.
+  check("...and the other is switchable", rs[1]?.siblings?.length === 2, rs[1]?.siblings);
   // A REHYDRATED ANSWER IS A RECORD, NOT A STREAM THAT STOPPED.
   check("rehydrated answers are done", rs.every((r) => r.status === "done"), rs.map((r) => r.status));
   check("every turn keeps its durable id", rs.every((r) => Boolean(r.itemId)), rs.map((r) => r.itemId));
@@ -254,6 +258,134 @@ console.log("\nan exchange with no answer kept");
     body: "hi", created_at: "2026-09-12T10:00:00.000Z", answers: [{ ordinal: 1, body: "   " }],
   }]);
   check("a whitespace-only answer is not an answer", replies().length === 0, replies());
+}
+
+// --- §6.2: regenerate produces a sibling, and both are retrievable ---------------------------
+//
+// THE RULE THIS WHOLE BLOCK IS ABOUT: "regenerate never destroys the previous reply. The new reply
+// is a SIBLING, not a replacement." §6.2 gives the argument rather than a preference — branches
+// never mutate their parent (v0.1.5), undo restores from a snapshot rather than reversing a diff
+// (v0.1.0), an agent's threads survive the agent's deletion — so "a chat surface that overwrites
+// the previous answer would be the only place in Jaroku where pressing a button destroys a record."
+
+console.log("\nregenerating in this session");
+{
+  reset();
+  store().replyStarted({ threadId: T, agentId: A, question: "which model for classification?" });
+  store().replyDelta({ threadId: T, agentId: A, text: "Use Haiku." });
+  store().replyDone({ threadId: T, agentId: A });
+  const first = reply()!;
+  // The server echoes the turn id back on a regeneration, which is what makes it a sibling rather
+  // than a second question. Faked here, because the store is what is under test.
+  useChatStore.setState((st) => ({
+    threads: { ...st.threads, [T]: (st.threads[T] ?? []).map((t) => (t.id === first.id ? { ...t, itemId: "i1" } : t)) },
+  }));
+
+  store().replyStarted({ threadId: T, agentId: A, question: "which model for classification?", regenerateOf: "i1" });
+  // TWO ANSWERS TO ONE QUESTION, NOT TWO QUESTIONS. §6.2's whole shape: the thread must not grow a
+  // second copy of the sentence somebody typed once.
+  check("no second question is appended", turns().filter((t) => t.role === "user").length === 1, turns());
+  check("...and no second reply turn either", replies().length === 1, replies().length);
+  check("the previous answer is retained", reply()?.priorVariants?.[0] === "Use Haiku.", reply()?.priorVariants);
+
+  store().replyDelta({ threadId: T, agentId: A, text: "Use GPT-5.6 Luna." });
+  store().replyDone({ threadId: T, agentId: A, usage: {
+    input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0,
+    cost_usd: 0, variant_ordinal: 2, variant_total: 2,
+  } });
+  check("the new answer is on screen", reply()?.text === "Use GPT-5.6 Luna.", reply()?.text);
+  check("...and the switcher has two", reply()?.usage?.variant_total === 2, reply()?.usage);
+  // BOTH RETRIEVABLE. A switch back must produce the first answer, not a second copy of the second.
+  store().switchVariant({ threadId: T, turnId: "i1", ordinal: 1 });
+  check("switching back shows the first answer", reply()?.text === "Use Haiku.", reply()?.text);
+  check("...and the second is still reachable", reply()?.priorVariants?.[0] === "Use GPT-5.6 Luna.", reply()?.priorVariants);
+}
+
+console.log("\nregenerating ten times");
+{
+  reset();
+  store().replyStarted({ threadId: T, agentId: A, question: "why?" });
+  store().replyDelta({ threadId: T, agentId: A, text: "answer 0" });
+  store().replyDone({ threadId: T, agentId: A });
+  const t0 = reply()!;
+  useChatStore.setState((st) => ({
+    threads: { ...st.threads, [T]: (st.threads[T] ?? []).map((t) => (t.id === t0.id ? { ...t, itemId: "i1" } : t)) },
+  }));
+  for (let n = 1; n <= 10; n++) {
+    store().replyStarted({ threadId: T, agentId: A, question: "why?", regenerateOf: "i1" });
+    store().replyDelta({ threadId: T, agentId: A, text: `answer ${n}` });
+    store().replyDone({ threadId: T, agentId: A });
+  }
+  // §16'S TURN-ACTION ATTACK, BY NAME. Ten regenerations is one turn with eleven answers, not
+  // eleven turns and not one answer with ten lost.
+  check("ten regenerations make one turn", replies().length === 1, replies().length);
+  check("...and one question", turns().filter((t) => t.role === "user").length === 1, turns().length);
+  check("...with every earlier answer kept", reply()?.priorVariants?.length === 10, reply()?.priorVariants?.length);
+  check("...and the newest on screen", reply()?.text === "answer 10", reply()?.text);
+}
+
+console.log("\nregenerating a stopped turn, and a failed one");
+{
+  for (const [name, settle] of [
+    ["stopped", () => store().replyStopped({ threadId: T, agentId: A })],
+    ["failed", () => store().replyError({ threadId: T, agentId: A, message: "rate limited" })],
+  ] as const) {
+    reset();
+    store().replyStarted({ threadId: T, agentId: A, question: "why?" });
+    store().replyDelta({ threadId: T, agentId: A, text: "half an" });
+    settle();
+    const t0 = reply()!;
+    useChatStore.setState((st) => ({
+      threads: { ...st.threads, [T]: (st.threads[T] ?? []).map((t) => (t.id === t0.id ? { ...t, itemId: "i1" } : t)) },
+    }));
+    // §6.2: "REGENERATE IS AVAILABLE ON A STOPPED TURN, A FAILED TURN, AND A COMPLETED TURN ALIKE."
+    // Those are the three where somebody most wants it.
+    store().replyStarted({ threadId: T, agentId: A, question: "why?", regenerateOf: "i1" });
+    check(`a ${name} turn regenerates in place`, replies().length === 1 && reply()?.status === "streaming", replies());
+    check(`...keeping the ${name} partial as a sibling`, reply()?.priorVariants?.[0] === "half an", reply()?.priorVariants);
+    store().replyDelta({ threadId: T, agentId: A, text: "a whole answer" });
+    store().replyDone({ threadId: T, agentId: A });
+    check(`...and the retry settles clean`, reply()?.status === "done" && reply()?.error === undefined, reply());
+  }
+}
+
+// --- §6.2 + §13.3: siblings from the record, each with its own model -------------------------
+
+console.log("\nsiblings after a reload");
+{
+  reset();
+  store().hydrate(T, [{
+    id: "i1", kind: "message", ref_id: null, role: "user",
+    body: "which model?", created_at: "2026-09-12T10:00:00.000Z",
+    answers: [
+      { ordinal: 1, body: "Haiku.", model: "claude-haiku-4-5", provider: "anthropic" },
+      { ordinal: 2, body: "Luna.", model: "gpt-5.6-luna", provider: "openai", selected: true },
+      { ordinal: 3, body: "Terra.", model: "gpt-5.6-terra", provider: "openai" },
+    ],
+  }]);
+  // §6.2: THE SELECTED ONE IS WHAT IS SHOWN, not the newest. Before migration 074 the switcher was
+  // local, so a reload always came back on the last answer generated — which is the one somebody
+  // may have switched AWAY from.
+  check("the selected sibling is on screen", reply()?.text === "Luna.", reply()?.text);
+  check("...and the switcher reports 2 of 3", reply()?.usage?.variant_ordinal === 2 && reply()?.usage?.variant_total === 3, reply()?.usage);
+  // §13.3: "TWO SIBLINGS GENERATED ON DIFFERENT MODELS SHOW DIFFERENT MODEL CHIPS." The metadata
+  // row reads `usage.model`, so the model has to move with the body.
+  check("the model chip names the shown sibling's model", reply()?.usage?.model === "gpt-5.6-luna", reply()?.usage?.model);
+
+  store().switchVariant({ threadId: T, turnId: "i1", ordinal: 1 });
+  check("switching shows the first answer", reply()?.text === "Haiku.", reply()?.text);
+  check("...and its own model", reply()?.usage?.model === "claude-haiku-4-5", reply()?.usage?.model);
+  check("...and its own provider", reply()?.usage?.provider === "anthropic", reply()?.usage?.provider);
+  check("...and the count follows", reply()?.usage?.variant_ordinal === 1, reply()?.usage);
+
+  store().switchVariant({ threadId: T, turnId: "i1", ordinal: 3 });
+  check("switching forward works too", reply()?.text === "Terra." && reply()?.usage?.model === "gpt-5.6-terra", reply()?.usage);
+  // AN ORDINAL NOTHING PRODUCED MOVES NOTHING. A client that asks for variant 9 of a three-variant
+  // turn has raced a regeneration or is simply wrong.
+  store().switchVariant({ threadId: T, turnId: "i1", ordinal: 9 });
+  check("an ordinal nothing produced is a no-op", reply()?.text === "Terra.", reply()?.text);
+  // NOTHING IS DESTROYED BY SWITCHING. Every body is still reachable after moving through all three.
+  check("every sibling survives switching", reply()?.siblings?.length === 3, reply()?.siblings?.length);
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

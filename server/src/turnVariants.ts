@@ -24,7 +24,7 @@
 
 import { randomUUID } from "node:crypto";
 
-import { type Db, type Queryable } from "./db/db.ts";
+import { asBool, type Db, type Queryable } from "./db/db.ts";
 import type { TenantContext } from "./db/tenant.ts";
 import { isEffort, type Effort } from "./effort.ts";
 
@@ -59,6 +59,15 @@ export interface TurnVariant {
    * before anything was keeping the words did not answer with an empty string.
    */
   body: string | null;
+  /**
+   * §6.2: THIS IS THE ANSWER THE CONVERSATION MEANS (migration 074).
+   *
+   * FALSE ON EVERY ROW UNTIL SOMEBODY PRESSES THE SWITCHER, and a turn with none selected reads as
+   * "the newest one" — which is exactly what every turn did before the column existed. So nothing
+   * already in a thread changes meaning, and the flag only starts deciding anything once there is a
+   * choice to record.
+   */
+  selected: boolean;
   created_at: string;
 }
 
@@ -116,6 +125,10 @@ export class TurnVariantStore {
       cost_usd: asNum(row["cost_usd"]),
       agent_version_id: (row["agent_version_id"] as string | null) ?? null,
       body: (row["body"] as string | null) ?? null,
+      // THROUGH `asBool`, NEVER `Boolean(...)`. A literal 0 arrives as 0 from SQLite and as `false`
+      // from Postgres, and `Boolean(0)` and `Boolean("0")` disagree — which is the whole reason
+      // `test:boolean-literals` exists in this repository.
+      selected: asBool(row["selected"]),
       created_at: String(row["created_at"]),
     };
   }
@@ -124,7 +137,7 @@ export class TurnVariantStore {
   async forTurn(ctx: TenantContext, turnId: string): Promise<TurnVariant[]> {
     const rows = await this.q(ctx).all<Record<string, unknown>>(
       `SELECT id, turn_id, ordinal, model_id, provider, effort_requested, effort_applied,
-              duration_ms, tokens_in, tokens_out, cost_usd, agent_version_id, body, created_at
+              duration_ms, tokens_in, tokens_out, cost_usd, agent_version_id, body, selected, created_at
          FROM turn_variants
         WHERE workspace_id = ? AND turn_id = ?
         ORDER BY ordinal ASC`,
@@ -214,6 +227,46 @@ export class TurnVariantStore {
   }
 
   /**
+   * §6.2: make one of a turn's answers the selected one.
+   *
+   * ONE TRANSACTION THAT CLEARS THEN SETS, which is what makes "exactly one" true without a partial
+   * unique index — see migration 074 for why that index is deliberately absent. The clear is scoped
+   * to the turn, so switching in one conversation cannot touch another's.
+   *
+   * BY ORDINAL RATHER THAN BY VARIANT ID, because the ordinal is what the client HAS: the switcher
+   * renders `‹ 2/3 ›` and the number in it is the ordinal. Taking an id would mean shipping every
+   * variant's uuid to the browser to let it name one.
+   *
+   * AN ORDINAL NOTHING PRODUCED IS A NO-OP rather than an error. A client that asks for variant 4
+   * of a three-variant turn has raced a regeneration or is simply wrong, and the honest outcome is
+   * that the selection does not move — the screen then disagrees with the record for one frame and
+   * the next snapshot corrects it, which is strictly better than a refusal the user cannot act on.
+   */
+  async select(ctx: TenantContext, turnId: string, ordinal: number): Promise<boolean> {
+    if (!Number.isInteger(ordinal) || ordinal < 1) return false;
+    return this.db.scoped(ctx.workspaceId, async (q) => {
+      const hit = await q.get<{ id: string }>(
+        `SELECT id FROM turn_variants
+          WHERE workspace_id = ? AND turn_id = ? AND ordinal = ?`,
+        [ctx.workspaceId, turnId, ordinal],
+      );
+      if (!hit) return false;
+      // CLEARED FIRST, so a failure between the two statements leaves the turn with none selected —
+      // which reads as "the newest one" rather than as two answers both claiming to be the one.
+      // The other order would leave two.
+      await q.run(
+        `UPDATE turn_variants SET selected = ? WHERE workspace_id = ? AND turn_id = ?`,
+        [false, ctx.workspaceId, turnId],
+      );
+      await q.run(
+        `UPDATE turn_variants SET selected = ? WHERE workspace_id = ? AND id = ?`,
+        [true, ctx.workspaceId, hit.id],
+      );
+      return true;
+    });
+  }
+
+  /**
    * The variants for many turns at once.
    *
    * ONE QUERY FOR THE WHOLE THREAD, not one per turn. Opening a conversation renders every turn's
@@ -228,7 +281,7 @@ export class TurnVariantStore {
     const holes = turnIds.map(() => "?").join(", ");
     const rows = await this.q(ctx).all<Record<string, unknown>>(
       `SELECT id, turn_id, ordinal, model_id, provider, effort_requested, effort_applied,
-              duration_ms, tokens_in, tokens_out, cost_usd, agent_version_id, body, created_at
+              duration_ms, tokens_in, tokens_out, cost_usd, agent_version_id, body, selected, created_at
          FROM turn_variants
         WHERE workspace_id = ? AND turn_id IN (${holes})
         ORDER BY turn_id ASC, ordinal ASC`,

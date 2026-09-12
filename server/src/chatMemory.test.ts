@@ -202,6 +202,45 @@ console.log("\nregenerated siblings");
   check("a bodyless variant contributes nothing",
     conversationWindow([empty], NO_RUNS).messages.every((m) => m.role === "user"), conversationWindow([empty], NO_RUNS).messages);
 
+  // §6.2's SELECTED SIBLING, DURABLY (migration 074). Before the column, the window took the
+  // NEWEST answer — so somebody who regenerated three times and switched back to the first read
+  // answer one on screen while every following turn was answered against answer three.
+  const switched: ItemForWindow = {
+    ...withThree,
+    answers: [
+      { ordinal: 1, body: "The first answer.", selected: true },
+      { ordinal: 2, body: "The second answer." },
+      { ordinal: 3, body: "The third answer." },
+    ],
+  };
+  const w2 = conversationWindow([switched], NO_RUNS);
+  const picked = w2.messages.filter((m) => m.role === "assistant");
+  check("the selected sibling is what the model reads", picked[0]?.content === "The first answer.", picked);
+  check("...and still only one of them", picked.length === 1, picked);
+
+  // A TIE GOES TO THE NEWEST, which is the same answer the column's absence gives — so a failed
+  // half-transaction degrades to the previous behaviour rather than to an arbitrary one.
+  const tied: ItemForWindow = {
+    ...withThree,
+    answers: [
+      { ordinal: 1, body: "One.", selected: true },
+      { ordinal: 2, body: "Two.", selected: true },
+    ],
+  };
+  check("two selected rows resolve to the newest",
+    conversationWindow([tied], NO_RUNS).messages.some((m) => m.content === "Two."),
+    conversationWindow([tied], NO_RUNS).messages);
+
+  // A SELECTED ROW WITH NO BODY IS NOT AN ANSWER, so selection cannot make the window empty: the
+  // fallback still finds the newest one that said something.
+  const emptySelected: ItemForWindow = {
+    ...withThree,
+    answers: [{ ordinal: 1, body: "Real." }, { ordinal: 2, body: "", selected: true }],
+  };
+  check("a selected empty body falls back to one that spoke",
+    conversationWindow([emptySelected], NO_RUNS).messages.some((m) => m.content === "Real."),
+    conversationWindow([emptySelected], NO_RUNS).messages);
+
   // §6.1: A STOPPED ANSWER STAYS IN MEMORY AS WHAT IT ACTUALLY WAS — a partial answer — rather than
   // being silently dropped from context.
   const stopped: ItemForWindow = { ...withThree, answers: [{ ordinal: 1, body: "The cheapest is GPT-5.6 Lu" }] };

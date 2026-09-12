@@ -1442,8 +1442,30 @@ export function sendBranchRun(
  * IT NEVER WRITES. There is no apply, no confirm and no second command that follows this one —
  * which is §2.2, and is checkable by reading this function.
  */
-export function sendChat(message: string, agentId?: string | null): void {
-  send({ cmd: "chat", message, ...(agentId ? { agentId } : {}), threadId: activeThread() });
+export function sendChat(
+  message: string,
+  agentId?: string | null,
+  /**
+   * §6.2: what makes this a SIBLING and what model answers it.
+   *
+   * `regenerateOf` IS A `thread_items` ID, and the server verifies it: an id this workspace does
+   * not own arrives as an ordinary message rather than as a refusal, which is the honest
+   * degradation — the answer still comes, it is simply not recorded as a second one.
+   *
+   * `model` IS WHAT WAS MISSING. "Regenerate with <model>" called `setModel`, which sets the model
+   * an agent's RUN goes to, and then dispatched a call that ignored the model entirely — so the
+   * menu changed the wrong setting and the answer came back on the same model under a label
+   * promising otherwise.
+   */
+  opts?: { regenerateOf?: string; model?: string },
+): void {
+  send({
+    cmd: "chat", message,
+    ...(agentId ? { agentId } : {}),
+    threadId: activeThread(),
+    ...(opts?.regenerateOf ? { regenerateOf: opts.regenerateOf } : {}),
+    ...(opts?.model ? { model: opts.model } : {}),
+  });
 }
 
 /**
@@ -1457,6 +1479,19 @@ export function sendChat(message: string, agentId?: string | null): void {
  * standing rule for every channel: a tab that marked its own turn stopped would be the only tab
  * that knew, and would have guessed — the stream may have finished a frame earlier.
  */
+/**
+ * §6.2: record which of a turn's answers the conversation means.
+ *
+ * IT IS SENT BESIDE the local swap rather than instead of it, and the asymmetry is deliberate: the
+ * screen must move on the click, and the record must move too. The local store is what the reader
+ * sees this frame; this is what the MODEL reads on the next turn — and before it existed, somebody
+ * who switched back to the first answer read answer one while every following reply was answered
+ * against answer three.
+ */
+export function sendSelectVariant(turnId: string, ordinal: number): void {
+  send({ cmd: "selectVariant", turnId, ordinal });
+}
+
 export function sendStopChat(): void {
   send({ cmd: "stopChat", threadId: activeThread() });
 }

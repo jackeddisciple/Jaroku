@@ -22,7 +22,7 @@ import {
 } from "../store/providerStore.ts";
 import {
   sendApplyEdit, sendAskRecord, sendBranchRun, sendChat, sendDiscardEdit, sendDiscardPlan, sendDispatchWork,
-  sendStopChat,
+  sendSelectVariant, sendStopChat,
   sendEdit, sendExplain, sendGenerate, sendLoadWorkItem, sendPlanAgent, sendPromoteTestInput, sendRun,
 } from "../lib/socket.ts";
 import { useEvalStore } from "../store/evalStore.ts";
@@ -527,9 +527,21 @@ function AssistantTurn({
               // Offered only where there are bodies to switch BETWEEN, which is a reply this
               // session has regenerated: `turn_variants` records what each answer cost forever, and
               // the prose lives as long as the tab does. See `ReplyTurn.priorVariants`.
+              // §6.2: OFFERED WHERE THERE ARE BODIES TO SWITCH BETWEEN — either from the record
+              // (`siblings`, which survives a reload) or from this session's own regeneration
+              // (`priorVariants`, which does not). Two sources because they arrive at different
+              // moments: a regeneration has no record to read until the answer settles.
+              //
+              // AND IT WRITES AS WELL AS SWAPS. The local call moves what is on screen this frame;
+              // `sendSelectVariant` moves what the MODEL reads on the next turn, which is the half
+              // §6.2 asks for and the half a local switcher could never do.
               onSwitchVariant={
-                itemId && turn.role === "jaroku" && turn.kind === "reply" && (turn.priorVariants?.length ?? 0) > 0
-                  ? (ordinal) => useChatStore.getState().switchVariant({ threadId: threadId ?? undefined, turnId: itemId, ordinal })
+                itemId && turn.role === "jaroku" && turn.kind === "reply"
+                  && ((turn.siblings?.length ?? 0) > 1 || (turn.priorVariants?.length ?? 0) > 0)
+                  ? (ordinal) => {
+                    useChatStore.getState().switchVariant({ threadId: threadId ?? undefined, turnId: itemId, ordinal });
+                    sendSelectVariant(itemId, ordinal);
+                  }
                   : undefined
               }
             />
@@ -578,13 +590,24 @@ function rerunTurn(
   // — §5.4's "the same user input" — rather than whatever is in the box now.
   const prompt = promptForRegenerate(turns, turn);
   if (!prompt) return;
-  if (opts?.modelId) useUiStore.getState().setModel(opts.modelId);
 
-  // THE SAME COMMAND THE ORIGINAL DISPATCHED, with the turn it is a second answer to. The subject
-  // is the agent generally: the step or node the first answer was grounded in may not be selected
-  // any more, and re-running against whatever happens to be selected NOW would answer a different
-  // question under the first one's heading.
-  sendExplain(turn.agentId, prompt, { kind: "agent" }, undefined, undefined, turn.itemId);
+  // §6.2: THE CHAT COMMAND, WITH THE TURN IT IS A SECOND ANSWER TO AND THE MODEL THAT SHOULD
+  // ANSWER IT.
+  //
+  // `sendChat` RATHER THAN `sendExplain`, WHICH IS THE CORRECTION THIS FUNCTION NEEDED. A reply
+  // turn is what the chat route produces, and re-running it through `explain` sent it somewhere
+  // grounded "strictly in the selection" with no selection to ground it in — §4.1's own description
+  // of why explain is the wrong engine for a conversation. The grounded context block and the
+  // conversation window both come with the chat route, so a regeneration now gets the same material
+  // the first answer had rather than less.
+  //
+  // AND THE MODEL TRAVELS ON THE COMMAND rather than through `setModel`. That setter moves the
+  // model an agent's RUN goes to: pressing "Regenerate with GPT-5.6 Terra" used to repoint the
+  // user's next test run and answer on the same model as before.
+  sendChat(prompt, turn.agentId || null, {
+    regenerateOf: turn.itemId,
+    ...(opts?.modelId ? { model: opts.modelId } : {}),
+  });
 }
 
 function Turn({ turn, isLastGen }: { turn: ChatTurn; isLastGen: boolean }) {

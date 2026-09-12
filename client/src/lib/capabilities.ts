@@ -135,6 +135,8 @@ export const COMMAND_CAPABILITY: Record<string, string> = {
   // Stopping an answer is the same authority as starting it — see the server's copy for why a stop
   // is not a write in the sense that matters here.
   stopChat: "agent:read",
+  // §6.2's switcher — a view change, so the authority to look. See the server's copy.
+  selectVariant: "agent:read",
   listAgentGrid: "agent:read",
   loadAgentDetail: "agent:read",
   loadAgentVersion: "agent:read",

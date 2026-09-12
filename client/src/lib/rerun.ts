@@ -36,5 +36,11 @@ import type { ChatTurn } from "../store/chatStore.ts";
  * never disagree about what the control does.
  */
 export function canRerunTurn(turn: ChatTurn): boolean {
+  // §6.2: A STOPPED TURN AND A FAILED TURN ARE REGENERABLE TOO, which is the one widening this
+  // predicate needed. "Regenerate is available on a stopped turn, a failed turn, and a completed
+  // turn alike" — and those are the three where somebody most wants it: an answer cut short, an
+  // answer that fell over, and an answer they did not like. A `streaming` one is excluded at the
+  // row rather than here, because that is a liveness question and this is a "what kind of turn is
+  // this" one.
   return turn.role === "jaroku" && turn.kind === "reply" && Boolean(turn.itemId);
 }

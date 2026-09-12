@@ -1168,7 +1168,16 @@ export interface ThreadItemView {
    * which is honest rather than a gap: those answers were not kept, and an empty string would claim
    * they were empty.
    */
-  answers?: { ordinal: number; body: string }[];
+  answers?: {
+    ordinal: number;
+    body: string;
+    /** §6.2: the one the conversation means (migration 074). False on a turn nobody switched. */
+    selected?: boolean;
+    /** §13.3: the model that produced THIS sibling. "Regenerating on a different model must be
+     *  visible as exactly that" — so each answer names its own rather than sharing the turn's. */
+    model?: string | null;
+    provider?: string | null;
+  }[];
 }
 
 // --- the Agents tab ------------------------------------------------------------------------
@@ -2104,10 +2113,15 @@ export type ClientCommand =
   // one: §8.1's planning stage is a thread with no agent, and that is exactly when somebody types
   // "hi". Answered on "reply" like `explain` and `askRecord` — see server/src/wsRelay.ts's
   // `ChatCommand` for why it is a third command rather than a flag on one of them.
-  | { cmd: "chat"; message: string; agentId?: string; threadId?: string }
+  // §6.2's `regenerateOf` is what makes a regeneration a SIBLING rather than a second question, and
+  // `model` is what makes "regenerate with a different model" true — the menu used to set the RUN's
+  // model and dispatch a call that ignored it.
+  | { cmd: "chat"; message: string; agentId?: string; threadId?: string; regenerateOf?: string; model?: string }
   // §6.1's Stop. It names the conversation and nothing else: there is at most one answer in flight
   // per thread, so a turn id would be a second identifier for the same thing.
   | { cmd: "stopChat"; threadId?: string }
+  // §6.2's switcher, durably. A view change and nothing else — it never moves a published pointer.
+  | { cmd: "selectVariant"; turnId: string; ordinal: number }
   // Eval: dataset CRUD. Every mutation is answered with a fresh snapshot on the "eval"
   // channel, so the client never reconciles a partial update against local state.
   | { cmd: "createDataset"; agentId: string; name: string }

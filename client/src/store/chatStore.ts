@@ -205,6 +205,21 @@ export interface ReplyTurn extends TurnAnchor {
    */
   priorVariants?: string[];
   /**
+   * §6.2: EVERY ANSWER TO THIS TURN, with what produced each one.
+   *
+   * BESIDE `priorVariants` RATHER THAN REPLACING IT, and that is a transition rather than a
+   * duplication. `priorVariants` is the in-session swap the switcher already drives — `text` is
+   * what is on screen and that array is what is not — and every reader of a `ReplyTurn` (the copy
+   * button, the notes rail, `turnSource`) reads `text` because of it. This is the DURABLE list, as
+   * the record has it, and it is what makes the switcher's numbers and each sibling's model chip
+   * survive a reload. Where both exist the durable one wins on identity and `text` still wins on
+   * what is rendered.
+   *
+   * §13.3 IS WHY EACH ENTRY CARRIES A MODEL. "Two siblings generated on different models show
+   * different model chips" — which cannot be true of a list of strings.
+   */
+  siblings?: { ordinal: number; body: string; selected?: boolean; model?: string | null; provider?: string | null }[];
+  /**
    * Part 3 §7.4: the work items this answer cited, resolved by the server.
    *
    * ON `done` RATHER THAN ARRIVING WITH THE TEXT, because a `[work:…]` marker can be split across
@@ -401,13 +416,37 @@ export const useChatStore = create<ChatState>((set) => ({
           // answer read out of a table is not a stream that stopped: whatever happened to the
           // connection at the time, this is the whole of what was kept.
           const answered = (it.answers ?? []).filter((a) => a.body.trim().length > 0);
+          // §6.2: THE ONE SOMEBODY SWITCHED TO, else the newest — the same rule the server's window
+          // applies, deliberately, so the screen and the model read the same answer.
+          const shown = [...answered].reverse().find((a) => a.selected === true) ?? answered[answered.length - 1];
           const reply = (agentId: string): ChatTurn[] =>
-            answered.length === 0 ? [] : [{
+            !shown ? [] : [{
               id: turnId(), itemId: it.id, role: "jaroku", kind: "reply", status: "done",
-              agentId, text: answered[answered.length - 1]!.body,
+              agentId, text: shown.body,
               ...(answered.length > 1
-                ? { priorVariants: answered.slice(0, -1).map((a) => a.body) }
-                : {}),
+                ? {
+                  siblings: answered,
+                  // THE SWITCHER'S NUMBERS, from the record. `usage` is where the metadata row reads
+                  // them, and a reloaded turn had none — so a regenerated turn came back looking
+                  // like a single answer with two bodies nobody could reach.
+                  usage: {
+                    input_tokens: 0, output_tokens: 0,
+                    cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: 0,
+                    variant_ordinal: answered.indexOf(shown) + 1,
+                    variant_total: answered.length,
+                    ...(shown.model ? { model: shown.model } : {}),
+                    ...(shown.provider ? { provider: shown.provider } : {}),
+                  },
+                }
+                : shown.model
+                  ? {
+                    usage: {
+                      input_tokens: 0, output_tokens: 0,
+                      cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: 0,
+                      model: shown.model, ...(shown.provider ? { provider: shown.provider } : {}),
+                    },
+                  }
+                  : {}),
             }];
 
           if (it.kind === "message" && it.role === "user") {
@@ -727,6 +766,12 @@ export const useChatStore = create<ChatState>((set) => ({
               ...prior,
               status: "streaming" as const,
               text: "",
+              // §6.2: A REGENERATION STARTS CLEAN. `error` used to survive the spread, so
+              // regenerating a failed turn — which §6.2 explicitly allows — produced a successful
+              // answer still carrying "rate limited by anthropic" underneath it. The previous
+              // failure is not a fact about the new attempt, and the partial that failed is kept as
+              // a sibling either way.
+              error: undefined,
               priorVariants: [...(prior.priorVariants ?? []), prior.text],
             })),
           };
@@ -756,6 +801,33 @@ export const useChatStore = create<ChatState>((set) => ({
       const turns = turnsIn(s, threadId);
       const turn = turns.find((t) => t.role === "jaroku" && t.kind === "reply" && t.itemId === itemId);
       if (!turn || turn.role !== "jaroku" || turn.kind !== "reply") return {};
+
+      // §6.2, THE DURABLE PATH: when the turn carries its siblings, switching is an INDEX MOVE
+      // rather than a swap. The record has every answer and its model, so nothing has to be
+      // exchanged to keep a body reachable — and `usage` moves with the body, which is what makes
+      // "two siblings on different models show different chips" true while switching between them.
+      //
+      // THE SWAP BELOW IS THE OTHER CASE and it is still needed: a regeneration in THIS session
+      // has no record to read until the answer settles, so `priorVariants` is all there is.
+      if (turn.siblings && turn.siblings.length > 1) {
+        const at = turn.siblings.find((v) => v.ordinal === ordinal);
+        if (!at) return {};
+        return putTurns(s, threadId, replaceTurn(turns, turn.id, {
+          ...turn,
+          text: at.body,
+          usage: {
+            ...(turn.usage ?? {
+              input_tokens: 0, output_tokens: 0,
+              cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: 0,
+            }),
+            variant_ordinal: turn.siblings.indexOf(at) + 1,
+            variant_total: turn.siblings.length,
+            ...(at.model ? { model: at.model } : {}),
+            ...(at.provider ? { provider: at.provider } : {}),
+          },
+        }));
+      }
+
       const prior = turn.priorVariants ?? [];
       // Ordinals are 1-based and the last one is what is on screen, so anything outside the
       // priors' range is either the current answer or a number nothing produced.

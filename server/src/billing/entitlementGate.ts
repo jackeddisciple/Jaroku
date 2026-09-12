@@ -172,6 +172,8 @@ export const COMMAND_ENTITLEMENT: Record<string, EntitlementKind | typeof NO_ENT
   // on this list that makes a workspace spend LESS. `NO_ENTITLEMENT` is the only honest answer, and
   // a tier that could not stop a stream would be a tier that had to pay for every answer in full.
   stopChat: NO_ENTITLEMENT,
+  // Reading an answer that has already been paid for costs nothing and counts against nothing.
+  selectVariant: NO_ENTITLEMENT,
   diagnoseFile: NO_ENTITLEMENT,
   planAgent: NO_ENTITLEMENT,
   discardPlan: NO_ENTITLEMENT,

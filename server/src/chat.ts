@@ -128,8 +128,13 @@ export interface ItemForWindow {
   body: string | null;
   /** The row this item points at, for the summaries that need one. */
   refId: string | null;
-  /** The answers to this turn, oldest first — `turn_variants` rows with a body. */
-  answers: readonly { ordinal: number; body: string | null }[];
+  /**
+   * The answers to this turn, oldest first — `turn_variants` rows with a body.
+   *
+   * `selected` IS §6.2's SWITCHER, DURABLY (migration 074). False on every row of a turn nobody has
+   * switched, which reads as "the newest one" — the same answer this had before the column existed.
+   */
+  answers: readonly { ordinal: number; body: string | null; selected?: boolean }[];
 }
 
 /** The run outcomes the window needs, keyed by run id — `store.runDigests`. */
@@ -240,8 +245,20 @@ export function conversationWindow(
       // user's would make the conversation read as though somebody had typed "[run failed]".
       if (line) turn.push({ role: "assistant", content: line });
     }
-    // §6.2: THE SELECTED SIBLING, which is the last variant carrying a body.
-    const answered = [...item.answers].reverse().find((a) => (a.body ?? "").trim().length > 0);
+    // §6.2: THE SELECTED SIBLING — the one somebody switched to, else the newest that said anything.
+    //
+    // THE FALLBACK IS NOT A SHORTCUT. A turn nobody has switched has no selected row (migration 074
+    // defaults the column false and backfills nothing), and the newest answer is the right default:
+    // it is the one on screen, because a regeneration replaces what was showing. The explicit flag
+    // only starts deciding anything once there is a choice on the record.
+    //
+    // AND A TIE GOES TO THE NEWEST, which is why this walks backwards through the selected ones
+    // too. Two rows both claiming to be selected can only come from a failed half-transaction, and
+    // "the newest one" is the same answer the column's absence gives — so the degradation is to the
+    // previous behaviour rather than to an arbitrary one.
+    const said = (a: { body: string | null }): boolean => (a.body ?? "").trim().length > 0;
+    const newestFirst = [...item.answers].reverse();
+    const answered = newestFirst.find((a) => a.selected === true && said(a)) ?? newestFirst.find(said);
     if (answered?.body) turn.push({ role: "assistant", content: answered.body.trim() });
     if (turn.length === 0) continue;
 

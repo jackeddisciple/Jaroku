@@ -281,12 +281,29 @@ console.log("\nthe store is instantiated, written and read — outside a test");
 
   // REGENERATE RE-RUNS, and attaches to the turn it is re-running rather than writing a second
   // message. Without this the switcher has nothing to switch between however well it is wired.
-  check("the four composer commands carry the turn a re-run is OF", (relay.match(/regenerateOf\?: string;/g) ?? []).length === 4);
+  // FIVE SINCE §6.2, and the fifth is the one that matters most: `chat` is the composer's default
+  // route, so it is the command a regeneration actually goes out on now. A count here rather than a
+  // per-command check because what fails is an OMISSION — a command that grew a regenerate path and
+  // did not carry the turn it is a second answer to writes a second QUESTION, silently.
+  check("the five composer commands carry the turn a re-run is OF", (relay.match(/regenerateOf\?: string;/g) ?? []).length === 5);
   check("...verified server-side rather than taken on the client's word", /async function turnForRegenerate\(/.test(index));
   check("...and used instead of writing a second user message", /cmd\.regenerateOf\s*\n?\s*\? await turnForRegenerate/.test(index));
 
   const pane = client("components/BuildPane.tsx");
-  check("Regenerate DISPATCHES rather than prefilling", /sendExplain\(turn\.agentId, prompt, \{ kind: "agent" \}, undefined, undefined, turn\.itemId\)/.test(pane));
+  // WHAT THIS ROW IS FOR IS UNCHANGED: regenerate must DISPATCH, not put the sentence back in the
+  // composer and stop. What it dispatches changed with §6.2 — `sendChat` rather than `sendExplain`,
+  // because a reply turn is what the chat route produces and re-running it through explain sent it
+  // somewhere "grounded strictly in the selection" with no selection to ground it in. The
+  // regenerated answer now gets the grounded context block and the conversation window the first
+  // one had, rather than less.
+  check("Regenerate DISPATCHES rather than prefilling", /sendChat\(prompt, turn\.agentId \|\| null, \{/.test(pane));
+  // AND IT CARRIES THE MODEL, which is §6.2's "regenerating on a different model is a legitimate and
+  // useful thing to do". The menu used to call `setModel` — the model an agent's RUN goes to — and
+  // then dispatch a call that ignored the model entirely, so it repointed the next test run and
+  // answered on the same model as before.
+  check("...and the chosen model rides the command rather than repointing the run",
+    /\.\.\.\(opts\?\.modelId \? \{ model: opts\.modelId \} : \{\}\)/.test(pane)
+    && !/setModel\(opts\.modelId\)/.test(pane));
   check("...and the switcher finally has a caller", /onSwitchVariant=\{/.test(pane));
   check(
     "...offered only where there are bodies to switch between",
@@ -299,6 +316,83 @@ console.log("\nthe store is instantiated, written and read — outside a test");
     "the comment above it no longer describes a write nothing performed",
     /IT DISPATCHES NOW RATHER THAN PREFILLING/.test(pane),
   );
+}
+
+// --- §6.2: which of a turn's answers the conversation MEANS (migration 074) ------------------
+//
+// THE LOCAL SWITCHER WAS ONLY HALF OF §6.2. It moved the answer on screen; it could not move which
+// answer the MODEL reads — "only the selected sibling participates in conversation memory and in
+// the context sent for subsequent turns" — so somebody who regenerated three times and switched
+// back to the first read answer one while every following reply was answered against answer three.
+
+console.log("\n§6.2 — selection is durable, exactly one, and scoped");
+{
+  const h = await harness();
+  const turn = await h.seedTurn(ctx.workspaceId);
+  const a = await h.store.begin(ctx, turn, { modelId: "claude-haiku-4-5", provider: "anthropic" });
+  const b = await h.store.begin(ctx, turn, { modelId: "gpt-5.6-luna", provider: "openai" });
+  const c = await h.store.begin(ctx, turn, { modelId: "gpt-5.6-terra", provider: "openai" });
+
+  // NOTHING IS SELECTED UNTIL SOMEBODY SWITCHES, which reads as "the newest one" — the same answer
+  // every turn gave before the column existed. That is what makes 074 need no backfill.
+  const fresh = await h.store.forTurn(ctx, turn);
+  check("a fresh turn has no selection", fresh.every((v) => v.selected === false), JSON.stringify(fresh.map((v) => v.selected)));
+
+  check("selecting an ordinal that exists succeeds", (await h.store.select(ctx, turn, 1)) === true);
+  const afterFirst = await h.store.forTurn(ctx, turn);
+  check("...and exactly one row is selected", afterFirst.filter((v) => v.selected).length === 1,
+    JSON.stringify(afterFirst.map((v) => [v.ordinal, v.selected])));
+  check("...the one asked for", afterFirst.find((v) => v.selected)?.id === a.id);
+
+  // MOVING IT CLEARS THE OTHER, which is what makes "exactly one" true without a partial unique
+  // index — migration 074 explains why that index is deliberately absent.
+  await h.store.select(ctx, turn, 3);
+  const afterThird = await h.store.forTurn(ctx, turn);
+  check("moving the selection clears the previous one", afterThird.filter((v) => v.selected).length === 1,
+    JSON.stringify(afterThird.map((v) => [v.ordinal, v.selected])));
+  check("...and lands on the new one", afterThird.find((v) => v.selected)?.id === c.id);
+
+  // AN ORDINAL NOTHING PRODUCED MOVES NOTHING. A client asking for variant 9 of a three-variant
+  // turn has raced a regeneration or is simply wrong, and the selection staying put is better than
+  // a refusal it cannot act on.
+  check("an ordinal nothing produced is refused", (await h.store.select(ctx, turn, 9)) === false);
+  check("...and the selection has not moved",
+    (await h.store.forTurn(ctx, turn)).find((v) => v.selected)?.id === c.id);
+  check("a zero ordinal is refused", (await h.store.select(ctx, turn, 0)) === false);
+  check("a fractional ordinal is refused", (await h.store.select(ctx, turn, 1.5)) === false);
+
+  // AND IT IS SCOPED. §13's rule for every id that crosses a tenant boundary: a turn this pass does
+  // not own reads as ABSENT rather than as forbidden, because a refusal that told them apart would
+  // confirm the id exists somewhere.
+  check("another workspace cannot select on this turn", (await h.store.select(otherCtx, turn, 1)) === false);
+  check("...and this turn's selection is untouched",
+    (await h.store.forTurn(ctx, turn)).find((v) => v.selected)?.id === c.id);
+
+  // SELECTION IS A VIEW CHANGE AND NOTHING ELSE — `turnVariants.ts`'s own standing rule. Nothing
+  // about what a variant PRODUCED may move because somebody looked at a different answer.
+  const bodies = await h.store.forTurn(ctx, turn);
+  check("no body was touched", bodies.every((v) => v.body === null), JSON.stringify(bodies.map((v) => v.body)));
+  check("no version pointer was touched", bodies.every((v) => v.agent_version_id === null));
+  check("every model is still its own",
+    bodies.find((v) => v.id === b.id)?.model_id === "gpt-5.6-luna"
+    && bodies.find((v) => v.id === a.id)?.model_id === "claude-haiku-4-5");
+
+  // §6.2's BODIES, SETTLED AND READ BACK — what makes both answers retrievable after a reload.
+  await h.store.settle(ctx, a.id, { body: "Haiku." });
+  await h.store.settle(ctx, c.id, { body: "Terra." });
+  const read = await h.store.forTurn(ctx, turn);
+  check("each answer's own body comes back", read.find((v) => v.id === a.id)?.body === "Haiku."
+    && read.find((v) => v.id === c.id)?.body === "Terra.");
+  check("...and a variant that said nothing stays null", read.find((v) => v.id === b.id)?.body === null);
+  // SETTLING ONE MUST NOT TOUCH ANOTHER — this module's founding rule, now with one more column to
+  // get wrong: "never overwrite variant 1's metadata with variant 2's."
+  await h.store.settle(ctx, b.id, { body: "Luna." });
+  const reread = await h.store.forTurn(ctx, turn);
+  check("settling a third body leaves the other two alone",
+    reread.find((v) => v.id === a.id)?.body === "Haiku." && reread.find((v) => v.id === c.id)?.body === "Terra.");
+  check("...and does not move the selection", reread.find((v) => v.selected)?.id === c.id);
+
+  await h.close();
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
