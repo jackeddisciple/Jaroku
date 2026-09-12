@@ -44,7 +44,10 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // rail's Connections tab already draws, so the mark count below does not move.
   // 164 WITH `composer.effortReset`, the effort slider's way back to Medium — `Undo03Icon`, a mark the
   // Inbox's undo already draws, so the count of distinct marks below does not move.
-  check("164 registry keys", entries.length === 164, `${entries.length}`);
+  // 165 WITH `turn.stop` (§6.1), the control that ends a streaming answer and keeps what arrived —
+  // `StopIcon`, which `trace.stop` and `cockpitWork.stop` already draw for the same verb, so the
+  // count of distinct marks below does not move either.
+  check("165 registry keys", entries.length === 165, `${entries.length}`);
   const names = new Set(entries.map((e) => e.export));
   // 104 from icons_integration's appendix, plus D8's 13 — the composer glyphs that had to move
   // here when `@hugeicons/react` came out. See the note at the top of `registry.ts`.

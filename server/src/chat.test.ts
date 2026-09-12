@@ -23,7 +23,7 @@ import { readFileSync } from "node:fs";
 import { CHAT_MAX_TOKENS, CHAT_MODEL, chatContext } from "./chat.ts";
 import { CHAT_SYSTEM, chatClosing } from "./prompt.ts";
 import { allPrices, capabilityFor, costFor, isPriced, priceFor } from "./pricing.ts";
-import { EXPLAIN_MODEL } from "./explainer.ts";
+import { EXPLAIN_MODEL, usageFromPartial } from "./explainer.ts";
 import { PLAN_MODEL } from "./planner.ts";
 import { EDIT_MODEL } from "./editor.ts";
 
@@ -148,6 +148,41 @@ console.log("\nthe closing paragraph");
   // context block that has just said there is no agent.
   check("an absent agent is said plainly", /no agent is open/i.test(anon), anon);
   check("...and no name is invented", !/"/.test(anon.split("—")[0] ?? anon), anon);
+}
+
+// --- §6.1: what a stopped answer cost --------------------------------------------------------
+//
+// THE ONE RULE WITH TWO WRONG ANSWERS, both of which are a single `?? 0` away. `finalMessage()`
+// never resolves on an aborted stream, so the usage report that fires on a completed call does not
+// fire here — and a caller that defaulted the counts would record a stopped answer as FREE on a
+// call that really consumed every input token of the prompt.
+
+console.log("\na stopped answer's cost");
+{
+  const real = usageFromPartial(CHAT_MODEL, {
+    usage: { input_tokens: 1420, output_tokens: 96, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+  });
+  check("the counts are the ones the call accumulated", real?.input === 1420 && real?.output === 96, real);
+  check("...and it prices to a real figure", (costFor(CHAT_MODEL, {
+    inputTokens: real?.input ?? 0, outputTokens: real?.output ?? 0,
+  }) ?? 0) > 0, real);
+  // NOT THE PROJECTED AMOUNT. A stopped answer produced 96 tokens, not `CHAT_MAX_TOKENS` of them —
+  // pricing the request as though it had run to the ceiling charges somebody for the answer they
+  // stopped precisely to avoid paying for.
+  check("...and it is far below the ceiling", (real?.output ?? 0) < CHAT_MAX_TOKENS, real?.output);
+
+  // UNKNOWN, NOT ZERO. An abort that beat the first `message_start` has no accumulated message, and
+  // v0.1.9's rule is that a silent zero reads as "this was free" rather than as "we don't know".
+  check("no accumulated message means no counts", usageFromPartial(CHAT_MODEL, undefined) === undefined);
+  check("...and neither does a message with no usage on it", usageFromPartial(CHAT_MODEL, {}) === undefined);
+  // THE MODEL TRAVELS WITH THE COUNTS, because `costFor` prices whatever id it is handed — a
+  // stopped call metered against the wrong model is the v0.1.10 accounting bug in a new place.
+  check("the model is reported as itself",
+    usageFromPartial("gpt-5.6-luna", { usage: { input_tokens: 1 } })?.model === "gpt-5.6-luna");
+  // A PARTIAL MESSAGE WITH NULL COUNTS IS ZERO RATHER THAN UNKNOWN, and that is right: the SDK sent
+  // a usage block, so the call reported its own spend and reported none.
+  check("an explicit null count is zero, not absent",
+    usageFromPartial(CHAT_MODEL, { usage: { input_tokens: null, output_tokens: null } })?.input === 0);
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

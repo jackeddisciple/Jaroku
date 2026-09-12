@@ -1542,6 +1542,24 @@ export type ChatCommand = {
   threadId?: string;
 };
 
+/**
+ * Stop the answer arriving in this conversation — §6.1.
+ *
+ * A COMMAND RATHER THAN A SOCKET CLOSE, which is the difference between stopping and disconnecting.
+ * Closing the socket would stop the stream too, and it would also be indistinguishable from a
+ * dropped connection: the turn would render as interrupted (§5) rather than as stopped, and every
+ * other channel in the tab would go down with it.
+ *
+ * IT NAMES THE THREAD AND NOTHING ELSE. There is at most one answer in flight per conversation —
+ * `chatting` enforces that — so the thread is the whole address, and a turn id would be a second
+ * identifier for the same thing that a client could get wrong.
+ */
+export type StopChatCommand = {
+  cmd: "stopChat";
+  /** The conversation whose answer should stop. Absent stops nothing, which is the safe direction. */
+  threadId?: string;
+};
+
 export type ExplainCommand = {
   cmd: "explain";
   agentId: string;
@@ -1587,6 +1605,7 @@ export type ClientCommand =
   | ExplainCommand
   | AskRecordCommand
   | ChatCommand
+  | StopChatCommand
   | EvalCommand
   | McpCommand
   | ListInboxCommand
@@ -1656,6 +1675,7 @@ export type ForwardedCommand =
   | ExplainCommand
   | AskRecordCommand
   | ChatCommand
+  | StopChatCommand
   | EvalCommand
   | McpCommand
   | ProviderCommand
@@ -1748,6 +1768,17 @@ export type ReplyEvent =
    * composer's answers are byte-identical to what they were.
    */
   | { type: "done"; agentId: string; usage?: unknown; citations?: CitationView[] }
+  /**
+   * §6.1: SOMEBODY STOPPED IT.
+   *
+   * ITS OWN EVENT, not a `done` with a flag. Three of the four terminal states on this channel
+   * render differently and mean different things — finished, cut off by a connection, stopped on
+   * purpose, failed — and a boolean on `done` would make the first and the third one event that
+   * the client has to branch on anyway. It also carries the usage, because a stopped call's counts
+   * arrive by a different route from a finished one's: `finalMessage()` never resolves on an
+   * aborted stream, so there is no `onUsage` to ride.
+   */
+  | { type: "stopped"; agentId: string; usage?: unknown }
   | { type: "error"; agentId: string; message: string };
 
 // Eval rides its own channel too, parallel to trace/gen/edit/debug/reply.
@@ -3336,6 +3367,9 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   // anywhere else would leave a question in the thread with no reply of any kind beneath it, which
   // reads as Jaroku having silently ignored somebody.
   chat: "reply",
+  // AND STOPPING ONE, on the same channel as the answer it stops. A refusal — "nothing is
+  // answering in that conversation" — belongs beside the turn somebody was looking at.
+  stopChat: "reply",
   createDataset: "eval", renameDataset: "eval", deleteDataset: "eval", listDatasets: "eval",
   loadDataset: "eval", addExample: "eval", updateExample: "eval", deleteExample: "eval",
   promoteTestInput: "eval", startEval: "eval", cancelEval: "eval", loadRubric: "eval",
@@ -4288,6 +4322,12 @@ export class WsRelay {
           // is required and the agent is not, which is the whole difference between this guard and
           // the two above it.
           } else if (msg.cmd === "chat" && typeof msg.message === "string") {
+            void withContext((ctx) => this.onCommand?.(msg, ctx));
+          // NO REQUIRED FIELD AT ALL, which is the one guard on this channel with nothing to check:
+          // the thread is optional and everything else about the command is its name. A `stopChat`
+          // with no thread stops nothing, which is the safe direction and needs no validation to
+          // reach.
+          } else if (msg.cmd === "stopChat") {
             void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "listMcpServers") {
             void this.answer(ws, async (ctx) => ({

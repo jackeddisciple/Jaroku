@@ -561,6 +561,13 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   // reads that agent's version, tools, last run and spend. Leaving it ungated because the common
   // case is harmless is how a read path acquires an agent it was never checked against.
   chat: "agent:read",
+  // STOPPING AN ANSWER IS `agent:read` TOO, and the reason is not obvious enough to leave unsaid: a
+  // stop is a WRITE in the sense that it changes something, and what it changes is a stream this
+  // same pass started. §6.1's Stop is reachable only on a turn that is arriving right now, in a
+  // conversation this pass could read — so anybody who could start the answer can end it, and
+  // nobody else can, because the handle is keyed by a thread id only a scoped resolution could have
+  // produced. Anything stronger would mean a member who may ask a question cannot stop their own.
+  stopChat: "agent:read",
 
   /**
    * The agent lifecycle: archive, restore, rename.

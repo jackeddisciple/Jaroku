@@ -22,6 +22,7 @@ import {
 } from "../store/providerStore.ts";
 import {
   sendApplyEdit, sendAskRecord, sendBranchRun, sendChat, sendDiscardEdit, sendDiscardPlan, sendDispatchWork,
+  sendStopChat,
   sendEdit, sendExplain, sendGenerate, sendLoadWorkItem, sendPlanAgent, sendPromoteTestInput, sendRun,
 } from "../lib/socket.ts";
 import { useEvalStore } from "../store/evalStore.ts";
@@ -344,20 +345,33 @@ function CitedProse({ text, cites }: {
  * what there is to render — which is exactly when it matters most.
  */
 function ReplyStopped({ turn }: { turn: ReplyTurn }) {
-  if (turn.status !== "interrupted" && turn.status !== "error") return null;
-  const interrupted = turn.status === "interrupted";
+  const { status } = turn;
+  if (status !== "stopped" && status !== "interrupted" && status !== "error") return null;
   return (
-    <div className={`mt-1.5 flex items-start gap-1.5 text-caption ${interrupted ? "text-muted" : "text-err"}`}>
+    <div
+      className={`mt-1.5 flex items-start gap-1.5 text-caption ${status === "error" ? "text-err" : "text-muted"}`}
+    >
       <span className="mt-[2px] shrink-0" aria-hidden>
-        <AlertTriangleIcon size={ICON.xs} />
+        {/* §6.1: STOPPING IS NOT A WARNING. Nothing went wrong and nothing was lost — somebody
+            decided the answer was long enough — so it gets the same mark the control that did it
+            carries, not the triangle the other two share. Colour rules hold either way: both
+            non-error states are muted, because "incomplete" is not a status this palette colours. */}
+        {status === "stopped"
+          ? <Glyph icon={Icon.turn.stop} size={GLYPH.meta} />
+          : <AlertTriangleIcon size={ICON.xs} />}
       </span>
       <span className="min-w-0">
-        {interrupted
-          // NO MESSAGE, BECAUSE NOTHING WAS ABLE TO SEND ONE. The socket went away; the honest
-          // sentence names the cause it can be sure of and says what happens next, which the
-          // reconnect is already doing.
-          ? (turn.text ? "Interrupted — the connection dropped mid-answer." : "Interrupted before the answer started.")
-          : turn.error || "The answer failed."}
+        {status === "stopped"
+          // AND IT SAYS WHAT IS STILL POSSIBLE. §6.2: "regenerate is available on a stopped turn, a
+          // failed turn, and a completed turn alike", and the control is in the row directly below —
+          // so the sentence points at it rather than repeating it.
+          ? (turn.text ? "Stopped — this is what had arrived." : "Stopped before the answer started.")
+          : status === "interrupted"
+            // NO MESSAGE, BECAUSE NOTHING WAS ABLE TO SEND ONE. The socket went away; the honest
+            // sentence names the cause it can be sure of and says what happens next, which the
+            // reconnect is already doing.
+            ? (turn.text ? "Interrupted — the connection dropped mid-answer." : "Interrupted before the answer started.")
+            : turn.error || "The answer failed."}
       </span>
     </div>
   );
@@ -478,6 +492,16 @@ function AssistantTurn({
             source={source}
             isLast={isLast}
             streaming={isLast && streaming}
+            // §6.1: STOP IS OFFERED ONLY WHERE THERE IS SOMETHING TO STOP — a reply that is
+            // streaming right now. `canRerunTurn`'s argument applies here from the other side: a
+            // plan, a generation and a proposal all stream too, and none of them is stopped by this
+            // command (a generation is cancelled by the build path, which is a different thing with
+            // its own record). A Stop that did nothing would be worse than no Stop.
+            onStop={
+              isLast && streaming && turn.role === "jaroku" && turn.kind === "reply" && turn.status === "streaming"
+                ? () => sendStopChat()
+                : undefined
+            }
             onRegenerate={rerunnable ? () => rerunTurn(turns, turn) : undefined}
             onRegenerateWith={rerunnable ? (opts) => rerunTurn(turns, turn, opts) : undefined}
             // The first three models in the catalogue. The whole list would be a menu longer than the

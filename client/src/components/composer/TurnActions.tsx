@@ -15,6 +15,8 @@
 // twice and then report as broken.
 
 import { useRef, useState } from "react";
+
+import { keyHint } from "../../lib/modKey.ts";
 import { Glyph, GLYPH, HIT_TARGET } from "../icons.ts";
 import { Icon, type IconComponent } from "../../lib/icons/registry.ts";
 import { CopyTurn } from "./CopyTurn.tsx";
@@ -79,6 +81,8 @@ export function TurnActions({
   /** Always visible on the last turn; on hover/focus otherwise. */
   isLast = false,
   streaming = false,
+  /** §6.1's Stop. Passed only where there is a stream to stop — see below. */
+  onStop,
   onRegenerate,
   onRegenerateWith,
   /** The models offered by "Regenerate with different model". From the server's catalogue. */
@@ -94,6 +98,7 @@ export function TurnActions({
   source: string;
   isLast?: boolean;
   streaming?: boolean;
+  onStop?: () => void;
   onRegenerate?: () => void;
   onRegenerateWith?: (opts: { modelId?: string; effort?: "high" | "xhigh" }) => void;
   models?: { id: string; label: string }[];
@@ -139,23 +144,38 @@ export function TurnActions({
         />
       )}
 
-      {onRegenerate && (
+      {/* §6.1: STOP, AND IT IS THE COMPLEMENT OF REGENERATE RATHER THAN A SIXTH GLYPH BESIDE IT.
+          While a stream is open, Regenerate is disabled — §9 blocks it and the tooltip says why —
+          and Stop is the thing there is to do; once it closes, the reverse. So they share a
+          position and only one of them is ever actionable, which keeps the strip the same width and
+          the same shape through a response arriving.
+
+          IT IS A REAL BUTTON IN THE ROW rather than an overlay on the text, because §14.2 requires
+          every interactive element in a turn to be tab-reachable with a focus ring, and this row is
+          the one place in a turn where that is already true of everything. */}
+      {streaming && onStop && (
+        <ActionButton
+          icon={Icon.turn.stop}
+          name="Stop this response"
+          title={`Stop — keep what has arrived (${keyHint("Esc")})`}
+          onClick={onStop}
+        />
+      )}
+
+      {!streaming && onRegenerate && (
         <ActionButton
           icon={Icon.turn.regenerate}
           name="Regenerate this response"
-          title={
-            streaming
-              // §9: "Regenerate during stream — Blocked, tooltip explains." The sentence is the
-              // point; a grey button with no reason is one people press twice.
-              ? "Wait for this response to finish before regenerating it"
-              : "Re-run the same message with the current settings"
-          }
-          disabled={streaming}
+          // §9's "regenerate during stream is blocked, tooltip explains" is now satisfied by the
+          // control not being there: Stop occupies the position while the stream is open, which
+          // says what the available action IS rather than greying out one that is not. A disabled
+          // button with a sentence in its tooltip is still a button people press.
+          title="Re-run the same message with the current settings"
           onClick={onRegenerate}
         />
       )}
 
-      {onRegenerateWith && (
+      {!streaming && onRegenerateWith && (
         <div className="relative">
           {/* §5.4's kebab: "Regenerate with different model" and "Regenerate with higher effort" —
               "the two things people actually want when a response disappoints, without re-typing." */}
@@ -163,7 +183,6 @@ export function TurnActions({
             ref={kebabRef}
             type="button"
             onClick={() => setMenuOpen((v) => !v)}
-            disabled={streaming}
             aria-label="Regenerate with different settings"
             aria-expanded={menuOpen}
             aria-haspopup="menu"

@@ -131,6 +131,72 @@ console.log("\na failure with nothing streaming");
   check("it becomes a visible note", turns().some((t) => t.role === "jaroku" && t.kind === "info"), turns());
 }
 
+// --- §6.1: Stop --------------------------------------------------------------------------------
+//
+// THREE THINGS FOLLOW FROM PRESSING IT and only the first is obvious. The partial is retained; the
+// turn is a first-class turn afterwards (regenerable, and present in conversation memory as the
+// partial answer it actually is); and the cost is the real one — which is settled server-side and
+// asserted in `test:chat-stop`, because the counts come off an aborted stream rather than a
+// completed one.
+
+console.log("\nan answer somebody stopped");
+{
+  reset();
+  store().replyStarted({ threadId: T, agentId: A, question: "explain the whole graph" });
+  store().replyDelta({ threadId: T, agentId: A, text: "It starts at the router, which" });
+  store().replyStopped({ threadId: T, agentId: A });
+
+  check("the turn is stopped", reply()?.status === "stopped", reply());
+  // NOT `done`. §5: "partial content must never be mistaken for a finished reply." Not `error`
+  // either — nothing failed, so a turn that read as a failure would blame the product for a button.
+  check("...and neither done nor error", reply()?.status !== "done" && reply()?.status !== "error", reply());
+  check("what arrived is kept", reply()?.text === "It starts at the router, which", reply()?.text);
+  check("no error is invented", reply()?.error === undefined, reply());
+  check("nothing is left streaming", store().streamingThreadId === null);
+}
+
+console.log("\nstopping during the first token");
+{
+  reset();
+  store().replyStarted({ threadId: T, agentId: A, question: "hi" });
+  store().replyStopped({ threadId: T, agentId: A });
+  // §16'S TURN-ACTION ATTACK. An empty stopped turn is still a turn — never a blank one, and never
+  // silently absent.
+  check("an empty stopped answer is still a turn", reply()?.status === "stopped", reply());
+  check("...and the question survives it", turns().some((t) => t.role === "user" && t.text === "hi"), turns());
+}
+
+console.log("\nstop racing the last token");
+{
+  reset();
+  store().replyStarted({ threadId: T, agentId: A, question: "hi" });
+  store().replyDelta({ threadId: T, agentId: A, text: "Hello — what are we building?" });
+  store().replyDone({ threadId: T, agentId: A });
+  // THE RACE EVERY Esc PRODUCES: the answer finished, the abort found a closed stream, and a
+  // `stopped` arrives afterwards. Demoting a finished answer to a partial one would be a lie about
+  // a complete reply.
+  store().replyStopped({ threadId: T, agentId: A });
+  check("a finished answer stays finished", reply()?.status === "done", reply());
+  check("...and keeps all of its text", reply()?.text === "Hello — what are we building?", reply()?.text);
+}
+
+console.log("\nstop, then immediately send");
+{
+  reset();
+  store().replyStarted({ threadId: T, agentId: A, question: "first" });
+  store().replyDelta({ threadId: T, agentId: A, text: "partial" });
+  store().replyStopped({ threadId: T, agentId: A });
+  store().replyStarted({ threadId: T, agentId: A, question: "second" });
+  // §16 ASKS FOR THIS PAIR BY NAME. The stopped turn must not be reopened by the next question's
+  // stream — `findReply` looks for a `streaming` reply, and a stopped one is not one.
+  const rs = replies();
+  check("the stopped turn stays stopped", rs[0]?.status === "stopped", rs[0]);
+  check("...and the new answer is its own turn", rs.length === 2 && rs[1]?.status === "streaming", rs.map((r) => r.status));
+  store().replyDelta({ threadId: T, agentId: A, text: "fresh" });
+  check("deltas land on the new turn only", rs[0]?.text === "partial" && replies()[1]?.text === "fresh",
+    replies().map((r) => r.text));
+}
+
 // --- §5: a reconnect rebuilds the conversation rather than emptying it ------------------------
 
 console.log("\na reconnect");

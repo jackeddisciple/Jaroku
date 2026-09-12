@@ -73,6 +73,7 @@ export function explainFixture(env: NodeJS.ProcessEnv = process.env): string | n
 /** The prefix a replayed answer carries, so a fixture cannot be mistaken for an answer. */
 export const FIXTURE_NOTICE = "(replayed from JAROKU_EXPLAIN_FIXTURE — not a real answer)";
 
+
 /** What one explain call consumed. The SDK reports `input` EXCLUSIVE of the cached counts. */
 export interface ExplainUsage {
   model: string;
@@ -82,10 +83,65 @@ export interface ExplainUsage {
   cacheWrite: number;
 }
 
+/**
+ * §6.1: WHAT AN ABORTED CALL ACTUALLY SPENT, or nothing at all.
+ *
+ * NAMED AND EXPORTED BECAUSE IT IS THE RULE RATHER THAN THE PLUMBING. §6.1 forbids both wrong
+ * answers — "records the cost actually incurred, not zero and not the full projected amount" — and
+ * they fail in opposite directions:
+ *
+ *   ZERO IS THE ONE THAT SHIPS. `finalMessage()` never resolves on an aborted stream, so the usage
+ *   report that fires on a completed call does not fire at all here. A caller that defaulted the
+ *   counts to 0 would record a stopped answer as free, on a call that really consumed every input
+ *   token of the prompt — and v0.1.9's whole rule is that a silent zero reads as "this was free"
+ *   rather than as "we don't know".
+ *
+ *   THE PROJECTED AMOUNT IS THE OTHER. Pricing the request as though it had run to `max_tokens`
+ *   would charge somebody for an answer they stopped precisely to avoid paying for.
+ *
+ * SO: the counts the SDK accumulated onto `currentMessage` as `message_delta` frames arrived, and
+ * `undefined` when the abort beat the first `message_start` — which is unknown, not zero, and is
+ * why the return type is optional rather than a zeroed record.
+ */
+export function usageFromPartial(
+  model: string,
+  partial: { usage?: { input_tokens?: number | null; output_tokens?: number | null; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null } } | undefined,
+): ExplainUsage | undefined {
+  const u = partial?.usage;
+  if (!u) return undefined;
+  return {
+    model,
+    input: u.input_tokens ?? 0,
+    output: u.output_tokens ?? 0,
+    cacheRead: u.cache_read_input_tokens ?? 0,
+    cacheWrite: u.cache_creation_input_tokens ?? 0,
+  };
+}
+
 export interface ExplainCallbacks {
   onDelta: (text: string) => void;
   onDone: () => void;
   onError: (message: string) => void;
+  /**
+   * §6.1: THE ANSWER WAS STOPPED, and what it had spent by then.
+   *
+   * A CALLBACK OF ITS OWN RATHER THAN `onDone` OR `onError`, because it is neither and the turn
+   * renders differently for all three. `onDone` would present a half-answer as the whole one — the
+   * exact thing §5 names — and `onError` would put a failure on a turn nothing failed in: somebody
+   * pressed a button.
+   *
+   * IT CARRIES THE USAGE RATHER THAN LEAVING IT TO `onUsage`, and that is the load-bearing half.
+   * `finalMessage()` never resolves on an aborted stream, so the usage report that fires on a
+   * completed call does not fire here at all — which is how a stopped turn would come to cost
+   * `$0.00` for a call that really consumed input tokens. §6.1: "records the cost actually
+   * incurred, not zero and not the full projected amount." The SDK accumulates usage onto
+   * `currentMessage` as `message_delta` frames arrive, so the number exists; it just has to be
+   * read at the moment of the abort rather than waited for.
+   *
+   * UNDEFINED USAGE IS A REAL ANSWER. A stream aborted before its first `message_start` has no
+   * accumulated message and therefore no counts — and unknown is `null`, never zero (v0.1.9).
+   */
+  onStopped?: (usage?: ExplainUsage) => void;
   /**
    * What the call cost, when there was one.
    *
@@ -96,6 +152,23 @@ export interface ExplainCallbacks {
    * calling this at all is the unambiguous version.
    */
   onUsage?: (usage: ExplainUsage) => void;
+}
+
+/**
+ * What a caller can do to an answer that is still arriving — §6.1.
+ *
+ * A HANDLE RATHER THAN A REGISTRY. The obvious alternative is a module-level map of thread id to
+ * stream, and it is the shape that goes wrong: two subsystems would then decide what "the current
+ * stream" is, and `streamExplain` would have to learn what a thread is to key the map — which is
+ * the dependency `test:db-boundary` exists to keep out of this file. The caller already knows which
+ * conversation it is in; what it lacked was a way to reach the socket, and this is that.
+ *
+ * `stop()` IS IDEMPOTENT AND SAFE AFTER THE END. A stop that races the last token is the ordinary
+ * case — somebody presses Esc as the answer finishes — and it must not throw or produce a second
+ * terminal callback.
+ */
+export interface ExplainHandle {
+  stop: () => void;
 }
 
 /** Stream a haiku answer for `question` grounded in `context`. Falls back (on any API error) to
@@ -183,6 +256,19 @@ export async function streamExplain(
      */
     closing?: string;
   },
+  /**
+   * Where to put the stop handle, once there is a stream to stop.
+   *
+   * A CALLBACK RATHER THAN A RETURN VALUE, because this function does not return until the stream
+   * has finished — which is precisely when a handle is of no further use. The caller receives it
+   * the moment the request is open and the deltas start, which is the window in which Esc means
+   * anything.
+   *
+   * NOT CALLED ON THE FIXTURE OR THE NO-KEY PATH. Both complete synchronously with no provider
+   * behind them, so there is nothing to stop; a handle for them would be a control that does
+   * nothing, which is worse than no control.
+   */
+  onHandle?: (handle: ExplainHandle) => void,
 ): Promise<void> {
   // THE FIXTURE IS CHECKED BEFORE THE KEY, so a recorded answer replays whether or not one is
   // configured — which is the point of having it: the path is exercisable on a laptop with no
@@ -254,7 +340,32 @@ export async function streamExplain(
       ],
     });
     stream.on("text", (t: string) => cb.onDelta(t));
-    const final = await stream.finalMessage();
+    // §6.1: THE HANDLE, HANDED OVER THE MOMENT THERE IS SOMETHING TO STOP.
+    //
+    // `stopped` IS THIS CLOSURE'S OWN FLAG AND NOT `stream.aborted`. The SDK's flag is true after
+    // an abort for any reason, including one the runtime caused; this one is true only when
+    // somebody asked. The difference decides whether the turn renders as stopped or as failed, and
+    // those are different sentences about different events.
+    let stopped = false;
+    onHandle?.({
+      stop: () => {
+        if (stopped || stream.ended) return;
+        stopped = true;
+        stream.abort();
+      },
+    });
+    let final: Awaited<ReturnType<typeof stream.finalMessage>> | null = null;
+    try {
+      final = await stream.finalMessage();
+    } catch (err) {
+      // AN ABORT REJECTS `finalMessage()`, which is the SDK's contract and is why this is a catch
+      // rather than a check: there is no resolved message to read on a stopped stream.
+      if (!stopped) throw err;
+      // THE COUNTS THE CALL ACTUALLY SPENT, off the partially-accumulated message — see
+      // `usageFromPartial` for why neither zero nor the projected amount is acceptable here.
+      cb.onStopped?.(usageFromPartial(model, stream.currentMessage));
+      return;
+    }
     // Reported before `onDone` so a caller that meters cannot see the answer complete and the
     // charge arrive afterwards — the same "record first, then say it happened" order the trace
     // ingest chain keeps between persisting a step and broadcasting it.
@@ -266,6 +377,7 @@ export async function streamExplain(
       cacheWrite: final.usage?.cache_creation_input_tokens ?? 0,
     });
     cb.onDone();
+    return;
   } catch (err) {
     // Surface the failure but still hand back the factual context rather than nothing.
     cb.onError(`explain failed (${(err as Error).message}). Raw context:\n\n${context}`);

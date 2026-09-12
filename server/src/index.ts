@@ -175,7 +175,7 @@ import {
 import { buildFactPack, type FactPack, type PackDeps } from "./work/factPack.ts";
 import { citableFrom, resolveCitations } from "./work/citations.ts";
 import { CHAT_SYSTEM, chatClosing, CONVERSATION_SYSTEM, conversationClosing, renderRecord } from "./prompt.ts";
-import type { AskRecordCommand, ChatCommand, ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCommand, InboxCommand, ProviderSnapshot } from "./wsRelay.ts";
+import type { AskRecordCommand, ChatCommand, ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCommand, InboxCommand, ProviderSnapshot, StopChatCommand } from "./wsRelay.ts";
 import type { ListWorkCommand, WorkCommand, WorkSnapshotWire } from "./wsRelay.ts";
 import { loadRuntimeEnv } from "./env.ts";
 import { installLogRedaction, protectEnv, protectSecret } from "./obs/log.ts";
@@ -5071,6 +5071,7 @@ async function dispatchCommand(cmd: ForwardedCommand, ctx: TenantContext): Promi
     else if (cmd.cmd === "explain") explainAgent(ctx, cmd);
     else if (cmd.cmd === "askRecord") void answerFromRecord(ctx, cmd);
     else if (cmd.cmd === "chat") void chatWithJaroku(ctx, cmd);
+    else if (cmd.cmd === "stopChat") stopChat(ctx, cmd);
     else if (AGENT_COMMAND_NAMES.has(cmd.cmd)) void handleAgentCommand(ctx, cmd as AgentCommand);
     else if (MCP_COMMAND_NAMES.has(cmd.cmd)) void handleMcpCommand(ctx, cmd as McpCommand);
     else if (DEPLOY_COMMAND_NAMES.has(cmd.cmd)) void handleDeployCommand(ctx, cmd as DeployChannelCommand);
@@ -12919,6 +12920,53 @@ async function answerFromRecord(ctx: TenantContext, cmd: AskRecordCommand): Prom
 const chatting = new Set<string>();
 
 /**
+ * §6.1: HOW TO STOP THE ANSWER IN A GIVEN CONVERSATION.
+ *
+ * A MAP BESIDE `chatting` RATHER THAN A FIELD IN IT, because the two answer different questions at
+ * different moments. `chatting` is "is this conversation busy", and it is claimed before the
+ * provider is called at all — the key is in it while the thread is being read and the window
+ * assembled. This is "is there a socket to abort", which only exists once the request is open. A
+ * single structure would have to hold an absent handle for the first stretch, and every reader
+ * would need to know which stretch it was in.
+ *
+ * KEYED BY THREAD, for the reason `chatting` is: there is at most one answer in flight per
+ * conversation, so the thread is the whole address.
+ *
+ * DELETED IN THE SAME `finally` AS `chatting`, so a handle cannot outlive the stream it stops. A
+ * stale handle is worse than none: `stop()` on a finished stream is a no-op, so nothing would
+ * break — but the composer would render a Stop control for a turn that had already settled, which
+ * is a control that does nothing.
+ */
+const chatStops = new Map<string, () => void>();
+
+/**
+ * Stop whatever is answering in this conversation — §6.1.
+ *
+ * IT REFUSES AUDIBLY WHEN THERE IS NOTHING TO STOP. §14.1 says `Esc` with no stream open "clears
+ * the composer selection state; never closes the view", so the ordinary case is that the client
+ * does not send this at all — which means one arriving is either a race with the last token or a
+ * client that thinks a stream is open when it is not. The first needs silence and the second needs
+ * saying, and they are indistinguishable from here; so it says nothing, on the argument that a
+ * sentence about a race somebody lost by fifty milliseconds is noise in the one place they were
+ * trying to read an answer.
+ *
+ * A THREAD THIS WORKSPACE DOES NOT OWN FINDS NOTHING, because the map is keyed by ids that only
+ * this workspace's own `threadForWork` could have put there — and a foreign id resolves to a
+ * different key, never to somebody else's entry.
+ */
+function stopChat(ctx: TenantContext, cmd: StopChatCommand): void {
+  const threadId = typeof cmd.threadId === "string" ? cmd.threadId : "";
+  if (!threadId) return;
+  const stop = chatStops.get(threadId);
+  if (!stop) return;
+  // SCOPED BY CONSTRUCTION rather than by a check. `chatStops` is keyed by thread id, and the only
+  // ids in it were resolved through `threadForWork` — which is scoped — so a caller naming another
+  // workspace's thread is naming a key that is not there.
+  void ctx;
+  stop();
+}
+
+/**
  * §4'S WINDOW, READ FROM THE THREAD THE MESSAGE IS IN.
  *
  * THREE STATEMENTS FOR A WHOLE CONVERSATION, and that number is the point rather than a boast. The
@@ -13055,6 +13103,35 @@ async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<voi
           settle({ body: answer });
           relay.broadcastReply(ctx, { type: "done", agentId: cmd.agentId ?? "" }, thread);
         },
+        /**
+         * §6.1: SOMEBODY PRESSED STOP, and three things follow from that rather than one.
+         *
+         * THE PARTIAL IS KEPT — "retains the partial turn marked as stopped, never discards what
+         * arrived" — and it is kept in the RECORD as well as on screen, so §6.1's last clause holds
+         * too: "it stays in conversation memory as what it actually was — a partial answer — rather
+         * than being silently dropped from context."
+         *
+         * THE COST IS THE REAL ONE. Metered from the counts the aborted call actually accumulated,
+         * so a stopped answer is neither free nor charged for tokens it never produced. When the
+         * abort beat the first `message_start` there are no counts, and nothing is metered — which
+         * is unknown rather than zero, and the same decision `onUsage` makes by not firing at all
+         * on the no-key path.
+         */
+        onStopped: (u) => {
+          settle({ body: answer, ...(u ? { tokensIn: u.input, tokensOut: u.output } : {}) });
+          if (u) {
+            meterPlatformCall(ctx, "llm.explain", {
+              model: u.model,
+              inputTokens: u.input,
+              outputTokens: u.output,
+              cacheReadTokens: u.cacheRead,
+              cacheWriteTokens: u.cacheWrite,
+              payer: chatKey ? "workspace" : "platform",
+              threadId: thread,
+            });
+          }
+          relay.broadcastReply(ctx, { type: "stopped", agentId: cmd.agentId ?? "" }, thread);
+        },
         onError: (m) => {
           // AND ON THE FAILURE PATH TOO. §7's rule arrives in its own commit; the half that belongs
           // here is that whatever arrived before the failure is what the conversation remembers.
@@ -13081,6 +13158,9 @@ async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<voi
           ? `${TRUNCATION_NOTICE}\n\n${chatClosing(agentName)}`
           : chatClosing(agentName),
       },
+      // §6.1's HANDLE, filed under this conversation for as long as the stream is open. The
+      // `finally` below is what removes it, so a Stop control can never outlive the thing it stops.
+      (handle) => chatStops.set(thread, handle.stop),
     );
   } catch (err) {
     const m = (err as Error)?.message ?? String(err);
@@ -13091,6 +13171,10 @@ async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<voi
     // throw between claiming the slot and finishing the stream would otherwise leave this
     // conversation answering "one at a time" until a restart.
     chatting.delete(thread);
+    // AND THE HANDLE GOES WITH IT. A stale handle is harmless to call — `stop()` on a finished
+    // stream is a no-op — and it is not harmless to HAVE: the composer would keep offering a Stop
+    // control for a turn that had already settled.
+    chatStops.delete(thread);
   }
 }
 

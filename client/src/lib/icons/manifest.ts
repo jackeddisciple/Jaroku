@@ -226,6 +226,11 @@ export const MANIFEST = {
     copy: "CopyIcon",
     note: "Note02Icon",
     pin: "PinIcon",
+    // §6.1's Stop, and it shares `StopIcon` with `trace.stop` and `cockpitWork.stop` because it is
+    // the same verb: end an operation that is running right now. NOT `Cancel01Icon` — that mark is
+    // for aborting something that had not started producing, and a stopped answer keeps every token
+    // that arrived. One glyph for one verb is this table's whole reason to exist.
+    stop: "StopIcon",
     // D3: `ReloadIcon` is "retry an operation that failed" — and regenerating a turn is retrying
     // the generation, which is why it shares a mark with `cockpitWork.retry` and `graph.retry`.
     regenerate: "ReloadIcon",

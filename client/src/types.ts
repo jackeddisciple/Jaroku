@@ -1902,6 +1902,11 @@ export type ServerMessage =
       channel: "reply"; type: "done"; agentId: string; usage?: GenUsage;
       citations?: { id: string; status: string; agent_name: string; created_at: string }[];
     })
+  // §6.1: SOMEBODY STOPPED IT — its own event rather than a flag on `done`, because three of the
+  // four terminal states on this channel render differently and mean different things. It carries
+  // the usage because a stopped call's counts arrive by a different route from a finished one's:
+  // `finalMessage()` never resolves on an aborted stream, so there is no `done` to ride.
+  | (InThread & { channel: "reply"; type: "stopped"; agentId: string; usage?: GenUsage })
   | (InThread & { channel: "reply"; type: "error"; agentId: string; message: string })
   | GenMessage
   | BillingMessage
@@ -2100,6 +2105,9 @@ export type ClientCommand =
   // "hi". Answered on "reply" like `explain` and `askRecord` — see server/src/wsRelay.ts's
   // `ChatCommand` for why it is a third command rather than a flag on one of them.
   | { cmd: "chat"; message: string; agentId?: string; threadId?: string }
+  // §6.1's Stop. It names the conversation and nothing else: there is at most one answer in flight
+  // per thread, so a turn id would be a second identifier for the same thing.
+  | { cmd: "stopChat"; threadId?: string }
   // Eval: dataset CRUD. Every mutation is answered with a fresh snapshot on the "eval"
   // channel, so the client never reconciles a partial update against local state.
   | { cmd: "createDataset"; agentId: string; name: string }

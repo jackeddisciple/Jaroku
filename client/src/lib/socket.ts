@@ -668,6 +668,7 @@ function dispatch(msg: ServerMessage): void {
       if (msg.type === "started") c.replyStarted(msg);
       else if (msg.type === "delta") c.replyDelta(msg);
       else if (msg.type === "done") c.replyDone(msg);
+      else if (msg.type === "stopped") c.replyStopped(msg);
       else if (msg.type === "error") c.replyError(msg);
       break;
     }
@@ -1443,6 +1444,21 @@ export function sendBranchRun(
  */
 export function sendChat(message: string, agentId?: string | null): void {
   send({ cmd: "chat", message, ...(agentId ? { agentId } : {}), threadId: activeThread() });
+}
+
+/**
+ * §6.1: stop the answer arriving in this conversation.
+ *
+ * A COMMAND AND NOT A SOCKET CLOSE. Closing would stop the stream too, and would be
+ * indistinguishable from a dropped connection — the turn would render as interrupted (§5) rather
+ * than as stopped, and every other channel in the tab would go down with it.
+ *
+ * NOTHING IS MARKED HERE. The turn changes when the server says it has, which is this file's
+ * standing rule for every channel: a tab that marked its own turn stopped would be the only tab
+ * that knew, and would have guessed — the stream may have finished a frame earlier.
+ */
+export function sendStopChat(): void {
+  send({ cmd: "stopChat", threadId: activeThread() });
 }
 
 // Unified composer "explain": ask for a prose answer about a step / node / the agent, built from

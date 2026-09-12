@@ -162,8 +162,14 @@ export interface ReplyTurn extends TurnAnchor {
    * `error` IS FOR A FAILURE THE SERVER NAMED. `interrupted` is for one nobody named: the
    * connection went away, so there is no message to show and the honest thing to say is that the
    * answer stopped rather than finished.
+   *
+   * AND `stopped` IS FOR ONE THE USER CAUSED (§6.1), which is a fourth thing and not a flavour of
+   * the other three. Nothing went wrong, nothing was lost, and the answer is short because somebody
+   * decided it was long enough — so it reads as a choice rather than as a fault, and it is a
+   * FIRST-CLASS TURN: regenerable (§6.2), and present in conversation memory as the partial answer
+   * it actually is rather than dropped from context.
    */
-  status: "streaming" | "done" | "interrupted" | "error";
+  status: "streaming" | "done" | "stopped" | "interrupted" | "error";
   agentId: string;
   text: string;
   /**
@@ -309,6 +315,15 @@ interface ChatState {
    * `replyError`: there is no message, because nothing was able to send one.
    */
   replyInterrupted: () => void;
+  /**
+   * §6.1: the answer was stopped on purpose, and the server has said so.
+   *
+   * FROM THE SERVER RATHER THAN OPTIMISTICALLY, which is this store's standing rule — "turns are
+   * appended by server events, not by the submit click, so every connected client sees the same
+   * conversation". A tab that marked its own turn stopped the instant somebody pressed Esc would
+   * be the only tab that knew, and would have guessed: the stream may already have finished.
+   */
+  replyStopped: (e: In & { agentId: string; usage?: GenUsage }) => void;
   /**
    * A job this conversation just dispatched — Part 3 §6.
    *
@@ -811,6 +826,33 @@ export const useChatStore = create<ChatState>((set) => ({
         ? replaceTurn(turns, open.id, { ...open, status: "error" as const, error: message })
         : [...turns, { id: turnId(), role: "jaroku" as const, kind: "info" as const, tone: "error" as const, text: message }];
       return { streamingAgentId: null, streamingThreadId: null, ...putTurns(s, key, next) };
+    }),
+
+  /**
+   * §6.1: the answer stopped because somebody stopped it.
+   *
+   * THE PARTIAL IS KEPT AND THE STATUS SAYS WHY. That is the whole of it on this side — the cost
+   * was settled server-side against the counts the aborted call really spent, and the usage rides
+   * the event so the metadata row reports this turn rather than nothing.
+   *
+   * A `stopped` THAT ARRIVES AFTER `done` IS IGNORED, which is the race Esc-at-the-last-token
+   * produces: the answer finished, the abort found a closed stream, and the turn is complete. The
+   * `streaming` guard is what makes the later event a no-op rather than a demotion of a finished
+   * answer to a partial one.
+   */
+  replyStopped: ({ threadId, agentId, usage }) =>
+    set((s) => {
+      const key = threadId ?? s.streamingThreadId ?? undefined;
+      const turns = turnsIn(s, key);
+      const open = findReply(turns, agentId);
+      if (!open) return { streamingAgentId: null, streamingThreadId: null };
+      return {
+        streamingAgentId: null,
+        streamingThreadId: null,
+        ...putTurns(s, key, replaceTurn(turns, open.id, {
+          ...open, status: "stopped" as const, ...(usage ? { usage } : {}),
+        })),
+      };
     }),
 
   /**

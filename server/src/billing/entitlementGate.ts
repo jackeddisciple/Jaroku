@@ -168,6 +168,10 @@ export const COMMAND_ENTITLEMENT: Record<string, EntitlementKind | typeof NO_ENT
   // by the `agent.explain` bucket it shares with the two above and by §12's chat ceilings, which
   // are the limit written for this route specifically.
   chat: NO_ENTITLEMENT,
+  // AND STOPPING ONE COSTS NOTHING AT ALL — it aborts a request in flight, which is the one command
+  // on this list that makes a workspace spend LESS. `NO_ENTITLEMENT` is the only honest answer, and
+  // a tier that could not stop a stream would be a tier that had to pay for every answer in full.
+  stopChat: NO_ENTITLEMENT,
   diagnoseFile: NO_ENTITLEMENT,
   planAgent: NO_ENTITLEMENT,
   discardPlan: NO_ENTITLEMENT,

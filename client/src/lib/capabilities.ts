@@ -132,6 +132,9 @@ export const COMMAND_CAPABILITY: Record<string, string> = {
   // is the authority to look. Mirrored from the server's table — the client's copy is advisory and
   // is used to hide controls, never trusted.
   chat: "agent:read",
+  // Stopping an answer is the same authority as starting it — see the server's copy for why a stop
+  // is not a write in the sense that matters here.
+  stopChat: "agent:read",
   listAgentGrid: "agent:read",
   loadAgentDetail: "agent:read",
   loadAgentVersion: "agent:read",
