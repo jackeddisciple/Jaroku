@@ -38,6 +38,7 @@ import { WorkGate } from "./WorkGate.tsx";
 import { useWorkStore } from "../store/workStore.ts";
 import { threadById } from "../store/threadStore.ts";
 import { fmtCost, fmtTokens } from "../lib/format.ts";
+import type { ProviderModel } from "../types.ts";
 import { secondaryBtn } from "./buttons.ts";
 import { Chip, chipClass } from "./Chip.tsx";
 import { ChoiceRow, type Choice } from "./ChoiceRow.tsx";
@@ -757,7 +758,14 @@ function rerunTurn(
   // user's next test run and answer on the same model as before.
   sendChat(prompt, turn.agentId || null, {
     regenerateOf: turn.itemId,
-    ...(opts?.modelId ? { model: opts.modelId } : {}),
+    // THE MODEL FROM THE MENU IF ONE WAS CHOSEN, else the conversation's own. A plain ⟳ answers
+    // again on the model the conversation is set to; "Regenerate with <model>" answers on that one
+    // — and §13.3's different chips are what makes the difference visible afterwards.
+    ...(opts?.modelId
+      ? { model: opts.modelId }
+      : useUiStore.getState().chatModel
+        ? { model: useUiStore.getState().chatModel }
+        : {}),
   });
 }
 
@@ -955,14 +963,139 @@ function Turn({ turn, isLastGen, threadId }: { turn: ChatTurn; isLastGen: boolea
 //
 // The open state is the chip's selected state rather than a bespoke one: an open menu is a
 // pressed control, and the app has one way of drawing that.
+/**
+ * One labelled half of the model selector — §11.1's two sections, as one component rendered twice.
+ *
+ * ONE COMPONENT BECAUSE THE TWO LISTS ARE THE SAME LIST. Both offer every model in the catalogue,
+ * both disable the ones with no key and say why, both mark the chosen one, and both carry the way
+ * out beside the provider it is about. Two copies would be two places for §5.2's "disabled with a
+ * stated reason, never hidden" to be forgotten in one of them.
+ *
+ * WHAT DIFFERS IS THE HEADING AND WHERE THE CHOICE GOES, which is exactly what props are for.
+ */
+function ModelSection({
+  heading,
+  catalogue,
+  models,
+  usableProviders,
+  selectedProvider,
+  selectedModel,
+  onPick,
+  onAddKey,
+}: {
+  heading: string;
+  catalogue: { id: string; label: string; models: string[] }[];
+  models: ProviderModel[];
+  usableProviders: ReadonlySet<string>;
+  selectedProvider: string;
+  selectedModel: string;
+  onPick: (model: string) => void;
+  onAddKey: (provider: string) => void;
+}) {
+  return (
+    <div>
+      {/* THE SECTION'S OWN HEADING, one step louder than the provider groups beneath it — the two
+          settings are what this menu is about, and a heading level that matched the groups would
+          read as a fourth provider. */}
+      <div className={`px-2 pb-0.5 pt-1 text-tiny font-medium uppercase tracking-wider text-faint`}>
+        {heading}
+      </div>
+      {catalogue.map((p) => (
+        <div key={p.id} className="mt-1 first:mt-0">
+          {/* The provider's own mark on its group, so the menu is scanned by logo the way
+              the chip that opened it is read by logo. */}
+          <div className={`flex items-center gap-1.5 px-2 pb-1 pt-0.5 ${TYPE.sectionLabel}`}>
+            <ProviderMark provider={p.id} size={ICON.badge} />
+            {p.label}
+            {/* THE WAY OUT, ATTACHED TO THE PROVIDER IT IS ABOUT. The models below are disabled
+                with a reason, which is right — a model that vanishes reads as unsupported — but
+                a disabled control cannot also be the fix. §5.2 asks that the way out open the
+                add dialog FOR THAT PROVIDER, and it can only carry which provider if it lives
+                beside one. */}
+            {!usableProviders.has(p.id) ? (
+              <button
+                type="button"
+                className="ml-auto inline-flex items-center gap-1 text-tiny text-muted underline-offset-2 hover:text-ink hover:underline"
+                onClick={() => onAddKey(p.id)}
+              >
+                <Icon.composer.addKey size={GLYPH.meta} />
+                Add key
+              </button>
+            ) : null}
+          </div>
+          {p.models.map((m) => {
+            const active = selectedProvider === p.id && selectedModel === m;
+            // DISABLED WITH A STATED REASON, NEVER HIDDEN. A model that vanishes because a key
+            // is missing reads as "Jaroku does not support this", which is both false and
+            // unfixable from the user's side. Shown, greyed, and told why.
+            const usable = usableProviders.has(p.id);
+            return (
+              <button
+                key={m}
+                type="button"
+                disabled={!usable}
+                title={usable ? undefined : `No ${p.label} API key in this workspace`}
+                onClick={() => onPick(m)}
+                className={`flex w-full items-center gap-1.5 rounded-control px-2 py-1 text-left text-caption transition-colors duration-fast ${
+                  !usable
+                    ? "cursor-not-allowed text-faint opacity-60"
+                    : active
+                      ? "bg-active text-ink"
+                      : "text-muted hover:bg-active/40 hover:text-ink"
+                }`}
+              >
+                {/* A fixed slot, so choosing a model does not shift the list. */}
+                <span className="inline-flex w-[11px] shrink-0 items-center justify-center" aria-hidden>
+                  {active && <CheckIcon size={ICON.xs} />}
+                </span>
+                <span className="min-w-0 flex-1 truncate">{modelName(models, m)}</span>
+                {!usable ? <span className="shrink-0 text-tiny">no API key</span> : null}
+              </button>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * §11.1 — ONE CONTROL, TWO SECTIONS, AND THE CHIP SHOWS THE ONE YOU TALK TO.
+ *
+ * THE PRODUCT OWNER'S OWN WORDS (2026-09-12): "when you click on the provider selection drop down
+ * in the composer box, two drop downs will be open. One for your agent and one for talking to
+ * Jaroku. You have to select what provider for both of them, then you can proceed. But in the
+ * composer, the provider will be shown of the provider with which you are using to talk to Jaroku,
+ * not for the runs."
+ *
+ * SO THE CHIP IS THE CHAT PAIR AND THE MENU IS BOTH. That inversion is the decision worth naming:
+ * the bar's one model chip used to describe the RUN, which was right while the run was the only
+ * model choice there was. It is now the less frequent of the two — a run is dispatched in Test mode,
+ * and a chat turn goes out every time somebody types — so the chip names the one somebody is
+ * actually using and the menu holds both.
+ *
+ * TWO SECTIONS RATHER THAN A NESTED MENU, and both open. A submenu would hide one of the two
+ * settings behind a hover, and the whole point of showing them together is that they are different:
+ * conflating them is how "Regenerate with GPT-5.6 Terra" came to repoint somebody's next test run.
+ *
+ * NEITHER SECTION HIDES AN UNUSABLE MODEL. §5.2's rule, unchanged: "disabled with a stated reason,
+ * never hidden. A model that vanishes because a key is missing reads as 'Jaroku does not support
+ * this', which is both false and unfixable from the user's side."
+ */
 function ModelSelector({
   provider,
   model,
   setModel,
+  chatProvider,
+  chatModel,
+  setChatModel,
 }: {
   provider: string;
   model: string;
   setModel: (m: string) => void;
+  chatProvider: string;
+  chatModel: string;
+  setChatModel: (m: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -978,6 +1111,9 @@ function ModelSelector({
   // THE NAME, NOT THE ID — "GPT-5.6 Luna", from the same price sheet as the catalogue.
   // Nothing picked yet only before the catalogue lands; uiStore picks as soon as it does.
   const label = model ? modelName(models, model) : "Choose a model";
+  // §11.1: THE CHIP NAMES THE MODEL YOU TALK TO, not the one the agent runs on — the product
+  // owner's call, and see the component's own header for why the inversion is right.
+  const chatLabel = chatModel ? modelName(models, chatModel) : "Choose a model";
   const usableProviders = new Set<string>(providers.filter((p) => p.runnable).map((p) => p.id));
   useEffect(() => {
     if (!open) return;
@@ -999,9 +1135,11 @@ function ModelSelector({
         className="max-w-full"
         selected={open}
         onClick={() => setOpen((o) => !o)}
-        // THE WHOLE LABEL IS IN THE TOOLTIP, which is what makes shortening it safe.
-        title={`Run model — ${label}`}
-        icon={<ProviderMark provider={provider} size={12} />}
+        // THE WHOLE LABEL IS IN THE TOOLTIP, and it names BOTH — because the chip shows one of the
+        // two and somebody hovering it wants to know what the other is set to without opening the
+        // menu.
+        title={`You talk to Jaroku on ${chatLabel} · this agent runs on ${label}`}
+        icon={<ProviderMark provider={chatProvider || provider} size={12} />}
       >
         {/* A model's name is prose — "GPT-5.6 Luna" — so it is not set in mono. */}
         {/* `truncate` RATHER THAN THE CHIP'S OWN BREAK RULE. `chipClass` sets
@@ -1011,7 +1149,7 @@ function ModelSelector({
             composer "Dry run (free)" came out one character per line, fifteen lines tall, and
             pushed the mic and the send button out of a bar whose own rule is that those two never
             collapse. A control's label shortens; it never breaks. */}
-        <span className="min-w-0 truncate">{label}</span>
+        <span className="min-w-0 truncate">{chatLabel}</span>
         {/* Points down at a closed menu and up at an open one — this popover opens upward, and a
             chevron that keeps pointing down while the list is above it is pointing at nothing. */}
         <span
@@ -1022,72 +1160,33 @@ function ModelSelector({
         </span>
       </Chip>
       {open && (
-        <div className="absolute bottom-full left-0 z-30 mb-1 min-w-[190px] animate-slide-in rounded-card border border-edge bg-elevated p-1 shadow-floating motion-reduce:animate-none">
-          {catalogue.map((p) => (
-            <div key={p.id} className="mt-1 first:mt-0">
-              {/* The provider's own mark on its group, so the menu is scanned by logo the way
-                  the chip that opened it is read by logo. */}
-              <div className={`flex items-center gap-1.5 px-2 pb-1 pt-0.5 ${TYPE.sectionLabel}`}>
-                <ProviderMark provider={p.id} size={ICON.badge} />
-                {p.label}
-                {/* THE WAY OUT, ATTACHED TO THE PROVIDER IT IS ABOUT. The models below are disabled
-                    with a reason, which is right — a model that vanishes reads as unsupported — but
-                    a disabled control cannot also be the fix. §5.2 asks that the way out open the
-                    add dialog FOR THAT PROVIDER, and it can only carry which provider if it lives
-                    beside one. */}
-                {!usableProviders.has(p.id) ? (
-                  <button
-                    type="button"
-                    className="ml-auto inline-flex items-center gap-1 text-tiny text-muted underline-offset-2 hover:text-ink hover:underline"
-                    onClick={() => {
-                      openSecretsForProvider(p.id);
-                      setOpen(false);
-                    }}
-                  >
-                    <Icon.composer.addKey size={GLYPH.meta} />
-                    Add key
-                  </button>
-                ) : null}
-              </div>
-              {p.models.map((m) => {
-                const active = provider === p.id && model === m;
-                // DISABLED WITH A STATED REASON, NEVER HIDDEN. A model that vanishes because a key
-                // is missing reads as "Jaroku does not support this", which is both false and
-                // unfixable from the user's side. Shown, greyed, and told why.
-                const usable = usableProviders.has(p.id);
-                return (
-                  <button
-                    key={m}
-                    type="button"
-                    disabled={!usable}
-                    title={usable ? undefined : `No ${p.label} API key in this workspace`}
-                    onClick={() => {
-                      // ONE CALL, because `setModel` now resolves the provider that owns the model
-                      // rather than leaving whatever was selected. The two-step dance was this
-                      // menu maintaining an invariant the store did not have — correct here, and
-                      // absent everywhere else `setModel` is reached from.
-                      setModel(m);
-                      setOpen(false);
-                    }}
-                    className={`flex w-full items-center gap-1.5 rounded-control px-2 py-1 text-left text-caption transition-colors duration-fast ${
-                      !usable
-                        ? "cursor-not-allowed text-faint opacity-60"
-                        : active
-                          ? "bg-active text-ink"
-                          : "text-muted hover:bg-active/40 hover:text-ink"
-                    }`}
-                  >
-                    {/* A fixed slot, so choosing a model does not shift the list. */}
-                    <span className="inline-flex w-[11px] shrink-0 items-center justify-center" aria-hidden>
-                      {active && <CheckIcon size={ICON.xs} />}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate">{modelName(models, m)}</span>
-                    {!usable ? <span className="shrink-0 text-tiny">no API key</span> : null}
-                  </button>
-                );
-              })}
-            </div>
-          ))}
+        <div className="absolute bottom-full left-0 z-30 mb-1 min-w-[260px] animate-slide-in rounded-card border border-edge bg-elevated p-1 shadow-floating motion-reduce:animate-none">
+          {/* §11.1: BOTH SECTIONS, OPEN, IN ONE POPOVER — see the component's header.
+              THE CHAT ONE FIRST, because it is the one the chip names and the one somebody opened
+              the menu to change. The run's sits below it under its own heading, so the difference
+              between "what answers me" and "what my agent runs on" is on screen rather than
+              implied. */}
+          <ModelSection
+            heading="You talk to Jaroku on"
+            catalogue={catalogue}
+            models={models}
+            usableProviders={usableProviders}
+            selectedProvider={chatProvider}
+            selectedModel={chatModel}
+            onPick={(m) => { setChatModel(m); setOpen(false); }}
+            onAddKey={(id) => { openSecretsForProvider(id); setOpen(false); }}
+          />
+          <div className="my-1 border-t border-hair" aria-hidden />
+          <ModelSection
+            heading="This agent runs on"
+            catalogue={catalogue}
+            models={models}
+            usableProviders={usableProviders}
+            selectedProvider={provider}
+            selectedModel={model}
+            onPick={(m) => { setModel(m); setOpen(false); }}
+            onAddKey={(id) => { openSecretsForProvider(id); setOpen(false); }}
+          />
           {/* THE WAY OUT OF THE DEAD END. Opens the Secrets tab at the provider group with the add
               form already showing — and does NOT unmount the composer, so the draft, the selected
               connectors and the attachments are all still there when they come back. That is the
@@ -1204,6 +1303,11 @@ export function BuildPane({
   const provider = useUiStore((s) => s.provider);
   const model = useUiStore((s) => s.model);
   const setModel = useUiStore((s) => s.setModel);
+  // §11.1's OTHER PAIR — which model talks to Jaroku. Read beside the run's rather than derived
+  // from it: two settings, and the whole point of the selector showing both is that they differ.
+  const chatProvider = useUiStore((s) => s.chatProvider);
+  const chatModel = useUiStore((s) => s.chatModel);
+  const setChatModel = useUiStore((s) => s.setChatModel);
   // Which providers can run here, for the key a send needs — see `missingKey`.
   const providerStatuses = useProviderStore((s) => s.providers);
   const providersLoaded = useProviderStore((s) => s.loaded);
@@ -1714,13 +1818,44 @@ export function BuildPane({
   // is Jaroku thinking — plan, edit, fix, explain — which is Anthropic whatever the agent runs on.
   // Operate threads dispatch deployed agents, which carry their own keys. Before the first snapshot
   // nothing is known, and the server would refuse anyway, so nothing is claimed.
+  /**
+   * §11.1: WHICH OF THE TWO SELECTIONS CANNOT ANSWER — and the send is blocked until neither is.
+   *
+   * THE PRODUCT OWNER'S RULE (2026-09-12): "you have to select what provider for both of them, then
+   * you can proceed." So this gate, which already blocked on the RUN provider in Test mode and on
+   * Anthropic in Chat mode, now names whichever of the two is unconfigured — and §11.1's own
+   * fall-back-and-say-so is deliberately NOT taken: falling back would spend somebody's Claude
+   * credit on a conversation they had pointed at OpenAI, which is the opposite of what choosing a
+   * provider is for.
+   *
+   * THE ORDER IS "WHAT YOU ARE ABOUT TO DO FIRST". In Test mode the run's provider is what a press
+   * of the button needs; in Chat mode the chat provider is. A gate that named the other one would be
+   * telling somebody to fix a setting that is not in their way.
+   *
+   * `chatProvider` FALLS BACK TO ANTHROPIC BEFORE THE CATALOGUE LANDS, which is what the old
+   * unconditional `"anthropic"` was: Jaroku's own thinking has no other default, and the selector
+   * has nothing to offer until the price sheet arrives.
+   */
+  const chatProviderNeeded = chatProvider || "anthropic";
   const missingKey: string | null = !providersLoaded || operating ? null
     : composerMode === "test"
       ? (isRunnable(providerStatuses, provider) ? null : provider || "anthropic")
-      : (canBuild(providerStatuses) ? null : "anthropic");
+      // CHAT MODE NEEDS THE PROVIDER IT IS ABOUT TO TALK TO. `canBuild` still gates the BUILD
+      // routes — a plan, a generation and an edit are Anthropic's whatever the conversation is set
+      // to — so both are checked and the one in the way is named.
+      : !isRunnable(providerStatuses, chatProviderNeeded)
+        ? chatProviderNeeded
+        : (canBuild(providerStatuses) ? null : "anthropic");
   const missingKeyLabel = missingKey ? providerLabelOf(providerModels, missingKey) : "";
   const keyAsk = missingKey
-    ? `Add ${/^[AEIOU]/.test(missingKeyLabel) ? "an" : "a"} ${missingKeyLabel} key to ${composerMode === "test" ? "run" : "send this"}`
+    ? `Add ${/^[AEIOU]/.test(missingKeyLabel) ? "an" : "a"} ${missingKeyLabel} key to ${
+      composerMode === "test"
+        ? "run"
+        // WHICH OF THE TWO, IN THE SENTENCE. "Add an OpenAI key to send this" is a sentence about a
+        // setting somebody chose, and naming the purpose is what makes it actionable — §12's rule
+        // that a blocked control always says why, applied to the one that blocks most often.
+        : missingKey === chatProviderNeeded ? "talk to Jaroku" : "build with"
+    }`
     : "";
   /** Instead of sending: Secrets, open at the provider the send needed. The draft stays put. */
   const askForKey = useCallback((id: string): void => {
@@ -2002,6 +2137,10 @@ export function BuildPane({
        */
       case "chat":
         sendChat(trimmed, activeAgentId, {
+          // §11.1: THE MODEL THE CONVERSATION IS SET TO, on every message — not only on a
+          // regeneration. The server validates it against the shared catalogue and resolves its
+          // provider from the same place, so a client cannot name a mismatched pair.
+          ...(chatModel ? { model: chatModel } : {}),
           // §8.1's `selection:` line, when something is selected. Three fields rather than the
           // step: the block says WHICH step is open, and `explain` is the route that carries a
           // step's input, output and error because explaining one is its whole job.
@@ -2948,7 +3087,14 @@ export function BuildPane({
               ...(operating ? {} : {
               model: {
                 bar: () => (
-                  <ModelSelector provider={provider} model={model} setModel={setModel} />
+                  <ModelSelector
+                    provider={provider}
+                    model={model}
+                    setModel={setModel}
+                    chatProvider={chatProvider}
+                    chatModel={chatModel}
+                    setChatModel={setChatModel}
+                  />
                 ),
               },
               mode: {

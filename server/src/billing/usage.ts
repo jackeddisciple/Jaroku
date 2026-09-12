@@ -257,6 +257,14 @@ export class UsageMeter {
        * runs and its verdicts attribute through those.
        */
       threadId?: string | null;
+      /**
+       * Whose API answered. Defaults to Anthropic, which is every kind but one.
+       *
+       * NOT DERIVED FROM THE MODEL ID HERE, deliberately: the caller has already resolved the pair
+       * through the shared catalogue, and a second derivation in this file would be a second answer
+       * to "which provider is this model" — the drift `pricing.ts` exists to prevent.
+       */
+      provider?: string;
     },
   ): Promise<boolean> {
     const cost = costFor(call.model, {
@@ -270,11 +278,12 @@ export class UsageMeter {
       idempotencyKey: call.idempotencyKey ?? usageKey(kind, randomUUID()),
       runId: call.runId ?? null,
       threadId: call.threadId ?? null,
-      // Every platform-side call is Anthropic's: planning, generation, the fix loop, explain and
-      // the judge are all Anthropic-only (see providers.ts's `powers_jaroku`). Recorded rather
-      // than left null so a future second provider is a change to this line and not a schema
-      // question.
-      provider: "anthropic",
+      // THE PROVIDER THE CALL ACTUALLY WENT TO, and this line is the change its own comment
+      // predicted: "recorded rather than left null so a future second provider is a change to this
+      // line and not a schema question." The chat route is that second provider — it answers on
+      // whichever one the conversation is set to — and every other kind on this list is still
+      // Anthropic's, so the default keeps them exactly as they were.
+      provider: call.provider ?? "anthropic",
       payer: call.payer ?? "platform",
       model: call.model,
       inputTokens: call.inputTokens,

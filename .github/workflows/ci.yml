@@ -628,6 +628,22 @@ jobs:
           # sharpest — null all the way down, excluded from the total, and the row reporting a FLOOR
           # rather than an answer, because a zero anywhere in that chain reads as "this was free".
           npm run test:chat-cost
+          # §11.2, AND THE ONE SUITE IN THIS FILE WRITTEN TO FAIL AGAINST BEHAVIOUR THAT SHIPPED.
+          # v0.1.10 recorded it: "the generation model used for cost accounting is fixed in one place
+          # regardless of what is configured, and the plan step inherits the same issue." That place
+          # was `claude.ts`'s constant, and `summarizeUsage` priced the generation, the plan AND the
+          # edit against it while each resolves its own model. Every assertion here uses a model
+          # whose rate DIFFERS from the fallback's and names the figure the old code produced, so a
+          # regression reads as that number rather than as a mismatch.
+          npm run test:accounting-model
+          # AND THE TRANSPORT THE CHAT ROUTE REACHES OPENAI AND META ON. Its three silent failures:
+          # a base URL that drifts from the Python runtime's (one of the two paths then 404s, and
+          # only on the provider nobody tried), a missing `include_usage` (every non-Anthropic turn's
+          # cost is unknown forever), and handing over `prompt_tokens` whole — which INCLUDES the
+          # cached ones on this shape and excludes them on Anthropic's, so cache reads get charged at
+          # the full input rate and overstate cost by up to 10x on exactly the long conversations
+          # where caching matters.
+          npm run test:openai-chat
 
       # THE INBOX DESTINATION, in a step of its own from its first suite — the same reason the two
       # steps above are separate rather than appended to whichever step had room. A reader looking
@@ -1439,6 +1455,13 @@ jobs:
           # three files explain at length why it is NOT used, and a raw search reads every one of
           # those sentences as a relapse.
           npm run test:thinking-indicator
+          # §11.1'S TWO SELECTIONS, and they are one `setModel` call apart. Conflating them has
+          # already gone wrong here once: "Regenerate with <model>" called `setModel`, which
+          # repoints the model an agent's RUN goes to — so the menu changed the wrong setting and
+          # the answer came back on the model it had always used, under a label promising otherwise.
+          # §11.1's "changing one must not change another" is that bug stated as a rule, and this is
+          # the rule as an assertion.
+          npm run test:chat-model
           # §5'S STATE MACHINE, and every wrong answer in it looks plausible on screen. A dropped
           # socket leaving a turn `streaming` blinks a caret under a sentence that ended mid-word,
           # for ever; marking it `done` presents half a sentence as the whole answer. A failure that

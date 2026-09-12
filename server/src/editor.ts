@@ -721,7 +721,11 @@ export class Editor extends EventEmitter<EditorEvents> {
     });
 
     const final = await stream.finalMessage();
-    onUsage(summarizeUsage(final.usage));
+    // §11.2: THE EDIT'S OWN MODEL. Not named in v0.1.10's note and wrong for the same reason:
+    // `JAROKU_EDIT_MODEL` is a separate variable, so an edit on a dearer model under-reported by
+    // whatever the difference was. §11.2 asks for the fix to be verified "against the plan and
+    // generation paths too", and this is the third of the three.
+    onUsage(summarizeUsage(EDIT_MODEL, final.usage));
     return raw;
   }
 }

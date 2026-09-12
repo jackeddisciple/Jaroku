@@ -407,7 +407,11 @@ export class Planner extends EventEmitter<PlannerEvents> {
     });
 
     const final = await stream.finalMessage();
-    onUsage(summarizeUsage(final.usage));
+    // §11.2: THE PLAN'S OWN MODEL. v0.1.10 recorded this as an open issue in those words — "the plan
+    // step inherits the same issue" — because `summarizeUsage` priced it against a constant while
+    // `PLAN_MODEL` resolves through `JAROKU_PLAN_MODEL` and then `JAROKU_GEN_MODEL`. A plan run on
+    // `claude-opus-5` reported the price of `claude-haiku-4-5`.
+    onUsage(summarizeUsage(PLAN_MODEL, final.usage));
     return raw;
   }
 }

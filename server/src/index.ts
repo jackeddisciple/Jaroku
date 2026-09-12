@@ -107,7 +107,14 @@ import { magicLinkRoutes } from "./http/magicLink.ts";
 import { signInRoutes } from "./http/signIn.ts";
 import { MAGIC_LINK_LIMIT_DEFAULTS, MAGIC_LINK_LIMITS, rateKeyForIp } from "./auth/signIn.ts";
 import {
-  Generator, agentsDir, slugify, uniqueAgentSlug, MAX_TOKENS as GEN_MAX_TOKENS, type UsageSummary,
+  Generator, agentsDir, slugify, uniqueAgentSlug, MAX_TOKENS as GEN_MAX_TOKENS,
+  // ALIASED, BECAUSE TWO MODULES EXPORT THIS NAME AND ONLY ONE OF THEM RESOLVES IT. `claude.ts`
+  // holds a bare constant — the accounting fallback, and the one place v0.1.10's open issue lived —
+  // while this module resolves the model through `JAROKU_GEN_MODEL`. The meter needs the resolved
+  // one, and an unaliased import would have silently kept whichever the module graph happened to
+  // bind. §11.2 is exactly this confusion, so the two names are now visibly different.
+  GENERATION_MODEL as GEN_MODEL_ACTUAL,
+  type UsageSummary,
 } from "./generator.ts";
 import { Planner, PLAN_MODEL, MAX_TOKENS as PLAN_MAX_TOKENS, type PendingPlan } from "./planner.ts";
 import { Editor, EDIT_MODEL, MAX_TOKENS as EDIT_MAX_TOKENS } from "./editor.ts";
@@ -170,7 +177,8 @@ import { introspectGraph, introspectGraphCached, type GraphResult } from "./grap
 import { streamExplain, EXPLAIN_MODEL, EXPLAIN_MAX_TOKENS } from "./explainer.ts";
 import { classifyProviderFailure } from "./providerFailure.ts";
 import {
-  chatContext, conversationWindow, CHAT_MODEL, CHAT_MAX_TOKENS, TRUNCATION_NOTICE,
+  chatContext, conversationWindow, providerOf,
+  CHAT_MODEL, CHAT_PROVIDER, CHAT_MAX_TOKENS, TRUNCATION_NOTICE,
   type ChatGrounding, type ItemForWindow,
 } from "./chat.ts";
 import { buildFactPack, type FactPack, type PackDeps } from "./work/factPack.ts";
@@ -280,7 +288,11 @@ import { PlatformKeyGate } from "./billing/platformKey.ts";
 import { ProviderKeyPool, poolRefusal } from "./billing/keyPool.ts";
 import { NEW_ACCOUNT_DAYS, firstBreach, type CapBreach } from "./abuse/spendCaps.ts";
 import { adminModeConfigured, adminModeOn, isAdminUser } from "./auth/adminMode.ts";
-import { GENERATION_MODEL } from "./claude.ts";
+// `claude.ts`'s `GENERATION_MODEL` IS NO LONGER IMPORTED HERE, and its absence is the visible half
+// of §11.2's fix. It was the accounting fallback masquerading as the answer: four sites in this file
+// read it — the plan meter, the generation meter, the edit meter and the attachment budget's model —
+// and each of them has a model of its own. The constant survives in `claude.ts` as
+// `summarizeUsage`'s last resort and nothing in this file reaches for it.
 import { isSecretName } from "./secrets/secretStore.ts";
 import {
   PROVIDER_ENV_KEY, isProviderId, isRealProvider, providerLabel, providerStatus, verifyProviderKey,
@@ -572,6 +584,15 @@ function meterPlatformCall(
      * kind attributes through its run; see migration 044.
      */
     threadId?: string | null;
+    /**
+     * Whose API answered, for the one kind that can be somewhere other than Anthropic.
+     *
+     * OMITTED BY FOUR OF THE FIVE KINDS AND DEFAULTED DOWNSTREAM. Planning, generation, the fix loop
+     * and the judge go through `claude.ts` and have no provider to choose; the chat route answers on
+     * whichever one the conversation is set to, and the ledger has to say which rather than
+     * recording a workspace's OpenAI spend as Anthropic's.
+     */
+    provider?: string;
   },
 ): void {
   void meter.meterModelCall(ctx, kind, call).catch((err) => {
@@ -4247,7 +4268,11 @@ const turnDeps: TurnRouteDeps = {
   // the honest answer at the moment somebody is attaching: the turn has not been dispatched yet, so
   // there is no model on it. §9's "Model swapped after effort set" applies here too — swap the
   // model and the budget is re-evaluated against the new window on the next read.
-  modelForTurn: async () => process.env.JAROKU_GEN_MODEL ?? GENERATION_MODEL,
+  // THROUGH THE RESOLVED CONSTANT RATHER THAN RE-READING THE VARIABLE. `GEN_MODEL_ACTUAL` IS
+  // `process.env.JAROKU_GEN_MODEL ?? "claude-haiku-4-5"`, so this line was the same expression
+  // written a second time — which is one more place for the two to disagree, and §11.2 is about
+  // exactly that kind of duplication.
+  modelForTurn: async () => GEN_MODEL_ACTUAL,
   attachables: async (ctx, agentId, kind, query, limit) => {
     const q = query.trim().toLowerCase();
     const matches = (s: string): boolean => q === "" || s.toLowerCase().includes(q);
@@ -11480,7 +11505,11 @@ planner.on("plan", (e) => {
   // — once, at the moment it happened. The generation that follows meters itself; it must not
   // also meter `planUsage`, which is the same call reported a second time for display.
   meterPlatformCall(contextForPlan(), "llm.plan", {
-    model: GENERATION_MODEL, ...tokensOf(e.usage), payer: planPayer, threadId: planThread,
+    // §11.2: THE MODEL THE PLAN ACTUALLY RAN ON. This read `GENERATION_MODEL` — the constant
+    // `claude.ts` held — which is v0.1.10's recorded open issue reaching the LEDGER as well as the
+    // card. `costFor` prices whatever id it is handed, so a plan on a dearer model was billed at
+    // the cheapest one's rate.
+    model: PLAN_MODEL, ...tokensOf(e.usage), payer: planPayer, threadId: planThread,
   });
   planOut({ type: "plan", ...e, usage: { ...e.usage, ...effortFields(planEffortPlan) } });
   // The plan is now awaiting a decision, which is §3.3's `needs_you`. The item is what lets the
@@ -11763,7 +11792,8 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     // it again here would bill every planned generation for its plan twice, and the second
     // charge would look exactly like the first.
     meterPlatformCall(contextForGen(), "llm.generation", {
-      model: GENERATION_MODEL, ...tokensOf(e.usage), payer: genPayer, threadId: genThread,
+      // §11.2: THE MODEL THE GENERATION ACTUALLY RAN ON — the half v0.1.10 named first.
+      model: GEN_MODEL_ACTUAL, ...tokensOf(e.usage), payer: genPayer, threadId: genThread,
     });
     // §6.2's TWO FIELDS, ON THE PAYLOAD THAT RENDERS THEM. The metadata row reads `effort` off
     // `usage` and nothing had ever set it, so the chip reported a setting that changed nothing.
@@ -11834,7 +11864,12 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
       category, avatarId,
       // And the row to build INTO, when onboarding already wrote one.
       intoAgentId,
-      effort: (genEffort = await effortForThread(ctx, genThread, GENERATION_MODEL, GEN_MAX_TOKENS)),
+      // §11.2 REACHES THE EFFORT ADAPTER TOO, and this is the fourth site. `planEffort` clamps a
+      // thinking budget against the MODEL's own ceiling and reports the level actually applied — so
+      // resolving it against a constant meant a generation on a model with a different ceiling was
+      // clamped against the wrong number, and §6.2's marker then reported a level nobody spent.
+      // The plan, the edit, the reply and the chat turn all pass their own model already.
+      effort: (genEffort = await effortForThread(ctx, genThread, GEN_MODEL_ACTUAL, GEN_MAX_TOKENS)),
       // See planAgent: undefined unless this workspace asked that its own key pay for the
       // platform's calls, and undefined is the platform's key.
       apiKey: genKey,
@@ -11864,7 +11899,9 @@ editor.on("proposal", (e) => {
   // proposal is a version pointer moving, and undoing one is the same pointer moving back.
   // Billing on apply would mean a rejected proposal was free, which it was not.
   meterPlatformCall(contextForEdit(), "llm.edit", {
-    model: GENERATION_MODEL, ...tokensOf(e.usage), payer: editPayer, threadId: editThread,
+    // §11.2: THE MODEL THE EDIT ACTUALLY RAN ON. `JAROKU_EDIT_MODEL` is its own variable, so
+    // this was wrong independently of the other two.
+    model: EDIT_MODEL, ...tokensOf(e.usage), payer: editPayer, threadId: editThread,
   });
   editOut({ type: "proposal", ...e, usage: { ...e.usage, ...effortFields(editEffort) } });
   // An unapplied diff is the most common thing a thread is blocked on, and this row is how the
@@ -13434,20 +13471,63 @@ async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<voi
     const context = chatContext(
       await chatGrounding(ctx, cmd.agentId ?? null, thread, history.filter((m) => m.role === "user").length + 1, cmd.selection),
     );
-    const chatKey = await providerKeys.platformKey(ctx);
-    // §6.2: THE MODEL THIS ANSWER RUNS ON, validated against the shared catalogue.
+    // §6.2 AND §11.1: THE MODEL THIS ANSWER RUNS ON, AND THE PROVIDER IT BELONGS TO.
     //
     // NEVER THE CLIENT'S STRING UNCHECKED. A model id decides what gets billed — `costFor` prices
     // whatever it is handed — so an unrecognised one falls back to the configured default rather
     // than reaching a provider or a price lookup. `isPriced` is the right test rather than a
     // hardcoded list: the catalogue is `runtime/pricing.json`, shared with the Python runtime, and a
     // second list here would be the drift this codebase already refuses everywhere else.
+    //
+    // AND THE PROVIDER COMES FROM THE CATALOGUE RATHER THAN FROM THE CLIENT. A model and a provider
+    // only mean something together, and a client that could name the pair could name a mismatched
+    // one — sending `muse-spark-1.3` to Anthropic, or worse, handing Meta's endpoint a credential
+    // resolved for OpenAI. One lookup, one answer, and the pair cannot disagree.
     const model = typeof cmd.model === "string" && isPriced(cmd.model) ? cmd.model : CHAT_MODEL;
+    const provider = providerOf(model) ?? CHAT_PROVIDER;
+
+    /**
+     * THE KEY FOR THE PROVIDER THAT IS ABOUT TO BE ASKED.
+     *
+     * `platformKey` RESOLVED ANTHROPIC'S UNCONDITIONALLY, which was right while every platform call
+     * was Anthropic's and is wrong for exactly one of them now: a chat turn on GPT-5.6 Luna given
+     * an Anthropic key is a credential handed to a call that cannot use it, and the request would
+     * fail as an authentication error for a key that is perfectly valid somewhere else.
+     *
+     * THE PLATFORM'S OWN KEY IS THE OTHER HALF, and it lives in the environment for Anthropic only
+     * — this product has never shipped a platform OpenAI key. So a workspace that has not opted its
+     * own key in cannot reach OpenAI or Meta at all, and the refusal below says which key is
+     * missing rather than failing at the provider.
+     */
+    const chatKey = isProviderId(provider)
+      ? await providerKeys.platformKeyFor(ctx, provider)
+      : undefined;
+    const envKey = isProviderId(provider) ? process.env[PROVIDER_ENV_KEY[provider]] : undefined;
+    if (!chatKey && !envKey) {
+      // §7's `no_credential`, RAISED BEFORE THE CALL RATHER THAN AFTER IT. The classifier would
+      // name this correctly if the provider were asked and refused — but there is no provider to
+      // ask: nothing was sent, so there is no status, and §7.2's action is to ADD a key rather than
+      // to replace one. Reaching the classifier through a thrown error would also spend a round
+      // trip to learn what is already known.
+      relay.broadcastReply(
+        ctx,
+        {
+          type: "error",
+          agentId: cmd.agentId ?? "",
+          message: `No API key configured for ${providerLabel(provider)}.`,
+          failure: "no_credential",
+          actions: ["open_credentials"],
+          retrying: false,
+        },
+        thread,
+      );
+      return;
+    }
     const effort = await effortForThread(ctx, thread, model, CHAT_MAX_TOKENS);
     // §10'S ROW, OPENED AROUND THE RESPONSE, with the model that is about to answer on it. Chat is
     // the route most likely to be regenerated on a DIFFERENT model, which is the whole reason every
     // metadata column on `turn_variants` is per-variant rather than per-turn.
-    const settle = await openVariant(ctx, turn, model, "anthropic", effort);
+    const settle = await openVariant(ctx, turn, model, provider, effort);
 
     // §7.3's ONE RETRY, and the flag that makes "one" true rather than intended. It is this
     // dispatch's own local, so a retried attempt starts with its own `false` — which would be an
@@ -13488,6 +13568,10 @@ async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<voi
             cacheWriteTokens: u.cacheWrite,
             payer: chatKey ? "workspace" : "platform",
             threadId: thread,
+            // WHOSE API ANSWERED. Every other kind on this list is Anthropic's and defaults to it;
+            // a chat turn is the one that can be somewhere else, and the ledger has to say which
+            // rather than recording every workspace's OpenAI spend as Anthropic's.
+            provider,
           });
           /**
            * §10: WHAT THIS TURN COST, on the turn.
@@ -13547,7 +13631,7 @@ async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<voi
                 type: "done",
                 agentId: cmd.agentId ?? "",
                 usage: {
-                  model, provider: "anthropic",
+                  model, provider,
                   ...effortFields(effort),
                   ...counts,
                   ...spent,
@@ -13601,6 +13685,7 @@ async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<voi
               cacheWriteTokens: u.cacheWrite,
               payer: chatKey ? "workspace" : "platform",
               threadId: thread,
+              provider,
             });
           }
           relay.broadcastReply(ctx, { type: "stopped", agentId: cmd.agentId ?? "" }, thread);
@@ -13632,11 +13717,7 @@ async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<voi
           // about the failure — so a reader and the next turn's model see the same partial answer.
           if (answer) settle({ body: answer });
           const classified = cause !== undefined
-            ? classifyProviderFailure(cause, {
-              provider: "anthropic",
-              model,
-              timeoutSeconds: undefined,
-            })
+            ? classifyProviderFailure(cause, { provider, model, timeoutSeconds: undefined })
             : null;
           // AN UNCLASSIFIED ERROR IS THE MESSAGE IT ALWAYS WAS. The no-key path and this module's
           // own refusals throw nothing, and inventing a class for them would put a Retry button on
@@ -13682,6 +13763,7 @@ async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<voi
       {
         system: CHAT_SYSTEM,
         model,
+        provider,
         askedBy: "Developer",
         history,
         // §4.2: THE MODEL IS TOLD THE CONVERSATION WAS TRUNCATED rather than handed a silently

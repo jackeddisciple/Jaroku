@@ -136,13 +136,34 @@ export class WorkspaceProviderKeys {
    * arrangement they had before they opted in.
    */
   async platformKey(ctx: TenantContext): Promise<string | undefined> {
+    return this.platformKeyFor(ctx, "anthropic");
+  }
+
+  /**
+   * The workspace's own key for ONE provider, when it has opted its key in.
+   *
+   * `platformKey` ABOVE IS NOW THIS, PINNED TO ANTHROPIC, and the note it used to carry is why this
+   * one exists: "Anthropic only. Planning, generation, the fix loop, explain and the judge are all
+   * Anthropic-only (providers.ts's `powers_jaroku`), so an OpenAI key opted in would buy the
+   * workspace nothing and would be a credential handed to a call that cannot use it."
+   *
+   * THAT SENTENCE STOPPED BEING TRUE FOR ONE CALL. The chat route answers on whichever provider the
+   * conversation is set to — Claude, OpenAI or Meta — so a workspace running on its own credential
+   * needs the key for the provider that is about to be asked, and asking for Anthropic's would hand
+   * a chat call on GPT-5.6 Luna a credential it cannot use. Every OTHER platform call is still
+   * Anthropic-only and still goes through `platformKey`, which is why that name is kept rather than
+   * every caller being made to name a provider it has no choice about.
+   *
+   * ONE KEY PER CALL, NAMED. Never the whole environment: `getForPlatformCall` takes the list of
+   * variables a call needs, and a call that asked for three would be a call holding two credentials
+   * it has no use for.
+   */
+  async platformKeyFor(ctx: TenantContext, provider: ProviderId): Promise<string | undefined> {
     const balance = await this.billing.balance(ctx);
     if (!balance.own_key_for_platform) return undefined;
-    // Anthropic only. Planning, generation, the fix loop, explain and the judge are all
-    // Anthropic-only (providers.ts's `powers_jaroku`), so an OpenAI key opted in would buy the
-    // workspace nothing and would be a credential handed to a call that cannot use it.
-    const env = await this.secrets.getForPlatformCall(ctx, [PROVIDER_ENV_KEY.anthropic]);
-    return env[PROVIDER_ENV_KEY.anthropic];
+    const name = PROVIDER_ENV_KEY[provider];
+    const env = await this.secrets.getForPlatformCall(ctx, [name]);
+    return env[name];
   }
 
   /** Turn the opt-in on or off. Explicit, not a toggle — see the repository's own note. */

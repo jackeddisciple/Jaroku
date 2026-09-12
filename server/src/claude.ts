@@ -13,9 +13,27 @@ export interface UsageSummary {
   cost_usd: number;
 }
 
-// The model generation/editing bills against. Its rates — and the cache multipliers —
-// come from the shared runtime/pricing.json, not from constants here: a second copy of a
-// price is a copy that drifts.
+/**
+ * THE FALLBACK MODEL FOR ACCOUNTING, and it is no longer the answer — it is the last resort.
+ *
+ * v0.1.10 SHIPPED WITH THIS AS AN OPEN ISSUE, in its own words: "the generation model used for cost
+ * accounting is fixed in one place regardless of what is configured, and the plan step inherits the
+ * same issue." This constant was that one place. `summarizeUsage` priced EVERY platform call against
+ * it — the generation, the plan and the edit — while each of those resolves its own model from its
+ * own environment variable, so pointing `JAROKU_EDIT_MODEL` at `claude-opus-5` produced an edit that
+ * really cost five times what the card said it did.
+ *
+ * §11.2 IS WHY IT IS FIXED NOW RATHER THAN LATER: "adding a third model path on top of that hardcode
+ * would make a known-wrong figure wrong in one more place." Chat is that third path, and a fourth
+ * and fifth arrive with the provider selection beside it.
+ *
+ * SO `summarizeUsage` TAKES THE MODEL and this is what it falls back to. Kept rather than deleted
+ * because the fallback has to be SOMETHING — a caller that names no model is a caller with a bug,
+ * and pricing it against the cheapest model this product uses is the direction that under-reports
+ * rather than over-reports, which is the safe way to be wrong about somebody else's money. Its rates
+ * still come from the shared `runtime/pricing.json` and not from constants here: a second copy of a
+ * price is a copy that drifts.
+ */
 export const GENERATION_MODEL = "claude-haiku-4-5";
 
 /**
@@ -100,7 +118,23 @@ export async function verifyAnthropicKey(key: string): Promise<{ ok: boolean; me
   }
 }
 
-export function summarizeUsage(u: {
+/**
+ * What one call consumed, priced against THE MODEL THAT MADE IT — §11.2, and the close of v0.1.10's
+ * open issue.
+ *
+ * `model` IS A REQUIRED ARGUMENT AND NOT AN OPTION, which is the whole of the fix. An optional one
+ * would have left every existing call site priced against the fallback and the bug intact in three
+ * places while looking resolved; a required one makes the compiler enumerate them. Four callers pass
+ * it now — the planner, the generator, the editor and the chat route — and each passes the model it
+ * actually resolved rather than the model this module happens to name.
+ *
+ * `cost_usd` STILL COALESCES AN UNPRICED MODEL TO 0, and that is deliberate here and wrong anywhere
+ * else. `UsageSummary.cost_usd` is a `number` because it feeds the "this generation cost $0.004"
+ * line, where the model is one this repo prices; the LEDGER's figure goes through
+ * `meterModelCall`, which writes `costFor`'s null as null. `usage.ts` argues that split at length,
+ * and it is why the two are different functions rather than one.
+ */
+export function summarizeUsage(model: string, u: {
   input_tokens: number;
   output_tokens: number;
   cache_read_input_tokens?: number | null;
@@ -116,7 +150,10 @@ export function summarizeUsage(u: {
     // The Anthropic SDK already reports `input_tokens` EXCLUSIVE of the cached counts
     // (unlike LangChain, which folds them in), so it maps straight onto the uncached slot.
     cost_usd:
-      costFor(GENERATION_MODEL, {
+      // THE MODEL THE CALLER NAMED. This read `GENERATION_MODEL` — a constant — which is the whole
+      // of v0.1.10's recorded open issue. A model with no pricing entry still coalesces to 0 here;
+      // see the header for why that is right for this figure and wrong for the ledger's.
+      costFor(model || GENERATION_MODEL, {
         inputTokens: u.input_tokens,
         outputTokens: u.output_tokens,
         cacheReadTokens: cacheRead,

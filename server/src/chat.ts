@@ -14,6 +14,7 @@
 //   npm run test:chat
 
 import { money } from "./prompt.ts";
+import { priceFor } from "./pricing.ts";
 
 /**
  * The model a chat message is answered on.
@@ -32,6 +33,30 @@ import { money } from "./prompt.ts";
  * that has never opened the selector.
  */
 export const CHAT_MODEL = process.env.JAROKU_CHAT_MODEL ?? "claude-haiku-4-5";
+
+/**
+ * Which provider the chat route answers on by default.
+ *
+ * ANTHROPIC, BECAUSE THE DEFAULT MODEL IS. A provider and a model only mean something together —
+ * the same model id is a 404 on the wrong provider — so these two constants are a pair, and the
+ * selector picks them as a pair for the same reason.
+ *
+ * SEPARATE FROM `JAROKU_CHAT_MODEL` because somebody pointing the chat route at OpenAI has to name
+ * both: an id alone cannot say which API it belongs to.
+ */
+export const CHAT_PROVIDER = process.env.JAROKU_CHAT_PROVIDER ?? "anthropic";
+
+/**
+ * The provider a model id belongs to, from the shared catalogue.
+ *
+ * FROM `runtime/pricing.json` AND NOT FROM A PREFIX. `claude-*` and `gpt-*` are guessable and
+ * `muse-spark-1.3` is not, and a prefix table here would be a second answer to a question the
+ * catalogue already answers — the same file the Python runtime reads, the same file that prices the
+ * call. A model nothing knows about resolves to null, which the caller reads as "do not send this".
+ */
+export function providerOf(model: string): string | null {
+  return priceFor(model)?.provider ?? null;
+}
 
 /**
  * The ceiling a chat call sends.

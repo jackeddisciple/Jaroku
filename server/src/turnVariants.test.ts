@@ -309,9 +309,19 @@ console.log("\nthe store is instantiated, written and read — outside a test");
   // useful thing to do". The menu used to call `setModel` — the model an agent's RUN goes to — and
   // then dispatch a call that ignored the model entirely, so it repointed the next test run and
   // answered on the same model as before.
+  // WHAT THIS ROW IS FOR IS UNCHANGED and its pattern moved with §11.1. A plain ⟳ now answers again
+  // on the model the CONVERSATION is set to — which is the chat pair, a separate selection from the
+  // run's — and "Regenerate with <model>" overrides it for one answer. The property being asserted
+  // is the one that was broken: the chosen model rides the COMMAND, and nothing calls `setModel`,
+  // which repoints the model an agent's test run goes to.
   check("...and the chosen model rides the command rather than repointing the run",
-    /\.\.\.\(opts\?\.modelId \? \{ model: opts\.modelId \} : \{\}\)/.test(pane)
-    && !/setModel\(opts\.modelId\)/.test(pane));
+    /opts\?\.modelId\s*\n?\s*\? \{ model: opts\.modelId \}/.test(pane)
+    && !/setModel\(opts\.modelId\)/.test(pane),
+    /\{[^}]*model:[^}]*\}/.exec(pane.slice(pane.indexOf("function rerunTurn")))?.[0] ?? "no match");
+  // AND THE FALLBACK IS THE CONVERSATION'S OWN MODEL, not the run's — §11.1's separation reaching
+  // the one control most likely to confuse the two.
+  check("...falling back to the conversation's model rather than the run's",
+    /useUiStore\.getState\(\)\.chatModel/.test(pane) && !/model: useUiStore\.getState\(\)\.model\b/.test(pane));
   check("...and the switcher finally has a caller", /onSwitchVariant=\{/.test(pane));
   check(
     "...offered only where there are bodies to switch between",

@@ -11,6 +11,8 @@ import { existsSync, readFileSync } from "node:fs";
 
 import { anthropicClient } from "./claude.ts";
 import { faultError, injectedFault } from "./providerFailure.ts";
+import { isOpenAiCompatible, streamOpenAiChat } from "./openaiChat.ts";
+import type { ProviderId } from "./providers.ts";
 import type { EffortPlan } from "./effort.ts";
 
 export const EXPLAIN_MODEL = process.env.JAROKU_EXPLAIN_MODEL ?? "claude-haiku-4-5";
@@ -232,6 +234,23 @@ export async function streamExplain(
      */
     model?: string;
     /**
+     * WHICH TRANSPORT ANSWERS — `anthropic` (the default) or an OpenAI-compatible one.
+     *
+     * IT RIDES WITH THE MODEL because a model id only means something against a provider: the same
+     * string is a 404 on the wrong one. The composer's selector picks a provider and a model
+     * together for exactly that reason, and this is the pair arriving.
+     *
+     * THIS IS NOT A SECOND ENGINE. Everything either side of the transport is shared — the key
+     * resolution, the fixture, §16's fault injection, the raw-context degradation, the usage report
+     * that arrives BEFORE `onDone`, the stop handle, the cost read off a partial message, and the
+     * error path that hands the thrown value to §7's classifier. What differs between providers is
+     * how bytes arrive, and that is all that branches.
+     *
+     * Omitted means Anthropic, so `explain` and Part 3's answers are byte-identical to the calls
+     * they were — the same discipline as `effort` being spread rather than set.
+     */
+    provider?: string;
+    /**
      * THE CONVERSATION SO FAR — §4, and the one argument that turns this into a chat.
      *
      * REAL TURNS RATHER THAN A TRANSCRIPT PASTED INTO `context`. The cheap version folds the
@@ -316,6 +335,18 @@ export async function streamExplain(
     // below — by the request and by the usage report — so the id that was ASKED and the id that is
     // PRICED cannot be two different strings.
     const model = ask?.model ?? EXPLAIN_MODEL;
+    const provider = ask?.provider ?? "anthropic";
+    // AN OPENAI-COMPATIBLE PROVIDER TAKES THE OTHER TRANSPORT, and everything above this line has
+    // already happened: the fixture, the key check, the degradation. Everything below — the usage
+    // report before `onDone`, the classified failure, the stop handle — happens for both, which is
+    // why this branch is here rather than at the top of the function.
+    if (isOpenAiCompatible(provider)) {
+      await streamOpenAiVia({
+        provider, model, apiKey: apiKey ?? "", context, question, cb, ask, onHandle,
+      });
+      return;
+    }
+
     // §16's FAULT, THROWN WHERE A REAL ONE WOULD BE — inside this try, so it travels the same
     // path with the same `cause` and the same partial-output behaviour as a provider's own. A
     // harness that threw from outside would be testing the harness.
@@ -425,4 +456,118 @@ export async function streamExplain(
     // composed. `explain`'s two callers ignore the second argument and keep the behaviour they had.
     cb.onError(`explain failed (${(err as Error).message}). Raw context:\n\n${context}`, err);
   }
+}
+
+/**
+ * The OpenAI-compatible half of `streamExplain` — same contract, different bytes.
+ *
+ * A FUNCTION RATHER THAN AN INLINE BRANCH, because the Anthropic path is already forty lines of
+ * stream handling and two of them side by side inside one `try` would be unreadable. What matters is
+ * that everything OUTSIDE both is shared: the caller cannot tell which transport answered except by
+ * the provider it asked for.
+ *
+ * IT KEEPS EVERY ONE OF THE CONTRACT'S PROMISES, and they are easy to drop one at a time:
+ *
+ *   `onUsage` BEFORE `onDone`, which is the ordering the trace ingest chain keeps between
+ *   persisting a step and broadcasting it — a caller that meters must not see the answer complete
+ *   and the charge arrive afterwards.
+ *
+ *   THE STOP HANDLE, so §6.1's Esc works on every provider. An `AbortController` here is what
+ *   `stream.abort()` is there.
+ *
+ *   THE COUNTS A STOPPED OR FAILED CALL ACTUALLY SPENT. `fetch` gives no partially-accumulated
+ *   message the way the Anthropic SDK does, and these APIs report usage only in the final frame —
+ *   so an aborted call has no counts at all, and `undefined` is the honest report. Unknown, never
+ *   zero (v0.1.9), and §6.1's "not zero and not the full projected amount" is satisfied by saying
+ *   nothing rather than by inventing a figure.
+ *
+ *   THE THROWN VALUE, handed to the caller so §7 can classify it. `streamOpenAiChat` attaches the
+ *   status and the `retry-after` header for exactly that.
+ */
+async function streamOpenAiVia(args: {
+  provider: ProviderId;
+  model: string;
+  apiKey: string;
+  context: string;
+  question: string;
+  cb: ExplainCallbacks;
+  ask: { system?: string; history?: readonly { role: "user" | "assistant"; content: string }[]; askedBy?: string; closing?: string } | undefined;
+  onHandle: ((handle: ExplainHandle) => void) | undefined;
+}): Promise<void> {
+  const { provider, model, apiKey, context, question, cb, ask, onHandle } = args;
+
+  // §16's FAULT, ON THIS TRANSPORT TOO. A harness that could only fail Anthropic would leave the
+  // provider half of §7 untested on the path most likely to surprise us.
+  const fault = injectedFault();
+  if (fault && !fault.mid) throw faultError(fault.class);
+
+  const controller = new AbortController();
+  let stopped = false;
+  onHandle?.({
+    stop: () => {
+      if (stopped) return;
+      stopped = true;
+      controller.abort();
+    },
+  });
+
+  // THE SAME MESSAGE SHAPE THE ANTHROPIC PATH BUILDS, so a conversation reads identically whichever
+  // provider answers it: the context block as its own turn when there is a history, folded into the
+  // question when there is not.
+  const messages: { role: "user" | "assistant"; content: string }[] =
+    ask?.history && ask.history.length > 0
+      ? [
+        { role: "user", content: `Context:\n${context}` },
+        { role: "assistant", content: "Understood — I have the context." },
+        ...ask.history.map((m) => ({ role: m.role, content: m.content })),
+        {
+          role: "user",
+          content: `${ask?.askedBy ?? "Developer"}'s question: ${question}`
+            + (ask?.closing ? `\n\n${ask.closing}` : ""),
+        },
+      ]
+      : [{
+        role: "user",
+        content: `Context:\n${context}\n\n${ask?.askedBy ?? "Developer"}'s question: ${question}`
+          + (ask?.closing ? `\n\n${ask.closing}` : ""),
+      }];
+
+  let sawText = 0;
+  let reported: ExplainUsage | undefined;
+  try {
+    await streamOpenAiChat(
+      {
+        provider, model, apiKey,
+        system: ask?.system ?? SYSTEM,
+        messages,
+        maxTokens: EXPLAIN_MAX_TOKENS,
+        signal: controller.signal,
+      },
+      {
+        onDelta: (t) => { sawText += t.length; cb.onDelta(t); },
+        onUsage: (u) => { reported = { ...u }; },
+      },
+    );
+    // §16's MID-STREAM FAULT, after real text has arrived — so the partial the caller keeps is
+    // genuinely non-empty.
+    if (fault?.mid && sawText > 0) throw faultError(fault.class);
+  } catch (err) {
+    if (stopped) {
+      // NO COUNTS ON AN ABORTED CALL, and that is the truth rather than a gap: these APIs report
+      // usage in the final frame only, so a stream cut off before it has none. Unknown, not zero.
+      cb.onStopped?.(reported);
+      return;
+    }
+    // WHAT THE FAILED CALL SPENT, IF THE PROVIDER MANAGED TO SAY. §7.3's "cost incurred before a
+    // failure is recorded honestly" — usually nothing to report on this shape, and reported when
+    // there is.
+    if (reported) cb.onUsage?.(reported);
+    // THE THROWN VALUE REACHES THE CALLER, which is what §7's classifier reads.
+    cb.onError(`chat failed (${(err as Error)?.message ?? String(err)})`, err);
+    return;
+  }
+
+  // BEFORE `onDone`, like the other transport — see the header.
+  if (reported) cb.onUsage?.(reported);
+  cb.onDone();
 }

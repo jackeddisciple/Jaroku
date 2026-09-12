@@ -485,7 +485,10 @@ export class Generator extends EventEmitter<GeneratorEvents> {
     });
 
     const final = await stream.finalMessage();
-    onUsage(summarizeUsage(final.usage));
+    // §11.2: THE GENERATION'S OWN MODEL — the half v0.1.10 named first. This module resolves it
+    // through `JAROKU_GEN_MODEL`; `claude.ts` held a constant, and the figure on the card came from
+    // the constant.
+    onUsage(summarizeUsage(GENERATION_MODEL, final.usage));
     return raw;
   }
 

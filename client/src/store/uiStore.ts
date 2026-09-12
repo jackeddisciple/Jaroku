@@ -432,6 +432,26 @@ interface UiState {
   setProvider: (id: string) => void;
   setModel: (m: string) => void;
 
+  /**
+   * WHICH MODEL TALKS TO JAROKU — §11.1, and a SEPARATE PAIR from the run's.
+   *
+   * TWO SETTINGS BECAUSE THEY ANSWER TWO DIFFERENT QUESTIONS, and conflating them was the first
+   * thing that went wrong here: "Regenerate with GPT-5.6 Terra" called `setModel`, which repoints
+   * the model an agent's RUN goes to — so the menu changed the wrong setting and the answer came
+   * back on the model it had always used.
+   *
+   * §11.1: "the chat model is separate from the eval, plan and generation models. Changing one must
+   * not change another." These two are the visible half of that, and the composer's selector opens
+   * both at once so the difference is on screen rather than in a comment.
+   *
+   * `chatProvider` IS DERIVED AND STORED RATHER THAN LOOKED UP AT EVERY READ. A model id only means
+   * something against a provider — the same string is a 404 on the wrong one — so the pair moves
+   * together through `setChatModel`, exactly as `setModel` moves the run's pair.
+   */
+  chatProvider: string;
+  chatModel: string;
+  setChatModel: (m: string) => void;
+
   // Code is an on-demand overlay (doc §4.1), not a permanent tab — opened from a diff-card
   // file row or Cmd+P, dismissed with Escape / close.
   codeOverlayOpen: boolean;
@@ -638,6 +658,22 @@ export const useUiStore = create<UiState>((set) => ({
     set({ model, provider: owner });
   },
 
+  chatProvider: "",
+  chatModel: "",
+  /**
+   * §11.1's other half, and the same refusal `setModel` makes.
+   *
+   * A MODEL NOTHING OFFERS IS NOT SELECTED AT ALL — the pair would be unreachable, the chip would
+   * describe something the catalogue cannot show, and every chat turn afterwards would be recorded
+   * under a model that never answered. Refusing leaves the last coherent pair, which is the one the
+   * chip is already describing.
+   */
+  setChatModel: (chatModel) => {
+    const owner = providerForModel(useProviderStore.getState().models, chatModel);
+    if (owner === null) return;
+    set({ chatModel, chatProvider: owner });
+  },
+
   codeOverlayOpen: false,
   setCodeOverlay: (codeOverlayOpen) => set({ codeOverlayOpen }),
 
@@ -700,7 +736,26 @@ useProviderStore.subscribe((s, prev) => {
   if (s.models === prev.models && s.providers === prev.providers) return;
   const ui = useUiStore.getState();
   const next = pickRunModel(s.models, s.providers, ui.model);
-  if (next === ui.model) return;
-  if (next) ui.setModel(next);
-  else useUiStore.setState({ provider: "", model: "" });
+  if (next !== ui.model) {
+    if (next) ui.setModel(next);
+    else useUiStore.setState({ provider: "", model: "" });
+  }
+  /**
+   * AND THE CHAT PAIR, PICKED THE SAME WAY — §11.1's "the cheapest capable model from the
+   * configured providers."
+   *
+   * THE SAME FUNCTION, DELIBERATELY. `pickRunModel` already answers "which of these is reachable
+   * and cheapest, keeping what is chosen if it still is" — which is exactly the question here, and
+   * a second picker would be a second answer to it. What differs is only which of the two
+   * selections it is given.
+   *
+   * KEPT WHEN IT IS STILL REACHABLE. Somebody who chose Opus for chat does not want it moved back
+   * to Haiku because the catalogue refreshed — and somebody whose key was revoked does want it
+   * moved off a model that can no longer answer.
+   */
+  const nextChat = pickRunModel(s.models, s.providers, useUiStore.getState().chatModel);
+  if (nextChat !== useUiStore.getState().chatModel) {
+    if (nextChat) useUiStore.getState().setChatModel(nextChat);
+    else useUiStore.setState({ chatProvider: "", chatModel: "" });
+  }
 });
