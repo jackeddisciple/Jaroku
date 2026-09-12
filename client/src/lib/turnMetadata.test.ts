@@ -37,6 +37,12 @@ const full = (over: Partial<TurnMeta> = {}): TurnMeta => ({
   durationMs: 12_400,
   ordinal: 2,
   total: 2,
+  // §13's FOUR. A turn with everything has a route, the reason it was taken, a token count and a
+  // cost — which is what the line renders for an ordinary chat turn.
+  route: "chat",
+  routeReason: "No build-request signal; nothing selected.",
+  totalTokens: 1204,
+  costUsd: 0.0003,
   ...over,
 });
 
@@ -48,26 +54,76 @@ const rendered = (meta: TurnMeta): MetadataSlot[] => {
 
 console.log("\n§6.5 — the order is fixed, and it is the spec's");
 {
-  check("five slots", METADATA_SLOTS.length === 5);
-  check("model → effort → build → duration → variants",
-    METADATA_SLOTS.join(",") === "model,effort,build,duration,variants", METADATA_SLOTS.join(","));
-  check("a turn with everything renders all five in that order",
-    rendered(full()).join(",") === "model,effort,build,duration,variants", rendered(full()).join(","));
+  // EIGHT SINCE §13, AND THE FIVE §6.5 NAMED HAVE NOT MOVED. §13's route leads and its tokens and
+  // cost follow the duration, so `model,effort,build,duration` occupy the same relative positions
+  // they always did and `variants` is still last. That is §6.5's own rule rather than deference to
+  // it: "people learn the position of the thing they check most", and a line that reordered itself
+  // when a feature landed would have cost every reader that.
+  check("eight slots", METADATA_SLOTS.length === 8, String(METADATA_SLOTS.length));
+  check("route → model → effort → build → duration → tokens → cost → variants",
+    METADATA_SLOTS.join(",") === "route,model,effort,build,duration,tokens,cost,variants",
+    METADATA_SLOTS.join(","));
+  // §6.5'S FIVE, IN THEIR ORIGINAL ORDER, asserted as a subsequence rather than as the whole list —
+  // which is the property that actually matters and the one a future addition must not break.
+  check("§6.5's five are still in their original order",
+    METADATA_SLOTS.filter((sl) => ["model", "effort", "build", "duration", "variants"].includes(sl))
+      .join(",") === "model,effort,build,duration,variants",
+    METADATA_SLOTS.join(","));
+  check("a turn with everything renders all eight in that order",
+    rendered(full()).join(",") === "route,model,effort,build,duration,tokens,cost,variants",
+    rendered(full()).join(","));
+}
+
+console.log("\n§13 — the provenance line's own four");
+{
+  // §13.3: "THE SAME LINE APPEARS ON PLAN TURNS, GENERATION TURNS AND EDIT TURNS — not only chat.
+  // A provenance line that exists on one turn type and not others is worse than none, because its
+  // absence reads as meaning something." So a turn with a route renders the chip whatever the route
+  // says.
+  for (const route of ["chat", "edit", "explain", "fix", "plan", "generate"]) {
+    check(`a ${route} turn renders its route`, rendered(full({ route })).includes("route"), route);
+  }
+  // AND A TURN WITH NO RECORDED ROUTE OMITS THE CHIP rather than guessing one. A chip reading "chat"
+  // under a turn nobody routed would be worse than no chip.
+  check("no route means no chip", !rendered(full({ route: null })).includes("route"));
+
+  // §13.1's COST IS THE ONE FIGURE WHERE `null` AND `0` ARE DIFFERENT CLAIMS, and both render: an
+  // unpriced model is "unknown" and a free one is "$0.0000". The slot is present for both, because
+  // this line IS where cost lives and silently omitting the unknown one would leave a reader to
+  // assume it was free.
+  check("an unknown cost still occupies the slot",
+    rendered(full({ costUsd: null })).includes("cost"), "");
+  check("a zero cost occupies it too", rendered(full({ costUsd: 0 })).includes("cost"));
+  // A TURN THAT MEASURED NOTHING AT ALL has neither, and the two collapse together — which keeps
+  // the line from ending in a bare separator.
+  const unmeasured = rendered(full({ costUsd: null, totalTokens: null }));
+  check("a turn that measured nothing shows neither",
+    !unmeasured.includes("tokens") && !unmeasured.includes("cost"), unmeasured.join(","));
+  // ...AND THE REST OF THE LINE IS UNMOVED BY THEIR ABSENCE, which is §6.5 applied to the new slots.
+  check("...and the rest of the line holds position",
+    unmeasured.join(",") === "route,model,effort,build,duration,variants", unmeasured.join(","));
+
+  // §13.2's REASON IS OPTIONAL AND DOES NOT GATE THE CHIP. A route recorded without a reason is a
+  // turn whose route is known and whose explanation was not kept — the chip still says which route,
+  // and expanding it has nothing to add.
+  check("a route with no reason still renders", rendered(full({ routeReason: null })).includes("route"));
 }
 
 console.log("\n§12.24 — absent items collapse without reordering the rest");
 {
+  // THE EXPECTED STRINGS GAINED §13's THREE SLOTS and lost none of their own order. That is the
+  // whole criterion restated: adding to a fixed order is allowed, moving anything in it is not.
   // The case the spec names, and the one that happens constantly: most turns produce no code.
   const noBuild = full({ versionLabel: null });
   check("no build chip", !presentSlots(noBuild).has("build"));
   check("...and everything else keeps its order",
-    rendered(noBuild).join(",") === "model,effort,duration,variants", rendered(noBuild).join(","));
+    rendered(noBuild).join(",") === "route,model,effort,duration,tokens,cost,variants", rendered(noBuild).join(","));
 
   // §6.2's omission. A model with no reasoning control shows no chip rather than a meaningless one.
   const noEffort = full({ effortSupported: false });
   check("no effort chip on a model without the control", !presentSlots(noEffort).has("effort"));
   check("...and the rest hold position",
-    rendered(noEffort).join(",") === "model,build,duration,variants", rendered(noEffort).join(","));
+    rendered(noEffort).join(",") === "route,model,build,duration,tokens,cost,variants", rendered(noEffort).join(","));
   // Even with an applied level recorded — that level is one nobody spent.
   check("...even when a level was recorded", !presentSlots(full({ effortSupported: false, effortApplied: "low" })).has("effort"));
 
@@ -75,7 +131,7 @@ console.log("\n§12.24 — absent items collapse without reordering the rest");
   const single = full({ total: 1, ordinal: 1 });
   check("no switcher on a turn with one response", !presentSlots(single).has("variants"));
   check("...and the rest are unmoved",
-    rendered(single).join(",") === "model,effort,build,duration", rendered(single).join(","));
+    rendered(single).join(",") === "route,model,effort,build,duration,tokens,cost", rendered(single).join(","));
 
   // THE ASSERTION THE CRITERION IS ACTUALLY ABOUT: whatever is missing, the ones that remain are in
   // the same relative order as they were when everything was there. Checked over every subset

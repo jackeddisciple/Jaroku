@@ -13735,6 +13735,15 @@ async function chatWithJaroku(ctx: TenantContext, cmd: ChatCommand): Promise<voi
                   ...effortFields(effort),
                   ...counts,
                   ...spent,
+                  // §13: THE ROUTE AND WHY. `chat` is this dispatch's own name and cannot be
+                  // anything else; the reason is the router's own sentence, carried from where the
+                  // decision was made rather than re-derived here — see `ChatCommand.routeReason`.
+                  route: "chat",
+                  ...(typeof cmd.routeReason === "string" && cmd.routeReason.trim()
+                    // BOUNDED, like every other client-supplied string that reaches a turn. It is
+                    // displayed and never branched on, so the cap is about a line staying a line.
+                    ? { route_reason: cmd.routeReason.trim().slice(0, 200) }
+                    : {}),
                 },
               },
               thread,

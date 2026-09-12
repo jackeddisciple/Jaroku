@@ -1505,6 +1505,13 @@ jobs:
           # is also the natural thing to write, so the suite checks every combination of
           # absences rather than the three the spec happens to name.
           npm run test:turn-metadata
+          # WHAT A TURN IS, and the suite `turnSource.ts` has pointed at since it was written
+          # without one existing — its header says `npm run test:turn-source` and there was no such
+          # script and no such file. That matters more since §13, because `metaForTurn` is now what
+          # fills the provenance line, and every one of its four fields has a wrong answer that
+          # renders perfectly: a `?? 0` on the cost reads as "this was free", and a route guessed
+          # from a turn's kind would put a confident label on a decision nobody made.
+          npm run test:turn-source
           # AND WHETHER THE ⟳ BESIDE IT RENDERS AT ALL, which `test:dead-controls` cannot answer:
           # it fails a button with no handler, and this button had one that did nothing on three of
           # the four turn kinds it was mounted on. Every negative assertion in it is a control that

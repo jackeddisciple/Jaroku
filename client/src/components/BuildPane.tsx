@@ -2155,6 +2155,10 @@ export function BuildPane({
           // regeneration. The server validates it against the shared catalogue and resolves its
           // provider from the same place, so a client cannot name a mismatched pair.
           ...(chatModel ? { model: chatModel } : {}),
+          // §13.2: THE ROUTER'S OWN REASON, from the decision that just happened. `routing` is the
+          // return of the same `routeMessage` call the preview renders from — so the sentence under
+          // the turn and the label above the send button describe one decision rather than two.
+          routeReason: routing.reason,
           // §8.1's `selection:` line, when something is selected. Three fields rather than the
           // step: the block says WHICH step is open, and `explain` is the route that carries a
           // step's input, output and error because explaining one is its whole job.

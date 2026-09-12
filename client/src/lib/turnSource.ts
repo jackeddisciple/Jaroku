@@ -109,7 +109,51 @@ export function metaForTurn(turn: ChatTurn): TurnMeta | null {
     durationMs: usage?.duration_ms ?? null,
     ordinal: usage?.variant_ordinal ?? 1,
     total: usage?.variant_total ?? 1,
+
+    // §13's FOUR, AND EVERY ONE OF THEM READ FROM THE TURN. §6.2's rule governs these as much as
+    // the model and the effort: "the level actually applied to this request, read from the turn
+    // record — not the current toolbar value, which may have changed since."
+    //
+    // §13.2's REASON IS CARRIED RATHER THAN RECONSTRUCTED. The router produced it at the moment it
+    // decided, the dispatch sent it, and the server recorded it — so what the chip explains is what
+    // actually happened. A function here that looked at the message and worked out what the router
+    // probably did would be the reconstruction §13.2 forbids, and it would disagree the first time
+    // either changed.
+    route: usage?.route ?? routeOf(turn),
+    routeReason: usage?.route_reason ?? null,
+    totalTokens: usage?.total_tokens ?? null,
+    // `?? null` AND NOT `?? 0`. An unpriced model recorded no cost, and §10's rule is that unknown
+    // is excluded rather than reading as free.
+    costUsd: usage?.turn_cost_usd ?? null,
   };
+}
+
+/**
+ * §13.3's fallback: which route a turn's KIND implies, when nothing recorded one.
+ *
+ * "THE SAME LINE APPEARS ON PLAN TURNS, GENERATION TURNS AND EDIT TURNS — not only chat. A
+ * provenance line that exists on one turn type and not others is worse than none, because its
+ * absence reads as meaning something." The chat and explain routes carry their route on the wire
+ * because the ROUTER decided it; a plan, a generation and a proposal did not go through that
+ * decision at all — they are what the plan gate and the edit loop produce, and the turn's own kind
+ * is the whole of what there is to say.
+ *
+ * THIS IS NOT THE RECONSTRUCTION §13.2 FORBIDS, and the difference is worth being precise about.
+ * §13.2 is about the REASON: a sentence claiming why the router chose something, worked out after
+ * the fact, can disagree with the actual decision. This is a turn kind mapped to the name of the
+ * route that produces that kind — a fact about the type, not a guess about a decision — and there is
+ * no reason attached to it, which is why `routeReason` stays null on those turns.
+ */
+function routeOf(turn: ChatTurn): string | null {
+  if (turn.role === "user") return null;
+  switch (turn.kind) {
+    case "plan": return "plan";
+    case "gen": return "generate";
+    case "proposal": return "edit";
+    // A REPLY WITHOUT A RECORDED ROUTE predates §3's router writing one, and `chat` would be a
+    // guess: the same turn kind is what `explain` produces. Null, and the chip is absent.
+    default: return null;
+  }
 }
 
 /** Line counts off the diff the card is already rendering, when the server did not send them. */

@@ -1470,6 +1470,8 @@ export function sendChat(
     model?: string;
     /** §8.1's `selection:` line. Three fields, not the step — see the command's own note. */
     selection?: { seq: number; type: string; name: string };
+    /** §13.2's reason, from the router that decided. See the command's own note. */
+    routeReason?: string;
   },
 ): void {
   send({
@@ -1479,6 +1481,7 @@ export function sendChat(
     ...(opts?.regenerateOf ? { regenerateOf: opts.regenerateOf } : {}),
     ...(opts?.model ? { model: opts.model } : {}),
     ...(opts?.selection ? { selection: opts.selection } : {}),
+    ...(opts?.routeReason ? { routeReason: opts.routeReason } : {}),
   });
 }
 

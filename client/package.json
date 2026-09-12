@@ -31,6 +31,7 @@
     "test:recent-agent": "tsx src/lib/recentAgent.test.ts",
     "test:effort-levels": "tsx src/lib/effortLevels.test.ts",
     "test:connector-deck": "tsx src/lib/connectorDeck.test.ts",
+    "test:turn-source": "tsx src/lib/turnSource.test.ts",
     "test:turn-metadata": "tsx src/lib/turnMetadata.test.ts",
     "test:rerun": "tsx src/lib/rerun.test.ts",
     "test:run-model": "tsx src/store/runModel.test.ts",

@@ -196,6 +196,22 @@ export interface GenUsage {
   // READ BACK FROM `turn_variants` RATHER THAN SUMMED HERE, so the figure on screen is the figure
   // in the table. §10's blocker-class defect is two arithmetics disagreeing.
 
+  /**
+   * §13.1's ROUTE — which intent handled this message.
+   *
+   * ON THE USAGE PAYLOAD rather than on the turn, for the reason every other field here is: a
+   * regenerated turn has several requests and each one was routed. When the variant switcher moves,
+   * this moves with it — which is what stops a sibling answered by one route being labelled with
+   * another's.
+   */
+  route?: string;
+  /**
+   * §13.2's reason, in plain language — "No build-request signal; nothing selected."
+   *
+   * FROM THE ROUTER'S OWN RECORD. §13.2: "it is not reconstructed afterward, because a
+   * reconstruction can disagree with the actual decision and then the explanation is itself a lie."
+   */
+  route_reason?: string;
   /** §13.1's token count: the total this response spent. Absent when nothing measured it. */
   total_tokens?: number;
   /**
@@ -2183,6 +2199,10 @@ export type ClientCommand =
       // §8.1's `selection:` line — three fields, not the step. `explain` carries the whole step
       // because explaining one is the job; this only has to say WHICH step is open.
       selection?: { seq: number; type: string; name: string };
+      // §13.2's reason, from the router that actually decided. Carried rather than re-derived
+      // server-side: the router runs HERE, by v0.1.7's design, and a reconstruction can disagree
+      // with the decision it claims to explain.
+      routeReason?: string;
     }
   // §6.1's Stop. It names the conversation and nothing else: there is at most one answer in flight
   // per thread, so a turn id would be a second identifier for the same thing.

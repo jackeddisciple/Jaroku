@@ -4,6 +4,11 @@
 // switcher. Never reorder based on availability; absent items collapse, the rest hold position.
 // Stability matters more than density — people learn the position of the thing they check most."
 //
+// §13 ADDS FOUR SLOTS AND MOVES NONE OF THOSE FIVE. The route leads and the tokens and cost follow
+// the duration, so every position §6.5 established is where it was. That is not politeness to the
+// old rule — it IS the old rule: "people learn the position of the thing they check most", and a
+// line that reordered itself when a feature landed would have cost every reader that.
+//
 // Reordering on availability is the natural thing to write. You have four optional items, you map
 // over the ones that exist, and the row looks perfect on every turn you happen to be looking at.
 // What it costs is that the duration is in a different place on a turn that produced code than on
@@ -17,8 +22,26 @@
 //
 //   npm run test:turn-metadata
 
-/** §6.5's order, and there is no other. */
-export const METADATA_SLOTS = ["model", "effort", "build", "duration", "variants"] as const;
+/**
+ * §6.5's order, and §13's four additions to it.
+ *
+ * `route` LEADS, and that is §13's own shape: "chat · claude-haiku-4-5 · 1,204 tok · $0.0003". The
+ * route is the first thing on the line because it is the thing a reader is checking — §13 exists
+ * because "now that routing is inverted, the router is making a judgement call on every message. A
+ * black box that silently decides does not earn trust."
+ *
+ * `tokens` AND `cost` COME LAST, AFTER THE DURATION, which keeps every position §6.5 already
+ * established: model, effort, build and duration are where they were, so the number somebody
+ * glances at forty times an hour has not moved. §6.5's rule is that "stability matters more than
+ * density — people learn the position of the thing they check most", and adding to the ends is the
+ * only way to add without moving anything.
+ *
+ * `variants` STAYS LAST because it is the one slot that is not a readout: it is a control, and §6's
+ * row pushes it to the right edge with `ml-auto`.
+ */
+export const METADATA_SLOTS = [
+  "route", "model", "effort", "build", "duration", "tokens", "cost", "variants",
+] as const;
 
 export type MetadataSlot = (typeof METADATA_SLOTS)[number];
 
@@ -40,6 +63,40 @@ export interface TurnMeta {
   /** 1-based. `total` above 1 is what renders the `‹ 2/2 ›` switcher. */
   ordinal: number;
   total: number;
+
+  // --- §13's provenance line -------------------------------------------------------------------
+
+  /**
+   * WHICH INTENT HANDLED THIS MESSAGE — `chat`, `edit`, `explain`, `fix`, `plan`.
+   *
+   * §13.1 renders it with `Chip.tsx`, and §13.3 requires it on EVERY assistant turn rather than only
+   * on chat: "a provenance line that exists on one turn type and not others is worse than none,
+   * because its absence reads as meaning something."
+   *
+   * Null on a turn whose route nothing recorded — every turn that predates §3's router writing one.
+   */
+  route: string | null;
+  /**
+   * WHY THAT ROUTE, in one line of plain language.
+   *
+   * §13.2: it "comes from the record the router already writes (§3.3, rule 5) — it is not
+   * reconstructed afterward, because a reconstruction can disagree with the actual decision and
+   * then the explanation is itself a lie."
+   *
+   * SHOWN BY EXPANDING THE ROUTE CHIP and nowhere else, so the line stays one line.
+   */
+  routeReason: string | null;
+  /** §13.1's token count: "total for the turn, tabular figure." Null when nothing measured it. */
+  totalTokens: number | null;
+  /**
+   * §13.1's cost, and §10's rule about it.
+   *
+   * "§10's figure. NOT DUPLICATED ELSEWHERE ON THE TURN — this line IS where cost lives."
+   *
+   * `null` MEANS UNKNOWN AND IS NOT ZERO. An unpriced model recorded no cost; rendering `$0.0000`
+   * would read as "this was free", which is the failure v0.1.9 exists to prevent.
+   */
+  costUsd: number | null;
 }
 
 /**
@@ -51,6 +108,10 @@ export interface TurnMeta {
  */
 export function presentSlots(meta: TurnMeta): Set<MetadataSlot> {
   const slots = new Set<MetadataSlot>();
+  // §13.3: THE ROUTE IS ON EVERY TURN THAT HAS ONE, and its absence on a turn that does not is the
+  // honest gap rather than a guess — a chip reading "chat" under a plan card would be worse than
+  // no chip, which is the argument §13.3 makes about the line as a whole.
+  if (meta.route) slots.add("route");
   if (meta.modelId) slots.add("model");
   // §6.2: "Model has no reasoning control: omit the chip entirely rather than showing a
   // meaningless 'Low'." An applied level with no support behind it is a level nobody spent.
@@ -60,6 +121,14 @@ export function presentSlots(meta: TurnMeta): Set<MetadataSlot> {
   // A duration of null is unmeasured; a duration of 0 is a response that took under a millisecond,
   // which does not happen. Only null is absent.
   if (meta.durationMs !== null) slots.add("duration");
+  // §13.1's TOKENS AND COST. A count of 0 is a turn that measured nothing, which does not happen —
+  // only null is absent. The cost is the one figure where `null` and `0` are genuinely different
+  // claims, and both are renderable: "unknown" and "$0.0000".
+  if (meta.totalTokens !== null) slots.add("tokens");
+  // THE COST SLOT IS PRESENT WHENEVER THE TURN WAS MEASURED AT ALL, including when the figure is
+  // unknown — because §13.1 says this line IS where cost lives, and a line that silently omitted
+  // the one unknown figure would leave a reader to assume it was free. `null` renders as a word.
+  if (meta.costUsd !== null || meta.totalTokens !== null) slots.add("cost");
   // §5.4's switcher appears once there is something to switch between. One variant is not a choice.
   if (meta.total > 1) slots.add("variants");
   return slots;

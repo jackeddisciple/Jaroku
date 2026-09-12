@@ -1567,6 +1567,21 @@ export type ChatCommand = {
    */
   selection?: { seq: number; type: string; name: string };
   /**
+   * §13: WHY THE ROUTER SENT THIS HERE, in its own words.
+   *
+   * CARRIED FROM THE CLIENT BECAUSE THE CLIENT IS WHERE THE ROUTER RUNS. v0.1.7 chose deterministic
+   * heuristics over a per-message classifier so routing costs nothing and happens while somebody
+   * types — which means the decision is made in the browser, and §13.2's rule is that the
+   * explanation "comes from the record the router already writes… it is not reconstructed
+   * afterward, because a reconstruction can disagree with the actual decision and then the
+   * explanation is itself a lie." A server that re-derived it would be exactly that reconstruction,
+   * with less information than the client had.
+   *
+   * BOUNDED AND NEVER TRUSTED AS ANYTHING BUT TEXT. It is displayed and stored, never branched on —
+   * so the worst a client can do with it is show its own user a sentence they did not expect.
+   */
+  routeReason?: string;
+  /**
    * §6.2: ANSWER IT ON THIS MODEL INSTEAD.
    *
    * "Regenerating on a different model is a legitimate and useful thing to do, and the two replies
