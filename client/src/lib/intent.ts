@@ -332,8 +332,68 @@ function planScore(t: string): { score: number; signals: string[] } {
  * `classifyIntent` want a route and nothing else — widening its return type would have rewritten
  * every one of them to reach through a field, for a value they do not use.
  */
+/**
+ * THE PROSE SOMEBODY WROTE, WITH THE CODE THEY QUOTED TAKEN OUT — §3.2's asymmetry, applied to a
+ * paste.
+ *
+ * THE BUG THIS FIXES, FOUND IN §16's PASS. Every pattern in this file used to read the whole
+ * message, so a build verb inside a fence was indistinguishable from one somebody typed. The
+ * results were not near misses:
+ *
+ *   "what does `build me an agent` mean here?"        → generate, CONFIDENT
+ *   "why does this say that?\n```build an agent```"   → generate, CONFIDENT
+ *   "is `whenever a row lands, email me` valid?"      → generate, CONFIDENT
+ *
+ * All three are questions, two of them carry a question mark and an interrogative opener, and all
+ * three paid a real generation call and answered with a plan card. §3.2 names that exact failure as
+ * the expensive half of the asymmetry: "they get a full plan card in response to 'hi', they pay a
+ * real generation call, and the product looks like it does not understand plain language." §3.3
+ * rule 2 settles it — "plan requires positive, confident evidence", and a verb in material somebody
+ * is SHOWING you is not evidence about what they want.
+ *
+ * IT MATTERS MORE HERE THAN IT WOULD ELSEWHERE. This is a tool for building agents: people paste
+ * tracebacks, READMEs, prompts they are debugging and snippets they want read back. §16.1 lists
+ * "only code" as a routing attack and the suite already covered it — with `def handler(event)`,
+ * which routes to chat because it contains no build verb at all. It passed for a reason that had
+ * nothing to do with its being code.
+ *
+ * LINE-BASED, AND THAT IS DELIBERATE. A fence is a line construct in every markdown dialect, and
+ * walking lines has no backtracking surface at all — §16.1's other routing attack is 10,000
+ * characters, and this runs on every keystroke behind the live route preview.
+ *
+ * AN UNCLOSED FENCE SWALLOWS THE REST, which is what a truncated paste looks like and what every
+ * markdown renderer does with one.
+ *
+ * BLOCKQUOTES ARE LEFT ALONE, and that is a judgement rather than an oversight — see the note on
+ * the quoted-only rung in `routeMessage`.
+ */
+export function prose(text: string): string {
+  const kept: string[] = [];
+  let fence: string | null = null;
+  for (const line of text.split("\n")) {
+    const marker = /^[ \t]*(```+|~~~+)/.exec(line);
+    if (fence !== null) {
+      // A CLOSER MUST BE AT LEAST AS LONG AS ITS OPENER, so ``` does not close ````. Everything
+      // between them is dropped whether it closes or not.
+      if (marker && marker[1]!.startsWith(fence)) fence = null;
+      continue;
+    }
+    if (marker) { fence = marker[1]!; continue; }
+    kept.push(line);
+  }
+  return kept
+    .join("\n")
+    // Inline spans, and then any backtick left over. A SPACE rather than "", so that removing the
+    // span out of "watches `x` daily" cannot fuse two words into one the patterns then miss.
+    .replace(/`[^`\n]*`/g, " ")
+    .replace(/`+/g, " ")
+    .trim();
+}
+
 export function routeMessage(text: string, ctx: ComposerContext): Routing {
-  const t = text.trim();
+  // WHAT THEY SAID, NOT WHAT THEY PASTED. Every pattern below reads this rather than the raw
+  // message — see `prose` for the three confident mis-routes that made it necessary.
+  const t = prose(text);
   const chat = (reason: string, planEvidence: Routing["planEvidence"] = "none"): Routing => ({
     intent: { kind: "chat" }, reason, planEvidence,
   });
@@ -362,6 +422,26 @@ export function routeMessage(text: string, ctx: ComposerContext): Routing {
     return ctx.pendingPlanId
       ? { intent: { kind: "replan", planId: ctx.pendingPlanId }, reason: "A plan is waiting; this is feedback on it.", planEvidence: "none" }
       : { intent: { kind: "generate", into: ctx.agentId }, reason: "A draft agent is selected; this describes what to build into it.", planEvidence: "confident" };
+  }
+
+  // A MESSAGE THAT IS NOTHING BUT QUOTED CODE IS A CONVERSATION, because nobody asked for anything.
+  //
+  // Somebody pasted a traceback, a snippet or a config and pressed send. Without this rung an agent
+  // being open sends it to `edit` — the fallback two blocks down — and the editor is handed an
+  // instruction with no instruction in it; a selected DRAFT would generate from it.
+  //
+  // IT SITS BELOW THE PENDING-PLAN AND DRAFT RUNGS ON PURPOSE. "Here is the API I want you to use:
+  // ```…```" is legitimate feedback on a plan and a legitimate brief for a draft, and both of those
+  // rungs carry a contextual claim strong enough to keep the raw message. Everything from here down
+  // reads the prose, and with no prose there is nothing for any of it to match.
+  //
+  // BLOCKQUOTES ARE NOT STRIPPED AND SO DO NOT REACH THIS RUNG — a deliberate line. A fence and a
+  // backtick span mean "this is literal text I am showing you" in markdown's own grammar; a `>`
+  // means "these are words, and somebody said them", and words somebody said can still be the ask —
+  // "my boss said: > we need a bot that files receipts" is a build request being relayed. Treating
+  // the two the same would have moved that message to chat on a guess about who was talking.
+  if (t === "" && text.trim() !== "") {
+    return chat("Nothing but quoted code; there is no request in it.");
   }
 
   const step = ctx.step;

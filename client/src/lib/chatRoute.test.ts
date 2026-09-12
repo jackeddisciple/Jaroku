@@ -16,7 +16,10 @@
 //
 //   npm run test:chat-route
 
-import { classifyIntent, routeLabel, routeMessage, type ComposerContext, type Intent } from "./intent.ts";
+import {
+  classifyIntent, prose, routeLabel, routeMessage,
+  type ComposerContext, type Intent,
+} from "./intent.ts";
 import type { Step } from "../types.ts";
 
 let fail = 0;
@@ -333,6 +336,117 @@ console.log("\n§16's routing attacks");
   const withSel = route("why did this fail?", { agentId: "weather_agent", step: FAILED });
   const without = route("why did this fail?", { agentId: "weather_agent" });
   check("a selection changes the route", withSel === "explain" && without === "chat", { withSel, without });
+}
+
+
+// --- §16's pass: quoted code is not a request ------------------------------------------------
+//
+// THE BUG. Every pattern in the router read the whole message, so a build verb inside a fence was
+// indistinguishable from one somebody typed. Three of these were `generate` with CONFIDENT
+// evidence — two of them questions carrying both a question mark and an interrogative opener — and
+// each paid a real generation call to answer with a plan card. §3.2 names that as the expensive
+// half of the asymmetry; §3.3 rule 2 requires "positive, confident evidence", and a verb in
+// material somebody is SHOWING you is not evidence about what they want.
+//
+// THE SUITE ALREADY HAD AN "only code" ROW AND IT PASSED THROUGHOUT, with `def handler(event)` —
+// which routes to chat because it contains no build verb at all. It was passing for a reason that
+// had nothing to do with its being code, which is the shape §16 exists to find.
+
+console.log("\n§16 — a paste is not a brief");
+{
+  const NO_AGENT: ComposerContext = { agentId: null };
+  const AGENT: ComposerContext = { agentId: "weather_agent" };
+  const DRAFT: ComposerContext = { agentId: "new_agent", agentIsDraft: true };
+
+  // THE THREE THAT WERE CONFIDENT. Each one now routes to chat, and the evidence band is `none`
+  // rather than `near` — there was never a signal, so §15.1 must not offer the build card either.
+  for (const [text, why] of [
+    ["what does `build me an agent` mean here?", "a question ABOUT a code span"],
+    ["why does this say that?\n```\nbuild an agent, they said\n```", "a question above a fenced quote"],
+    ["is `whenever a row lands, email me` a valid trigger?", "a question about a trigger's syntax"],
+  ] as const) {
+    const r = routeMessage(text, NO_AGENT);
+    check(`${why} → chat`, r.intent.kind === "chat", r.intent.kind);
+    check(`...and offers no build card`, r.planEvidence === "none", r.planEvidence);
+  }
+
+  // EVERY FENCE DIALECT, and the shapes a real paste arrives in.
+  for (const [text, why] of [
+    ["```\nbuild me an agent that watches my inbox\n```", "a bare fence"],
+    ["```md\n# README\nbuild an agent that summarises mail\n```", "a fenced README with an info string"],
+    ["~~~\nbuild me a bot\n~~~", "a tilde fence"],
+    ["look at this:\n```\nbuild me an agent\n```", "prose with no ask, above a fence"],
+    // A TRUNCATED PASTE. Markdown renders an unclosed fence as code to the end, and so does this.
+    ["```\nbuild me an agent", "an unclosed fence"],
+  ] as const) {
+    check(`${why} → chat`, routeMessage(text, NO_AGENT).intent.kind === "chat",
+      routeMessage(text, NO_AGENT).intent.kind);
+  }
+
+  // A CLOSER MUST BE AT LEAST AS LONG AS ITS OPENER — ``` does not close ````, so the inner fence
+  // is content and the whole thing is still quoted.
+  check("``` does not close ````",
+    routeMessage("````\n```\nbuild me an agent\n```\n````", NO_AGENT).intent.kind === "chat",
+    routeMessage("````\n```\nbuild me an agent\n```\n````", NO_AGENT).intent.kind);
+
+  // AND THE PROSE STILL DECIDES WHEN THERE IS PROSE. This is the half that makes the fix a fix
+  // rather than a refusal to route: the ask is in the sentence, the fence is the illustration.
+  const asked = routeMessage("build me an agent that does this:\n```\ndef f(): pass\n```", NO_AGENT);
+  check("an ask above a fence still generates", asked.intent.kind === "generate", asked.intent.kind);
+  check("...confidently", asked.planEvidence === "confident", asked.planEvidence);
+
+  // WHERE THE FIX STOPS, ASSERTED RATHER THAN LEFT TO BE DISCOVERED.
+  //
+  // This originally asserted `chat`, which was a claim about what I wanted the fix to cover rather
+  // than what it does. `prose` strips material somebody MARKED as quoted. Unfenced code carrying an
+  // English build sentence has no marker on it, so the router reads it as typed prose and plans:
+  //
+  //   "def build_agent():\n    make an agent that watches inbox"   → generate
+  //
+  // AND WIDENING IT IS THE WRONG TRADE, on §3.1's own argument: recognising code by its shape means
+  // indentation, braces, `def`, semicolons, a colon-terminated line — and "the pattern list is
+  // unbounded. Every miss produces another pattern, and every pattern widens the false-positive
+  // surface." Each of those patterns would also fire on ordinary sentences. The real-world shape
+  // this leaves open is pasting a prompt file raw; wrapping it in a fence routes it correctly, and
+  // §15.2's "just asking" card is the one-click recovery §3.2 describes for the rest.
+  check("unfenced code carrying an English ask still plans — a documented limit",
+    routeMessage("def build_agent():\n    make an agent that watches inbox\n    return 1", NO_AGENT)
+      .intent.kind === "generate");
+
+  // AN ALL-QUOTED MESSAGE WITH AN AGENT OPEN IS A CONVERSATION, not an edit. Without the rung the
+  // agent-selected fallback hands the editor an instruction with no instruction in it.
+  check("a fenced paste with an agent open → chat",
+    routeMessage("```\nadd a retry\n```", AGENT).intent.kind === "chat",
+    routeMessage("```\nadd a retry\n```", AGENT).intent.kind);
+  // ...AND WITH A DRAFT OPEN IT IS A BRIEF, because that rung sits ABOVE the quoted-only check on
+  // purpose: "here is the API I want you to use: ```…```" is a legitimate brief for a draft.
+  check("a fenced paste with a DRAFT open still generates into it",
+    routeMessage("```\nGET /v1/messages\n```", DRAFT).intent.kind === "generate");
+
+  // BLOCKQUOTES ARE DELIBERATELY NOT STRIPPED. A fence means "literal text I am showing you" in
+  // markdown's own grammar; a `>` means "somebody said this", and what somebody said can still be
+  // the ask — "my boss said: > we need a bot that files receipts" is a build request being relayed.
+  // Asserted so the decision is visible rather than incidental.
+  check("a relayed build request is still a build request",
+    routeMessage("my boss said:\n> we need a bot that files receipts", NO_AGENT).intent.kind === "generate");
+
+  // NO BACKTRACKING SURFACE. `prose` walks lines, and this runs on every keystroke behind the live
+  // route preview — §16.1's 10,000-character attack applied to the new code path.
+  const huge = "```\n" + "x".repeat(10_000) + "\n```\n" + "`y`".repeat(2_000);
+  const started = Date.now();
+  const r = routeMessage(huge, NO_AGENT);
+  const elapsed = Date.now() - started;
+  check(`12,000 characters of fences and spans strip in ${elapsed}ms`, elapsed < 250, elapsed);
+  check("...and say nothing", r.intent.kind === "chat", r.intent.kind);
+
+  // `prose` ITSELF, on the cases where the seam is easy to get wrong.
+  check("a span is replaced by a space, never closed up",
+    prose("watches `x` daily") === "watches   daily", JSON.stringify(prose("watches `x` daily")));
+  check("a message with no code comes back unchanged",
+    prose("build me an agent") === "build me an agent");
+  check("a lone backtick does not fuse words",
+    prose("a ` b") === "a   b", JSON.stringify(prose("a ` b")));
+  check("nothing but a fence is empty", prose("```\nx\n```") === "");
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
