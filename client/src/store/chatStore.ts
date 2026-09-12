@@ -1036,19 +1036,51 @@ export const useChatStore = create<ChatState>((set) => ({
    */
   replyInterrupted: () =>
     set((s) => {
-      const key = s.streamingThreadId ?? undefined;
-      const turns = turnsIn(s, key);
-      const open = turns.find(
-        (t): t is ReplyTurn => t.role === "jaroku" && t.kind === "reply" && t.status === "streaming",
-      );
+      // EVERY THREAD, NOT THE ONE IN `streamingThreadId` — which is what the note above this action
+      // already promised ("whatever was streaming, WHEREVER it was streaming") and what §16's pass
+      // found it not doing.
+      //
+      // TWO CHAT STREAMS CAN BE LIVE AT ONCE. The server serialises chat PER THREAD — the
+      // `chatting` set is keyed by thread id — so sending in one conversation, switching to another
+      // and sending there leaves two answers arriving, which §16.1 attacks as "two threads
+      // interleaved rapidly on one agent". `streamingThreadId` holds one of them, so a dropped
+      // socket marked that one and left the other reading `streaming` for ever: a live thinking
+      // indicator and an amber duration counting up under an answer that will never arrive.
+      //
+      // AND IT WAS UNRECOVERABLE IN SESSION, which is what decides the severity. The action row
+      // hides both Stop and Regenerate on a turn whose status is `streaming`, so there was no
+      // control left to press — only a reload, which rebuilds from the record and clears it.
+      const patch = (turns: ChatTurn[]): ChatTurn[] | null => {
+        let hit = false;
+        const next = turns.map((t) => {
+          if (t.role === "jaroku" && t.kind === "reply" && t.status === "streaming") {
+            hit = true;
+            return { ...t, status: "interrupted" as const };
+          }
+          return t;
+        });
+        return hit ? next : null;
+      };
+
+      const threads: Record<string, ChatTurn[]> = { ...s.threads };
+      let touched = false;
+      for (const [id, turns] of Object.entries(s.threads)) {
+        const next = patch(turns);
+        if (next) { threads[id] = next; touched = true; }
+      }
+      // `pending` IS A CONVERSATION TOO — the one before a thread exists, which is where a first
+      // message lands. Leaving it out would strand exactly the turn a new user is watching.
+      const pending = patch(s.pending);
+
       // NOT AN INFO TURN WHEN THERE IS NOTHING OPEN. A dropped socket with no answer in flight is
       // the connection banner's business, and this store adding a line about it would put one in
       // whichever conversation happened to be on screen — which is the defect `pending` exists for.
-      if (!open) return { streamingAgentId: null, streamingThreadId: null };
+      if (!touched && !pending) return { streamingAgentId: null, streamingThreadId: null };
       return {
         streamingAgentId: null,
         streamingThreadId: null,
-        ...putTurns(s, key, replaceTurn(turns, open.id, { ...open, status: "interrupted" as const })),
+        ...(touched ? { threads } : {}),
+        ...(pending ? { pending } : {}),
       };
     }),
 }));

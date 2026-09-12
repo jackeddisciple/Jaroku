@@ -638,5 +638,76 @@ console.log("\n§16 — a stopped answer survives a relaunch as stopped");
 }
 
 
+// --- §16.1: two threads interleaved rapidly on one agent -------------------------------------
+//
+// THE BUG. The server serialises chat PER THREAD — the `chatting` set is keyed by thread id — so
+// two answers can be arriving at once: send in one conversation, switch, send in another.
+// `replyInterrupted` marked only the turn in `streamingThreadId`, which holds one of them, so a
+// dropped socket left the other reading `streaming` for ever.
+//
+// ITS OWN NOTE ALREADY PROMISED OTHERWISE: "this marks whatever was streaming, WHEREVER it was
+// streaming." The single-thread read was the gap between the sentence and the code.
+//
+// AND THE STRANDED TURN COULD NOT BE RECOVERED IN SESSION. `TurnActions` renders Stop and
+// Regenerate under opposite halves of the same `streaming` flag, so a turn stuck in that state has
+// neither — a live thinking indicator and an amber duration counting up, with no control to press.
+
+console.log("\n§16 — a dropped socket interrupts every live answer");
+{
+  reset();
+  const A = "thread-a";
+  const B = "thread-b";
+  store().replyStarted({ threadId: A, agentId: "weather_agent", question: "why did the last run fail?" });
+  store().replyDelta({ threadId: A, agentId: "weather_agent", text: "Step 7 timed out because" });
+  // SWITCHING CONVERSATIONS AND SENDING AGAIN. Nothing refuses this: the thread id differs, so the
+  // server's per-thread gate does not apply.
+  store().replyStarted({ threadId: B, agentId: "weather_agent", question: "and the cost?" });
+  store().replyDelta({ threadId: B, agentId: "weather_agent", text: "About four" });
+
+  const inA = () => (store().threads[A] ?? []).filter((t) => t.role === "jaroku" && t.kind === "reply");
+  const inB = () => (store().threads[B] ?? []).filter((t) => t.role === "jaroku" && t.kind === "reply");
+  check("both threads have an answer arriving",
+    inA().length === 1 && inB().length === 1, [inA().length, inB().length]);
+  // THE DELTAS LANDED IN THE RIGHT CONVERSATIONS, which was already true — `replyDelta` keys by the
+  // event's own thread id. Asserted so the fix below cannot be mistaken for fixing this.
+  check("...each with its own text",
+    (inA()[0] as { text: string }).text.startsWith("Step 7")
+    && (inB()[0] as { text: string }).text.startsWith("About four"));
+
+  store().replyInterrupted();
+  check("the tracked thread's answer is interrupted",
+    (inB()[0] as { status: string }).status === "interrupted", (inB()[0] as { status: string }).status);
+  // THE ONE THAT WAS NOT TRACKED. This is the assertion that was failing.
+  check("...and so is the other one",
+    (inA()[0] as { status: string }).status === "interrupted", (inA()[0] as { status: string }).status);
+  check("nothing is left streaming anywhere",
+    ![...inA(), ...inB()].some((t) => (t as { status: string }).status === "streaming"));
+  check("...and the store holds no stream", store().streamingThreadId === null);
+  // WHAT ARRIVED IS KEPT IN BOTH, which is §5's rule and the reason this is `interrupted` rather
+  // than a discard.
+  check("both partials survive",
+    (inA()[0] as { text: string }).text === "Step 7 timed out because"
+    && (inB()[0] as { text: string }).text === "About four");
+
+  // `pending` IS A CONVERSATION TOO — the one before a thread exists. A first message streams
+  // there, and leaving it out would strand exactly the turn a new user is watching.
+  reset();
+  store().replyStarted({ agentId: "weather_agent", question: "hi" });
+  store().replyDelta({ agentId: "weather_agent", text: "Hel" });
+  store().replyInterrupted();
+  const stray = store().pending.filter((t) => t.role === "jaroku" && t.kind === "reply");
+  check("a pending answer is interrupted too",
+    (stray[0] as { status: string })?.status === "interrupted", (stray[0] as { status: string })?.status);
+
+  // AND A FINISHED TURN IN ANOTHER THREAD IS NOT RE-MARKED, so the sweep touches only what is live.
+  reset();
+  store().replyStarted({ threadId: A, agentId: "weather_agent", question: "done already" });
+  store().replyDone({ threadId: A, agentId: "weather_agent" });
+  store().replyStarted({ threadId: B, agentId: "weather_agent", question: "still going" });
+  store().replyInterrupted();
+  check("the finished answer stays done", (inA()[0] as { status: string }).status === "done", (inA()[0] as { status: string }).status);
+  check("...and the live one is interrupted", (inB()[0] as { status: string }).status === "interrupted");
+}
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 (globalThis as { process?: { exit(code: number): void } }).process?.exit(fail === 0 ? 0 : 1);
