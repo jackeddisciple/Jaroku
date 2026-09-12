@@ -150,5 +150,35 @@ console.log("\n§16 — R cannot regenerate a turn that is still arriving");
 }
 
 
+// --- §16.1's DESKTOP ROW: offline send ---------------------------------------------------------
+//
+// THE ATTACK: press Send with no connection. `submit` returns early on `!connected`, so nothing
+// phantom is appended to the thread and the draft is not cleared — that half was already right.
+// What was missing was the sentence: Send disables on `!connected` beside `overBudget` and
+// `missingKey`, each of which had a notice, and this one had none. So a dropped socket left a greyed
+// arrow whose tooltip still promised a route, which is the mismatch §3.4 paid for once already and
+// the standard the button's own comment states: "a disabled button is never unexplained."
+//
+// BOTH GUARDS PREDATE THIS FEATURE. Running the attack is what surfaced them.
+
+console.log("\n§16 — a disabled Send says why");
+{
+  check("the draft survives an offline press",
+    /if \(!connected \|\| !trimmed\) return;/.test(pane), "submit's early return");
+  // THE NOTICE, and it is a `role="status"` line like the budget one rather than a new mechanism.
+  const at = pane.indexOf("{!connected && (");
+  check("a notice renders when disconnected", at > 0, String(at));
+  const notice = pane.slice(at, at + 700);
+  check('...as role="status"', /role="status"/.test(notice), notice.slice(0, 200));
+  check("...saying the draft is kept", /draft is kept/.test(notice), notice.slice(0, 400));
+  // AND THE BUTTON ITSELF, checked ahead of the key and the mode — the order matters, because
+  // `missingKey` is false on a fresh disconnect and would otherwise win the ternary.
+  check("the button's label names it first",
+    /aria-label=\{!connected \? OFFLINE_SEND/.test(pane), "aria-label order");
+  check("...and so does its tooltip", /title=\{!connected \? OFFLINE_SEND/.test(pane), "title order");
+  check("...from one string, so hover and screen reader agree",
+    (pane.match(/OFFLINE_SEND/g) ?? []).length === 3, String((pane.match(/OFFLINE_SEND/g) ?? []).length));
+}
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 (globalThis as { process?: { exit(code: number): void } }).process?.exit(fail === 0 ? 0 : 1);

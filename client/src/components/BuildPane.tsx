@@ -1922,6 +1922,14 @@ export function BuildPane({
         ? chatProviderNeeded
         : (canBuild(providerStatuses) ? null : "anthropic");
   const missingKeyLabel = missingKey ? providerLabelOf(providerModels, missingKey) : "";
+  /**
+   * §16.1's offline-send attack: the sentence a greyed Send owes the person pressing it.
+   *
+   * ONE STRING FOR THE TOOLTIP AND THE ACCESSIBLE NAME, so a screen reader and a hover say the
+   * same thing — and it names the draft, because "your message is gone" is the fear and it is not
+   * true: `submit` returns before touching the text.
+   */
+  const OFFLINE_SEND = "Not connected — your draft is kept until the connection returns";
   const keyAsk = missingKey
     ? `Add ${/^[AEIOU]/.test(missingKeyLabel) ? "an" : "a"} ${missingKeyLabel} key to ${
       composerMode === "test"
@@ -3131,6 +3139,29 @@ export function BuildPane({
             </div>
           )}
 
+          {/* §16.1's OFFLINE-SEND ATTACK, and the send button's own standard applied to it: "a
+              disabled button is never unexplained." Send disables on `!connected` alongside
+              `overBudget` and `missingKey`, and those two each had a notice — this one had none, so
+              a dropped socket left a greyed arrow with a tooltip still promising a route.
+
+              THE DRAFT WAS NEVER AT RISK: `submit` returns early on `!connected`, so nothing
+              phantom is appended and nothing is cleared. What was missing was the sentence. Both
+              guards predate this feature; the attack is what surfaced them. */}
+          {!connected && (
+            <div
+              className="mb-2 flex items-start gap-2 rounded-card border border-edge bg-bg px-2.5 py-2 text-tiny"
+              role="status"
+            >
+              <span className="shrink-0" style={{ color: STATUS.warn }} aria-hidden>
+                <AlertTriangleIcon size={ICON.xs} />
+              </span>
+              <span className="min-w-0 flex-1 text-muted">
+                Not connected to the Jaroku server — reconnecting. Your draft is kept; send as soon
+                as this clears.
+              </span>
+            </div>
+          )}
+
           {/* input slot: the textarea and the live waveform crossfade in place (~200ms) so the
               transition from typing to recording is smooth and the card doesn't jump. */}
           <div
@@ -3487,8 +3518,11 @@ export function BuildPane({
                     // makes a judgement call on every message. A preview that reads one route beside
                     // a button that describes none is the class of defect v0.2.2 already paid for
                     // ("the composer described a context it was about to ignore").
-                    aria-label={missingKey ? keyAsk : composerMode === "test" ? "Run the agent on this input" : `Send — ${routeLabel(intent)}`}
-                    title={missingKey ? keyAsk : composerMode === "test" ? "Run the agent on this input" : `Send — ${routeLabel(intent)} (${keyHint("⌘↵")})`}
+                    // NOT CONNECTED IS CHECKED FIRST, ahead of the key and the mode: it is the one
+                    // state where none of the other labels is true yet, and a tooltip promising a
+                    // route on a button that cannot dispatch is the mismatch §3.4 already paid for.
+                    aria-label={!connected ? OFFLINE_SEND : missingKey ? keyAsk : composerMode === "test" ? "Run the agent on this input" : `Send — ${routeLabel(intent)}`}
+                    title={!connected ? OFFLINE_SEND : missingKey ? keyAsk : composerMode === "test" ? "Run the agent on this input" : `Send — ${routeLabel(intent)} (${keyHint("⌘↵")})`}
                     // The one ink-filled control on the screen, and the only one in this bar that
                     // is not a glyph on open background.
                     //
