@@ -323,5 +323,39 @@ console.log("\na stopped answer's cost");
     usageFromPartial(CHAT_MODEL, { usage: { input_tokens: null, output_tokens: null } })?.input === 0);
 }
 
+
+// --- §16's pass: a deleted agent is not the planning stage ------------------------------------
+//
+// THE BUG. `chatGrounding` returns `agentName: null` both for a thread that never had an agent and
+// for one whose agent was deleted while it was open, and the block asserted the first for both:
+//
+//   agent:       none — this conversation has no agent yet (the planning stage)
+//
+// ...under four turns of history about an agent that existed. §8.1 asks for this distinction in so
+// many words — the block exists "so the model knows the difference between 'no agent' and 'agent
+// unknown'" — and §16.1 attacks it twice, in the Memory row and the Grounding row.
+
+console.log("\n§16 — a deleted agent says so");
+{
+  const gone = chatContext({
+    agentName: null,
+    missingAgentSlug: "weather_agent",
+    thread: { turns: 4, costUsd: 0.031, costKnown: true },
+  });
+  check("it does not claim the planning stage", !/planning stage/.test(gone), gone);
+  check("...it says the agent is gone", /gone —/.test(gone), gone);
+  check("...and names which one", /weather_agent/.test(gone), gone);
+  // THE THREAD LINE SURVIVES, because the turns and the spend are still facts about this
+  // conversation — losing them would answer "how much has this cost?" with nothing.
+  check("...while the thread's own figures stand", /4 turns/.test(gone) && /\$0\.0310/.test(gone), gone);
+  // AND NO AGENT DETAIL IS INVENTED for a row that could not be read.
+  check("...and nothing is invented about it", !/ · v\d/.test(gone) && !/tools/.test(gone), gone);
+
+  // A THREAD THAT NEVER HAD AN AGENT still gets §8.1's original sentence, unchanged.
+  const never = chatContext({ agentName: null, thread: { turns: 1, costUsd: null, costKnown: true } });
+  check("a thread with agent_id null is still the planning stage", /planning stage/.test(never), never);
+  check("...and does not read as gone", !/gone —/.test(never), never);
+}
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 process.exit(fail === 0 ? 0 : 1);

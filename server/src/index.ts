@@ -13303,7 +13303,10 @@ async function chatGrounding(
     if (!agentSlug) return { ...base, thread };
 
     const agent = await agentRepo.bySlug(ctx, agentSlug).catch(() => null);
-    if (!agent) return { ...base, thread };
+    // §8.1's "no agent" AND "agent unknown" ARE DIFFERENT FACTS. The thread still points at a slug;
+    // what is gone is the agent behind it, and the block says so rather than claiming this
+    // conversation never had one.
+    if (!agent) return { ...base, thread, missingAgentSlug: agentSlug };
 
     const [deployments, lastRun, versions] = await Promise.all([
       deployStore.currentByAgent(ctx).catch(() => new Map()),

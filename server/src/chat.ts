@@ -90,6 +90,19 @@ export const CHAT_MAX_TOKENS = 900;
 export interface ChatGrounding {
   /** The agent's display name, or null for a thread with `agent_id` null. */
   agentName: string | null;
+  /**
+   * THE SLUG A THREAD STILL POINTS AT WHEN THE AGENT BEHIND IT IS NO LONGER THERE.
+   *
+   * §8.1 asks for the block to distinguish "no agent" from "agent unknown" in so many words — "so
+   * the model knows the difference" — and `agentName: null` alone cannot: a thread that never had
+   * an agent and a thread whose agent was deleted mid-conversation produce the same null. Before
+   * this field the block asserted the first for both, telling the model a four-turn conversation
+   * about a deleted agent was "the planning stage".
+   *
+   * IT COVERS DELETED, RENAMED AND MOVED, because the lookup that failed cannot tell them apart and
+   * the line says only what is known: the thread points at a slug this workspace no longer has.
+   */
+  missingAgentSlug?: string | null;
   /** Its current version number. Null when there is no agent, never 0 for one that exists. */
   version?: number | null;
   /**
@@ -154,7 +167,15 @@ export function chatContext(g: ChatGrounding): string {
     // §8.1'S ABSENT-AGENT RULE. "When no agent is selected — the planning stage, a thread with
     // `agent_id` null — the block says that plainly rather than being omitted, so the model knows
     // the difference between 'no agent' and 'agent unknown'."
-    lines.push("agent:       none — this conversation has no agent yet (the planning stage)");
+    //
+    // AND THOSE ARE TWO DIFFERENT SENTENCES, which is the half §16's pass found missing. A thread
+    // whose agent was deleted while it was open is not at the planning stage: it has a history of
+    // turns about an agent that existed, and telling the model otherwise makes it answer "what does
+    // this agent do?" as though nothing had been built. §8.3 treats the product asserting something
+    // false about its own state as the most serious class there is.
+    lines.push(g.missingAgentSlug
+      ? `agent:       gone — this conversation was about \`${g.missingAgentSlug}\`, which is no longer in this workspace`
+      : "agent:       none — this conversation has no agent yet (the planning stage)");
   } else {
     const parts = [g.agentName];
     if (typeof g.version === "number") parts.push(`v${g.version}`);
