@@ -1328,6 +1328,12 @@ jobs:
           # answer. The fixtures are captured output rather than the documented shape, because the
           # documented shape is what a parser tested against a document agrees with.
           npm run test:provider-turn
+          # AND THE SEAMS BETWEEN THE PIECES, which the parser suite above cannot reach: listening
+          # before the process starts, appending deltas in order, settling exactly once, refusing to
+          # record a failure as an answer, and cancelling the process that is spending somebody's
+          # plan. The stand-in replaces the SHELL, never the provider — the JSON it plays is lines
+          # both CLIs really printed, so this tests the wiring rather than an idea of the protocol.
+          npm run test:provider-turn-flow
           # WHICH OF THE TWO WINDOWS THE PAGE ASKS FOR, and the two ways that goes wrong. The
           # welcome screen is a 560px window and the application is 1440, only the bundle knows
           # which of them a launch needs, and a webview cannot resize the frame it is inside — so
