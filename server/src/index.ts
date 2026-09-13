@@ -13538,10 +13538,17 @@ async function recordChatTurn(ctx: TenantContext, cmd: RecordChatTurnCommand): P
     return;
   }
 
-  const thread = await threadForWork(ctx, cmd.threadId, cmd.agentId ?? null);
-  if (!thread) return;
+  // NAMED `threadId` RATHER THAN `thread`, and not only for accuracy. `threadChannel.test.ts`
+  // locates the chat route by searching index.ts for `const thread = await threadForWork(...)`,
+  // takes the 2,600 characters after it, and asserts the navigation code is in there. This function
+  // sits above `chatWithJaroku`, so an identically-spelled line here is the one that suite finds —
+  // and it then reports the chat route as having lost its §4.3 behaviour, which is six failures
+  // pointing at innocent code. It is an id; calling it one costs nothing and keeps that anchor
+  // unambiguous.
+  const threadId = await threadForWork(ctx, cmd.threadId, cmd.agentId ?? null);
+  if (!threadId) return;
 
-  const turnId = await noteUserMessage(ctx, thread, question);
+  const turnId = await noteUserMessage(ctx, threadId, question);
   const settle = await openVariant(
     ctx,
     turnId,
