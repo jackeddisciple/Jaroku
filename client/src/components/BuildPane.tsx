@@ -18,9 +18,7 @@ import {
 } from "../store/chatStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { inputKey, useUiStore } from "../store/uiStore.ts";
-import {
-  canBuild, isRunnable, modelName, providerLabelOf, runProviders, useProviderStore,
-} from "../store/providerStore.ts";
+import { isRunnable, modelName, providerLabelOf, runProviders, useProviderStore } from "../store/providerStore.ts";
 import {
   sendApplyEdit, sendAskRecord, sendBranchRun, sendChat, sendDiscardEdit, sendDiscardPlan, sendDispatchWork,
   sendCreateThread, sendEditTurn, sendSelectVariant, sendStopChat,
@@ -60,6 +58,7 @@ import { refKey, type AttachKind, type AttachableRow } from "./composer/AttachPi
 import { MAX_ATTACHMENTS, WARN_AT, budgetPercent } from "../lib/attachBudget.ts";
 import { EffortControl } from "./composer/EffortControl.tsx";
 import { canRunLocally, runLocalTurn } from "../lib/providerTurn.ts";
+import { useSubscriptionConnected } from "./ProviderSubscriptions.tsx";
 import { effortName, effortStops, stopFor } from "../lib/effortLevels.ts";
 import { ShieldControl, modeLabel } from "./composer/ShieldControl.tsx";
 import { GreetingEmoji } from "./GreetingEmoji.tsx";
@@ -2087,6 +2086,9 @@ export function BuildPane({
    */
   const chatProviderNeeded = chatProvider || "anthropic";
 
+  /** Whether ANY provider subscription is connected on this machine. The Chat gate's whole question. */
+  const subscriptionConnected = useSubscriptionConnected();
+
   /**
    * Whether THIS turn should run on the user's own subscription rather than on the server.
    *
@@ -2130,15 +2132,23 @@ export function BuildPane({
   /** The turn in flight, so Stop can kill the process that is spending the plan. */
   const localTurnRef = useRef<{ cancel: () => void } | null>(null);
 
-  const missingKey: string | null = !providersLoaded || operating ? null
-    : composerMode === "test"
-      ? (isRunnable(providerStatuses, provider) ? null : provider || "anthropic")
-      // CHAT MODE NEEDS THE PROVIDER IT IS ABOUT TO TALK TO. `canBuild` still gates the BUILD
-      // routes — a plan, a generation and an edit are Anthropic's whatever the conversation is set
-      // to — so both are checked and the one in the way is named.
-      : !isRunnable(providerStatuses, chatProviderNeeded)
-        ? chatProviderNeeded
-        : (canBuild(providerStatuses) ? null : "anthropic");
+  /**
+   * CHAT NEEDS A SUBSCRIPTION, NOT A KEY — the product owner's rule, 2026-09-13: "User can't send a
+   * message without logging in claude or codex."
+   *
+   * THIS REPLACES THE API-KEY CHECK IN CHAT MODE RATHER THAN JOINING IT, which is the whole point.
+   * Talking to Jaroku spends the plan somebody already pays a provider for; an API key in Secrets
+   * neither grants that nor stands in for it. Asking for a key here would be the substitution the
+   * architecture forbids, and it would also be a lie — the key would not be what answered.
+   *
+   * TEST MODE IS UNTOUCHED. An agent run spends an API account, so `missingKey` below still governs
+   * it exactly as it always did. The two modes block on two different credentials because they
+   * spend two different things.
+   */
+  const noSubscription = composerMode === "chat" && !operating && !subscriptionConnected;
+
+  const missingKey: string | null = !providersLoaded || operating || composerMode === "chat" ? null
+    : isRunnable(providerStatuses, provider) ? null : provider || "anthropic";
   const missingKeyLabel = missingKey ? providerLabelOf(providerModels, missingKey) : "";
   /**
    * §16.1's offline-send attack: the sentence a greyed Send owes the person pressing it.
@@ -2148,6 +2158,14 @@ export function BuildPane({
    * true: `submit` returns before touching the text.
    */
   const OFFLINE_SEND = "Not connected — your draft is kept until the connection returns";
+  /**
+   * The sentence a Chat send owes somebody with no provider connected.
+   *
+   * It names the ACT rather than the setting — "to talk to Jaroku" — because that is what the press
+   * was for, and it says the draft survives, which is the fear. Pressing opens Settings at the place
+   * that fixes it rather than refusing in place.
+   */
+  const SUBSCRIPTION_ASK = "Connect your Claude or Codex subscription to talk to Jaroku — your draft is kept";
   const keyAsk = missingKey
     ? `Add ${/^[AEIOU]/.test(missingKeyLabel) ? "an" : "a"} ${missingKeyLabel} key to ${
       composerMode === "test"
@@ -2478,6 +2496,14 @@ export function BuildPane({
   const submit = () => {
     const trimmed = text.trim();
     if (!connected || !trimmed) return;
+
+    // NO SUBSCRIPTION, NO CHAT — and no dead end: the place to connect one opens instead, with the
+    // draft intact. Deliberately NOT Secrets: an API key cannot answer a Chat turn, so sending
+    // somebody there would be a dead end wearing the costume of a way out.
+    if (noSubscription) {
+      useUiStore.getState().openWorkspacePanel("account");
+      return;
+    }
 
     // NO KEY, NO SEND — and no dead end: the way to the key opens instead, with the draft intact.
     if (missingKey) {
@@ -3419,6 +3445,34 @@ export function BuildPane({
             </div>
           )}
 
+          {/* NO SUBSCRIPTION, AND THE SEND SAYS SO IN PLACE. Same standard as the strip above: a
+              disabled button is never unexplained. Shown only when the socket IS up, because
+              "connect a provider" is not the useful sentence for somebody who is offline — that one
+              is, and two stacked warnings would bury it.
+
+              THE WAY OUT IS A CONTROL, not a line of prose telling somebody to go and find one. */}
+          {connected && noSubscription && (
+            <div
+              className="mb-2 flex items-start gap-2 rounded-card border border-edge bg-bg px-2.5 py-2 text-tiny"
+              role="status"
+            >
+              <span className="shrink-0" style={{ color: STATUS.warn }} aria-hidden>
+                <AlertTriangleIcon size={ICON.xs} />
+              </span>
+              <span className="min-w-0 flex-1 text-muted">
+                Chat runs on your own Claude or Codex subscription. Connect one to send — your draft
+                is kept.{" "}
+                <button
+                  type="button"
+                  onClick={() => useUiStore.getState().openWorkspacePanel("account")}
+                  className="text-ink underline underline-offset-2 outline-none transition-colors duration-fast hover:text-ink focus-visible:shadow-focusring"
+                >
+                  Connect a provider
+                </button>
+              </span>
+            </div>
+          )}
+
           {/* input slot: the textarea and the live waveform crossfade in place (~200ms) so the
               transition from typing to recording is smooth and the card doesn't jump. */}
           <div
@@ -3778,8 +3832,8 @@ export function BuildPane({
                     // NOT CONNECTED IS CHECKED FIRST, ahead of the key and the mode: it is the one
                     // state where none of the other labels is true yet, and a tooltip promising a
                     // route on a button that cannot dispatch is the mismatch §3.4 already paid for.
-                    aria-label={!connected ? OFFLINE_SEND : missingKey ? keyAsk : composerMode === "test" ? "Run the agent on this input" : `Send — ${routeLabel(intent)}`}
-                    title={!connected ? OFFLINE_SEND : missingKey ? keyAsk : composerMode === "test" ? "Run the agent on this input" : `Send — ${routeLabel(intent)} (${keyHint("⌘↵")})`}
+                    aria-label={!connected ? OFFLINE_SEND : noSubscription ? SUBSCRIPTION_ASK : missingKey ? keyAsk : composerMode === "test" ? "Run the agent on this input" : `Send — ${routeLabel(intent)}`}
+                    title={!connected ? OFFLINE_SEND : noSubscription ? SUBSCRIPTION_ASK : missingKey ? keyAsk : composerMode === "test" ? "Run the agent on this input" : `Send — ${routeLabel(intent)} (${keyHint("⌘↵")})`}
                     // The one ink-filled control on the screen, and the only one in this bar that
                     // is not a glyph on open background.
                     //

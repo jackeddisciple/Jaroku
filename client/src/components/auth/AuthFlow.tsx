@@ -168,7 +168,26 @@ export function SignInSwapPrompt() {
 
   useEffect(() => onAuthCallback((callback) => setTicket(callback.ticket)), []);
 
-  if (!ticket) return null;
+  /**
+   * NOBODY TO SWAP, SO NOTHING TO ASK.
+   *
+   * This strip exists for §4.5's one case: a link arrives while a DIFFERENT person is signed in,
+   * and swapping them silently would be indefensible. With no session there is no second person —
+   * the honest reading of "a sign-in link opened Jaroku" is that somebody is signing in, which is
+   * the thing they just asked for. Asking anyway produced a confirmation whose only true answer is
+   * "yes, obviously", in front of an application they could not use until they gave it.
+   *
+   * It is re-offered rather than spent here, because `AuthFlow` is the only thing that should ever
+   * hold a ticket — the same reasoning `Continue` follows below, minus the sign-out it does not
+   * need.
+   */
+  useEffect(() => {
+    if (!ticket || email) return;
+    setTicket(null);
+    void import("../../lib/authLink.ts").then((m) => m.offerAuthCallback({ ticket }));
+  }, [ticket, email]);
+
+  if (!ticket || !email) return null;
 
   const cancel = (): void => {
     setTicket(null);

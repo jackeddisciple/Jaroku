@@ -25,6 +25,7 @@ import { useAccountOnboardingStore } from "../store/accountOnboardingStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { TYPE } from "../lib/tokens.ts";
+import { ProviderSubscriptions } from "./ProviderSubscriptions.tsx";
 
 export function AccountSection() {
   const user = useSessionStore((s) => s.user);
@@ -50,6 +51,18 @@ export function AccountSection() {
 
   return (
     <div className="flex flex-col gap-6">
+      {/* THE PROVIDER SUBSCRIPTION CHAT RUNS ON, and it sits under Account rather than under a
+          workspace section for the same reason everything else here does: a sign-in on this laptop
+          belongs to a PERSON and to a MACHINE, not to a tenant. Two people in one workspace have
+          two different answers, and filing it beside Members would imply an admin could set it for
+          somebody else's computer.
+
+          Distinct from Secrets, which is the other credential system: keys there pay for AGENT
+          RUNS against an API account. This is the plan that pays for talking to Jaroku. */}
+      <section className="flex flex-col gap-2">
+        <h3 className={TYPE.sectionLabel}>Chat provider</h3>
+        <ProviderSubscriptions />
+      </section>
       <section className="flex flex-col gap-2">
         <h3 className={TYPE.sectionLabel}>Account</h3>
         <dl className="flex flex-col gap-1.5">

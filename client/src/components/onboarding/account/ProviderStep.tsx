@@ -50,6 +50,7 @@ import { FormError, PrimaryButton, TextField } from "../../auth/controls.tsx";
 import { TextLink } from "../../auth/AuthShell.tsx";
 import { SecretsGate } from "../../SecretsGate.tsx";
 import { StepShell } from "./StepShell.tsx";
+import { ProviderSubscriptions } from "../../ProviderSubscriptions.tsx";
 
 /** Where each provider's key is found. A fact about a documentation site, not about the API. */
 const HELP: Record<ProviderChoiceId, string> = {
@@ -147,11 +148,33 @@ export function ProviderStep() {
   return (
     <StepShell
       step={3}
-      title="Connect a model provider"
-      subtitle="Jaroku uses your own API key to run models. Your key stays on your device."
+      title="Connect a provider"
+      subtitle="One subscription to talk to Jaroku, and optionally an API key for your agents to run on."
       skip={skip}
       width="wide"
     >
+      {/* THE SUBSCRIPTION COMES FIRST BECAUSE IT IS WHAT THE NEXT SCREEN NEEDS. Step 4 asks somebody
+          to describe an agent, and describing one is a Chat turn — which runs on the plan they
+          already pay a provider for. Leading with the API key would put the credential for AGENT
+          RUNS in front of somebody who cannot yet send the message that creates an agent.
+
+          BOTH ARE ON ONE STEP RATHER THAN TWO, deliberately: `users.onboarding_step` is a column
+          with values in it and §5's numbering is load-bearing — see lib/accountOnboarding.ts, which
+          opens by warning about exactly this. A sixth screen would renumber a fact the database
+          already holds. */}
+      <section className="mb-6 flex flex-col gap-2">
+        <h3 className="text-label font-medium text-ink">To talk to Jaroku</h3>
+        <ProviderSubscriptions compact />
+      </section>
+
+      <section className="flex flex-col gap-2">
+        <h3 className="text-label font-medium text-ink">For your agents to run on</h3>
+        <p className="text-caption text-muted">
+          Separate from the above, and optional now: an API key pays for the agents you build when
+          they run. Your subscription is never used for that, and this key is never used for Chat.
+        </p>
+      </section>
+
       <form
         onSubmit={(e) => {
           e.preventDefault();
