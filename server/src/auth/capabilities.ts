@@ -803,6 +803,9 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   // no credential, and only decides which subscription rows THIS socket is shown. Somebody who can
   // read the provider list can tell us what is on the laptop they are already holding.
   reportProviderHost: "provider:read",
+  // Writing a turn the user's own machine answered into their own thread. The same capability
+  // `chat` needs, because it is the same act with the inference performed elsewhere.
+  recordChatTurn: "agent:read",
   // `setProviderKey` and `testProviderKey` are not here because they no longer exist. A credential
   // written over the socket could not be gated by elevation — that rides on a request header — so
   // the passcode gate was bypassable by anyone with a session. See wsRelay.ts.
@@ -1041,6 +1044,8 @@ export const COMMAND_AGENT_CAPABILITY: Record<string, AgentCapability> = {
   // so the authority it needs is the authority to look. Somebody with read access to an agent must
   // be able to ask what it does, and somebody without it must not learn what it does by asking.
   chat: "view",
+  // Same as `chat`: recording a turn about an agent needs only the right to see it.
+  recordChatTurn: "view",
   // The datasets belonging to an agent, and what a comparison would cost. Both are reads, and the
   // second is the estimate the entitlement gate deliberately leaves ungated for the same reason: a
   // workspace at its limit has to be able to find out what going over would cost, and a person who

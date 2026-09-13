@@ -2348,6 +2348,19 @@ export type ClientCommand =
    * about itself. The server validates each entry and drops any it does not recognise, and a
    * claim about a gated provider changes nothing — permission is checked before the machine.
    */
+  /**
+   * A Chat turn answered on this machine against the user's own provider subscription.
+   *
+   * Carries no cost and reaches no ledger: those tokens came from a plan the user already pays
+   * for, and metering them here would charge them twice for one answer.
+   */
+  | {
+      cmd: "recordChatTurn";
+      question: string; answer: string; provider: string;
+      model?: string | null; effort?: string | null;
+      inputTokens?: number | null; outputTokens?: number | null;
+      agentId?: string | null; threadId?: string;
+    }
   | {
       cmd: "reportProviderHost";
       hosts: { provider: string; installed: boolean; version: string | null; signedIn: boolean; account: string | null }[];

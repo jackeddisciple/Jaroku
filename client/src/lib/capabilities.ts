@@ -252,6 +252,7 @@ export const COMMAND_CAPABILITY: Record<string, string> = {
   // providers
   listProviders: "provider:read",
   reportProviderHost: "provider:read",
+  recordChatTurn: "agent:read",
   setOwnKeyForPlatform: "provider:manage",
 
   // membership, billing, enforcement
@@ -519,6 +520,7 @@ export const COMMAND_AGENT_CAPABILITY: Record<string, AgentCapability> = {
   // §2's chat route. `view`, beside `explain` and `askRecord`, for the reason §2.2 gives: it
   // answers and offers, and it never writes.
   chat: "view",
+  recordChatTurn: "view",
   listDatasets: "view",
   estimateEval: "view",
   getActivityFeed: "view",

@@ -86,9 +86,10 @@ import { TokenVerifier } from "./auth/verifier.ts";
 import { authenticate, sessionRoutes } from "./auth/session.ts";
 import { conversationRoutes } from "./http/conversations.ts";
 import { ConversationSettingsStore, DEFAULT_PERMISSION_MODE, type PermissionMode } from "./conversationSettings.ts";
-import { offeredLevels, planEffort, type EffortPlan } from "./effort.ts";
+import { offeredLevels, planEffort, type EffortPlan, isEffort} from "./effort.ts";
 import { ConversationConnectorStore } from "./conversationConnectors.ts";
 import { TurnInteractionStore } from "./turnInteraction.ts";
+import { subscriptionAvailable } from "./providerAuth/capability.ts";
 import { TurnVariantStore, type TurnVariant, type VariantOutcome } from "./turnVariants.ts";
 import { classOf, mustConfirm } from "./permissionShield.ts";
 import { attachTurn, turnRoutes, type Attachable, type RequestedAttachment, type TurnRouteDeps } from "./http/turns.ts";
@@ -187,7 +188,7 @@ import {
 import { buildFactPack, type FactPack, type PackDeps } from "./work/factPack.ts";
 import { citableFrom, resolveCitations } from "./work/citations.ts";
 import { CHAT_SYSTEM, chatClosing, CONVERSATION_SYSTEM, conversationClosing, renderRecord } from "./prompt.ts";
-import type { AskRecordCommand, ChatCommand, ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCommand, InboxCommand, EditTurnCommand, ProviderSnapshot, SelectVariantCommand, StopChatCommand } from "./wsRelay.ts";
+import type { AskRecordCommand, ChatCommand, ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCommand, InboxCommand, EditTurnCommand, ProviderSnapshot, SelectVariantCommand, StopChatCommand, RecordChatTurnCommand} from "./wsRelay.ts";
 import type { ListWorkCommand, WorkCommand, WorkSnapshotWire } from "./wsRelay.ts";
 import { loadRuntimeEnv } from "./env.ts";
 import { installLogRedaction, protectEnv, protectSecret } from "./obs/log.ts";
@@ -5223,6 +5224,7 @@ async function dispatchCommand(cmd: ForwardedCommand, ctx: TenantContext): Promi
     else if (cmd.cmd === "explain") explainAgent(ctx, cmd);
     else if (cmd.cmd === "askRecord") void answerFromRecord(ctx, cmd);
     else if (cmd.cmd === "chat") void chatWithJaroku(ctx, cmd);
+    else if (cmd.cmd === "recordChatTurn") void recordChatTurn(ctx, cmd);
     else if (cmd.cmd === "stopChat") stopChat(ctx, cmd);
     else if (cmd.cmd === "selectVariant") void selectVariant(ctx, cmd);
     else if (AGENT_COMMAND_NAMES.has(cmd.cmd)) void handleAgentCommand(ctx, cmd as AgentCommand);
@@ -13504,6 +13506,64 @@ async function chatBudget(ctx: TenantContext, threadId: string): Promise<ChatBud
  * socket: a field there is one a client could set to claim it had already been retried, or to ask
  * for a retry of its own.
  */
+/**
+ * Write down a Chat turn the user's own machine already answered.
+ *
+ * THE SERVER DID NOT PRODUCE THIS ANSWER. It came from `codex` or `claude` running on the user's
+ * laptop under their own subscription, because a remote backend cannot reach the credential and
+ * must never hold one. So this records rather than generates: the same two rows a server-answered
+ * turn leaves behind — the question as a thread item, the answer as a turn variant — written from
+ * what the client reported.
+ *
+ * IT BOOKS NO MONEY, and that is the point rather than an omission. `costUsd` is deliberately null:
+ * these tokens were drawn from a plan the user already pays the provider for, and putting a figure
+ * in the ledger would bill them a second time for one answer. The token counts ARE kept, because
+ * they are the user's own account of what they spent and belong in their own thread.
+ *
+ * NOTHING HERE IS TRUSTED TO BE TRUE, only to be well-formed. A client could report an answer
+ * nobody generated — but it can only do so into its OWN workspace's thread, which is a place it
+ * could already write by typing. The credential systems stay separate regardless: no path from
+ * here reaches a provider key, and no spend is recorded.
+ */
+async function recordChatTurn(ctx: TenantContext, cmd: RecordChatTurnCommand): Promise<void> {
+  const question = typeof cmd.question === "string" ? cmd.question.trim() : "";
+  const answer = typeof cmd.answer === "string" ? cmd.answer.trim() : "";
+  if (!question || !answer) return;
+  if (!isProviderId(cmd.provider)) return;
+  // A provider that may not answer Chat on a subscription may not have answered this one either.
+  // The client already checked; this is the server refusing to write a record that contradicts its
+  // own capability table.
+  if (!subscriptionAvailable(cmd.provider)) {
+    console.warn(`[chat] refusing a subscription turn recorded for gated provider ${cmd.provider}`);
+    return;
+  }
+
+  const thread = await threadForWork(ctx, cmd.threadId, cmd.agentId ?? null);
+  if (!thread) return;
+
+  const turnId = await noteUserMessage(ctx, thread, question);
+  const settle = await openVariant(
+    ctx,
+    turnId,
+    cmd.model ?? "",
+    cmd.provider,
+    // The effort plan shape the variant row stores. Requested and applied are the same value here:
+    // the clamp happened before the CLI was invoked, and what came back is what was asked for.
+    typeof cmd.effort === "string" && isEffort(cmd.effort)
+      ? { requested: cmd.effort, applied: cmd.effort, supported: true, clamped: false, reason: null, thinking: null, reasoningEffort: null }
+      : null,
+    // §13.2's route, so the chip survives a reload and says where this answer came from.
+    "subscription",
+  );
+  await settle({
+    body: answer,
+    tokensIn: typeof cmd.inputTokens === "number" && cmd.inputTokens >= 0 ? cmd.inputTokens : null,
+    tokensOut: typeof cmd.outputTokens === "number" && cmd.outputTokens >= 0 ? cmd.outputTokens : null,
+    // NULL, DELIBERATELY. See this function's own note: a plan turn has no price to book.
+    costUsd: null,
+  });
+}
+
 async function chatWithJaroku(
   ctx: TenantContext,
   cmd: ChatCommand,

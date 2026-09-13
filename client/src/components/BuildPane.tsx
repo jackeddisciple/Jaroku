@@ -24,8 +24,7 @@ import {
 import {
   sendApplyEdit, sendAskRecord, sendBranchRun, sendChat, sendDiscardEdit, sendDiscardPlan, sendDispatchWork,
   sendCreateThread, sendEditTurn, sendSelectVariant, sendStopChat,
-  sendEdit, sendExplain, sendGenerate, sendLoadWorkItem, sendPlanAgent, sendPromoteTestInput, sendRun,
-} from "../lib/socket.ts";
+  sendEdit, sendExplain, sendGenerate, sendLoadWorkItem, sendPlanAgent, sendPromoteTestInput, sendRun, sendRecordChatTurn} from "../lib/socket.ts";
 import { useEvalStore } from "../store/evalStore.ts";
 import { UpsellCard } from "./UpsellCard.tsx";
 import { composerMoment } from "../lib/composerMoment.ts";
@@ -60,6 +59,7 @@ import { AttachmentRail, type DraftAttachment } from "./composer/AttachmentRail.
 import { refKey, type AttachKind, type AttachableRow } from "./composer/AttachPicker.tsx";
 import { MAX_ATTACHMENTS, WARN_AT, budgetPercent } from "../lib/attachBudget.ts";
 import { EffortControl } from "./composer/EffortControl.tsx";
+import { canRunLocally, runLocalTurn } from "../lib/providerTurn.ts";
 import { effortName, effortStops, stopFor } from "../lib/effortLevels.ts";
 import { ShieldControl, modeLabel } from "./composer/ShieldControl.tsx";
 import { GreetingEmoji } from "./GreetingEmoji.tsx";
@@ -2086,6 +2086,50 @@ export function BuildPane({
    * has nothing to offer until the price sheet arrives.
    */
   const chatProviderNeeded = chatProvider || "anthropic";
+
+  /**
+   * Whether THIS turn should run on the user's own subscription rather than on the server.
+   *
+   * Three things have to be true and all three are the server's answers: Chat mode, a provider the
+   * subscription snapshot reports as `connected`, and a shell to run it in. A browser tab satisfies
+   * the first two and not the third, which is why `canRunLocally` is part of the condition rather
+   * than an assumption about where this code is running.
+   */
+  const chatSubscriptionActive = composerMode === "chat"
+    && canRunLocally()
+    && (useProviderStore.getState().subscriptions.find((x) => x.provider === chatProviderNeeded)?.connected ?? false);
+
+  /**
+   * The effort level in THIS provider's vocabulary, or null when it takes none.
+   *
+   * Translated rather than passed through: Codex stops at xhigh, so Jaroku's Max clamps, and a
+   * provider with no reasoning control is sent nothing at all. The table is the same one the
+   * server's `mapEffort` uses — these are the levels the subscription row reported.
+   */
+  const chatEffortValue = useMemo(() => {
+    const sub = useProviderStore.getState().subscriptions.find((x) => x.provider === chatProviderNeeded);
+    const levels = sub?.effortLevels ?? [];
+    if (levels.length === 0) return null;
+    if (levels.includes(effort)) return effort;
+    // Clamp DOWN to the highest level this provider accepts — never up, which would spend more
+    // than was chosen. Mirrors `mapEffort`'s rule on the server.
+    const order = ["low", "medium", "high", "xhigh", "max"] as const;
+    const wanted = order.indexOf(effort);
+    for (let i = wanted; i >= 0; i--) {
+      const l = order[i]!;
+      if (levels.includes(l)) return l;
+    }
+    return null;
+  }, [chatProviderNeeded, effort]);
+
+  /** Where a local turn runs. Jaroku's own directory, never the user's project. See the fork. */
+  const localTurnCwd = useMemo(
+    () => (globalThis as { __JAROKU_CONFIG__?: { home?: string } }).__JAROKU_CONFIG__?.home ?? "/tmp",
+    [],
+  );
+  /** The turn in flight, so Stop can kill the process that is spending the plan. */
+  const localTurnRef = useRef<{ cancel: () => void } | null>(null);
+
   const missingKey: string | null = !providersLoaded || operating ? null
     : composerMode === "test"
       ? (isRunnable(providerStatuses, provider) ? null : provider || "anthropic")
@@ -2514,6 +2558,45 @@ export function BuildPane({
        * carrying them here would silently spend an attachment budget on a greeting.
        */
       case "chat":
+        // THE ONE FORK BETWEEN THE TWO CREDENTIAL SYSTEMS, and it is here rather than on the server
+        // because only this side can reach the CLI holding the user's sign-in. When the Chat
+        // provider is a connected SUBSCRIPTION, the turn runs on this machine against the user's
+        // own plan and the server never sees the question. Otherwise it goes where it always went.
+        //
+        // `connected` is the server's answer, not ours: it already checked that the provider is
+        // permitted, installed and signed in with a plan rather than an API key. Re-deriving any of
+        // that here would be a second opinion that could disagree with the one the row renders.
+        if (chatSubscriptionActive) {
+          const turn = runLocalTurn({
+            provider: chatProviderNeeded,
+            prompt: trimmed,
+            model: chatModel || null,
+            // The level the composer is set to, translated to this provider's own vocabulary by
+            // the same table the server plans with. Null when the provider takes no reasoning.
+            effort: chatEffortValue,
+            agentId: activeAgentId ?? "",
+            // Jaroku's own directory, never the user's project: a chat turn is about an agent
+            // being built, and `codex exec` would otherwise refuse to run outside a trusted repo.
+            cwd: localTurnCwd,
+            onComplete: (answer, usage) => {
+              // Recorded so the turn survives a reload. The SPEND is deliberately not reported:
+              // these tokens came from a plan the user already pays for, and metering them would
+              // charge them twice for one answer.
+              sendRecordChatTurn({
+                question: trimmed,
+                answer,
+                provider: chatProviderNeeded,
+                model: chatModel || null,
+                effort: chatEffortValue,
+                inputTokens: usage?.input_tokens ?? null,
+                outputTokens: usage?.output_tokens ?? null,
+                agentId: activeAgentId,
+              });
+            },
+          });
+          localTurnRef.current = turn;
+          break;
+        }
         sendChat(trimmed, activeAgentId, {
           // §11.1: THE MODEL THE CONVERSATION IS SET TO, on every message — not only on a
           // regeneration. The server validates it against the shared catalogue and resolves its

@@ -235,6 +235,10 @@ export const COMMAND_ENTITLEMENT: Record<string, EntitlementKind | typeof NO_ENT
   disconnectConnector: NO_ENTITLEMENT,
   listProviders: NO_ENTITLEMENT,
   reportProviderHost: NO_ENTITLEMENT,
+  // NO ENTITLEMENT, and that is the point rather than an oversight: this turn was paid for by the
+  // user's own provider plan before it reached us. Gating it on a Jaroku tier would charge for an
+  // answer Jaroku did not produce.
+  recordChatTurn: NO_ENTITLEMENT,
   listDeployments: NO_ENTITLEMENT,
   loadDeployLogs: NO_ENTITLEMENT,
   setRailwayToken: NO_ENTITLEMENT,

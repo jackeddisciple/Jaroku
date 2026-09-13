@@ -606,6 +606,32 @@ export type SetOwnKeyForPlatformCommand = { cmd: "setOwnKeyForPlatform"; on: boo
  * A client that is not the desktop shell never sends this, and its absence is an ordinary state:
  * a browser tab simply has no machine to report, and every provider reads as not connected there.
  */
+/**
+ * A Chat turn that was answered on the user's own machine, recorded so it survives a reload.
+ *
+ * THE SERVER DID NOT SEE THIS ANSWER AND CANNOT VERIFY IT. The question, the reply and the token
+ * counts were produced by a CLI holding the user's own subscription, on their laptop, and this is
+ * the client telling us what happened. That is inherent to local delegation rather than a weakness
+ * of it — the alternative is routing the credential through here, which every provider forbids.
+ *
+ * WHICH IS WHY IT CARRIES NO MONEY. There is no cost field and there is no metering call behind
+ * this: the tokens were drawn from a plan the user already pays for, and billing them again would
+ * charge somebody twice for one answer. `inputTokens` and `outputTokens` are recorded for the
+ * user's own account of what they spent, and reach no ledger.
+ */
+export type RecordChatTurnCommand = {
+  cmd: "recordChatTurn";
+  question: string;
+  answer: string;
+  provider: string;
+  model?: string | null;
+  effort?: string | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  agentId?: string | null;
+  threadId?: string;
+};
+
 export type ReportProviderHostCommand = {
   cmd: "reportProviderHost";
   hosts: { provider: string; installed: boolean; version?: string | null; signedIn: boolean; account?: string | null }[];
@@ -1735,6 +1761,7 @@ export type ClientCommand =
   | ProviderCommand
   | ListProvidersCommand
   | ReportProviderHostCommand
+  | RecordChatTurnCommand
   | ConnectionCommand
   | BillingCommand
   | DeployChannelCommand
@@ -1777,6 +1804,7 @@ const EVAL_COMMANDS = new Set([
 /** Commands the relay forwards to the app rather than answering locally. */
 export type ForwardedCommand =
   | RunCommand
+  | RecordChatTurnCommand
   | GenerateCommand
   | PlanAgentCommand
   | DiscardPlanCommand
@@ -3652,6 +3680,7 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   setMcpServerAuth: "mcp", setMcpToolImpact: "mcp", resolveMcpConfirm: "mcp",
   listProviders: "providers", setOwnKeyForPlatform: "providers",
   reportProviderHost: "providers",
+  recordChatTurn: "reply",
   listConnections: "connections", connectConnector: "connections", disconnectConnector: "connections",
   loadUsage: "billing", setSpendCeiling: "billing", setByok: "billing",
   listMembers: "members", inviteMember: "members", revokeInvite: "members",
@@ -4640,6 +4669,11 @@ export class WsRelay {
           // the thread is optional and everything else about the command is its name. A `stopChat`
           // with no thread stops nothing, which is the safe direction and needs no validation to
           // reach.
+          } else if (msg.cmd === "recordChatTurn" && typeof msg.question === "string" && typeof msg.answer === "string") {
+            // Forwarded like `chat` beside it: the app owns the thread store and is the only thing
+            // that can write a turn into it. Both halves of the exchange are required — a record
+            // with no answer is not a turn that happened.
+            void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "stopChat") {
             void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "selectVariant" && typeof msg.turnId === "string" && typeof msg.ordinal === "number") {

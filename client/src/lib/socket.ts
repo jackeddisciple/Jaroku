@@ -1627,6 +1627,22 @@ export function sendListProviders(): void {
  * sending exactly once so the server replaces any stale rows from a previous desktop session on
  * this same socket. Called on connect and again after the user has been sent off to sign in.
  */
+/**
+ * Record a Chat turn this machine answered, so it survives a reload.
+ *
+ * THE SERVER NEVER SAW THIS EXCHANGE. It was produced locally by a CLI holding the user's own
+ * subscription, which is the whole point of the architecture — so this is the client reporting
+ * what happened rather than the server observing it. Nothing about it is billed.
+ */
+export function sendRecordChatTurn(turn: {
+  question: string; answer: string; provider: string;
+  model: string | null; effort: string | null;
+  inputTokens: number | null; outputTokens: number | null;
+  agentId: string | null;
+}): void {
+  send({ cmd: "recordChatTurn", ...turn, threadId: activeThread() });
+}
+
 export async function reportHostProviders(): Promise<void> {
   const hosts = await readHostProviders();
   if (!hasHost()) return;
