@@ -140,31 +140,51 @@ export interface ProviderCapability {
  */
 export const PROVIDER_CAPABILITY: Readonly<Record<ProviderId, ProviderCapability>> = {
   // ------------------------------------------------------------------------------------------
-  // Claude — the mechanism is real and addressed by the terms; the approval is not yet held.
+  // Claude — permitted, under a section written for exactly this.
   //
-  // Anthropic governs two different acts with two different sentences. Offering Claude.ai login
-  // inside your own application, routing requests through plan credentials on a user's behalf, or
-  // holding their tokens is prohibited outright, and the Agent SDK overview names agents built on
-  // that SDK specifically. The legal page then carves out the local case: "Nor does it prevent an
-  // end user from signing in to the unmodified Claude Code binary with their own Claude
-  // subscription, including where a platform hosts Claude Code."
+  // Anthropic governs two different acts with two different sentences, and what separates them is
+  // WHICH THING IS DOING THE AUTHENTICATING.
   //
-  // Jaroku's integration is the second of those. It stays unavailable because one tension is
-  // unresolved in public documentation — the headless page calls `claude -p` "the Agent SDK via the
-  // CLI", while the SDK page withholds plan rate limits from third-party products "unless
-  // previously approved". What flips this entry is an email, not a commit.
+  // PROHIBITED: offering Claude.ai login inside your own application, routing requests through plan
+  // credentials on a user's behalf, or holding their tokens. The Agent SDK overview names agents
+  // built on that SDK specifically — because embedding the SDK as a library makes YOUR product the
+  // thing logging in.
+  //
+  // PERMITTED: "Can customers offer Claude Code in their products?" — a section of the legal page
+  // whose title is the question this integration asks. It permits preinstalling or running Claude
+  // Code in a product subject to four conditions, and the authentication section says it again:
+  // "Nor does it prevent an end user from signing in to the unmodified Claude Code binary with
+  // their own Claude subscription, including where a platform hosts Claude Code."
+  //
+  // THE FOUR CONDITIONS, AND WHAT SATISFIES EACH HERE:
+  //
+  //   the binary is unmodified         the user's own install, found on PATH, never bundled
+  //   its auth methods are untouched   `claude auth login` is Anthropic's flow, run unchanged
+  //   usage is not paid for or resold  `recordChatTurn` books no cost and meters nothing
+  //   each end user authenticates      no token is ever held; it stays in their Keychain
+  //
+  // THE ONE REAL OBLIGATION, which is a business act rather than a property of this code: running
+  // Claude Code inside a product "requires agreeing to our Commercial Terms of Service". That is a
+  // click-through the product owner accepts once — which is what this entry had wrong before, having
+  // read the Agent SDK's "unless previously approved" as governing the subprocess case as well.
+  //
+  // AND A BRANDING RULE, a product constraint rather than a code one: "Powered by Claude" and
+  // "Claude Agent" are permitted, "Claude Code" as part of a product or feature name is not.
+  // `PROVIDER_LABEL` says "Claude", which is inside the line.
   // ------------------------------------------------------------------------------------------
   anthropic: {
     id: "anthropic",
     subscriptionChatSupported: true,
-    subscriptionChatAvailable: false,
-    requiresProviderApproval: true,
+    subscriptionChatAvailable: true,
+    requiresProviderApproval: false,
     runtimeApiSupported: true,
     usageSource: "subscription",
     mechanism: {
       kind: "local-agent",
       binary: "claude",
-      loginCommand: ["claude", "/login"],
+      // `claude auth login` rather than the in-session `/login`: this is what somebody types in a
+      // terminal to sign in, and therefore what a disconnected row can usefully print.
+      loginCommand: ["claude", "auth", "login"],
       // NEVER `--bare`. That mode "never reads OAuth credentials or the system keychain" and wants
       // ANTHROPIC_API_KEY instead, so it would turn subscription chat into API billing without
       // anything appearing to go wrong — the exact crossing this architecture exists to prevent.
@@ -178,15 +198,9 @@ export const PROVIDER_CAPABILITY: Readonly<Record<ProviderId, ProviderCapability
         "Nor does it prevent an end user from signing in to the unmodified Claude Code binary with "
         + "their own Claude subscription, including where a platform hosts Claude Code.",
     },
-    reason:
-      "Anthropic requires prior approval before a third-party product may draw on a Claude "
-      + "subscription's rate limits. Jaroku drives the unmodified Claude Code binary you signed into "
-      + "yourself, which the terms address separately — but that approval is not yet held.",
-    citation: "https://code.claude.com/docs/en/agent-sdk/overview",
-    unblock:
-      "The restriction reads \"unless previously approved\". Request approval through "
-      + "https://www.anthropic.com/contact-sales and accept Anthropic's Commercial Terms. Turning "
-      + "this on is one field of this entry; the integration underneath is finished.",
+    reason: null,
+    citation: "https://code.claude.com/docs/en/legal-and-compliance",
+    unblock: null,
     // `/effort <level>` in the prompt string, with the same five names Jaroku uses. One-to-one
     // because both were written from the product owner's level names, not because it was assumed.
     reasoning: {

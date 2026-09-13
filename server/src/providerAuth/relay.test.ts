@@ -82,7 +82,7 @@ console.log("\nevery socket is told on frame one, before it asks");
   check(first.subscriptions.every((r: any) => r.connected === false), "nothing is connected before anything reports");
   // A browser tab has no CLI to sign in with, and its rows say so rather than going missing.
   check(first.subscriptions.every((r: any) => r.host === null), "...and no machine has reported");
-  check(rowFor(first, "anthropic").reason?.length > 40, "a gated row explains itself on frame one");
+  check((rowFor(first, "meta").reason?.length ?? 0) > 40, "a gated row explains itself on frame one");
 }
 
 console.log("\na machine reports, and only its own socket learns");
@@ -115,14 +115,17 @@ console.log("\nno report can promote a provider its owner has not sanctioned");
     ],
   });
   const after = await a.want(isSubs, "a's gated report");
-  // The client claimed both are installed and signed in. Permission is checked first.
-  check(rowFor(after, "anthropic").connected === false, "Claude stays refused however it is reported");
+  // The client claimed BOTH are installed and signed in. Claude is permitted, so it connects;
+  // Muse Spark has no documented third-party mechanism, so it does not — however it is reported.
+  // That asymmetry from one identical claim is the property: the machine never overrules the
+  // provider, and a client cannot talk its way into a provider by asserting harder.
+  check(rowFor(after, "anthropic").connected === true, "Claude connects, being permitted and signed in");
   check(rowFor(after, "meta").connected === false, "Muse Spark stays refused however it is reported");
-  check(rowFor(after, "anthropic").host?.signedIn === true, "...while still reporting honestly what is installed");
-  check(rowFor(after, "anthropic").unblock?.includes("contact-sales") === true, "...and naming what would change it");
-  // Claude is gated, not absent: the integration is finished and the row says so.
-  check(rowFor(after, "anthropic").supported === true, "...while still saying an official mechanism exists");
-  check(rowFor(after, "anthropic").requiresApproval === true, "...and that approval is the thing missing");
+  check(rowFor(after, "meta").host?.signedIn === true, "...while still reporting honestly what is installed");
+  check(rowFor(after, "meta").supported === false, "...and saying no official mechanism exists");
+  // Chat is not the only thing a provider can be for: Muse Spark is refused here and remains a
+  // first-class runtime provider, which is the whole of the separation.
+  check(rowFor(after, "meta").runtimeApiSupported === true, "...and still runs agents on an API key");
   // And the separation holds in the other direction: gating Chat never touches agent runtime.
   check(after.subscriptions.every((r: any) => r.runtimeApiSupported === true), "...and every provider still runs agents on an API key");
   // The previous report is replaced, not merged — a snapshot, like every other channel here.

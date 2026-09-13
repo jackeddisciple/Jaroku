@@ -71,14 +71,20 @@ console.log("\na row carries what the UI needs to explain itself");
   check("...and cites the page that sanctions it", /^https:\/\//.test(openai.citation));
 
   const anthropic = statusFor("anthropic", undefined);
-  // GATED ROWS KEEP THEIR MECHANISM, unlike the first draft of this file. Claude's integration is
-  // finished and waiting on an email, so the row can honestly name the binary and the sign-in
-  // command. What it must not do is report `connected`, which is asserted above.
-  check("a gated row still names its mechanism", anthropic.binary === "claude" && anthropic.loginCommand === "claude /login");
-  check("...and says an official mechanism exists", anthropic.supported && !anthropic.available);
-  check("...and that approval is what is missing", anthropic.requiresApproval);
-  check("...cites the page it was refused by", /^https:\/\//.test(anthropic.citation));
-  check("...and names what would unblock it", (anthropic.unblock ?? "").includes("contact-sales"));
+  check("Claude names its binary", anthropic.binary === "claude");
+  check("...and Anthropic's own sign-in command", anthropic.loginCommand === "claude auth login");
+  check("...where the credential lives, which nothing here opens", anthropic.credentialPath?.includes("Keychain") === true);
+  check("...and is available, with nothing to explain away", anthropic.available && anthropic.reason === null);
+
+  // THE GATED CASE IS MUSE SPARK NOW, and the assertions move with it rather than disappearing: a
+  // provider with no documented third-party mechanism must still render a row that explains itself,
+  // because the question "can I use my Muse subscription?" deserves an answer rather than silence.
+  const meta = statusFor("meta", perfect("meta"));
+  check("a gated row carries no mechanism to offer", meta.binary === null && meta.loginCommand === null);
+  check("...says no official mechanism exists", !meta.supported && !meta.available);
+  check("...explains why, in the provider's own terms", (meta.reason ?? "").length > 40);
+  check("...cites the page it was refused by", /^https:\/\//.test(meta.citation));
+  check("...and stays refused on a machine set up for it", !meta.connected);
 }
 
 console.log("\nevery provider gets a row, gated ones included");
@@ -98,9 +104,12 @@ console.log("\nthe connectable set is what dispatch and the selector both read")
   const all = new Map(PROVIDER_IDS.map((id) => [id, perfect(id)] as const));
   const rows = subscriptionStatuses(PROVIDER_IDS, all);
   const connected = connectedProviders(rows);
-  // Every machine set up for all three; only the permitted one comes back.
-  check("only the permitted provider connects", connected.join(",") === "openai", connected.join(","));
+  // Every machine set up for all three; only the PERMITTED ones come back. Muse Spark is reported
+  // installed and signed in here and is still absent, which is the whole property: the machine
+  // never overrules the provider.
+  check("only permitted providers connect", connected.join(",") === "anthropic,openai", connected.join(","));
   check("...which is exactly the available set", connected.every((id) => subscriptionAvailable(id)));
+  check("...and the unsupported one is left out despite being set up", !connected.includes("meta"));
 
   const none = connectedProviders(subscriptionStatuses(PROVIDER_IDS, new Map()));
   check("an empty machine connects nothing", none.length === 0);

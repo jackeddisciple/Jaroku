@@ -43,9 +43,14 @@ console.log("\na gated provider produces no command at all");
       check(`...and says why`, isRefusal(plan) && plan.reason.length > 20, isRefusal(plan) ? plan.reason : "");
     }
   }
-  // Claude specifically: the refusal names the approval rather than pretending nothing exists.
+  // Muse Spark specifically: it has no subscription mechanism at all, so the refusal says that
+  // rather than implying something is merely switched off.
+  const meta = planInvocation("meta", req());
+  check("Muse Spark's refusal says no mechanism exists", isRefusal(meta) && /no supported subscription/i.test(meta.reason),
+    isRefusal(meta) ? meta.reason : "");
+  // And Claude, now permitted, plans a real command rather than a refusal.
   const claude = planInvocation("anthropic", req());
-  check("Claude's refusal names the approval", isRefusal(claude) && /approval/i.test(claude.reason));
+  check("Claude plans a command", !isRefusal(claude));
 }
 
 console.log("\nthe flag that would switch billing can never be emitted");

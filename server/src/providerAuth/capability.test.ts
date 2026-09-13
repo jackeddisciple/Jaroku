@@ -106,9 +106,14 @@ console.log("\nthe verdicts are the ones verified on 2026-09-13");
   // to re-read them — silently inheriting a new verdict is the failure this whole file prevents.
   const claude = capabilityOf("anthropic");
   check("Claude's mechanism is supported", claude.subscriptionChatSupported);
-  check("...but gated on Anthropic's prior approval", !claude.subscriptionChatAvailable && claude.requiresProviderApproval);
-  check("...with the implementation kept underneath the gate", claude.mechanism !== null);
-  check("...and a named way to unblock it", (claude.unblock ?? "").includes("contact-sales"));
+  // Permitted by the legal page's "Can customers offer Claude Code in their products?", whose four
+  // conditions this integration meets. The remaining obligation — accepting Anthropic's Commercial
+  // Terms — is the product owner's to accept once, and is not something code can assert.
+  check("...and available, under that section's conditions", claude.subscriptionChatAvailable);
+  check("...needing no per-integration approval", !claude.requiresProviderApproval);
+  check("...so it offers no unblock, having nothing to unblock", claude.unblock === null && claude.reason === null);
+  check("...citing the page that permits it", claude.citation.endsWith("/legal-and-compliance"), claude.citation);
+  check("...and signing in with Anthropic's own command", claude.mechanism?.loginCommand.join(" ") === "claude auth login");
 
   check("Codex is available", subscriptionAvailable("openai"));
   check("...through codex app-server", localAgentFor("openai")?.serve.argv.join(" ") === "codex app-server");
@@ -119,8 +124,12 @@ console.log("\nthe verdicts are the ones verified on 2026-09-13");
   check("Muse Spark has no subscription mechanism at all", !meta.subscriptionChatSupported && meta.mechanism === null);
   check("...so there is nothing to approve", !meta.requiresProviderApproval && meta.unblock === null);
 
-  check("exactly one provider is connectable today", availableSubscriptionProviders().join(",") === "openai");
-  check("...while two have an official mechanism", supportedSubscriptionProviders().join(",") === "anthropic,openai");
+  check("both providers with a mechanism are connectable", availableSubscriptionProviders().join(",") === "anthropic,openai");
+  check("...which is exactly the set that has one", supportedSubscriptionProviders().join(",") === "anthropic,openai");
+  // The gate still exists and still has something behind it — Muse Spark. If this ever passes
+  // because every provider became available, the mechanism this file guards has stopped being
+  // exercised by anything.
+  check("...and a provider without one is still refused", !subscriptionAvailable("meta"));
 }
 
 console.log("\neffort maps to each provider's real parameter, never a shared invention");
