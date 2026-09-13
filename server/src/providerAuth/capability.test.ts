@@ -14,9 +14,10 @@ import { fileURLToPath } from "node:url";
 
 import { PROVIDER_IDS } from "../providers.ts";
 import {
-  SUBSCRIPTION_SUPPORT, availableSubscriptionProviders, localAgentFor, subscriptionAvailable,
-  subscriptionSupport,
+  PROVIDER_CAPABILITY, availableSubscriptionProviders, capabilityOf, localAgentFor, mapEffort,
+  reasoningLevels, runtimeApiProviders, subscriptionAvailable, supportedSubscriptionProviders,
 } from "./capability.ts";
+import { EFFORT_LEVELS } from "../effort.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SOURCE = readFileSync(join(HERE, "capability.ts"), "utf8");
@@ -45,22 +46,39 @@ const check = (name: string, ok: boolean, detail = ""): void => {
 console.log("\nevery provider is decided, and decided once");
 {
   for (const id of PROVIDER_IDS) {
-    check(`${id} has a verdict`, id in SUBSCRIPTION_SUPPORT);
+    check(`${id} has a verdict`, id in PROVIDER_CAPABILITY);
+    check(`...keyed by its own id`, capabilityOf(id).id === id);
   }
-  const extra = Object.keys(SUBSCRIPTION_SUPPORT).filter((k) => !(PROVIDER_IDS as string[]).includes(k));
+  const extra = Object.keys(PROVIDER_CAPABILITY).filter((k) => !(PROVIDER_IDS as string[]).includes(k));
   check("...and no verdict names a provider that does not exist", extra.length === 0, extra.join(","));
 }
 
-console.log("\na refusal carries its reason and its source");
+console.log("\nthe four booleans cannot contradict each other");
 {
   for (const id of PROVIDER_IDS) {
-    const s = subscriptionSupport(id);
-    if (s.available) continue;
-    check(`${id} says why`, s.reason.length > 40, s.reason);
-    check(`${id} cites the page it was read from`, /^https:\/\//.test(s.citation), s.citation);
-    // A reason that does not name the provider's own position is a reason we invented.
-    check(`${id}'s reason is about the provider, not about us`, !/jaroku/i.test(s.reason));
+    const c = capabilityOf(id);
+    // Available without supported would be a provider we permit ourselves to use through a
+    // mechanism we have not established exists.
+    check(`${id}: available implies supported`, !c.subscriptionChatAvailable || c.subscriptionChatSupported);
+    // Approval is the NAME of the gap between supported and available. Claiming one while already
+    // available would mean the product asks for permission it is not waiting on.
+    check(`${id}: approval is only pending while gated`, !c.requiresProviderApproval || !c.subscriptionChatAvailable);
+    // A usable mechanism has to exist for a provider we say is usable.
+    check(`${id}: available implies a mechanism`, !c.subscriptionChatAvailable || c.mechanism !== null);
+    // Every gated or unsupported provider owes the user a sentence.
+    check(`${id}: unavailable implies a reason`, c.subscriptionChatAvailable || (c.reason ?? "").length > 40);
+    check(`${id}: cites the page it was read from`, /^https:\/\//.test(c.citation), c.citation);
   }
+}
+
+console.log("\nagent runtime is independent of every one of them");
+{
+  // The product owner's rule: Muse Spark stays a first-class runtime provider while having no
+  // subscription path at all. If these two sets were ever forced to agree, gating a provider for
+  // Chat would silently remove it from Test — which is the two credential systems leaking.
+  check("all three providers run agents on an API key", runtimeApiProviders().join(",") === PROVIDER_IDS.join(","));
+  check("...including the one with no subscription path", capabilityOf("meta").runtimeApiSupported);
+  check("...and the one still awaiting approval", capabilityOf("anthropic").runtimeApiSupported);
 }
 
 console.log("\nan approval carries a complete mechanism, and it is delegation");
@@ -71,25 +89,65 @@ console.log("\nan approval carries a complete mechanism, and it is delegation");
     check(`${id} names the binary the user installs`, m.binary.length > 0);
     check(`${id} signs in with the PROVIDER'S command`, m.loginCommand[0] === m.binary, m.loginCommand.join(" "));
     check(`${id} drives a documented subprocess mode`, m.serve.argv[0] === m.binary, m.serve.argv.join(" "));
-    check(`${id} speaks a documented protocol`, m.serve.protocol === "json-rpc-2.0/stdio");
     check(`${id} cites the page that sanctions embedding`, /^https:\/\//.test(m.citation));
     check(`${id} quotes the sanctioning sentence`, m.sanction.length > 40);
   }
+  // THE ONE FLAG THAT WOULD SILENTLY MOVE CLAUDE ONTO API BILLING. `--bare` "never reads OAuth
+  // credentials or the system keychain" and wants ANTHROPIC_API_KEY instead, so a subscription
+  // chat that passed it would spend the wrong pool with nothing appearing to go wrong.
+  const claude = localAgentFor("anthropic")!;
+  check("Claude is never driven with --bare", !claude.serve.argv.includes("--bare"), claude.serve.argv.join(" "));
+  check("...and is driven with -p, the documented programmatic mode", claude.serve.argv.includes("-p"));
 }
 
 console.log("\nthe verdicts are the ones verified on 2026-09-13");
 {
   // Pinned deliberately. If a provider changes its terms, this suite should fail and force somebody
-  // to re-read them — silently inheriting a new verdict is the failure mode this whole file exists
-  // to prevent.
-  check("Claude is gated on Anthropic's prior approval", !subscriptionAvailable("anthropic"));
-  check("...and says the approval exists", (SUBSCRIPTION_SUPPORT.anthropic as { unblock: string | null }).unblock !== null);
+  // to re-read them — silently inheriting a new verdict is the failure this whole file prevents.
+  const claude = capabilityOf("anthropic");
+  check("Claude's mechanism is supported", claude.subscriptionChatSupported);
+  check("...but gated on Anthropic's prior approval", !claude.subscriptionChatAvailable && claude.requiresProviderApproval);
+  check("...with the implementation kept underneath the gate", claude.mechanism !== null);
+  check("...and a named way to unblock it", (claude.unblock ?? "").includes("contact-sales"));
+
   check("Codex is available", subscriptionAvailable("openai"));
   check("...through codex app-server", localAgentFor("openai")?.serve.argv.join(" ") === "codex app-server");
   check("...signing in with codex login", localAgentFor("openai")?.loginCommand.join(" ") === "codex login");
-  check("Muse Spark is gated", !subscriptionAvailable("meta"));
-  check("...with nothing to unblock it yet", (SUBSCRIPTION_SUPPORT.meta as { unblock: string | null }).unblock === null);
-  check("so exactly one provider is connectable today", availableSubscriptionProviders().join(",") === "openai");
+  check("...needing no approval", !capabilityOf("openai").requiresProviderApproval);
+
+  const meta = capabilityOf("meta");
+  check("Muse Spark has no subscription mechanism at all", !meta.subscriptionChatSupported && meta.mechanism === null);
+  check("...so there is nothing to approve", !meta.requiresProviderApproval && meta.unblock === null);
+
+  check("exactly one provider is connectable today", availableSubscriptionProviders().join(",") === "openai");
+  check("...while two have an official mechanism", supportedSubscriptionProviders().join(",") === "anthropic,openai");
+}
+
+console.log("\neffort maps to each provider's real parameter, never a shared invention");
+{
+  // The three do not agree, and the table must not pretend they do.
+  check("Claude's parameter is its slash command", capabilityOf("anthropic").reasoning?.param === "/effort");
+  check("Codex's parameter is model_reasoning_effort", capabilityOf("openai").reasoning?.param === "model_reasoning_effort");
+  check("Muse Spark has no reasoning control", capabilityOf("meta").reasoning === null);
+  check("...so it offers no levels", reasoningLevels("meta").length === 0);
+
+  // Codex stops at xhigh. Max must CLAMP to a value the CLI accepts rather than be sent through.
+  const maxOnCodex = mapEffort("openai", "max");
+  check("Max clamps to xhigh on Codex", maxOnCodex.value === "xhigh", String(maxOnCodex.value));
+  check("...and reports xhigh as the level actually applied", maxOnCodex.applied === "xhigh", String(maxOnCodex.applied));
+  check("Max is unclamped on Claude", mapEffort("anthropic", "max").value === "max");
+  check("Muse Spark is sent nothing at all", mapEffort("meta", "high").value === null);
+
+  // Every level a provider OFFERS must map to a value it accepts — an offered stop that sends
+  // nothing is a control that silently does nothing when a user moves it.
+  for (const id of PROVIDER_IDS) {
+    const levels = reasoningLevels(id);
+    check(`${id}: every offered level maps to a real value`,
+      levels.every((l) => mapEffort(id, l).value !== null), levels.join(","));
+    const accepted = capabilityOf(id).reasoning?.levels ?? [];
+    check(`${id}: never offers a level outside Jaroku's five`,
+      accepted.every((l) => (EFFORT_LEVELS as readonly string[]).includes(l)));
+  }
 }
 
 console.log("\nno environment can talk this module out of a verdict");

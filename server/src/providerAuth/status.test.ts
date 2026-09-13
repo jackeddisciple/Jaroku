@@ -9,7 +9,7 @@
 //   npm run test:provider-auth-status
 
 import { PROVIDER_IDS, type ProviderId } from "../providers.ts";
-import { subscriptionAvailable } from "./capability.ts";
+import { capabilityOf, subscriptionAvailable } from "./capability.ts";
 import {
   connectedProviders, gatedEvenWhenPresent, statusFor, subscriptionStatuses, type HostObservation,
 } from "./status.ts";
@@ -71,7 +71,12 @@ console.log("\na row carries what the UI needs to explain itself");
   check("...and cites the page that sanctions it", /^https:\/\//.test(openai.citation));
 
   const anthropic = statusFor("anthropic", undefined);
-  check("a gated row carries no mechanism", anthropic.binary === null && anthropic.loginCommand === null);
+  // GATED ROWS KEEP THEIR MECHANISM, unlike the first draft of this file. Claude's integration is
+  // finished and waiting on an email, so the row can honestly name the binary and the sign-in
+  // command. What it must not do is report `connected`, which is asserted above.
+  check("a gated row still names its mechanism", anthropic.binary === "claude" && anthropic.loginCommand === "claude /login");
+  check("...and says an official mechanism exists", anthropic.supported && !anthropic.available);
+  check("...and that approval is what is missing", anthropic.requiresApproval);
   check("...cites the page it was refused by", /^https:\/\//.test(anthropic.citation));
   check("...and names what would unblock it", (anthropic.unblock ?? "").includes("contact-sales"));
 }
@@ -84,6 +89,8 @@ console.log("\nevery provider gets a row, gated ones included");
   // Hiding a gated provider answers "can I use my Claude subscription?" with silence.
   check("...and gated providers are present rather than hidden", rows.some((r) => !r.available));
   check("every row is labelled for a person", rows.every((r) => r.label.length > 0 && r.label !== r.provider));
+  // Agent runtime is a separate credential system and no subscription verdict may narrow it.
+  check("...and every row still runs agents on an API key", rows.every((r) => r.runtimeApiSupported));
 }
 
 console.log("\nthe connectable set is what dispatch and the selector both read");

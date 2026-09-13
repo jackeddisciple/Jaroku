@@ -22,7 +22,8 @@
 //   npm run test:provider-auth-status
 
 import { providerLabel, type ProviderId } from "../providers.ts";
-import { subscriptionSupport } from "./capability.ts";
+import type { Effort } from "../effort.ts";
+import { capabilityOf, mapEffort, reasoningLevels } from "./capability.ts";
 
 /**
  * What the desktop shell last saw on this machine for one provider.
@@ -56,8 +57,14 @@ export interface HostObservation {
 export interface SubscriptionStatus {
   readonly provider: ProviderId;
   readonly label: string;
-  /** From the verdict table. The client renders a gated row rather than hiding it. */
+  /** May Chat use this provider's subscription TODAY. The client renders a gated row, not a hole. */
   readonly available: boolean;
+  /** Does an official mechanism exist at all. True for Claude while `available` is false. */
+  readonly supported: boolean;
+  /** Is the gap between the two a provider approval we do not hold. */
+  readonly requiresApproval: boolean;
+  /** May an agent run on this provider with an API key from Secrets. Independent of all the above. */
+  readonly runtimeApiSupported: boolean;
   /** Why not, when not. Null when available. */
   readonly reason: string | null;
   /** The provider's own page the verdict came from. Always present, both ways. */
@@ -70,6 +77,10 @@ export interface SubscriptionStatus {
   readonly loginCommand: string | null;
   /** Where the provider keeps its own credential, so the product can say so. Never opened. */
   readonly credentialPath: string | null;
+  /** The provider's own reasoning parameter, so the composer names a real control or omits it. */
+  readonly effortParam: string | null;
+  /** The levels this provider accepts. Empty means it has no reasoning control at all. */
+  readonly effortLevels: Effort[];
   /** What this machine has, or null when nothing has reported — a browser, or a shell too old. */
   readonly host: {
     readonly installed: boolean;
@@ -97,25 +108,34 @@ export interface SubscriptionStatus {
  * with this comment on it rather than relax an `&&`.
  */
 export function gatedEvenWhenPresent(id: ProviderId, host: HostObservation | undefined): boolean {
-  return !subscriptionSupport(id).available && host !== undefined && host.installed && host.signedIn;
+  return !capabilityOf(id).subscriptionChatAvailable && host !== undefined && host.installed && host.signedIn;
 }
 
 /** One row. `observations` is keyed by provider; a missing entry means nothing has reported. */
 export function statusFor(id: ProviderId, host: HostObservation | undefined): SubscriptionStatus {
-  const support = subscriptionSupport(id);
-  const mechanism = support.available ? support.mechanism : null;
+  const cap = capabilityOf(id);
+  // THE MECHANISM IS SHOWN EVEN WHILE GATED. Claude's integration is finished and sitting under a
+  // flag, and a row that names the binary and the sign-in command tells a user something true about
+  // what is waiting for them. What it must never do is let that row be USED — which the line below
+  // is responsible for, and which no field here can reach around.
+  const mechanism = cap.mechanism;
 
   // PERMISSION FIRST. `connected` can only ever narrow from here — there is no branch below that
-  // reaches it without passing through `support.available`.
-  const connected = support.available && host !== undefined && host.installed && host.signedIn;
+  // reaches it without passing through `subscriptionChatAvailable`.
+  const connected = cap.subscriptionChatAvailable && host !== undefined && host.installed && host.signedIn;
 
   return {
     provider: id,
     label: providerLabel(id),
-    available: support.available,
-    reason: support.available ? null : support.reason,
-    citation: support.available ? support.mechanism.citation : support.citation,
-    unblock: support.available ? null : support.unblock,
+    available: cap.subscriptionChatAvailable,
+    supported: cap.subscriptionChatSupported,
+    requiresApproval: cap.requiresProviderApproval,
+    runtimeApiSupported: cap.runtimeApiSupported,
+    reason: cap.reason,
+    citation: cap.citation,
+    unblock: cap.unblock,
+    effortParam: cap.reasoning?.param ?? null,
+    effortLevels: [...reasoningLevels(id)],
     binary: mechanism?.binary ?? null,
     loginCommand: mechanism ? mechanism.loginCommand.join(" ") : null,
     credentialPath: mechanism?.credentialPath ?? null,

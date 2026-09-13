@@ -32,6 +32,7 @@
 //   npm run test:provider-auth-capability
 
 import { PROVIDER_IDS, type ProviderId } from "../providers.ts";
+import type { Effort } from "../effort.ts";
 
 /**
  * How Jaroku reaches a provider that permits subscription-backed use.
@@ -56,7 +57,7 @@ export interface LocalAgentMechanism {
    */
   readonly loginCommand: readonly string[];
   /** The documented subprocess mode Jaroku drives, and the protocol it speaks. */
-  readonly serve: { readonly argv: readonly string[]; readonly protocol: "json-rpc-2.0/stdio" };
+  readonly serve: { readonly argv: readonly string[]; readonly protocol: string };
   /**
    * Where the provider's own CLI caches its own credential.
    *
@@ -71,68 +72,140 @@ export interface LocalAgentMechanism {
   readonly sanction: string;
 }
 
-/** A provider that does not permit this, and the reason it does not. */
-export interface Unavailable {
-  readonly available: false;
-  /** Rendered to the user verbatim. Plain, factual, and never apologetic. */
-  readonly reason: string;
-  /** The page the verdict came from. */
-  readonly citation: string;
-  /**
-   * What would change the verdict, when anything would.
-   *
-   * Anthropic's restriction is "unless previously approved", which makes it a business step rather
-   * than a permanent no — and a product owner who is told that can act on it. A provider that has
-   * simply not built the mechanism gets `null`, because there is nothing to do but wait.
-   */
-  readonly unblock: string | null;
+/**
+ * How Jaroku's five effort levels reach ONE provider's real parameter.
+ *
+ * NOT ASSUMED TO BE THE SAME SHAPE ANYWHERE. Codex takes a named level on a config key; Claude
+ * takes a slash-command argument; Muse Spark takes nothing at all. A single "effort" value sent to
+ * all three would be a parameter two of them reject and one ignores, so what is stored here is the
+ * PARAMETER'S NAME and a table from our level to that provider's own vocabulary.
+ *
+ * A level that maps to a word below its own is a CLAMP, and the clamp is visible: `mapEffort`
+ * reports which level was really applied, so §3.2's "never report an effort that wasn't used"
+ * survives the translation.
+ */
+export interface ReasoningCapability {
+  /** The provider's own parameter, exactly as its CLI or API spells it. */
+  readonly param: string;
+  /** Jaroku's levels this provider actually accepts, in order. */
+  readonly levels: readonly Effort[];
+  /** Our level -> the provider's word for it. Null means send nothing rather than something close. */
+  readonly map: Readonly<Record<Effort, string | null>>;
 }
 
-export type SubscriptionSupport = { readonly available: true; readonly mechanism: LocalAgentMechanism } | Unavailable;
+/**
+ * Everything the product needs to decide what a provider may do, in one record.
+ *
+ * FOUR BOOLEANS RATHER THAN ONE, because they answer four genuinely different questions and
+ * collapsing them is how a gated provider gets deleted by a refactor:
+ *
+ *   subscriptionChatSupported   does an official mechanism EXIST at all
+ *   subscriptionChatAvailable   may we use it TODAY
+ *   requiresProviderApproval    is the gap between those two a business step
+ *   runtimeApiSupported         may an agent run on this provider with the user's own API key
+ *
+ * Claude is the case that proves they are different: supported, not available, approval pending,
+ * and fully usable for agent runtime. A single `available` flag would lose three of those facts,
+ * and the product would have nothing true to render.
+ */
+export interface ProviderCapability {
+  readonly id: ProviderId;
+  readonly subscriptionChatSupported: boolean;
+  /** Never true when `subscriptionChatSupported` is false — asserted, not merely intended. */
+  readonly subscriptionChatAvailable: boolean;
+  readonly requiresProviderApproval: boolean;
+  readonly runtimeApiSupported: boolean;
+  /** Which pool subscription-backed chat spends. Null when there is no such path. */
+  readonly usageSource: "subscription" | null;
+  /** How to reach it. Present even while gated, because the implementation is finished. */
+  readonly mechanism: LocalAgentMechanism | null;
+  /** Why it is not available, for a person. Null when it is. */
+  readonly reason: string | null;
+  /** The provider's own page this verdict was read from. Always present. */
+  readonly citation: string;
+  /** What would change a "no". Null when nothing would, or when it is already "yes". */
+  readonly unblock: string | null;
+  /** How effort reaches this provider. Null when it has no reasoning control. */
+  readonly reasoning: ReasoningCapability | null;
+}
 
 /**
  * The verdicts, one per provider, verified 2026-09-13.
  *
  * KEYED BY THE SAME `ProviderId` THE API-KEY SIDE USES, and that shared key is the only thing the
- * two credential systems have in common. It is a name, not a credential: `providerAuth` never reads
+ * two credential systems have in common. It is a name, not a credential: this module never reads
  * `PROVIDER_ENV_KEY`, and `providers.ts` never reads this table. The separation the product owner
- * asked for — "these are two completely independent credential systems" — is kept by the two
- * modules not importing each other's secrets rather than by a comment asking them not to.
+ * asked for is kept by the two modules not importing each other's secrets rather than by a comment
+ * asking them not to.
  */
-export const SUBSCRIPTION_SUPPORT: Readonly<Record<ProviderId, SubscriptionSupport>> = {
+export const PROVIDER_CAPABILITY: Readonly<Record<ProviderId, ProviderCapability>> = {
   // ------------------------------------------------------------------------------------------
-  // Claude — permitted only with prior written approval from Anthropic.
+  // Claude — the mechanism is real and addressed by the terms; the approval is not yet held.
   //
-  // The support article "Use the Claude Agent SDK with your Claude plan" does say that third-party
-  // app usage draws on a subscription's limits, and read alone it sounds like a green light. It is
-  // describing what happens to an INDIVIDUAL'S OWN usage, and it sits under a paused billing
-  // change. The operative sentence for a developer is in the Agent SDK overview and it is specific
-  // enough to name the SDK itself, which is why it wins.
+  // Anthropic governs two different acts with two different sentences. Offering Claude.ai login
+  // inside your own application, routing requests through plan credentials on a user's behalf, or
+  // holding their tokens is prohibited outright, and the Agent SDK overview names agents built on
+  // that SDK specifically. The legal page then carves out the local case: "Nor does it prevent an
+  // end user from signing in to the unmodified Claude Code binary with their own Claude
+  // subscription, including where a platform hosts Claude Code."
+  //
+  // Jaroku's integration is the second of those. It stays unavailable because one tension is
+  // unresolved in public documentation — the headless page calls `claude -p` "the Agent SDK via the
+  // CLI", while the SDK page withholds plan rate limits from third-party products "unless
+  // previously approved". What flips this entry is an email, not a commit.
   // ------------------------------------------------------------------------------------------
   anthropic: {
-    available: false,
+    id: "anthropic",
+    subscriptionChatSupported: true,
+    subscriptionChatAvailable: false,
+    requiresProviderApproval: true,
+    runtimeApiSupported: true,
+    usageSource: "subscription",
+    mechanism: {
+      kind: "local-agent",
+      binary: "claude",
+      loginCommand: ["claude", "/login"],
+      // NEVER `--bare`. That mode "never reads OAuth credentials or the system keychain" and wants
+      // ANTHROPIC_API_KEY instead, so it would turn subscription chat into API billing without
+      // anything appearing to go wrong — the exact crossing this architecture exists to prevent.
+      serve: {
+        argv: ["claude", "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"],
+        protocol: "stream-json/stdio",
+      },
+      credentialPath: "the macOS Keychain, or ~/.claude/.credentials.json",
+      citation: "https://code.claude.com/docs/en/legal-and-compliance",
+      sanction:
+        "Nor does it prevent an end user from signing in to the unmodified Claude Code binary with "
+        + "their own Claude subscription, including where a platform hosts Claude Code.",
+    },
     reason:
-      "Anthropic does not allow third-party developers to offer Claude.ai login or subscription "
-      + "rate limits in their own products — including agents built on the Claude Agent SDK — "
-      + "unless the developer has been approved in advance.",
+      "Anthropic requires prior approval before a third-party product may draw on a Claude "
+      + "subscription's rate limits. Jaroku drives the unmodified Claude Code binary you signed into "
+      + "yourself, which the terms address separately — but that approval is not yet held.",
     citation: "https://code.claude.com/docs/en/agent-sdk/overview",
     unblock:
-      "Anthropic grants exceptions: the restriction reads \"unless previously approved\". Request "
-      + "approval through https://www.anthropic.com/contact-sales. This provider turns on the day "
-      + "that approval lands, with no code change beyond this entry.",
+      "The restriction reads \"unless previously approved\". Request approval through "
+      + "https://www.anthropic.com/contact-sales and accept Anthropic's Commercial Terms. Turning "
+      + "this on is one field of this entry; the integration underneath is finished.",
+    // `/effort <level>` in the prompt string, with the same five names Jaroku uses. One-to-one
+    // because both were written from the product owner's level names, not because it was assumed.
+    reasoning: {
+      param: "/effort",
+      levels: ["low", "medium", "high", "xhigh", "max"],
+      map: { low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" },
+    },
   },
 
   // ------------------------------------------------------------------------------------------
-  // Codex — permitted, and documented for exactly this.
-  //
-  // OpenAI publishes `codex app-server` as the interface its OWN rich clients use — the VS Code
-  // extension is the example the page gives — and tells third-party developers to use it when they
-  // want a deep integration inside their own product, naming authentication as one of the things it
-  // carries. `codex login` completes in OpenAI's browser flow and caches to the path below, which
-  // is the provider holding its own credential exactly as its terms require.
+  // Codex — documented for exactly this, and verified against codex-cli 0.154.0 on 2026-09-13.
   // ------------------------------------------------------------------------------------------
   openai: {
-    available: true,
+    id: "openai",
+    subscriptionChatSupported: true,
+    subscriptionChatAvailable: true,
+    requiresProviderApproval: false,
+    runtimeApiSupported: true,
+    usageSource: "subscription",
     mechanism: {
       kind: "local-agent",
       binary: "codex",
@@ -144,56 +217,103 @@ export const SUBSCRIPTION_SUPPORT: Readonly<Record<ProviderId, SubscriptionSuppo
         "Use it when you want a deep integration inside your own product: authentication, "
         + "conversation history, approvals, and streamed agent events.",
     },
+    reason: null,
+    citation: "https://learn.chatgpt.com/docs/app-server",
+    unblock: null,
+    // `model_reasoning_effort`, set per invocation with `-c model_reasoning_effort="high"`. Codex
+    // stops at xhigh, so Jaroku's Max CLAMPS to it rather than inventing a level the CLI rejects.
+    reasoning: {
+      param: "model_reasoning_effort",
+      levels: ["low", "medium", "high", "xhigh"],
+      map: { low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "xhigh" },
+    },
   },
 
   // ------------------------------------------------------------------------------------------
-  // Muse Spark — no documented third-party path.
-  //
-  // Muse Code offers a browser sign-in, so the mechanism plainly exists inside Meta's own client;
-  // what is absent is any documentation letting another product drive it. The docs point the other
-  // way for exactly the case Jaroku is: "for non-interactive environments, set META_API_KEY
-  // instead." An undocumented path is not a permitted one, and `muse exec` under somebody's browser
-  // sign-in would be us deciding that on Meta's behalf.
+  // Muse Spark — no official third-party mechanism, so there is nothing to gate and nothing to
+  // approve. It remains a first-class provider for agent runtime on the user's own API key.
   // ------------------------------------------------------------------------------------------
   meta: {
-    available: false,
+    id: "meta",
+    subscriptionChatSupported: false,
+    subscriptionChatAvailable: false,
+    requiresProviderApproval: false,
+    runtimeApiSupported: true,
+    usageSource: null,
+    mechanism: null,
     reason:
       "Meta documents no way for a third-party application to drive Muse Code under a user's "
       + "subscription sign-in. Its own guidance for non-interactive use is to set META_API_KEY, "
       + "which is API billing rather than subscription access.",
     citation: "https://dev.meta.ai/docs",
     unblock: null,
+    // No reasoning control at all, by the product owner's call — which is why the composer omits
+    // the slider for Muse Spark rather than drawing one that would change nothing.
+    reasoning: null,
   },
 } as const;
 
 /** What a provider permits. Total over `ProviderId`, so there is no "unknown provider" branch. */
-export function subscriptionSupport(id: ProviderId): SubscriptionSupport {
-  return SUBSCRIPTION_SUPPORT[id];
+export function capabilityOf(id: ProviderId): ProviderCapability {
+  return PROVIDER_CAPABILITY[id];
 }
 
 /**
- * Whether this provider may be connected as a subscription at all.
+ * Whether this provider may be connected as a subscription TODAY.
  *
  * THE ONE PREDICATE EVERY CALLER USES. Dispatch asks it before routing a turn, the relay asks it
  * before accepting a connect command, and the client asks it before offering a button. Three
  * questions with one answer, so a provider cannot be live in one of them and gated in another.
  */
 export function subscriptionAvailable(id: ProviderId): boolean {
-  return SUBSCRIPTION_SUPPORT[id].available;
+  return PROVIDER_CAPABILITY[id].subscriptionChatAvailable;
 }
 
 /**
  * The mechanism for a provider that has one, or null.
  *
- * Returning null rather than throwing for a gated provider: callers reach this while building a
- * snapshot for the UI, where "this one is gated" is an ordinary row to render and not an error.
+ * PRESENT EVEN WHILE GATED, which is deliberate: Claude's integration is finished and this is what
+ * it is built from. Nothing may USE it while `subscriptionChatAvailable` is false — that is
+ * `subscriptionAvailable`'s job, and `status.ts` checks it first.
  */
 export function localAgentFor(id: ProviderId): LocalAgentMechanism | null {
-  const support = SUBSCRIPTION_SUPPORT[id];
-  return support.available ? support.mechanism : null;
+  return PROVIDER_CAPABILITY[id].mechanism;
+}
+
+/**
+ * Translate a level into what THIS provider's parameter actually takes.
+ *
+ * Returns both halves, because they differ and the difference is what the UI has to show: `applied`
+ * is the level really asked for after clamping, `value` is the provider's own word for it. A
+ * provider with no reasoning control returns nulls and the caller sends nothing at all.
+ */
+export function mapEffort(id: ProviderId, requested: Effort): { applied: Effort | null; value: string | null } {
+  const reasoning = PROVIDER_CAPABILITY[id].reasoning;
+  if (!reasoning) return { applied: null, value: null };
+  const value = reasoning.map[requested] ?? null;
+  if (value === null) return { applied: null, value: null };
+  // The level that word really corresponds to — `requested` unless the map clamped it. Found by
+  // looking up rather than assumed, so a clamp is reported as the level actually spent.
+  const applied = reasoning.levels.find((l) => reasoning.map[l] === value) ?? requested;
+  return { applied, value };
+}
+
+/** The levels this provider's control should offer. Empty when it has no reasoning control. */
+export function reasoningLevels(id: ProviderId): readonly Effort[] {
+  return PROVIDER_CAPABILITY[id].reasoning?.levels ?? [];
 }
 
 /** Every provider that may be connected today. Empty is a legitimate answer. */
 export function availableSubscriptionProviders(): ProviderId[] {
   return PROVIDER_IDS.filter(subscriptionAvailable);
+}
+
+/** Providers with an official mechanism, whether or not we may use it yet. */
+export function supportedSubscriptionProviders(): ProviderId[] {
+  return PROVIDER_IDS.filter((id) => PROVIDER_CAPABILITY[id].subscriptionChatSupported);
+}
+
+/** Providers an agent may run on with an API key from Secrets. Independent of everything above. */
+export function runtimeApiProviders(): ProviderId[] {
+  return PROVIDER_IDS.filter((id) => PROVIDER_CAPABILITY[id].runtimeApiSupported);
 }

@@ -120,6 +120,11 @@ console.log("\nno report can promote a provider its owner has not sanctioned");
   check(rowFor(after, "meta").connected === false, "Muse Spark stays refused however it is reported");
   check(rowFor(after, "anthropic").host?.signedIn === true, "...while still reporting honestly what is installed");
   check(rowFor(after, "anthropic").unblock?.includes("contact-sales") === true, "...and naming what would change it");
+  // Claude is gated, not absent: the integration is finished and the row says so.
+  check(rowFor(after, "anthropic").supported === true, "...while still saying an official mechanism exists");
+  check(rowFor(after, "anthropic").requiresApproval === true, "...and that approval is the thing missing");
+  // And the separation holds in the other direction: gating Chat never touches agent runtime.
+  check(after.subscriptions.every((r: any) => r.runtimeApiSupported === true), "...and every provider still runs agents on an API key");
   // The previous report is replaced, not merged — a snapshot, like every other channel here.
   check(rowFor(after, "openai").connected === false, "a report replaces the last one rather than merging");
 }
@@ -149,7 +154,8 @@ console.log("\nrows carry no credential, because there is none to carry");
   // documentation and the most useful thing that row can say. A scan for credential-looking text
   // flags that and misses the actual risk, which is a FIELD appearing here that could hold one.
   const ROW_FIELDS = [
-    "provider", "label", "available", "reason", "citation", "unblock",
+    "provider", "label", "available", "supported", "requiresApproval", "runtimeApiSupported",
+    "reason", "citation", "unblock", "effortParam", "effortLevels",
     "binary", "loginCommand", "credentialPath", "host", "connected",
   ].sort().join(",");
   const HOST_FIELDS = ["installed", "version", "signedIn", "account", "observedAt"].sort().join(",");
