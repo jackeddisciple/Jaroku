@@ -922,6 +922,14 @@ jobs:
           # untrue. The suite also drives a client that claims a gated provider is installed and
           # signed in, and asserts the row still comes back refused.
           npm run test:provider-auth-relay
+          # THE COMMAND LINE ITSELF, asserted as a value. This is the last thing between a user's
+          # intention and a process that spends their provider account, so the suite is mostly
+          # about what cannot appear in it: a command for a gated provider, an effort level the CLI
+          # would reject, and above all `--bare` — which makes Claude Code ignore the keychain and
+          # demand an API key, so a subscription turn carrying it would spend the wrong pool with
+          # nothing appearing to go wrong. That one is asserted across every provider and every
+          # level rather than for the single case somebody remembered.
+          npm run test:provider-auth-invocation
           # REASONING EFFORT, AND THE ONE FAILURE MODE THAT IS COMFORTABLE. The composer spec's
           # §3.2 says "Degradation is visible, not silent" and "Never report an effort that
           # wasn't used" — two statements of the same rule, because the way this breaks is a
