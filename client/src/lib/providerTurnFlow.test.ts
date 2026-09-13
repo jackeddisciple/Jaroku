@@ -139,6 +139,38 @@ console.log("\na Claude turn streams in order and does not double");
     (seen.usage as { cost_usd?: number })?.cost_usd === 0.0683845);
 }
 
+console.log("\nan answer that never streamed is still an answer");
+{
+  // THE CASE THE APP ACTUALLY HIT. A Claude turn ended with a complete `assistant` message and no
+  // `text_delta` at all, and the conversation rendered "the provider returned no answer" while the
+  // answer sat in the event immediately before `done`. Deltas are what usually carry a reply; they
+  // are not what guarantees there was one.
+  installHost([
+    '{"type":"system","subtype":"init","session_id":"s"}',
+    '{"type":"assistant","message":{"content":[{"type":"text","text":"Hi! What can I help you with?"}]}}',
+    '{"type":"result","total_cost_usd":0.01,"usage":{"input_tokens":2,"output_tokens":9}}',
+  ]);
+  const seen = watchStore();
+  await runLocalTurn({ ...base, provider: "anthropic", prompt: "Hi" }).finished;
+  check("the whole message becomes the answer", seen.deltas.join("") === "Hi! What can I help you with?", seen.deltas.join(""));
+  check("...settling rather than erroring", seen.done === 1 && seen.errors.length === 0, JSON.stringify(seen.errors));
+}
+
+console.log("\nand a streamed answer is never doubled by the copy that follows it");
+{
+  // The other half of the same rule: when deltas DID arrive, the repeated whole message must not be
+  // appended on top of them. "Hi!" must not render as "Hi!Hi!".
+  installHost([
+    '{"type":"stream_event","event":{"delta":{"type":"text_delta","text":"Hi"}}}',
+    '{"type":"stream_event","event":{"delta":{"type":"text_delta","text":"!"}}}',
+    '{"type":"assistant","message":{"content":[{"type":"text","text":"Hi!"}]}}',
+    '{"type":"result","usage":{"input_tokens":1,"output_tokens":2}}',
+  ]);
+  const seen = watchStore();
+  await runLocalTurn({ ...base, provider: "anthropic", prompt: "Hi" }).finished;
+  check("the streamed text stands alone", seen.deltas.join("") === "Hi!", seen.deltas.join(""));
+}
+
 console.log("\na failure is reported rather than swallowed");
 {
   // A provider that exits non-zero having said nothing: the shape of an expired sign-in.

@@ -53,10 +53,13 @@ console.log("\nclaude -p --output-format stream-json, as captured");
   const delta = __parseClaudeLine(J('{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi!"}},"session_id":"9a680ec1"}'));
   check("a text_delta becomes text", delta?.text === "Hi!", JSON.stringify(delta));
 
-  // The full assistant message arrives again as its own event. Appending it too would double every
-  // answer — the deltas already carried it.
+  // The full assistant message arrives again as its own event. It is carried as `whole` rather than
+  // as `text`, which is the distinction that keeps both properties: appending it as text would
+  // double every streamed answer, and dropping it entirely loses the answer on a turn where no
+  // delta ever arrived. The runner appends it only when nothing streamed — asserted in
+  // providerTurnFlow.test.ts, where a whole run is driven.
   const full = __parseClaudeLine(J('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hi! How can I help?"}]}}'));
-  check("the repeated assistant message is ignored, so nothing doubles", full === null, JSON.stringify(full));
+  check("the repeated assistant message is held in reserve, not appended", full?.whole === "Hi! How can I help?" && full?.text === undefined, JSON.stringify(full));
 
   const result = __parseClaudeLine(J('{"type":"result","duration_api_ms":1673,"stop_reason":"end_turn","total_cost_usd":0.0683845,"usage":{"input_tokens":2,"output_tokens":10}}'));
   check("result becomes usage", result?.usage?.input_tokens === 2 && result?.usage?.output_tokens === 10, JSON.stringify(result));

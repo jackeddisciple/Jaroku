@@ -61,6 +61,17 @@ export function canRunLocally(): boolean {
 export interface Parsed {
   /** Text to append to the answer. */
   text?: string;
+  /**
+   * A COMPLETE message, as opposed to a delta.
+   *
+   * Both CLIs emit the finished answer a second time after streaming it — Claude as an `assistant`
+   * event, Codex as `item.completed`. Appending that alongside the deltas would double every reply,
+   * so it is carried separately and used only when no delta ever arrived. That is not hypothetical:
+   * `--include-partial-messages` is what produces the deltas, and a turn that ends before any
+   * arrive (a refusal, a fast cached reply, a build that ignores the flag) would otherwise render
+   * as "the provider returned no answer" while the answer sat in the very next event.
+   */
+  whole?: string;
   /** The turn finished, and this is what it spent. */
   usage?: TurnUsage;
   /** The provider reported a failure of its own. */
@@ -103,6 +114,13 @@ export function __parseClaudeLine(raw: unknown): Parsed | null {
   const e = raw as Record<string, any>;
   if (e.type === "stream_event" && e.event?.delta?.type === "text_delta" && typeof e.event.delta.text === "string") {
     return { text: e.event.delta.text };
+  }
+  if (e.type === "assistant" && Array.isArray(e.message?.content)) {
+    const text = e.message.content
+      .filter((b: Record<string, unknown>) => b?.type === "text" && typeof b.text === "string")
+      .map((b: Record<string, string>) => b.text)
+      .join("");
+    return text ? { whole: text } : null;
   }
   if (e.type === "result") {
     if (e.is_error === true || e.subtype === "error") {
@@ -154,6 +172,8 @@ export function runLocalTurn(opts: {
   const parse = opts.provider === "openai" ? __parseCodexLine : __parseClaudeLine;
 
   let answer = "";
+  /** A whole message held in reserve, used only if no delta ever arrives. See `Parsed.whole`. */
+  let whole = "";
   let usage: TurnUsage | null = null;
   let failed: string | null = null;
   let turnId: number | null = null;
@@ -205,10 +225,18 @@ export function runLocalTurn(opts: {
             answer += parsedLine.text;
             chat.replyDelta({ threadId: opts.threadId, agentId: opts.agentId, text: parsedLine.text });
           }
+          if (parsedLine.whole) whole = parsedLine.whole;
           if (parsedLine.usage) usage = parsedLine.usage;
           if (parsedLine.error) failed = parsedLine.error;
         }
         if (ev.done) {
+          // NO DELTAS BUT A WHOLE MESSAGE IS STILL AN ANSWER. Rendered at the end rather than as it
+          // arrived, which is honest: it did not stream, and pretending otherwise would be a
+          // typewriter over text that was already complete.
+          if (answer.length === 0 && whole.length > 0) {
+            answer = whole;
+            chat.replyDelta({ threadId: opts.threadId, agentId: opts.agentId, text: whole });
+          }
           // The shell's own error only stands when the provider did not give a better one.
           if (!failed && ev.error) failed = ev.error;
           if (!failed && answer.length === 0) {

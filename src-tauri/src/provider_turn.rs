@@ -205,12 +205,18 @@ fn run(app: AppHandle, turn_id: u64, mut child: Child) {
     }
 
     std::thread::spawn(move || {
+        // COUNTED, BECAUSE "NO ANSWER" HAS TWO VERY DIFFERENT CAUSES and the log could not tell
+        // them apart: a CLI that printed nothing at all, and one that printed plenty which the
+        // page then failed to make sense of. The count is the cheapest thing that separates them,
+        // and it carries no content — the lines themselves are the user's conversation.
+        let mut lines_seen = 0usize;
         if let Some(out) = stdout {
             for line in BufReader::new(out).lines().map_while(Result::ok) {
                 let line = line.trim().to_string();
                 if line.is_empty() {
                     continue;
                 }
+                lines_seen += 1;
                 let _ = app.emit(EVENT, TurnEvent {
                     turn_id, line: Some(line), done: false, code: None, error: None,
                 });
@@ -226,7 +232,7 @@ fn run(app: AppHandle, turn_id: u64, mut child: Child) {
             .and_then(|s| s.code());
         drop(running);
 
-        logs::say(format!("provider turn {turn_id} ended, exit {code:?}"));
+        logs::say(format!("provider turn {turn_id} ended, exit {code:?}, {lines_seen} line(s) of output"));
         let _ = app.emit(EVENT, TurnEvent {
             turn_id,
             line: None,
