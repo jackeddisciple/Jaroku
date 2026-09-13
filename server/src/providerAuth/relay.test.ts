@@ -29,7 +29,7 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 const db = await openTestSqlite();
 const store = new TraceStore(db);
 const WS = "11111111-1111-4111-8111-111111111111";
-const ctx: TenantContext = { ...systemContextFor(WS), requestId: newRequestId() };
+const ctx: TenantContext = systemContextFor(WS, newRequestId());
 
 const PORT = 4519;
 const relay = new WsRelay({
