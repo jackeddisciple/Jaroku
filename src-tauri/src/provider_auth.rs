@@ -61,6 +61,14 @@ const EXTRA_DIRS: &[&str] = &[
     "/usr/bin",
 ];
 
+/// The same idea for per-user installs, resolved against `$HOME` at call time.
+///
+/// `~/.local/bin` IS WHERE CLAUDE CODE PUTS ITSELF, which is how this list earned its existence:
+/// with only the system directories above, a Finder-launched build found `codex` under Homebrew and
+/// missed `claude` entirely — on a machine where both were installed and signed in. The bug is
+/// invisible from a terminal, because a terminal has the user's real PATH.
+const EXTRA_HOME_DIRS: &[&str] = &[".local/bin", ".bun/bin", ".deno/bin"];
+
 /// One provider CLI as this machine has it. Serialised straight to the page.
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -111,6 +119,14 @@ fn locate(binary: &str) -> Option<PathBuf> {
         let candidate = Path::new(dir).join(binary);
         if is_executable(&candidate) {
             return Some(candidate);
+        }
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        for dir in EXTRA_HOME_DIRS {
+            let candidate = Path::new(&home).join(dir).join(binary);
+            if is_executable(&candidate) {
+                return Some(candidate);
+            }
         }
     }
     None
@@ -407,6 +423,21 @@ mod tests {
             let (signed_in, _, _, _) = read_claude_status(json);
             assert!(!signed_in, "{json:?} must not count as a sign-in");
         }
+    }
+
+    #[test]
+    fn a_gui_launch_finds_a_per_user_install() {
+        // THE BUG THIS CAUGHT. A `.app` opened from Finder inherits no shell PATH, so the search
+        // falls back to the fixed lists. With only the system directories, a machine with Claude
+        // Code in ~/.local/bin — where its installer puts it — reported it absent while a terminal
+        // found it instantly. Asserting the list rather than the filesystem, because CI has neither
+        // binary and the thing that was wrong was the list.
+        assert!(
+            EXTRA_HOME_DIRS.contains(&".local/bin"),
+            "Claude Code installs to ~/.local/bin; a GUI launch must look there"
+        );
+        assert!(EXTRA_DIRS.contains(&"/opt/homebrew/bin"), "Homebrew on Apple silicon");
+        assert!(EXTRA_DIRS.contains(&"/usr/local/bin"), "Homebrew on Intel, and npm's default prefix");
     }
 
     #[test]
