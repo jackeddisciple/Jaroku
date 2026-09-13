@@ -385,7 +385,10 @@ function FailureActions({ turn, agentId }: { turn: ReplyTurn; agentId: string | 
     // does not append a duplicate question to the thread.
     if (!turn.itemId) return;
     const prompt = promptForRegenerate(turns, turn);
-    if (prompt) sendChat(prompt, agentId, { regenerateOf: turn.itemId });
+    // THE ROUTING VERDICT TRAVELS WITH THE RETRY — see `routingOf`. Without it the second attempt
+    // arrived with no reason and no band, so the chip stopped explaining itself and §15.1's offer
+    // could not appear on a turn whose first attempt had earned it.
+    if (prompt) sendChat(prompt, agentId, { regenerateOf: turn.itemId, ...routingOf(turn) });
   };
 
   const control = (id: string): React.ReactNode => {
@@ -720,6 +723,33 @@ function AssistantTurn({
 }
 
 /**
+ * THE ROUTING VERDICT OF THE TURN BEING RE-ANSWERED — §13.2's reason and §15.1's band.
+ *
+ * A REGENERATION IS A SECOND ANSWER TO THE SAME QUESTION, so the routing decision is the one that
+ * already happened. Neither dispatch carried it: a regenerated turn came back with `route: "chat"`
+ * and no `route_reason`, so the chip fell back to "Handled by the chat route", stopped being
+ * clickable, and §13.2's one-line explanation was gone. The band went the same way, which means
+ * §15.1's build offer could not appear under a regenerated reply even when the original message had
+ * earned it.
+ *
+ * READ FROM THE RECORD, NEVER RE-ROUTED. §13.2 is explicit: the reason "comes from the record the
+ * router already writes — it is not reconstructed afterward, because a reconstruction can disagree
+ * with the actual decision and then the explanation is itself a lie." Running `routeMessage` again
+ * here would be that reconstruction, and it would disagree the moment the composer's context
+ * differed from when the question was asked.
+ *
+ * ABSENT FIELDS STAY ABSENT. A turn from before the router recorded either one has nothing to
+ * carry, and an invented reason is worse than no chip to expand.
+ */
+function routingOf(turn: ReplyTurn): { routeReason?: string; planEvidence?: "none" | "near" | "confident" } {
+  const reason = turn.usage?.route_reason;
+  return {
+    ...(typeof reason === "string" && reason.trim() ? { routeReason: reason } : {}),
+    ...(turn.planEvidence ? { planEvidence: turn.planEvidence } : {}),
+  };
+}
+
+/**
  * Re-run the message that produced this turn — §5.4.
  *
  * IT DISPATCHES NOW RATHER THAN PREFILLING, which is what §5.4 asks for: "re-runs the same user
@@ -773,6 +803,8 @@ function rerunTurn(
   // user's next test run and answer on the same model as before.
   sendChat(prompt, turn.agentId || null, {
     regenerateOf: turn.itemId,
+    // §13.2 AND §15.1, CARRIED FROM THE TURN BEING RE-ANSWERED.
+    ...routingOf(turn),
     // THE MODEL FROM THE MENU IF ONE WAS CHOSEN, else the conversation's own. A plain ⟳ answers
     // again on the model the conversation is set to; "Regenerate with <model>" answers on that one
     // — and §13.3's different chips are what makes the difference visible afterwards.
