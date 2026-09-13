@@ -1,304 +1,64 @@
-// §5.1 step 3 — connect a model provider, or don't.
+// §5.1 step 3 — connect the subscription Jaroku Chat runs on.
 //
-// "SKIP IS GENUINELY FIRST-CLASS HERE." The specification says it in bold: somebody can see the
-// product before handing it a credential. There is no offline dry-run mode behind the skip any more
-// — the product owner retired it on 2026-09-11 — so what a skip buys is the whole app to look
-// around, with every control that would run a model opening Secrets at the key it needs. That is
-// still the difference between this product and one that asks for an API key before it has shown
-// you anything, and it is why the skip below is not apologetic and is always available.
+// WHAT THIS STEP USED TO BE, AND WHY IT IS NOT ANY MORE. It asked for an API key, because for most
+// of this product's life a key was the only credential there was. It is now the wrong question to
+// open with: talking to Jaroku spends the plan somebody already pays Anthropic or OpenAI for, and
+// step 4 immediately asks them to describe an agent — which IS a chat turn. Asking for an API key
+// here put the credential for AGENT RUNS in front of somebody who could not yet send the message
+// that creates an agent, and then let them through to a composer that refused to send.
 //
-// THIS STEP GOES THROUGH THE SECRETS TAB'S OWN GATE, WHICH IS THE HARD PART.
+// THE API KEY DID NOT MOVE HERE, IT MOVED OUT. It lives in Secrets, where every other credential
+// lives, behind the passcode gate that exists for exactly that. The product owner's instruction on
+// 2026-09-13 was plain: "User can't send manually go to secrets and put that." So this screen has
+// one job and one credential system on it.
 //
-// §5.1 says this step "is effectively pre-populating the Secrets tab's Model Providers group", and
-// that turns out to have a consequence the specification does not mention: writing a credential in
-// this product needs an UNLOCKED vault. `POST /v1/secrets` is `guarded(..., { elevation: "mutate" })`
-// and refuses without a live elevation token, which is backed by a passcode.
+// THERE IS NO BUTTON THAT SIGNS ANYBODY IN, and there cannot be one. Neither provider permits a
+// third-party application to carry out its sign-in — that is the whole reason this integration is
+// permissible at all. The user runs `claude auth login` or `codex login` themselves, in their own
+// terminal, through the provider's own browser flow, and Jaroku then asks the CLI what happened.
+// A button here would be theatre around a line somebody still has to type.
 //
-// THERE WERE THREE WAYS THROUGH THAT AND ONLY ONE OF THEM IS HONEST:
-//
-//   1. A special unelevated write path for onboarding. Rejected: that is a hole in the exact gate
-//      the Secrets tab exists to be, reachable by anybody who can hit an endpoint, and it would be
-//      permanent — nothing about it would stop working once onboarding was over.
-//   2. Pretend the key was stored and write it later. Rejected outright: a "✓ Validated" over a
-//      credential that is not saved is the worst possible version of this screen.
-//   3. Show the real gate, inline, with the skip beside it. Which is what this does.
-//
-// SO A LOCKED VAULT MAKES THIS SCREEN TWO THINGS IN SEQUENCE — set or unlock, then paste — and the
-// copy says which is happening. That is more friction than §5.1 drew, and the honest accounting is
-// that the friction is REAL rather than introduced here: the same wall stands in front of the
-// Secrets tab on day two, and a person who skips this step meets it exactly once, later, when they
-// have a reason to care. What this screen must not do is hide it and fail at the last moment.
-//
-// AND §5.3'S RESUME IS WHY IT READS EXISTING STATE FIRST. "Data already saved (workspace, provider
-// key) is not re-collected — it's re-shown for confirmation only if the user navigates back to that
-// step." So a provider that already has a key reads as connected, and the step becomes "confirm or
-// change" rather than "create" — which is also exactly what §5.4's restart-from-settings needs.
+// SKIP IS STILL FIRST-CLASS. §5.1 says it in bold and it is still true: somebody can look around
+// before connecting anything. What a skip buys is the whole app with Chat disabled and a control
+// that says why — not a dead end, and not a silent failure at the first message.
 
-import { useEffect, useState } from "react";
-import { HELP_URLS, openExternal } from "../../../lib/openExternal.ts";
-import {
-  PROVIDER_CHOICES,
-  connectedProviders,
-  saveProviderKey,
-  type ProviderChoiceId,
-} from "../../../lib/providerKeys.ts";
-import { fetchElevation, hasElevationToken } from "../../../lib/secrets.ts";
 import { useAccountOnboardingStore } from "../../../store/accountOnboardingStore.ts";
-import { useSecretsStore } from "../../../store/secretsStore.ts";
-import { ICON } from "../../../lib/tokens.ts";
-import { FormError, PrimaryButton, TextField } from "../../auth/controls.tsx";
-import { TextLink } from "../../auth/AuthShell.tsx";
-import { SecretsGate } from "../../SecretsGate.tsx";
+import { ProviderSubscriptions, useSubscriptionConnected } from "../../ProviderSubscriptions.tsx";
 import { StepShell } from "./StepShell.tsx";
-import { ProviderSubscriptions } from "../../ProviderSubscriptions.tsx";
-
-/** Where each provider's key is found. A fact about a documentation site, not about the API. */
-const HELP: Record<ProviderChoiceId, string> = {
-  anthropic: HELP_URLS.anthropicKeys,
-  openai: HELP_URLS.openaiKeys,
-  meta: HELP_URLS.metaKeys,
-};
 
 export function ProviderStep() {
   const advance = useAccountOnboardingStore((s) => s.advance);
-  const elevated = useSecretsStore((s) => s.elevated);
-
-  const [provider, setProvider] = useState<ProviderChoiceId>("anthropic");
-  const [key, setKey] = useState("");
-  const [state, setState] = useState<"idle" | "checking" | "valid">("idle");
-  const [error, setError] = useState<string | null>(null);
-  /** Which providers already have a key. §5.3's "re-shown for confirmation". */
-  const [connected, setConnected] = useState<Set<ProviderChoiceId>>(new Set());
-  const [reading, setReading] = useState(true);
-
-  const chosen = PROVIDER_CHOICES.find((p) => p.id === provider)!;
-
-  // WHAT IS ALREADY TRUE, ASKED ONCE. Two questions in one pass: is this session allowed to write a
-  // credential, and does one already exist. Both have to be answered before the screen can decide
-  // what it is — and asking them separately would mean two renders where the screen changed shape
-  // under somebody's hands.
-  useEffect(() => {
-    let live = true;
-    void (async () => {
-      try {
-        await fetchElevation();
-        const already = await connectedProviders();
-        if (!live) return;
-        setConnected(already);
-        // Land on a provider that is NOT yet connected, so the default choice is the useful one.
-        // Somebody resuming with Anthropic already set should see OpenAI selected rather than a
-        // screen that looks like it is about to overwrite the key they came back to confirm.
-        const next = PROVIDER_CHOICES.find((p) => !already.has(p.id));
-        if (next && already.size > 0) setProvider(next.id);
-      } catch {
-        // A read that failed tells us nothing, and nothing is a perfectly good starting state:
-        // the screen renders as if the vault is empty and the write will say otherwise if it is not.
-      } finally {
-        if (live) setReading(false);
-      }
-    })();
-    return () => {
-      live = false;
-    };
-  }, []);
-
-  const save = async (): Promise<void> => {
-    if (state === "checking" || key.trim().length === 0) return;
-    setState("checking");
-    setError(null);
-    try {
-      await saveProviderKey(provider, key.trim());
-      setState("valid");
-      setConnected((s) => new Set(s).add(provider));
-      // A beat on the checkmark before moving, so the one piece of feedback this screen gives is
-      // seen rather than replaced by the next screen in the same frame.
-      setTimeout(advance, 450);
-    } catch (err) {
-      // VERBATIM-BUT-SANITISED, which is the Secrets tab's own rule: a provider's own words are the
-      // only thing that can distinguish "this key is revoked" from "this key is for the wrong
-      // organisation", and neither is something this client could work out.
-      setError((err as Error).message);
-      setState("idle");
-    }
-  };
-
-  const skip = { label: "Skip for now", onSkip: advance };
-
-  // THE VAULT IS LOCKED. See the header: the real gate, inline, with the skip beside it. `elevated`
-  // and `hasElevationToken()` are both consulted because they answer at different moments — the
-  // store is filled by `fetchElevation` above, and the token is what a write will actually present.
-  if (!reading && !elevated && !hasElevationToken()) {
-    return (
-      <StepShell
-        step={3}
-        title="Connect a model provider"
-        subtitle="Jaroku keeps your API keys behind a passcode. Set one now, or skip and do it later."
-        skip={skip}
-        width="wide"
-      >
-        {/* THE SECRETS TAB'S OWN COMPONENT, not a copy of it. Two passcode forms would be two
-            places that have to agree about the paste rule, the autofocus, the generic failure
-            message and the difference between setting one and unlocking one — and the one that
-            drifted would be this one, because it is seen once per account. */}
-        <SecretsGate onUnlocked={() => void connectedProviders().then(setConnected)} />
-      </StepShell>
-    );
-  }
+  const connected = useSubscriptionConnected();
 
   return (
     <StepShell
       step={3}
-      title="Connect a provider"
-      subtitle="One subscription to talk to Jaroku, and optionally an API key for your agents to run on."
-      skip={skip}
+      title="Connect your provider"
+      subtitle="Jaroku Chat runs on a Claude or Codex subscription you already have. Sign in with the provider's own command — the plan stays yours."
+      skip={{ label: "Skip for now", onSkip: advance }}
       width="wide"
     >
-      {/* THE SUBSCRIPTION COMES FIRST BECAUSE IT IS WHAT THE NEXT SCREEN NEEDS. Step 4 asks somebody
-          to describe an agent, and describing one is a Chat turn — which runs on the plan they
-          already pay a provider for. Leading with the API key would put the credential for AGENT
-          RUNS in front of somebody who cannot yet send the message that creates an agent.
-
-          BOTH ARE ON ONE STEP RATHER THAN TWO, deliberately: `users.onboarding_step` is a column
-          with values in it and §5's numbering is load-bearing — see lib/accountOnboarding.ts, which
-          opens by warning about exactly this. A sixth screen would renumber a fact the database
-          already holds. */}
-      <section className="mb-6 flex flex-col gap-2">
-        <h3 className="text-label font-medium text-ink">To talk to Jaroku</h3>
+      <div className="flex flex-col gap-5">
         <ProviderSubscriptions compact />
-      </section>
 
-      <section className="flex flex-col gap-2">
-        <h3 className="text-label font-medium text-ink">For your agents to run on</h3>
-        <p className="text-caption text-muted">
-          Separate from the above, and optional now: an API key pays for the agents you build when
-          they run. Your subscription is never used for that, and this key is never used for Chat.
-        </p>
-      </section>
-
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void save();
-        }}
-        className="flex flex-col gap-5"
-      >
-        <fieldset className="flex flex-col gap-2">
-          <legend className="sr-only">Model provider</legend>
-          {PROVIDER_CHOICES.map((p) => (
-            <label
-              key={p.id}
-              className={`flex cursor-pointer items-center gap-3 rounded-control border px-3.5 py-3 transition-colors
-                duration-fast ${provider === p.id ? "border-chrome bg-active" : "border-edge bg-void hover:border-chrome"}`}
-            >
-              <input
-                type="radio"
-                name="provider"
-                value={p.id}
-                checked={provider === p.id}
-                onChange={() => {
-                  setProvider(p.id);
-                  // The key belongs to the provider it was typed for. Carrying it across would send
-                  // an Anthropic key to OpenAI's models-list, which fails with a message about
-                  // entirely the wrong thing.
-                  setKey("");
-                  setState("idle");
-                  setError(null);
-                }}
-                className="peer sr-only"
-              />
-              <span
-                aria-hidden
-                className={`flex h-[16px] w-[16px] shrink-0 items-center justify-center rounded-full border
-                  transition-colors duration-fast peer-focus-visible:shadow-focusring
-                  ${provider === p.id ? "border-ink" : "border-edge"}`}
-              >
-                {provider === p.id && <span className="h-[7px] w-[7px] rounded-full bg-ink" />}
-              </span>
-              <span className="flex min-w-0 flex-1 items-center gap-2 text-label text-ink">
-                {p.label}
-                {p.recommended && <span className="text-muted">(recommended)</span>}
-                {/* §5.3's "re-shown for confirmation". A provider that already has a key says so,
-                    so somebody who came back to this step knows what they are looking at rather
-                    than assuming an empty field means nothing was saved. */}
-                {connected.has(p.id) && (
-                  <span className="ml-auto flex items-center gap-1 text-tiny text-ok">
-                    <svg
-                      width={ICON.badge}
-                      height={ICON.badge}
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="3.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden
-                    >
-                      <path d="M20 6 9 17l-5-5" />
-                    </svg>
-                    Connected
-                  </span>
-                )}
-              </span>
-            </label>
-          ))}
-        </fieldset>
-
-        <div className="flex flex-col gap-2">
-          <p className="text-label leading-[1.5] text-ink">
-            {connected.has(provider) ? `Replace your ${chosen.label} key` : "API key"}
-          </p>
-          <TextField
-            // `password`, so a key is not readable over somebody's shoulder or in a screen share —
-            // which is how onboarding screenshots leak credentials.
-            type="password"
-            value={key}
-            onChange={(v) => {
-              setKey(v);
-              setState("idle");
-              setError(null);
-            }}
-            placeholder={chosen.placeholder}
-            ariaLabel={`${chosen.label} API key`}
-            autoFocus
-            disabled={state === "checking"}
-            invalid={error !== null}
-          />
-          <p className="text-caption leading-[1.5] text-muted">
-            <TextLink onClick={() => void openExternal(HELP[provider])}>Where do I find this?</TextLink>
-          </p>
-        </div>
-
-        {state === "valid" && (
-          <p className="flex items-center gap-2 text-caption text-ok" role="status">
-            <svg
-              width={ICON.xs}
-              height={ICON.xs}
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="3"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
-            >
-              <path d="M20 6 9 17l-5-5" />
-            </svg>
-            Validated
-          </p>
-        )}
-        {error && <FormError>{error}</FormError>}
-
-        <PrimaryButton
-          type="submit"
-          // ALREADY CONNECTED AND NOTHING TYPED IS A CONTINUE, NOT A DEAD BUTTON. §5.3: a key that
-          // is already saved is "re-shown for confirmation", and confirming it is pressing the
-          // button — which must not require re-pasting a credential they already gave us.
-          onClick={connected.has(provider) && key.trim().length === 0 ? advance : undefined}
-          disabled={state === "checking" || (key.trim().length === 0 && !connected.has(provider))}
+        <button
+          type="button"
+          onClick={advance}
+          disabled={!connected}
+          className="rounded-control bg-ink px-3 py-2 text-caption font-medium text-void outline-none
+            transition-shadow duration-base hover:shadow-glow-cta focus-visible:shadow-focusring
+            disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {state === "checking" ? "Checking your key…" : state === "valid" ? "Validated" : "Continue"}
-        </PrimaryButton>
-      </form>
+          Continue
+        </button>
+        {!connected ? (
+          // The disabled button says why, which is this product's rule everywhere else. Skip is
+          // right there for somebody who would rather look around first.
+          <p className="text-tiny text-faint">
+            Connect one provider to continue, or skip and do it later in Settings.
+          </p>
+        ) : null}
+      </div>
     </StepShell>
   );
 }

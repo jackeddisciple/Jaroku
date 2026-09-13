@@ -171,6 +171,19 @@ export function ProviderSubscriptions({ compact = false }: { compact?: boolean }
           command and the plan stays yours — Jaroku never sees or stores the credential.
         </p>
       ) : null}
+
+      {/* NO ROWS IS A STATE, AND IT HAS TO SAY SO. It rendered as an empty gap with a lone button
+          under it — a screen with nothing to click and no explanation, which is how a server that
+          had never been told about this feature looked from the outside. The list is empty until
+          the server sends a snapshot, and a server too old to send one never will; either way the
+          honest thing is to say what is missing rather than draw a blank. */}
+      {rows.length === 0 ? (
+        <p className="rounded-card border border-edge bg-panel px-3 py-2.5 text-caption text-muted">
+          Waiting for the provider list. If this does not fill in, the Jaroku server this app is
+          connected to is older than this feature and needs updating.
+        </p>
+      ) : null}
+
       {rows.map((row) => <Row key={row.provider} row={row} />)}
       <div className="flex items-center gap-2">
         <button
