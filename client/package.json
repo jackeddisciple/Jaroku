@@ -71,6 +71,7 @@
     "test:workspace-switch": "tsx src/lib/workspaceSwitch.test.ts",
     "test:permission-ui": "tsx src/lib/permissionUi.test.ts",
     "test:access-tab": "tsx src/lib/accessTab.test.ts",
+    "test:selectors": "tsx src/store/selectors.test.ts",
     "test:reset": "tsx src/store/reset.test.ts",
     "test:work-badge": "tsx src/store/workBadge.test.ts",
     "test:work-delta": "tsx src/store/workDelta.test.ts",

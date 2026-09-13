@@ -1226,7 +1226,28 @@ export function threadFor(
   state: { threads: Record<string, ChatTurn[]>; pending: ChatTurn[] },
   threadId: string | null,
 ): ChatTurn[] {
-  if (threadId) return state.threads[threadId] ?? [];
+  if (threadId) return state.threads[threadId] ?? NO_TURNS;
   return state.pending;
 }
 
+/**
+ * THE EMPTY CONVERSATION, AS ONE VALUE — and it has to be one value, not a fresh literal.
+ *
+ * `?? []` HERE BLANKED THE WHOLE APP. `threadFor` is read inside Zustand selectors
+ * (`useChatStore((s) => threadFor(...))`), and `useSyncExternalStore` compares snapshots BY
+ * REFERENCE. A new array on every call means "changed" on every call, so React re-rendered, called
+ * the selector again, got another new array, and gave up:
+ *
+ *   The result of getSnapshot should be cached to avoid an infinite loop
+ *   Maximum update depth exceeded
+ *
+ * ...and the document went to zero characters. A white screen.
+ *
+ * IT FIRES IN THE GAP BETWEEN NAMING A THREAD AND HAVING IT, which is every time somebody opens a
+ * conversation from the Threads list: the active id is set, the snapshot is still in flight, and
+ * `state.threads[id]` is undefined until it lands. Found by clicking a row in a real browser.
+ *
+ * FROZEN, so a caller that tries to push into it fails loudly here rather than corrupting the
+ * shared value for every other reader.
+ */
+const NO_TURNS = Object.freeze([]) as unknown as ChatTurn[];

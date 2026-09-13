@@ -1092,6 +1092,9 @@ jobs:
           # stylesheet. Nine rungs replaced four in 42 files here, so the census is over every file
           # in the client rather than over the ones this pass touched.
           npm run test:surface-system
+          # A selector that builds its return value loops React until the tree unmounts — a blank
+          # window. Found live by clicking a conversation; three selectors had the shape.
+          npm run test:selectors
           npm run test:reset
           # §9 ASKS FOR THIS SUITE BY NAME: "The Inbox has a test that fails if somebody 'fixes'
           # its badge to count more; write the equivalent here." A badge that counts everything

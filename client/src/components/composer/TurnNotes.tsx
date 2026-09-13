@@ -21,11 +21,27 @@ import { relTime } from "../../lib/format.ts";
 import { STATUS } from "../../lib/tokens.ts";
 import { keyHint } from "../../lib/modKey.ts";
 import {
-  FEEDBACK_REASONS, useTurnInteractionStore, type FeedbackReason,
+  FEEDBACK_REASONS, useTurnInteractionStore, type FeedbackReason, type FeedbackSummary, type TurnNote,
 } from "../../store/turnInteractionStore.ts";
 
+/**
+ * THE EMPTY NOTE LIST, AS ONE VALUE. See `chatStore`'s `NO_TURNS` for the same hazard and the same
+ * reason: a selector read through `useSyncExternalStore` is compared BY REFERENCE, so `?? []`
+ * returns a "changed" snapshot on every call and React loops until it unmounts the tree.
+ *
+ * THIS ONE TOOK THE APP TO A WHITE SCREEN. `NoteControl` mounts once per turn in the action row, so
+ * opening any conversation with turns in it mounted several of these at once and the render never
+ * settled: "The result of getSnapshot should be cached to avoid an infinite loop", then "Maximum
+ * update depth exceeded", then zero characters in the document. Found by clicking a conversation in
+ * a real browser — every unit suite passes either way, because none of them renders.
+ */
+const NO_NOTES = Object.freeze([]) as unknown as TurnNote[];
+
+/** The same, for the feedback summary a turn has not been given yet. */
+const NO_FEEDBACK = Object.freeze({ up: 0, down: 0, mine: null }) as FeedbackSummary;
+
 export function NoteControl({ turnId, disabled = false }: { turnId: string; disabled?: boolean }) {
-  const notes = useTurnInteractionStore((s) => s.notes[turnId] ?? []);
+  const notes = useTurnInteractionStore((s) => s.notes[turnId] ?? NO_NOTES);
   const addNote = useTurnInteractionStore((s) => s.addNote);
   const deleteNote = useTurnInteractionStore((s) => s.deleteNote);
   const [open, setOpen] = useState(false);
@@ -146,7 +162,10 @@ export function FeedbackControls({
   onPromoteToDataset?: () => void;
   disabled?: boolean;
 }) {
-  const summary = useTurnInteractionStore((s) => s.feedback[turnId] ?? { up: 0, down: 0, mine: null });
+  // ONE VALUE FOR "NO FEEDBACK YET", never a fresh literal — see `NO_NOTES` above for what a new
+  // object per selector call does to `useSyncExternalStore`. This was the one that actually took the
+  // app to a white screen: `FeedbackControls` mounts on every turn's action row.
+  const summary = useTurnInteractionStore((s) => s.feedback[turnId] ?? NO_FEEDBACK);
   const setFeedback = useTurnInteractionStore((s) => s.setFeedback);
   const [open, setOpen] = useState(false);
   const [reasons, setReasons] = useState<FeedbackReason[]>([]);
