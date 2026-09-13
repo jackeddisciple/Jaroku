@@ -1322,6 +1322,12 @@ jobs:
           # React mounts, so on exactly the launches this exists for an event alone reaches
           # nobody, while a snapshot alone can arrive after and overwrite a recovery.
           npm run test:host-backend
+          # THE TWO PROVIDER STREAMS, parsed from lines both CLIs really emitted. Codex hands back
+          # a whole message in one `item.completed`; Claude emits real `text_delta`s and then
+          # repeats the finished message as its own event — appending both would double every
+          # answer. The fixtures are captured output rather than the documented shape, because the
+          # documented shape is what a parser tested against a document agrees with.
+          npm run test:provider-turn
           # WHICH OF THE TWO WINDOWS THE PAGE ASKS FOR, and the two ways that goes wrong. The
           # welcome screen is a 560px window and the application is 1440, only the bundle knows
           # which of them a launch needs, and a webview cannot resize the frame it is inside — so

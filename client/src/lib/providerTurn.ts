@@ -1,0 +1,240 @@
+// One Chat turn run on the user's own provider subscription, on this machine.
+//
+// IT DRIVES THE SAME STORE ACTIONS A SERVER-ANSWERED TURN DOES — `replyStarted`, `replyDelta`,
+// `replyDone`, `replyError` — so the conversation renders through exactly one path. The alternative
+// was a second set of components for locally-answered turns, which is two implementations of "an
+// answer appearing" that drift the first time either is touched. Where the inference happened is a
+// fact about billing, not about rendering.
+//
+// TWO PROTOCOLS, ONE SHAPE. Codex and Claude both emit newline-delimited JSON and agree on nothing
+// else, so each gets a reader that knows its own vocabulary and both produce the same three things:
+// text as it arrives, a usage record at the end, and an error when there is one.
+//
+//   codex exec --json      {"type":"item.completed","item":{"type":"agent_message","text":…}}
+//                          {"type":"turn.completed","usage":{"input_tokens":…,"output_tokens":…}}
+//   claude -p stream-json  {"type":"stream_event","event":{"delta":{"type":"text_delta","text":…}}}
+//                          {"type":"result","usage":{…},"total_cost_usd":…}
+//
+// NOTHING HERE IS BILLED BY JAROKU, and the usage it reports is recorded for the user's own
+// benefit. These tokens were spent against a plan the user already pays for, through a CLI they
+// signed into themselves. Sending this to the platform's metering would be charging somebody twice
+// for one answer — so the turn is recorded, and the spend is not.
+
+import { useChatStore } from "../store/chatStore.ts";
+
+/** What a finished turn spent, in the shape `replyDone` already takes. */
+/**
+ * A token count from a provider's own JSON, or zero.
+ *
+ * `Number("lots")` IS NaN, AND NaN SURVIVES EVERYTHING it touches — it adds, it serialises to
+ * `null`, and it lands in a usage record somebody reads as a fact. Caught by this file's suite
+ * feeding a non-numeric count through, which is exactly what a provider changing its schema looks
+ * like from here.
+ */
+function count(v: unknown): number {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+export interface TurnUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  cost_usd?: number | null;
+}
+
+type Invoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
+type Listen = (event: string, cb: (e: { payload: unknown }) => void) => Promise<() => void>;
+
+function host(): { invoke: Invoke; listen: Listen } | null {
+  const t = (globalThis as {
+    __TAURI__?: { core?: { invoke?: Invoke }; event?: { listen?: Listen } };
+  }).__TAURI__;
+  return t?.core?.invoke && t?.event?.listen ? { invoke: t.core.invoke, listen: t.event.listen } : null;
+}
+
+/** Whether a turn can be run locally at all. False in a browser, where there is no shell. */
+export function canRunLocally(): boolean {
+  return host() !== null;
+}
+
+/** A line of one provider's stream, reduced to what the conversation needs. */
+export interface Parsed {
+  /** Text to append to the answer. */
+  text?: string;
+  /** The turn finished, and this is what it spent. */
+  usage?: TurnUsage;
+  /** The provider reported a failure of its own. */
+  error?: string;
+}
+
+/**
+ * Codex's `exec --json` stream.
+ *
+ * `item.completed` carries a whole message rather than a delta — codex buffers the agent's reply
+ * and emits it once — so a Codex turn appears in one piece. That is the protocol's behaviour and
+ * not something to paper over with a fake typewriter: a spinner that pretends to stream and then
+ * dumps everything is a worse lie than an honest wait.
+ */
+export function __parseCodexLine(raw: unknown): Parsed | null {
+  if (!raw || typeof raw !== "object") return null;
+  const e = raw as Record<string, any>;
+  if (e.type === "item.completed" && e.item?.type === "agent_message" && typeof e.item.text === "string") {
+    return { text: e.item.text };
+  }
+  if (e.type === "turn.completed") {
+    return {
+      usage: {
+        input_tokens: count(e.usage?.input_tokens),
+        output_tokens: count(e.usage?.output_tokens),
+        // Codex reports no cost: the turn was drawn from a plan, not priced per token.
+        cost_usd: null,
+      },
+    };
+  }
+  if (e.type === "turn.failed" || e.type === "error") {
+    return { error: typeof e.message === "string" ? e.message : "The provider reported a failure." };
+  }
+  return null;
+}
+
+/** Claude Code's `--output-format stream-json`, which does emit real token deltas. */
+export function __parseClaudeLine(raw: unknown): Parsed | null {
+  if (!raw || typeof raw !== "object") return null;
+  const e = raw as Record<string, any>;
+  if (e.type === "stream_event" && e.event?.delta?.type === "text_delta" && typeof e.event.delta.text === "string") {
+    return { text: e.event.delta.text };
+  }
+  if (e.type === "result") {
+    if (e.is_error === true || e.subtype === "error") {
+      return { error: typeof e.result === "string" ? e.result : "The provider reported a failure." };
+    }
+    return {
+      usage: {
+        input_tokens: count(e.usage?.input_tokens),
+        output_tokens: count(e.usage?.output_tokens),
+        // Claude Code DOES report a figure, and it is a client-side estimate of what the same
+        // request would cost on the API — not what the plan was charged, which is nothing.
+        // Carried because it is the only size signal available, and labelled as an estimate
+        // wherever it is shown.
+        cost_usd: typeof e.total_cost_usd === "number" ? e.total_cost_usd : null,
+      },
+    };
+  }
+  return null;
+}
+
+export interface LocalTurn {
+  /** Stop the turn. Killing the process is what ends the spend. */
+  cancel: () => void;
+  /** Resolves when the turn has finished, one way or another. */
+  finished: Promise<void>;
+}
+
+/**
+ * Run a turn and stream it into the conversation.
+ *
+ * THE STORE IS DRIVEN DIRECTLY rather than through the socket, because the answer never goes near
+ * the server: it is produced on this machine by a process holding the user's own credential. The
+ * server learns about it afterwards, as a record.
+ */
+export function runLocalTurn(opts: {
+  provider: string;
+  prompt: string;
+  model: string | null;
+  effort: string | null;
+  /** Absent means the active thread, which is what the store's own `In` type expects. */
+  threadId?: string;
+  agentId: string;
+  cwd: string;
+  /** Called once the turn has finished, with what it spent. Used to persist the turn. */
+  onComplete?: (answer: string, usage: TurnUsage | null) => void;
+}): LocalTurn {
+  const h = host();
+  const chat = useChatStore.getState();
+  const parse = opts.provider === "openai" ? __parseCodexLine : __parseClaudeLine;
+
+  let answer = "";
+  let usage: TurnUsage | null = null;
+  let failed: string | null = null;
+  let turnId: number | null = null;
+  let unlisten: (() => void) | null = null;
+  let settle!: () => void;
+  const finished = new Promise<void>((r) => { settle = r; });
+
+  const end = (): void => {
+    unlisten?.();
+    unlisten = null;
+    if (failed) {
+      chat.replyError({ threadId: opts.threadId, agentId: opts.agentId, message: failed });
+    } else {
+      chat.replyDone({ threadId: opts.threadId, agentId: opts.agentId, usage: usage ?? undefined });
+      opts.onComplete?.(answer, usage);
+    }
+    settle();
+  };
+
+  if (!h) {
+    // A browser has no shell to run this on, and the composer should never have offered it. Said
+    // plainly rather than silently doing nothing.
+    chat.replyStarted({ threadId: opts.threadId, agentId: opts.agentId, question: opts.prompt });
+    failed = "Subscription chat needs the Jaroku desktop app — it runs on the provider CLI installed on your machine.";
+    end();
+    return { cancel: () => {}, finished };
+  }
+
+  chat.replyStarted({ threadId: opts.threadId, agentId: opts.agentId, question: opts.prompt });
+
+  void (async () => {
+    try {
+      // LISTEN BEFORE STARTING. A fast turn can emit its first line before an await resolves, and a
+      // listener attached afterwards would miss it — which reads as a turn that answered nothing.
+      unlisten = await h.listen("jaroku:provider-turn", ({ payload }) => {
+        const ev = payload as { turnId: number; line?: string; done?: boolean; error?: string };
+        if (turnId !== null && ev.turnId !== turnId) return;
+        if (ev.line) {
+          let parsedLine: Parsed | null = null;
+          try {
+            parsedLine = parse(JSON.parse(ev.line));
+          } catch {
+            // A line that is not JSON is progress chatter, not an answer. Both CLIs write those to
+            // stderr, which the shell keeps out of this stream, so this is belt and braces.
+            return;
+          }
+          if (!parsedLine) return;
+          if (parsedLine.text) {
+            answer += parsedLine.text;
+            chat.replyDelta({ threadId: opts.threadId, agentId: opts.agentId, text: parsedLine.text });
+          }
+          if (parsedLine.usage) usage = parsedLine.usage;
+          if (parsedLine.error) failed = parsedLine.error;
+        }
+        if (ev.done) {
+          // The shell's own error only stands when the provider did not give a better one.
+          if (!failed && ev.error) failed = ev.error;
+          if (!failed && answer.length === 0) {
+            failed = "The provider returned no answer. Check the desktop log for what its CLI reported.";
+          }
+          end();
+        }
+      });
+
+      turnId = (await h.invoke("provider_turn_start", {
+        provider: opts.provider,
+        prompt: opts.prompt,
+        model: opts.model,
+        effort: opts.effort,
+        cwd: opts.cwd,
+      })) as number;
+    } catch (err) {
+      failed = err instanceof Error ? err.message : String(err);
+      end();
+    }
+  })();
+
+  return {
+    cancel: () => {
+      if (turnId !== null) void h.invoke("provider_turn_cancel", { turnId });
+    },
+    finished,
+  };
+}

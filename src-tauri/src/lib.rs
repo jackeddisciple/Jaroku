@@ -20,6 +20,7 @@ mod menu;
 mod paths;
 mod payload;
 mod provider_auth;
+mod provider_turn;
 mod ports;
 mod python;
 mod secrets;
@@ -113,6 +114,10 @@ pub fn run() {
             firstrun::focus_window,
             status::backend_status,
             provider_auth::provider_hosts,
+        provider_turn::provider_turn_start,
+        provider_turn::provider_turn_cancel,
+            provider_turn::provider_turn_start,
+            provider_turn::provider_turn_cancel,
             sidecar::restart_backend,
             deeplink::drain_deep_links,
             deeplink::open_checkout,

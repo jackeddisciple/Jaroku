@@ -106,7 +106,7 @@ impl HostProvider {
 }
 
 /// Find an executable by name, on `PATH` and then in the places a GUI launch cannot see.
-fn locate(binary: &str) -> Option<PathBuf> {
+pub fn locate(binary: &str) -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&path) {
             let candidate = dir.join(binary);

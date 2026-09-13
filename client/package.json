@@ -63,6 +63,7 @@
     "test:sign-in-recovery": "tsx src/lib/signInRecovery.test.ts",
     "test:account-onboarding": "tsx src/lib/accountOnboarding.test.ts",
     "test:provider-keys": "tsx src/lib/providerKeys.test.ts",
+    "test:provider-turn": "tsx src/lib/providerTurn.test.ts",
     "test:host-backend": "tsx src/lib/hostBackend.test.ts",
     "test:session-vault": "tsx src/lib/sessionVault.test.ts",
     "test:invite": "tsx src/lib/invite.test.ts",
