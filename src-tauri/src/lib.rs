@@ -19,6 +19,7 @@ mod marker;
 mod menu;
 mod paths;
 mod payload;
+mod provider_auth;
 mod ports;
 mod python;
 mod secrets;
@@ -111,6 +112,7 @@ pub fn run() {
             firstrun::quit_app,
             firstrun::focus_window,
             status::backend_status,
+            provider_auth::provider_hosts,
             sidecar::restart_backend,
             deeplink::drain_deep_links,
             deeplink::open_checkout,
@@ -417,6 +419,7 @@ fn with_updater(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         firstrun::quit_app,
         firstrun::focus_window,
         status::backend_status,
+        provider_auth::provider_hosts,
         sidecar::restart_backend,
         deeplink::drain_deep_links,
         // ABSENT FROM THIS LIST UNTIL NOW, which is the whole reason the contract suite asserts
