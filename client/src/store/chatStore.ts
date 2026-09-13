@@ -871,7 +871,25 @@ export const useChatStore = create<ChatState>((set) => ({
         streamingThreadId: threadId ?? null,
         ...putTurns(s, threadId, [
           ...turns,
-          { id: turnId(), role: "user", text: question },
+          {
+            id: turnId(), role: "user", text: question,
+            /**
+             * THE USER TURN GETS THE ROW ID TOO, and it is the same id the reply carries.
+             *
+             * `turnId` on the `started` event IS the `thread_items` row `noteUserMessage` wrote —
+             * the user's message. The reply hangs its variants off that row, which is why both
+             * turns name it, and it is exactly the id `editTurn` verifies: "only a user message can
+             * be edited", checked against the row.
+             *
+             * WITHOUT IT, §14.1's ↑ AND §6.3's EDIT-AND-FORK WERE BOTH DEAD ON A LIVE CONVERSATION.
+             * `editLast` looks for the last turn that is `role === "user"` AND has an `itemId`;
+             * live user turns had none, so pressing ↑ on an empty composer did nothing at all. The
+             * flow worked only after a reload, because `hydrate` sets the id — the same
+             * live-versus-reloaded split the note above this line describes for the reply's own
+             * controls. Found by pressing the key in a real browser.
+             */
+            ...(itemId ? { itemId } : {}),
+          },
           {
             id: turnId(), role: "jaroku", kind: "reply", status: "streaming", agentId, text: "",
             // §15.1's TWO FIELDS, and the second is the one that keeps the offer honest: the card
