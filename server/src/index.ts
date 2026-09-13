@@ -3814,6 +3814,14 @@ async function openVariant(
   modelId: string,
   provider: string,
   effort: EffortPlan | null,
+  /**
+   * §13.3's ROUTE, named by the caller because the caller IS the route.
+   *
+   * Required rather than optional: a new answering path that forgot it would put a turn in the
+   * thread whose chip disappears on reload, which is the gap live testing found and the reason the
+   * column exists. The compiler asking is cheaper than noticing.
+   */
+  route: string,
 ): Promise<(outcome: VariantOutcome) => Promise<void>> {
   if (!turnId) return () => Promise.resolve();
   const startedAt = Date.now();
@@ -3823,6 +3831,7 @@ async function openVariant(
       provider,
       effortRequested: effort?.supported ? effort.requested : null,
       effortApplied: effort?.supported ? effort.applied : null,
+      route,
     });
     /**
      * EVERY WRITE TO THIS ROW IS CHAINED, AND THE FUNCTION HANDS BACK THE CHAIN.
@@ -5032,6 +5041,9 @@ const relay = new WsRelay({
              * `done` delivers and the row renders identically whether the turn just arrived or was
              * read back a week later.
              */
+            // §13.3's ROUTE (migration 078), so the chip is on the line after a reload as well as
+            // during the session — see the migration for why it could not be reconstructed.
+            route: v.route,
             effort: v.effort_applied,
             effortRequested: v.effort_requested,
             durationMs: v.duration_ms,
@@ -12820,7 +12832,7 @@ ${attached}`;
   // regeneration of it, each carrying the model and the effort levels that produced THIS one —
   // which is the whole of what the store's header promises and what nothing was writing.
   const replyEffort = await effortForThread(ctx, replyThread, EXPLAIN_MODEL, EXPLAIN_MAX_TOKENS);
-  const settleReply = await openVariant(ctx, replyTurn, EXPLAIN_MODEL, "anthropic", replyEffort);
+  const settleReply = await openVariant(ctx, replyTurn, EXPLAIN_MODEL, "anthropic", replyEffort, "explain");
   // §4: WHAT THIS ANSWER SAID, so it is in the window the NEXT message is sent with.
   //
   // AN EXPLAIN REPLY IS AN ASSISTANT REPLY. §4.2 puts "user messages and assistant replies" in the
@@ -12988,7 +13000,10 @@ async function answerFromRecord(ctx: TenantContext, cmd: AskRecordCommand): Prom
     let answer = "";
     const askKey = await providerKeys.platformKey(ctx);
     const effort = await effortForThread(ctx, replyThread, EXPLAIN_MODEL, EXPLAIN_MAX_TOKENS);
-    const settle = await openVariant(ctx, turn, EXPLAIN_MODEL, "anthropic", effort);
+    // `ask` IS ITS OWN ROUTE: Part 3's "a question never touches the container" answers from the
+    // record rather than from the agent's code, and calling it `explain` would put two different
+    // dispatches under one label on the provenance line.
+    const settle = await openVariant(ctx, turn, EXPLAIN_MODEL, "anthropic", effort, "ask");
     const thread = replyThread;
 
     await streamExplain(
@@ -13699,7 +13714,7 @@ async function chatWithJaroku(
     // §10'S ROW, OPENED AROUND THE RESPONSE, with the model that is about to answer on it. Chat is
     // the route most likely to be regenerated on a DIFFERENT model, which is the whole reason every
     // metadata column on `turn_variants` is per-variant rather than per-turn.
-    const settle = await openVariant(ctx, turn, model, provider, effort);
+    const settle = await openVariant(ctx, turn, model, provider, effort, "chat");
 
     // §7.3's ONE RETRY, and the flag that makes "one" true rather than intended.
     //

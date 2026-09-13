@@ -1,0 +1,37 @@
+-- 078_turn_variant_route — which intent produced this answer.
+--
+-- §13.3 IS THE REASON AND IT IS ONE SENTENCE: "the same line appears on plan turns, generation
+-- turns and edit turns — not only chat. A provenance line that exists on one turn type and not
+-- others is worse than none, because its absence reads as meaning something."
+--
+-- LIVE TESTING IS WHAT FOUND THE HOLE. The route travels on the `done` event, so a turn that just
+-- arrived renders `chat · claude-sonnet-5 · Medium · 954 tok · $0.00239`. Reload the app and the
+-- chip is gone from every reply, because nothing recorded which route had answered — the client's
+-- `routeOf()` maps a reply to null on purpose, since `chat` and `explain` produce the same turn
+-- kind and guessing between them would be the reconstruction §13.2 forbids. So the chip was present
+-- during the session and absent afterwards, on the same turn, which is precisely the "absence reads
+-- as meaning something" §13.3 warns about.
+--
+-- ON THE VARIANT RATHER THAN THE TURN, like every other column here. A regeneration can be asked
+-- on a different route from the answer it replaces — ask a question, then hit Regenerate with an
+-- agent selected and the second answer comes from `explain` — and §5.4's rule is that variant 2
+-- never overwrites variant 1's metadata.
+--
+-- WRITTEN AT `begin` RATHER THAN AT `settle`, because the route is decided before the request is
+-- sent: it is what CHOSE the dispatch. The model and both effort levels are written there for the
+-- same reason, and this sits beside them.
+--
+-- NO CHECK CONSTRAINT, and that is a decision. The vocabulary belongs to the router — `chat`,
+-- `explain`, `edit`, `fix`, `rerun`, `plan`, `generate` today — and it grows when an intent is
+-- added. Migration 072 had to DROP and re-add four CHECKs across two drivers to add one reasoning
+-- level; making every new intent cost the same is a worse trade than accepting a text column whose
+-- only consumer is a label. Nothing branches on this value: it is displayed, and §13.2's reason
+-- beside it is already free text.
+--
+-- NULL FOR EVERY EXISTING ROW, which reads as "not recorded" and renders no chip — exactly what
+-- those turns do today. A backfill would have to guess between `chat` and `explain`, and a chip
+-- that named the wrong route would be worse than the one that is missing.
+--
+-- AN EXPAND: a nullable column the running version does not select. No contract step.
+
+ALTER TABLE turn_variants ADD COLUMN route text;

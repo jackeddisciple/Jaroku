@@ -730,7 +730,7 @@ console.log("\n§6.2, §6.4, §13.1 — the line survives a reload");
     answers: [
       { ordinal: 1, body: "A first answer.", model: "claude-haiku-4-5", provider: "anthropic",
         effort: null, effortRequested: null, durationMs: 1262, tokensIn: 1570, tokensOut: 14, costUsd: 0.00328 },
-      { ordinal: 2, body: "A second, on a different model.", selected: true,
+      { ordinal: 2, body: "A second, on a different model.", selected: true, route: "chat",
         model: "claude-sonnet-5", provider: "anthropic", effort: "medium", effortRequested: "high",
         durationMs: 8796, tokensIn: 894, tokensOut: 700, costUsd: 0.008788 },
     ],
@@ -738,6 +738,10 @@ console.log("\n§6.2, §6.4, §13.1 — the line survives a reload");
   const r = replies()[0] as { usage?: Record<string, unknown>; siblings?: unknown[] } | undefined;
   const u = r?.usage ?? {};
   check("the selected sibling's model is on the line", u["model"] === "claude-sonnet-5", JSON.stringify(u));
+  // §13.3's CHIP, FROM THE RECORD (migration 078). Without it a reopened conversation showed the
+  // route on no reply at all, while the same turns had shown it moments before the reload — and it
+  // cannot be derived, because `chat` and `explain` produce the same turn kind.
+  check("...and the route that produced it", u["route"] === "chat", String(u["route"]));
   check("...its effort", u["effort"] === "medium", String(u["effort"]));
   // §6.2's CLAMP IS DERIVABLE, which is the reason both levels are kept rather than one.
   check("...and what was asked for, so a clamp still shows",
@@ -757,6 +761,8 @@ console.log("\n§6.2, §6.4, §13.1 — the line survives a reload");
     created_at: "2026-09-12T10:00:00.000Z", answers: [{ ordinal: 1, body: "An answer from before." }],
   }]);
   const old = (replies()[0] as { usage?: Record<string, unknown> } | undefined)?.usage ?? {};
+  check("an answer with no recorded route shows no chip",
+    old["route"] === undefined, String(old["route"]));
   check("an answer with no figures claims none",
     old["duration_ms"] === undefined && old["total_tokens"] === undefined, JSON.stringify(old));
   check("...and its cost is unknown rather than zero", old["turn_cost_usd"] === null, String(old["turn_cost_usd"]));

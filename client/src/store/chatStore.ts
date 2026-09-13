@@ -508,6 +508,10 @@ export const useChatStore = create<ChatState>((set) => ({
                   : {}),
                 ...(shown.model ? { model: shown.model } : {}),
                 ...(shown.provider ? { provider: shown.provider } : {}),
+                // §13.3's ROUTE, from the record (migration 078). `metaForTurn` prefers
+                // `usage.route` over `routeOf(turn)`, which returns null for a reply on purpose —
+                // so this is what puts the chip back on a reopened conversation.
+                ...(shown.route ? { route: shown.route } : {}),
                 ...(shown.effort ? { effort: shown.effort } : {}),
                 ...(shown.effortRequested ? { effort_requested: shown.effortRequested } : {}),
                 ...(shown.durationMs !== null && shown.durationMs !== undefined
@@ -1225,3 +1229,4 @@ export function threadFor(
   if (threadId) return state.threads[threadId] ?? [];
   return state.pending;
 }
+

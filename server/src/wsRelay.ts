@@ -2707,6 +2707,16 @@ export interface ThreadItemView {
      * cost, on turns whose rows held all four. `null` where the row holds null, which is the
      * honest gap: a backfilled variant measured nothing and a zero would claim it was free.
      */
+    /**
+     * §13.3's ROUTE (migration 078): which intent produced this answer.
+     *
+     * A LIVE RELOAD IS WHY THIS IS HERE. The route travels on the `done` event, so a turn that just
+     * arrived shows its chip; nothing recorded it, so reopening the thread dropped the chip from
+     * every reply — the same turn with and without a provenance line depending on when you looked,
+     * which is the "absence reads as meaning something" §13.3 warns about. It could not be
+     * reconstructed: `chat` and `explain` produce the same turn kind.
+     */
+    route?: string | null;
     effort?: string | null;
     effortRequested?: string | null;
     durationMs?: number | null;

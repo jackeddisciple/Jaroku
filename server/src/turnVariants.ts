@@ -80,6 +80,14 @@ export interface TurnVariant {
    * stop is a fact about the prose, and the prose is incomplete for ever.
    */
   stopped: boolean;
+  /**
+   * §13.3: WHICH INTENT PRODUCED THIS ANSWER (migration 078).
+   *
+   * `chat`, `explain`, `edit`, `fix`, `rerun`, `plan`, `generate` — the router's own vocabulary.
+   * Null on every row written before the column existed, which renders no chip: guessing between
+   * `chat` and `explain` after the fact is the reconstruction §13.2 forbids.
+   */
+  route: string | null;
   created_at: string;
 }
 
@@ -89,6 +97,13 @@ export interface VariantInput {
   provider?: string | null;
   effortRequested?: Effort | null;
   effortApplied?: Effort | null;
+  /**
+   * §13.3's ROUTE, and it belongs at `begin` beside the model.
+   *
+   * The route is what CHOSE this dispatch, so it is known before the request goes out — unlike the
+   * body, the duration and the cost, which are what came back.
+   */
+  route?: string | null;
 }
 
 /** What a finished response actually cost. Every field optional — see `null rather than guessing`. */
@@ -150,6 +165,7 @@ export class TurnVariantStore {
       // `test:boolean-literals` exists in this repository.
       selected: asBool(row["selected"]),
       stopped: asBool(row["stopped"]),
+      route: (row["route"] as string | null) ?? null,
       created_at: String(row["created_at"]),
     };
   }
@@ -158,7 +174,8 @@ export class TurnVariantStore {
   async forTurn(ctx: TenantContext, turnId: string): Promise<TurnVariant[]> {
     const rows = await this.q(ctx).all<Record<string, unknown>>(
       `SELECT id, turn_id, ordinal, model_id, provider, effort_requested, effort_applied,
-              duration_ms, tokens_in, tokens_out, cost_usd, agent_version_id, body, selected, stopped, created_at
+              duration_ms, tokens_in, tokens_out, cost_usd, agent_version_id, body, selected, stopped,
+              route, created_at
          FROM turn_variants
         WHERE workspace_id = ? AND turn_id = ?
         ORDER BY ordinal ASC`,
@@ -192,12 +209,13 @@ export class TurnVariantStore {
         await q.run(
           `INSERT INTO turn_variants
              (id, workspace_id, turn_id, ordinal, model_id, provider,
-              effort_requested, effort_applied, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              effort_requested, effort_applied, route, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             id, ctx.workspaceId, turnId, ordinal,
             input.modelId ?? null, input.provider ?? null,
             input.effortRequested ?? null, input.effortApplied ?? null,
+            input.route ?? null,
             nowIso(),
           ],
         );
@@ -303,7 +321,8 @@ export class TurnVariantStore {
     const holes = turnIds.map(() => "?").join(", ");
     const rows = await this.q(ctx).all<Record<string, unknown>>(
       `SELECT id, turn_id, ordinal, model_id, provider, effort_requested, effort_applied,
-              duration_ms, tokens_in, tokens_out, cost_usd, agent_version_id, body, selected, stopped, created_at
+              duration_ms, tokens_in, tokens_out, cost_usd, agent_version_id, body, selected, stopped,
+              route, created_at
          FROM turn_variants
         WHERE workspace_id = ? AND turn_id IN (${holes})
         ORDER BY turn_id ASC, ordinal ASC`,
