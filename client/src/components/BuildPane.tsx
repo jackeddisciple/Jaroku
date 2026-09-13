@@ -1074,6 +1074,8 @@ function ModelSection({
   selectedModel,
   onPick,
   onAddKey,
+  blockedReason,
+  wayOutLabel,
 }: {
   heading: string;
   catalogue: { id: string; label: string; models: string[] }[];
@@ -1083,6 +1085,17 @@ function ModelSection({
   selectedModel: string;
   onPick: (model: string) => void;
   onAddKey: (provider: string) => void;
+  /**
+   * Why a provider in this section cannot be used, in its own terms.
+   *
+   * A FUNCTION RATHER THAN A STRING, because the two sections are blocked for different reasons and
+   * the reason is the whole value of showing a disabled row. Test says "no API key in this
+   * workspace"; Chat says "Anthropic has not approved this yet", or "run `codex login`", or "that
+   * sign-in is an API key, not a plan". A shared message would be wrong in most of those.
+   */
+  blockedReason?: (provider: string) => string;
+  /** What the way-out says. Test adds a key; Chat sends you to the provider's own sign-in. */
+  wayOutLabel?: string;
 }) {
   return (
     <div>
@@ -1109,9 +1122,10 @@ function ModelSection({
                 type="button"
                 className="ml-auto inline-flex items-center gap-1 text-tiny text-muted underline-offset-2 hover:text-ink hover:underline"
                 onClick={() => onAddKey(p.id)}
+                title={blockedReason?.(p.id)}
               >
                 <Icon.composer.addKey size={GLYPH.meta} />
-                Add key
+                {wayOutLabel ?? "Add key"}
               </button>
             ) : null}
           </div>
@@ -1126,7 +1140,7 @@ function ModelSection({
                 key={m}
                 type="button"
                 disabled={!usable}
-                title={usable ? undefined : `No ${p.label} API key in this workspace`}
+                title={usable ? undefined : (blockedReason?.(p.id) ?? `No ${p.label} API key in this workspace`)}
                 onClick={() => onPick(m)}
                 className={`flex w-full items-center gap-1.5 rounded-control px-2 py-1 text-left text-caption transition-colors duration-fast ${
                   !usable
@@ -1190,6 +1204,15 @@ function ModelSelector({
   setChatModel: (m: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  /**
+   * Which Chat provider the user asked "how do I connect this?" about, or null.
+   *
+   * AN INLINE PANEL RATHER THAN A DIALOG, because the answer is two lines and a dialog would take
+   * the composer away to deliver them. It also cannot be a link to Secrets: the answer to "how do I
+   * connect Claude for Chat" is never "paste an API key", and a control that went there would be
+   * teaching the one substitution this whole architecture exists to prevent.
+   */
+  const [connectHelp, setConnectHelp] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const openSecretsForProvider = useUiStore((s) => s.openSecretsForProvider);
   // WHICH PROVIDERS CAN ACTUALLY RUN: a key in THIS workspace, or one the deployment lends —
@@ -1206,7 +1229,38 @@ function ModelSelector({
   // §11.1: THE CHIP NAMES THE MODEL YOU TALK TO, not the one the agent runs on — the product
   // owner's call, and see the component's own header for why the inversion is right.
   const chatLabel = chatModel ? modelName(models, chatModel) : "Choose a model";
+  // TEST'S SCOPE: a key in THIS workspace, or one the deployment lends. An agent run spends an API
+  // account, so this is the only question that decides it.
   const usableProviders = new Set<string>(providers.filter((p) => p.runnable).map((p) => p.id));
+  // CHAT'S SCOPE IS A DIFFERENT CREDENTIAL SYSTEM ENTIRELY, and deriving it from the same set was
+  // the bug this replaces: talking to Jaroku runs on the user's own provider SUBSCRIPTION, which an
+  // API key neither grants nor implies. A workspace with an Anthropic key and no Claude sign-in can
+  // run agents on Claude all day and cannot chat on it, and the reverse is equally true.
+  const subscriptions = useProviderStore((s) => s.subscriptions);
+  // Only providers with an official mechanism appear at all. Muse Spark has none, so it is absent
+  // from Chat rather than listed-and-disabled — there is nothing a user could do about it.
+  const chatCatalogue = useMemo(
+    () => catalogue.filter((p) => subscriptions.some((sub) => sub.provider === p.id && sub.supported)),
+    [catalogue, subscriptions],
+  );
+  // Connected means: permitted by the provider, installed on this machine, and signed in with a
+  // plan. The server decides it; this set only mirrors the answer.
+  const chatUsable = new Set<string>(subscriptions.filter((sub) => sub.connected).map((sub) => sub.provider));
+  /** Why a listed-but-unusable Chat provider cannot be picked, in the provider's own terms. */
+  const chatBlockedReason = (id: string): string => {
+    const sub = subscriptions.find((x) => x.provider === id);
+    if (!sub) return "This provider is not available for Chat.";
+    if (!sub.available) return sub.reason ?? "This provider is not available for Chat yet.";
+    if (!sub.host?.installed) return `${sub.binary ?? "The CLI"} isn't installed on this machine.`;
+    if (!sub.host.signedIn) {
+      // The most confusing case, so it is the most explicit: signed in, and still not usable,
+      // because it is signed in with API credentials rather than a plan.
+      return sub.host.account || sub.loginCommand
+        ? `Run \`${sub.loginCommand}\` to sign in with your plan.`
+        : "Not signed in with a subscription.";
+    }
+    return "Not available for Chat.";
+  };
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
@@ -1253,6 +1307,39 @@ function ModelSelector({
       </Chip>
       {open && (
         <div className="absolute bottom-full left-0 z-30 mb-1 min-w-[260px] animate-slide-in rounded-card border border-edge bg-elevated p-1 shadow-floating motion-reduce:animate-none">
+          {connectHelp ? (() => {
+            const sub = subscriptions.find((x) => x.provider === connectHelp);
+            if (!sub) return null;
+            return (
+              <div className="mb-1 rounded-control bg-active/50 px-2 py-2 text-caption">
+                <div className="flex items-center gap-1.5 font-medium text-ink">
+                  <ProviderMark provider={sub.provider} size={ICON.badge} />
+                  {sub.label}
+                </div>
+                {/* THE PROVIDER'S OWN REASON, VERBATIM. Paraphrasing a terms decision into product
+                    copy is how it drifts from what the provider actually said. */}
+                <p className="mt-1 text-muted">{chatBlockedReason(sub.provider)}</p>
+                {sub.available && sub.loginCommand && !sub.host?.signedIn ? (
+                  <p className="mt-1 rounded-control bg-panel px-1.5 py-1 text-tiny text-ink">
+                    {sub.loginCommand}
+                  </p>
+                ) : null}
+                {/* Where the credential will live, so somebody knows what they are agreeing to and
+                    where to go to revoke it. Named; never opened by Jaroku. */}
+                {sub.credentialPath && sub.available ? (
+                  <p className="mt-1 text-tiny text-faint">Your sign-in stays in {sub.credentialPath}.</p>
+                ) : null}
+                {sub.unblock ? <p className="mt-1 text-tiny text-faint">{sub.unblock}</p> : null}
+                <button
+                  type="button"
+                  className="mt-1.5 text-tiny text-muted underline-offset-2 hover:text-ink hover:underline"
+                  onClick={() => setConnectHelp(null)}
+                >
+                  Close
+                </button>
+              </div>
+            );
+          })() : null}
           {/* §11.1: BOTH SECTIONS, OPEN, IN ONE POPOVER — see the component's header.
               THE CHAT ONE FIRST, because it is the one the chip names and the one somebody opened
               the menu to change. The run's sits below it under its own heading, so the difference
@@ -1260,20 +1347,33 @@ function ModelSelector({
               implied. */}
           <ModelSection
             heading="You talk to Jaroku on"
-            catalogue={catalogue}
+            /* THE SUBSCRIPTION CATALOGUE, not the API-key one. Chat spends the user's own plan, so
+               a provider belongs here only if it has an official mechanism for that — which is why
+               Muse Spark is absent rather than greyed: Meta documents no third-party path, and a
+               disabled row would imply one is coming. */
+            catalogue={chatCatalogue}
             models={models}
-            usableProviders={usableProviders}
+            usableProviders={chatUsable}
+            blockedReason={chatBlockedReason}
+            /* The way out of Chat is the PROVIDER'S own sign-in, never Jaroku's key form. Sending
+               somebody to Secrets from here would be the exact substitution the architecture
+               forbids: an API key is not a subscription and must never stand in for one. */
+            wayOutLabel="How to connect"
             selectedProvider={chatProvider}
             selectedModel={chatModel}
             onPick={(m) => { setChatModel(m); setOpen(false); }}
-            onAddKey={(id) => { openSecretsForProvider(id); setOpen(false); }}
+            onAddKey={(id) => { setConnectHelp(id); setOpen(false); }}
           />
           <div className="my-1 border-t border-hair" aria-hidden />
           <ModelSection
             heading="This agent runs on"
+            /* UNCHANGED, AND DELIBERATELY SO: an agent run spends an API account, so the only
+               question is whether this workspace holds a key. A subscription sign-in grants
+               nothing here and must never be read as if it did. */
             catalogue={catalogue}
             models={models}
             usableProviders={usableProviders}
+            blockedReason={(id) => `No ${catalogue.find((c) => c.id === id)?.label ?? id} API key in this workspace`}
             selectedProvider={provider}
             selectedModel={model}
             onPick={(m) => { setModel(m); setOpen(false); }}
@@ -1571,6 +1671,48 @@ export function BuildPane({
   // rather than guessed: whether a reasoning control exists at all is the server's answer, and a
   // second table in this client is what put the catalogue four models behind the price sheet once.
   const selectedModel = useProviderStore((s) => s.models.find((m) => m.id === model));
+  // THE EFFORT CONTROL FOLLOWS WHICHEVER MODEL THE COMPOSER IS ABOUT TO SPEND, and that is a
+  // different model in each mode: Chat runs on the user's subscription, Test runs the agent on an
+  // API key. Reading the Test model while in Chat mode would offer the stops of a model this turn
+  // is not going to reach — and then send one of them to a provider that does not take it.
+  const chatSelectedModel = useProviderStore((s) => s.models.find((m) => m.id === chatModel));
+  const effortModel = composerMode === "chat" ? chatSelectedModel : selectedModel;
+  const chatSubscription = useProviderStore(
+    (s) => s.subscriptions.find((sub) => sub.provider === (chatSelectedModel?.provider ?? chatProvider)),
+  );
+  /**
+   * The stops this control may offer right now.
+   *
+   * TWO SOURCES INTERSECTED IN CHAT MODE, and both are real: the MODEL's own stops from the price
+   * sheet, and the PROVIDER's accepted levels from its capability record. Codex stops at xhigh
+   * while Jaroku offers five, so offering Max here would draw a stop whose value the CLI rejects —
+   * the turn fails, and the control that caused it looks fine. In Test mode the model's own stops
+   * are the whole answer, because an API call takes what the price sheet says it takes.
+   */
+  const effortStopsNow = useMemo(() => {
+    const fromModel = effortStops(effortModel);
+    if (composerMode !== "chat") return fromModel;
+    const accepted = chatSubscription?.effortLevels ?? [];
+    if (accepted.length === 0) return [];
+    return fromModel.filter((stop) => (accepted as readonly string[]).includes(stop));
+  }, [effortModel, composerMode, chatSubscription]);
+
+  /**
+   * Drop a per-turn override the current provider cannot honour.
+   *
+   * SWITCHING PROVIDER IS THE CASE. Somebody sets Max on Claude, switches Chat to Codex — which
+   * stops at xhigh — and the override is now a level with no stop on the slider. Left alone it is
+   * invisible and still live: the thumb sits at the nearest stop while the request carries Max, and
+   * §3.2's "never report an effort that wasn't used" is broken before a single character is typed.
+   *
+   * IT CLEARS RATHER THAN CLAMPS, deliberately. Clamping would silently spend a level the user did
+   * not choose; clearing falls back to the thread's own setting, which is a value they did choose.
+   * A level that IS supported survives the switch untouched, which is the common case.
+   */
+  useEffect(() => {
+    if (effortOverride === null) return;
+    if (effortStopsNow.length === 0 || !effortStopsNow.includes(effortOverride)) setEffortOverride(null);
+  }, [effortStopsNow, effortOverride]);
 
   /**
    * SELECT THE ROW ONBOARDING WROTE, once it has arrived.
@@ -3310,12 +3452,12 @@ export function BuildPane({
               // NO STOPS, NO CONTROL: Muse Spark by the product owner's call, Haiku 4.5 because it
               // takes no effort. The slot is left out rather than drawn disabled, and the bar closes
               // up around the gap — §12.1c's absence rule, which `layoutBar` already keeps.
-              ...(effortStops(selectedModel).length > 0 ? {
+              ...(effortStopsNow.length > 0 ? {
                 effort: {
                   bar: (density: Density) => (
                     <EffortControl
                       value={effort}
-                      model={selectedModel}
+                      model={effortModel}
                       dense={!showsLabel(density)}
                       disabled={busy}
                       remembered={settings.explicit.effort}
@@ -3328,12 +3470,12 @@ export function BuildPane({
                     />
                   ),
                   menu: () => {
-                    const stops = effortStops(selectedModel);
+                    const stops = effortStopsNow;
                     const at = stopFor(stops, effort) ?? stops[0]!;
                     return (
                       <PopoverRow
                         label="Reasoning effort"
-                        detail={effortName(selectedModel, at)}
+                        detail={effortName(effortModel, at)}
                         disabled={busy}
                         onSelect={() => {
                           // Cycles rather than opening a second popover inside the overflow one. A
