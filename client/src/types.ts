@@ -652,6 +652,55 @@ export type McpMessage =
   | ({ channel: "mcp"; type: "confirmRequest" } & McpConfirmRequest)
   | { channel: "mcp"; type: "confirmResolved"; runId: string; nonce: string; verdict: string };
 
+/**
+ * One provider's row in the OTHER credential system: the user's own subscription.
+ *
+ * MIRRORS `server/src/providerAuth/status.ts` AND OWNS NONE OF IT. Every field here is decided by
+ * the server and replaced wholesale on each snapshot — the client cannot make a provider connected,
+ * and a component that tried would be asserting something only the machine's own CLI can answer.
+ *
+ * Note what is NOT here: anything resembling a credential. The subscription lives in the provider's
+ * own store on the user's machine, and the furthest this row goes is naming where that is so the
+ * product can tell somebody how to revoke it.
+ */
+export interface SubscriptionStatus {
+  provider: ProviderId;
+  label: string;
+  /** May Chat use this provider's subscription today. */
+  available: boolean;
+  /** Does an official mechanism exist at all — true for Claude while `available` is false. */
+  supported: boolean;
+  /** Is the gap between those two a provider approval. */
+  requiresApproval: boolean;
+  /** May an agent run on this provider with an API key. Independent of everything above. */
+  runtimeApiSupported: boolean;
+  reason: string | null;
+  citation: string;
+  unblock: string | null;
+  /** The provider's own reasoning parameter, or null when it has no reasoning control. */
+  effortParam: string | null;
+  /**
+   * The levels this provider accepts. Empty means the composer omits the control entirely.
+   *
+   * Spelled out rather than imported from the composer's store: this file is the shared shape
+   * every module reads, and reaching into a store for a type would point the dependency the wrong
+   * way. The five names are the product's, and `effort.test.ts` on the server holds them to it.
+   */
+  effortLevels: ("low" | "medium" | "high" | "xhigh" | "max")[];
+  binary: string | null;
+  loginCommand: string | null;
+  credentialPath: string | null;
+  host: {
+    installed: boolean;
+    version: string | null;
+    signedIn: boolean;
+    account: string | null;
+    observedAt: string;
+  } | null;
+  /** The one derived answer: may Chat run on this provider right now. */
+  connected: boolean;
+}
+
 // --- model providers (see server/src/providers.ts) ---
 //
 // Jaroku is bring-your-own-key: a provider key is the user's, it is written to runtime/.env
@@ -744,6 +793,14 @@ export type ProviderMessage =
       /** Every model a run may be started on, from the server's price sheet. See ProviderModel. */
       models: ProviderModel[];
     }
+  /**
+   * The subscription half, sent to ONE socket rather than broadcast.
+   *
+   * Its own message because its scope differs from `providers` above: that one is a workspace fact
+   * every socket shares, and this describes the machine at the end of this connection. See
+   * `sendSubscriptions` in server/src/wsRelay.ts.
+   */
+  | { channel: "providers"; type: "subscriptions"; subscriptions: SubscriptionStatus[] }
   | { channel: "providers"; type: "testResult"; provider: string; ok: boolean; message: string | null }
   | { channel: "providers"; type: "error"; message: string; provider?: string }
   | { channel: "providers"; type: "notice"; message: string; provider?: string };
@@ -2284,6 +2341,17 @@ export type ClientCommand =
   // travels on a request header, which a WebSocket cannot carry, so neither could ever be gated.
   // Both moved to the secrets routes; what is left asks which names are set.
   | { cmd: "listProviders" }
+  /**
+   * What the desktop shell can see of the provider CLIs on this machine.
+   *
+   * Carries no credential and could not: every field is a fact the provider's own CLI reported
+   * about itself. The server validates each entry and drops any it does not recognise, and a
+   * claim about a gated provider changes nothing — permission is checked before the machine.
+   */
+  | {
+      cmd: "reportProviderHost";
+      hosts: { provider: string; installed: boolean; version: string | null; signedIn: boolean; account: string | null }[];
+    }
   // Carries no credential: both keys are already stored, and this decides which of them pays for
   // the calls Jaroku makes on the workspace's behalf. Which is why it survived the removal of the
   // two commands beside it.

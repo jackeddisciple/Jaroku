@@ -13,7 +13,7 @@
 // which is the whole of what the browser is ever told.
 
 import { create } from "zustand";
-import type { ProviderId, ProviderModel, ProviderStatus } from "../types.ts";
+import type { ProviderId, ProviderModel, ProviderStatus, SubscriptionStatus } from "../types.ts";
 
 /** The answer to one "Test connection" press. Transient — it describes a moment, not state. */
 export interface ProviderTestResult {
@@ -38,6 +38,19 @@ interface ProviderState {
    */
   models: ProviderModel[];
   /**
+   * The OTHER credential system: one row per provider for the user's own subscription.
+   *
+   * A SEPARATE SNAPSHOT FROM `providers`, arriving on its own message, because the two have
+   * different scopes. `providers` is a workspace fact — which API keys this workspace holds — and
+   * every socket in the workspace gets the same answer. These describe THIS MACHINE: whether the
+   * laptop running this window has `codex` installed and signed in. A colleague's browser gets a
+   * different answer to the same question, and correctly so.
+   *
+   * Empty until the first snapshot, which is also the permanent state in a browser: there is no
+   * local CLI for a tab to sign in with, so every row reads as not connected.
+   */
+  subscriptions: SubscriptionStatus[];
+  /**
    * Whether the first snapshot has landed.
    *
    * Load-bearing rather than cosmetic: before it does, "no provider is configured" and "we have
@@ -61,6 +74,8 @@ interface ProviderState {
   notice: string | null;
 
   setProviders: (providers: ProviderStatus[], ownKeyForPlatform: boolean, models: ProviderModel[]) => void;
+  /** Replace, never merge — the same discipline as `setProviders`. */
+  setSubscriptions: (subscriptions: SubscriptionStatus[]) => void;
   startTest: (provider: string) => void;
   setTestResult: (result: ProviderTestResult) => void;
   clearTestResult: () => void;
@@ -71,6 +86,7 @@ interface ProviderState {
 export const useProviderStore = create<ProviderState>((set) => ({
   providers: [],
   models: [],
+  subscriptions: [],
   loaded: false,
   ownKeyForPlatform: false,
   testing: {},
@@ -83,6 +99,11 @@ export const useProviderStore = create<ProviderState>((set) => ({
   // spinner running forever. Same reasoning as mcpStore.setServers.
   setProviders: (providers, ownKeyForPlatform, models) =>
     set({ providers, ownKeyForPlatform, models, loaded: true, testing: {} }),
+
+  // DELIBERATELY DOES NOT TOUCH `loaded`. That flag is about the API-key snapshot, and the two
+  // messages arrive independently — letting this one set it would tell every "do we have a key
+  // yet" branch that the answer had arrived when a different question had been answered.
+  setSubscriptions: (subscriptions) => set({ subscriptions }),
 
   startTest: (provider) =>
     set((s) => ({ testing: { ...s.testing, [provider]: true }, testResult: null, error: null })),

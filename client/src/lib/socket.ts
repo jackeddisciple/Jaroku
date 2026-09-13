@@ -1,3 +1,4 @@
+import { hasHost, readHostProviders } from "./hostProviders.ts";
 // WebSocket client for the Jaroku relay. Mirrors the reconnect pattern of the original
 // debug-client.html (1s backoff) and dispatches each server message into the trace store.
 // The relay only speaks WebSocket, so this is the single channel between UI and pipeline.
@@ -309,6 +310,10 @@ function dispatch(msg: ServerMessage): void {
       // there is nothing here to be careful with beyond not inventing state the server owns.
       const p = useProviderStore.getState();
       if (msg.type === "providers") p.setProviders(msg.providers, msg.ownKeyForPlatform, msg.models);
+      // The subscription half, on its own message because it has a different scope: these rows
+      // describe the machine holding THIS socket, so they are sent to it alone and never
+      // broadcast. See server/src/wsRelay.ts's `sendSubscriptions`.
+      else if (msg.type === "subscriptions") p.setSubscriptions(msg.subscriptions);
       else if (msg.type === "testResult") p.setTestResult({ provider: msg.provider, ok: msg.ok, message: msg.message });
       else if (msg.type === "error") p.setError(msg.message);
       else if (msg.type === "notice") p.setNotice(msg.message);
@@ -785,6 +790,13 @@ async function connect(): Promise<void> {
     // than by the panel that renders it, because a suspended workspace has to say so on frame one —
     // the alternative is a user pressing Run, being refused, and having nowhere to read why.
     sendLoadEnforcement();
+    // AND WHAT THIS MACHINE HAS, which the relay cannot know and no snapshot can carry. The server
+    // is on a different computer from the user's `codex` or `claude`, so the only way it learns
+    // whether Chat has a subscription to run on is for the side holding the credential to say so.
+    // Fired here rather than on mount because it belongs to THIS socket's session: a reconnect
+    // lands on a fresh session with no rows, and a stale report would outlive the connection it
+    // described. It never rejects and does nothing in a browser.
+    void reportHostProviders();
   };
 
   socket.onmessage = (ev) => {
@@ -1602,6 +1614,32 @@ export function sendSetMcpToolImpact(serverId: string, toolName: string, impact:
 
 export function sendListProviders(): void {
   send({ cmd: "listProviders" });
+}
+
+/**
+ * Ask the shell what provider CLIs this machine has, and tell the server.
+ *
+ * THE PAGE RELAYS WHAT THE SHELL OBSERVED, rather than the shell opening a socket of its own —
+ * which would be a second authenticated connection, a second session to expire and a second place
+ * for tenancy to be wrong. This socket is already authenticated, so the report rides it.
+ *
+ * A no-op in a browser: `readHostProviders` resolves empty, and an empty report is still worth
+ * sending exactly once so the server replaces any stale rows from a previous desktop session on
+ * this same socket. Called on connect and again after the user has been sent off to sign in.
+ */
+export async function reportHostProviders(): Promise<void> {
+  const hosts = await readHostProviders();
+  if (!hasHost()) return;
+  send({
+    cmd: "reportProviderHost",
+    hosts: hosts.map((h) => ({
+      provider: h.provider,
+      installed: h.installed,
+      version: h.version,
+      signedIn: h.signedIn,
+      account: h.account,
+    })),
+  });
 }
 
 /**
