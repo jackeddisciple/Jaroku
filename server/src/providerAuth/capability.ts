@@ -110,6 +110,17 @@ export interface ReasoningCapability {
  */
 export interface ProviderCapability {
   readonly id: ProviderId;
+  /**
+   * What the SUBSCRIPTION is called, which is not always what the company is called.
+   *
+   * `providerLabel` says "OpenAI", and that is right for an API key — the key is an OpenAI platform
+   * credential. It is wrong here: what somebody signs into is CODEX, with their ChatGPT plan, and a
+   * row headed "OpenAI" reading "runs on your OpenAI plan" told a user with a ChatGPT subscription
+   * that they were connected to something they did not think they had. Claude happens to be called
+   * the same thing in both systems; Codex does not, and one table that assumed they always agreed
+   * is how that confusion shipped.
+   */
+  readonly subscriptionLabel: string;
   readonly subscriptionChatSupported: boolean;
   /** Never true when `subscriptionChatSupported` is false — asserted, not merely intended. */
   readonly subscriptionChatAvailable: boolean;
@@ -174,6 +185,7 @@ export const PROVIDER_CAPABILITY: Readonly<Record<ProviderId, ProviderCapability
   // ------------------------------------------------------------------------------------------
   anthropic: {
     id: "anthropic",
+    subscriptionLabel: "Claude",
     subscriptionChatSupported: true,
     subscriptionChatAvailable: true,
     requiresProviderApproval: false,
@@ -215,6 +227,7 @@ export const PROVIDER_CAPABILITY: Readonly<Record<ProviderId, ProviderCapability
   // ------------------------------------------------------------------------------------------
   openai: {
     id: "openai",
+    subscriptionLabel: "Codex",
     subscriptionChatSupported: true,
     subscriptionChatAvailable: true,
     requiresProviderApproval: false,
@@ -249,6 +262,7 @@ export const PROVIDER_CAPABILITY: Readonly<Record<ProviderId, ProviderCapability
   // ------------------------------------------------------------------------------------------
   meta: {
     id: "meta",
+    subscriptionLabel: "Muse Spark",
     subscriptionChatSupported: false,
     subscriptionChatAvailable: false,
     requiresProviderApproval: false,

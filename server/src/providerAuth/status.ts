@@ -57,6 +57,8 @@ export interface HostObservation {
 export interface SubscriptionStatus {
   readonly provider: ProviderId;
   readonly label: string;
+  /** Which PLAN pays. Codex runs on a ChatGPT plan, so the two names differ there. */
+  readonly planLabel: string;
   /** May Chat use this provider's subscription TODAY. The client renders a gated row, not a hole. */
   readonly available: boolean;
   /** Does an official mechanism exist at all. True for Claude while `available` is false. */
@@ -126,7 +128,8 @@ export function statusFor(id: ProviderId, host: HostObservation | undefined): Su
 
   return {
     provider: id,
-    label: providerLabel(id),
+    label: cap.subscriptionLabel,
+    planLabel: cap.id === "openai" ? "ChatGPT" : cap.subscriptionLabel,
     available: cap.subscriptionChatAvailable,
     supported: cap.subscriptionChatSupported,
     requiresApproval: cap.requiresProviderApproval,

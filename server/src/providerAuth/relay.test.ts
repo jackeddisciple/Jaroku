@@ -157,7 +157,7 @@ console.log("\nrows carry no credential, because there is none to carry");
   // documentation and the most useful thing that row can say. A scan for credential-looking text
   // flags that and misses the actual risk, which is a FIELD appearing here that could hold one.
   const ROW_FIELDS = [
-    "provider", "label", "available", "supported", "requiresApproval", "runtimeApiSupported",
+    "provider", "label", "planLabel", "available", "supported", "requiresApproval", "runtimeApiSupported",
     "reason", "citation", "unblock", "effortParam", "effortLevels",
     "binary", "loginCommand", "credentialPath", "host", "connected",
   ].sort().join(",");

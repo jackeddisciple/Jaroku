@@ -137,8 +137,32 @@ export type ComposerContext = {
  * trailing punctuation and the optional second word are there because "hi!", "hey there" and
  * "thanks so much" are the same message.
  */
+/**
+ * A greeting, optionally with ONE short word of address after it.
+ *
+ * THE ADDRESS TERM USED TO BE AN ENUMERATED LIST — `there|all|again|jaroku|mate|man|folks` — and
+ * that list is unwinnable. "Hey bro" missed it, fell past every rung below, and was routed to the
+ * PLANNER: a greeting spent a real model call, failed on a missing API key, and told somebody that
+ * saying hello needed a credential. "Hey buddy", "yo dude" and "hi friend" all did the same.
+ *
+ * SO THE TERM IS NOW SHAPE-MATCHED RATHER THAN LISTED: one word, letters only, twelve characters
+ * at most. That is deliberately loose, and it is still tight enough — the `$` anchor means only a
+ * greeting followed by a SINGLE short word can match, so "hey build me an agent" leaves four words
+ * unconsumed and routes to the planner exactly as it should. The failure direction matters here:
+ * mistaking a greeting for a build request spends money and demands a key, while mistaking a
+ * two-word request for a greeting costs one reply saying "say more".
+ */
 const RE_SOCIAL =
-  /^(hi|hii+|hey|hello|hiya|yo|sup|howdy|morning|good (morning|afternoon|evening)|thanks|thank you|thx|ty|cheers|ok|okay|k|cool|nice|great|awesome|perfect|got it|sounds good|never ?mind|nvm|bye|goodbye|see ya|later|test|testing|ping)\b[\s!.,?]*(there|all|again|jaroku|so much|a lot|very much|mate|man|folks)?[\s!.,?]*$/i;
+  /^(hi|hii+|hey|hello|hiya|yo|sup|howdy|morning|good (morning|afternoon|evening)|thanks|thank you|thx|ty|cheers|ok|okay|k|cool|nice|great|awesome|perfect|got it|sounds good|never ?mind|nvm|bye|goodbye|see ya|later|test|testing|ping)\b[\s!.,?]*(so much|a lot|very much|[a-z]{1,12})?[\s!.,?]*$/i;
+
+/**
+ * A message about the PERSON or about Jaroku, rather than about a job to be done.
+ *
+ * The one signal that separates "tell me a joke" from "triage inbound support email": a brief
+ * describes work in the third person, while conversation involves whoever is talking. Used only by
+ * the draft rung, where something has to decide between the two.
+ */
+const RE_PERSONAL = /\b(i|i'm|im|i've|me|my|mine|myself|you|your|you're|yourself|we|us|our|let's|lets)\b/i;
 
 const RE_EXPLAIN = /^(why|what|whats|what's|how|when|where|which|who|explain|describe|tell me|walk me)\b|\bexplain\b/i;
 const RE_RERUN = /\b(re-?run|retry|run again|try again|re-?execute|from (here|step|this|that))\b/i;
@@ -417,11 +441,49 @@ export function routeMessage(text: string, ctx: ComposerContext): Routing {
     return { intent: { kind: "replan", planId: ctx.pendingPlanId }, reason: "A plan is waiting; this is feedback on it.", planEvidence: "none" };
   }
 
-  // A DRAFT IS A NAME AND A FACE. Nothing below this line applies to it, so it never reaches them.
+  // A DRAFT IS A NAME AND A FACE, AND A SELECTION IS NOT A CONSENT TO BUILD.
+  //
+  // THIS RUNG USED TO CLAIM EVERY MESSAGE. A draft on screen meant the next thing typed was its
+  // brief — whatever it was — so "Hey bro" was sent to the planner, which answered "ANTHROPIC_API_KEY
+  // is not set … planning needs the same key generation does". Somebody said hello and was told
+  // they needed a credential. The product owner's rule, 2026-09-13: "I can say anything… it should
+  // reply to everything", and a key is for generating, not for talking.
+  //
+  // SO THE DRAFT LOWERS THE BAR RATHER THAN REMOVING IT. With nothing selected a build has to prove
+  // itself at `PLAN_CONFIDENCE`; a selected draft is real context and drops that to `PLAN_NEAR`, so
+  // "an agent that reads Slack" still builds into it on one signal. What no longer happens is a
+  // message with NO build signal at all being treated as a brief because of where the cursor was.
   if (ctx.agentId && ctx.agentIsDraft) {
-    return ctx.pendingPlanId
-      ? { intent: { kind: "replan", planId: ctx.pendingPlanId }, reason: "A plan is waiting; this is feedback on it.", planEvidence: "none" }
-      : { intent: { kind: "generate", into: ctx.agentId }, reason: "A draft agent is selected; this describes what to build into it.", planEvidence: "confident" };
+    if (ctx.pendingPlanId) {
+      return { intent: { kind: "replan", planId: ctx.pendingPlanId }, reason: "A plan is waiting; this is feedback on it.", planEvidence: "none" };
+    }
+    // CONVERSATION IS WHAT IS CARVED OUT, not what has to prove itself. `planScore` only fires on
+    // explicit build vocabulary — "triage inbound support email and draft a reply" scores zero and
+    // is nonetheless exactly what a draft is waiting for — so requiring a score here would send real
+    // briefs to chat. The reliable signal runs the other way: a message ABOUT the person or about
+    // Jaroku, or one too short to be a brief, is somebody talking.
+    //
+    // THE FAILURE DIRECTION IS CHOSEN. Over-claiming conversation costs one reply and a rephrase;
+    // over-claiming a brief spends a model call, demands an API key, and tells somebody that saying
+    // hello needs a credential. The product owner's rule is that Jaroku talks back to anything.
+    // EXPLICIT BUILD VOCABULARY WINS FIRST, before anything conversational is considered. "build me
+    // a support bot" contains "me" and is unmistakably a brief; a personal-pronoun check that ran
+    // ahead of the score would send it to chat, which is the opposite mistake.
+    const asked = planScore(t);
+    const words = t.split(/\s+/).filter(Boolean).length;
+    // A PASTE IS NOT A SHORT MESSAGE. `prose` strips fences, so "```\nGET /v1/messages\n```" arrives
+    // here as an empty string — which the word count below would read as three words or fewer and
+    // call conversation. With a draft open it is the opposite: "here is the API I want you to use"
+    // is a brief, and this rung sits above the quoted-only check for exactly that reason.
+    const pastedOnly = t === "" && text.trim() !== "";
+    if (!pastedOnly && asked.score < PLAN_NEAR && (RE_PERSONAL.test(t) || words <= 3)) {
+      return chat("A draft is selected, but this is conversation rather than a brief.");
+    }
+    return {
+      intent: { kind: "generate", into: ctx.agentId },
+      reason: "A draft agent is selected; this describes what to build into it.",
+      planEvidence: "confident",
+    };
   }
 
   // A MESSAGE THAT IS NOTHING BUT QUOTED CODE IS A CONVERSATION, because nobody asked for anything.

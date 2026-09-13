@@ -666,6 +666,8 @@ export type McpMessage =
 export interface SubscriptionStatus {
   provider: ProviderId;
   label: string;
+  /** Which PLAN pays. Codex runs on a ChatGPT plan, so the two names differ there. */
+  planLabel: string;
   /** May Chat use this provider's subscription today. */
   available: boolean;
   /** Does an official mechanism exist at all — true for Claude while `available` is false. */

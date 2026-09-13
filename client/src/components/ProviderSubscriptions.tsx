@@ -99,7 +99,7 @@ function Row({ row }: { row: SubscriptionStatus }) {
 
       {state === "connected" ? (
         <p className="text-tiny text-muted">
-          Chat runs on your {row.label} plan. Usage counts against that plan, not against Jaroku.
+          Chat runs on your {row.planLabel} plan. Usage counts against that plan, not against Jaroku.
         </p>
       ) : state === "unavailable" ? (
         // The provider's own reason, verbatim — paraphrasing a terms decision is how it drifts.
