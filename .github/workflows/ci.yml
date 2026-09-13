@@ -898,6 +898,16 @@ jobs:
         working-directory: server
         run: |
           npm run test:pricing
+          # WHAT EACH PROVIDER OFFICIALLY PERMITS A THIRD PARTY TO DO WITH A USER'S OWN
+          # SUBSCRIPTION, as a table of verdicts with the page each was read from. It is a gate
+          # rather than a configuration: the way this breaks is a provider quietly switched on
+          # because the code path was already there, and the people who find out are users whose
+          # accounts get enforced against. So the suite asserts the shape of a verdict — a refusal
+          # carries its reason and its citation, an approval carries a complete delegation
+          # mechanism — and then asserts that no environment variable, flag or build can talk the
+          # module out of one. It also holds the wall between the two credential systems: this
+          # module may quote a provider naming its own API-key variable, and may never use one.
+          npm run test:provider-auth-capability
           # REASONING EFFORT, AND THE ONE FAILURE MODE THAT IS COMFORTABLE. The composer spec's
           # §3.2 says "Degradation is visible, not silent" and "Never report an effort that
           # wasn't used" — two statements of the same rule, because the way this breaks is a
