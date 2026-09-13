@@ -10,6 +10,9 @@ import { WebSocketServer, WebSocket } from "ws";
 import { LOOPBACK } from "./auth/bindHost.ts";
 import type { TraceStore } from "./store.ts";
 import type { ThreadStatus } from "./threadStore.ts";
+import type { HostObservation, SubscriptionStatus } from "./providerAuth/status.ts";
+import { subscriptionStatuses } from "./providerAuth/status.ts";
+import { PROVIDER_IDS, isProviderId, type ProviderId } from "./providers.ts";
 import type { TenantContext } from "./db/tenant.ts";
 import type { TraceEvent } from "./types.ts";
 import type { Router } from "./http/router.ts";
@@ -586,6 +589,27 @@ export type ListProvidersCommand = { cmd: "listProviders" };
  * stored, and this decides only what it is allowed to pay for.
  */
 export type SetOwnKeyForPlatformCommand = { cmd: "setOwnKeyForPlatform"; on: boolean };
+
+/**
+ * What the desktop shell can see of the provider CLIs on THIS machine.
+ *
+ * REPORTED INWARD, BECAUSE THE BACKEND CANNOT LOOK. In the shipped build the relay runs on a server
+ * and the user's `codex` lives on their laptop, so "is it installed, is it signed in" is a question
+ * only the shell can answer. It answers on its own socket and the relay believes it for that socket
+ * alone — which is also why this is session state rather than a row: it describes the machine at
+ * the other end of THIS connection, and the same account on a second laptop is a different answer.
+ *
+ * IT CARRIES NO CREDENTIAL AND COULD NOT. Every field is a fact the provider's own CLI reported
+ * about itself — found, version, signed in, which account. The credential stays in the provider's
+ * own store, which nothing in this repository opens; see providerAuth/capability.ts.
+ *
+ * A client that is not the desktop shell never sends this, and its absence is an ordinary state:
+ * a browser tab simply has no machine to report, and every provider reads as not connected there.
+ */
+export type ReportProviderHostCommand = {
+  cmd: "reportProviderHost";
+  hosts: { provider: string; installed: boolean; version?: string | null; signedIn: boolean; account?: string | null }[];
+};
 
 /**
  * What this workspace has spent this period, and against what.
@@ -1710,6 +1734,7 @@ export type ClientCommand =
   | ListMcpServersCommand
   | ProviderCommand
   | ListProvidersCommand
+  | ReportProviderHostCommand
   | ConnectionCommand
   | BillingCommand
   | DeployChannelCommand
@@ -2047,6 +2072,10 @@ export interface ProviderSnapshot {
 
 export type ProviderEvent =
   | ({ type: "providers" } & ProviderSnapshot)
+  // The OTHER credential system, for the machine holding one socket. Deliberately a separate
+  // message from `providers` above: that one is a workspace fact and is broadcast, this one is a
+  // fact about somebody's laptop and is only ever sent to the socket it describes.
+  | { type: "subscriptions"; subscriptions: SubscriptionStatus[] }
   // The answer to "Test connection": did that key authenticate. Nothing was written.
   | { type: "testResult"; provider: string; ok: boolean; message: string | null }
   // A write that could not happen (an unknown provider, a value the .env format cannot store
@@ -3491,6 +3520,16 @@ export type DebugEvent =
  */
 export interface SocketSession {
   context: TenantContext;
+  /**
+   * What the desktop shell reported about the provider CLIs on the machine at the other end.
+   *
+   * ON THE SOCKET RATHER THAN ON THE USER, because it describes a MACHINE and one account may be
+   * signed in from two. A browser tab and a desktop app held by the same person are two sockets
+   * with two different answers, and both are correct.
+   *
+   * Absent until something reports, which is the state every browser client stays in forever.
+   */
+  hostProviders?: Map<string, HostObservation>;
   /** Unix seconds, or null when the socket was opened without a token (the dev path). */
   expiresAt?: number | null;
   userId?: string | null;
@@ -3612,6 +3651,7 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   listMcpServers: "mcp", addMcpServer: "mcp", removeMcpServer: "mcp", rediscoverMcpServer: "mcp",
   setMcpServerAuth: "mcp", setMcpToolImpact: "mcp", resolveMcpConfirm: "mcp",
   listProviders: "providers", setOwnKeyForPlatform: "providers",
+  reportProviderHost: "providers",
   listConnections: "connections", connectConnector: "connections", disconnectConnector: "connections",
   loadUsage: "billing", setSpendCeiling: "billing", setByok: "billing",
   listMembers: "members", inviteMember: "members", revokeInvite: "members",
@@ -4037,6 +4077,36 @@ export class WsRelay {
   private contexts = new Map<WebSocket, TenantContext>();
   /** The fuller picture per socket: who, and when their credential runs out. */
   private sessions = new Map<WebSocket, SocketSession>();
+
+  /**
+   * The subscription rows for ONE socket: every provider, and whether THIS machine can use it.
+   *
+   * ITS OWN MESSAGE RATHER THAN A FIELD ON THE PROVIDERS SNAPSHOT, and the reason is scope. The
+   * providers snapshot is a WORKSPACE fact and is broadcast to every socket in it — and, through
+   * `onBroadcast`, to sockets on other replicas entirely. These rows are a MACHINE fact: whether
+   * the laptop holding this one connection has `codex` installed and signed in. Riding them on a
+   * workspace broadcast would send one person's machine state to their colleague's browser, and
+   * the cross-replica hop has no socket to compute them for at all.
+   *
+   * So the two travel separately, each to exactly the audience it is true for.
+   *
+   * A socket that has reported nothing still gets a full list — every provider, not connected, each
+   * saying why. That is the truth for a browser tab: it has no local CLI to sign in with.
+   */
+  private subscriptionsFor(ws: WebSocket): SubscriptionStatus[] {
+    const observed = this.sessions.get(ws)?.hostProviders;
+    const hosts = new Map<ProviderId, HostObservation>();
+    for (const id of PROVIDER_IDS) {
+      const seen = observed?.get(id);
+      if (seen) hosts.set(id, seen);
+    }
+    return subscriptionStatuses(PROVIDER_IDS, hosts);
+  }
+
+  /** Send this socket its own subscription rows. Never broadcast — see above. */
+  private sendSubscriptions(ws: WebSocket): void {
+    this.sendTo(ws, { channel: "providers", type: "subscriptions", subscriptions: this.subscriptionsFor(ws) });
+  }
   /** Sockets already told their token is nearly out, so they are told once and not per tick. */
   private warned = new WeakSet<WebSocket>();
   private revalidator?: ReturnType<typeof setInterval>;
@@ -4148,6 +4218,10 @@ export class WsRelay {
           type: "providers",
           ...((await this.opts.listProviders?.(ctx)) ?? { providers: [], ownKeyForPlatform: false, models: [] }),
         });
+        // And whether this MACHINE can talk to Jaroku on a provider subscription. Sent on frame one
+        // beside the keys so the composer knows on its first render which of its two modes has
+        // anything to offer, rather than after a round trip that makes Chat look empty.
+        this.sendSubscriptions(ws);
         // And what is deployed, so the sidebar's Deployed filter is right on frame one rather
         // than after a round trip.
         const deploySnapshot = (await this.opts.listDeployments?.(ctx)) ?? {
@@ -4686,12 +4760,47 @@ export class WsRelay {
               ...((await this.opts.listDeployments?.(ctx)) ?? { deployments: [], railwayConfigured: false }),
             }), live, (message) => ({ channel: "deploy", type: "error", message }));
           } else if (msg.cmd === "listProviders") {
-            void withContext(async (ctx) =>
+            void withContext(async (ctx) => {
               this.sendTo(ws, {
                 channel: "providers",
                 type: "providers",
                 ...((await this.opts.listProviders?.(ctx)) ?? { providers: [], ownKeyForPlatform: false, models: [] }),
-              }));
+              });
+              this.sendSubscriptions(ws);
+            });
+          } else if (msg.cmd === "reportProviderHost") {
+            // ANSWERED LOCALLY, like `listProviders` beside it: the relay holds the session this
+            // describes, so there is nothing to forward and nobody better placed to answer.
+            //
+            // VALIDATED RATHER THAN TRUSTED, even though the sender is our own shell. A socket is a
+            // socket: anything that can open one can send this, and the fields decide whether a
+            // provider is offered for Chat. The validation is narrow on purpose — an unknown
+            // provider id is dropped rather than stored, so a client cannot invent a fourth
+            // provider and have it rendered back to every tab as a connected one.
+            //
+            // NOTE WHAT IT STILL CANNOT DO. A caller may claim `signedIn: true` for a gated
+            // provider all it likes; `subscriptionStatuses` checks permission first and the row
+            // comes back not connected. Lying here buys nothing, which is the property that makes
+            // believing the shell safe.
+            const reported = Array.isArray(msg.hosts) ? msg.hosts : [];
+            const observedAt = new Date().toISOString();
+            const hosts = new Map<string, HostObservation>();
+            for (const h of reported) {
+              if (!h || typeof h !== "object" || !isProviderId(h.provider)) continue;
+              hosts.set(h.provider, {
+                provider: h.provider,
+                installed: h.installed === true,
+                version: typeof h.version === "string" ? h.version.slice(0, 64) : null,
+                signedIn: h.signedIn === true,
+                account: typeof h.account === "string" ? h.account.slice(0, 128) : null,
+                observedAt,
+              });
+            }
+            const session = this.sessions.get(ws);
+            if (session) session.hostProviders = hosts;
+            // Back to THIS socket only. Another tab's machine is not this one, and broadcasting
+            // would tell it that a CLI it cannot see is signed in.
+            this.sendSubscriptions(ws);
           } else if (DEPLOY_COMMANDS.has(msg.cmd)) {
             // Shape-checked in the app, which owns the deploy manager and can answer with a
             // precise error on the "deploy" channel rather than dropping the message here.

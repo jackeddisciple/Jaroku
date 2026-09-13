@@ -251,6 +251,7 @@ export const COMMAND_CAPABILITY: Record<string, string> = {
 
   // providers
   listProviders: "provider:read",
+  reportProviderHost: "provider:read",
   setOwnKeyForPlatform: "provider:manage",
 
   // membership, billing, enforcement

@@ -478,6 +478,12 @@ console.log("\nevery command reaches the handler its channel implies");
     // mutations are forwarded. Both are snapshots of rows this process can already reach, with no
     // third party and no refusal of their own to make.
     "listThreads", "loadThread",
+    // The desktop shell telling the relay what is installed on the machine at the end of THIS
+    // socket. It is answered here for a reason no feature handler could improve on: the state it
+    // writes lives on the socket's own session, which the relay holds and the app cannot see. There
+    // is no third party to ask and no refusal to make — a report about a machine is either
+    // well-formed or dropped.
+    "reportProviderHost",
   ]);
 
   for (const [channel, setName] of Object.entries(DISPATCH_SETS)) {

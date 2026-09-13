@@ -798,6 +798,11 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
 
   // providers
   listProviders: "provider:read",
+  // The desktop shell describing its own machine — which CLIs are installed and signed in. A READ
+  // capability because that is what it amounts to: it changes nothing about the workspace, stores
+  // no credential, and only decides which subscription rows THIS socket is shown. Somebody who can
+  // read the provider list can tell us what is on the laptop they are already holding.
+  reportProviderHost: "provider:read",
   // `setProviderKey` and `testProviderKey` are not here because they no longer exist. A credential
   // written over the socket could not be gated by elevation — that rides on a request header — so
   // the passcode gate was bypassable by anyone with a session. See wsRelay.ts.

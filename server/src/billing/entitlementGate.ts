@@ -234,6 +234,7 @@ export const COMMAND_ENTITLEMENT: Record<string, EntitlementKind | typeof NO_ENT
   connectConnector: NO_ENTITLEMENT,
   disconnectConnector: NO_ENTITLEMENT,
   listProviders: NO_ENTITLEMENT,
+  reportProviderHost: NO_ENTITLEMENT,
   listDeployments: NO_ENTITLEMENT,
   loadDeployLogs: NO_ENTITLEMENT,
   setRailwayToken: NO_ENTITLEMENT,

@@ -915,6 +915,13 @@ jobs:
           # provider's terms for exactly those people, which is why most of this suite asserts the
           # case where the machine is perfectly set up and the answer is still no.
           npm run test:provider-auth-status
+          # AND THE SAME RULES OVER A REAL SOCKET, because one property only exists once a relay
+          # is involved: these rows describe the MACHINE holding one connection, so they must reach
+          # that connection and no other. Broadcasting them would put one person's laptop state
+          # into a colleague's browser, and it would look like a feature until it said something
+          # untrue. The suite also drives a client that claims a gated provider is installed and
+          # signed in, and asserts the row still comes back refused.
+          npm run test:provider-auth-relay
           # REASONING EFFORT, AND THE ONE FAILURE MODE THAT IS COMFORTABLE. The composer spec's
           # §3.2 says "Degradation is visible, not silent" and "Never report an effort that
           # wasn't used" — two statements of the same rule, because the way this breaks is a
