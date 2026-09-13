@@ -3913,7 +3913,7 @@ async function turnForRegenerate(ctx: TenantContext, turnId: string): Promise<st
 async function spentOnTurn(
   ctx: TenantContext,
   turnId: string | null,
-): Promise<{ turn_cost_usd?: number | null; total_tokens?: number }> {
+): Promise<{ turn_cost_usd?: number | null; total_tokens?: number; duration_ms?: number }> {
   if (!turnId) return {};
   try {
     const rows = await turnVariants.forTurn(ctx, turnId);
@@ -3933,6 +3933,21 @@ async function spentOnTurn(
       // before the first `message_start` has no counts, and a zero there would claim it spent
       // nothing when what is true is that nobody knows.
       ...(v.tokens_in !== null || v.tokens_out !== null ? { total_tokens: tokens } : {}),
+      /**
+       * §6.4's DURATION, and a live run is what showed it missing.
+       *
+       * `openVariant` measures dispatch-to-end-of-stream — "the only place that saw both ends" —
+       * and wrote it to the row, and nothing sent it back. So the composer counted up in amber
+       * while the answer streamed, then the slot COLLAPSED the moment it settled, because
+       * `presentSlots` drops a null duration. The figure reappeared after a reload, read from the
+       * row: the same turn with five slots live and six after reopening it.
+       *
+       * §6.5 IS THE RULE THAT MAKES THIS A BUG RATHER THAN A COSMETIC GAP: "never reorder based on
+       * availability; absent items collapse, the rest hold position. Stability matters more than
+       * density — people learn the position of the thing they check most." A slot that vanishes at
+       * the end of every answer and returns on reload is the least stable version of that line.
+       */
+      ...(v.duration_ms !== null ? { duration_ms: v.duration_ms } : {}),
     };
   } catch {
     return {};
