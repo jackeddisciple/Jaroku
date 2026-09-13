@@ -185,7 +185,21 @@ fn probe(exe: &Path, args: &[&str]) -> Option<String> {
 
     let out = child.wait_with_output().ok()?;
     let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if text.is_empty() { None } else { Some(text) }
+    if text.is_empty() {
+        // WHY, RATHER THAN JUST "NO". A probe that answers nothing is indistinguishable from a
+        // provider that is signed out, and the two want completely different things done about
+        // them. `codex login status` reported a ChatGPT sign-in in every shell it was tried in and
+        // reported nothing from inside the packaged app, and there was no way to tell from the log
+        // whether it had failed, been refused, or simply said something unexpected.
+        logs::say(format!(
+            "provider probe said nothing: {} {} (exit {:?})",
+            exe.display(),
+            args.join(" "),
+            out.status.code()
+        ));
+        return None;
+    }
+    Some(text)
 }
 
 /// The one line of `codex login status` that means a consumer plan, matched exactly.
@@ -270,6 +284,11 @@ fn observe_codex() -> HostProvider {
     let version = probe(&exe, &["--version"]).map(|v| v.trim().to_string());
     let status = probe(&exe, &["login", "status"]).unwrap_or_default();
     let (signed_in, auth_mode, note) = read_codex_status(&status);
+    if !signed_in && !status.is_empty() {
+        // An unrecognised first line is the third silent outcome, and the log is the only place it
+        // can show up: the row just reads "not signed in" either way.
+        logs::say(format!("codex login status said: {:?}", status.lines().next().unwrap_or("")));
+    }
 
     HostProvider {
         provider: "openai".to_string(),
