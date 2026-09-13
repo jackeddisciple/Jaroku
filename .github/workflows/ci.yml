@@ -908,6 +908,13 @@ jobs:
           # module out of one. It also holds the wall between the two credential systems: this
           # module may quote a provider naming its own API-key variable, and may never use one.
           npm run test:provider-auth-capability
+          # AND THE DERIVATION ON TOP OF IT, whose only real risk is an ordering. Two inputs
+          # decide whether a subscription may answer a turn — what the provider permits, and what
+          # the user's machine has — and the natural-looking arrangement checks the machine first.
+          # That version works on the laptop of anybody who already has the CLI and breaks the
+          # provider's terms for exactly those people, which is why most of this suite asserts the
+          # case where the machine is perfectly set up and the answer is still no.
+          npm run test:provider-auth-status
           # REASONING EFFORT, AND THE ONE FAILURE MODE THAT IS COMFORTABLE. The composer spec's
           # §3.2 says "Degradation is visible, not silent" and "Never report an effort that
           # wasn't used" — two statements of the same rule, because the way this breaks is a
