@@ -2088,6 +2088,15 @@ export function BuildPane({
 
   /** Whether ANY provider subscription is connected on this machine. The Chat gate's whole question. */
   const subscriptionConnected = useSubscriptionConnected();
+  /**
+   * The rows themselves, SUBSCRIBED rather than read out of `getState()`.
+   *
+   * `getState()` during render returns a value React was never told about, so a provider that
+   * connected while the composer was open would not reach the gate, the model list or the effort
+   * stops until something else happened to re-render. The array is a stable reference — every
+   * snapshot replaces it — so subscribing costs one comparison.
+   */
+  const subscriptionRows = useProviderStore((s) => s.subscriptions);
 
   /**
    * Whether THIS turn should run on the user's own subscription rather than on the server.
@@ -2099,7 +2108,7 @@ export function BuildPane({
    */
   const chatSubscriptionActive = composerMode === "chat"
     && canRunLocally()
-    && (useProviderStore.getState().subscriptions.find((x) => x.provider === chatProviderNeeded)?.connected ?? false);
+    && (subscriptionRows.find((x) => x.provider === chatProviderNeeded)?.connected ?? false);
 
   /**
    * The effort level in THIS provider's vocabulary, or null when it takes none.
@@ -2109,7 +2118,7 @@ export function BuildPane({
    * server's `mapEffort` uses — these are the levels the subscription row reported.
    */
   const chatEffortValue = useMemo(() => {
-    const sub = useProviderStore.getState().subscriptions.find((x) => x.provider === chatProviderNeeded);
+    const sub = subscriptionRows.find((x) => x.provider === chatProviderNeeded);
     const levels = sub?.effortLevels ?? [];
     if (levels.length === 0) return null;
     if (levels.includes(effort)) return effort;
@@ -2122,7 +2131,7 @@ export function BuildPane({
       if (levels.includes(l)) return l;
     }
     return null;
-  }, [chatProviderNeeded, effort]);
+  }, [chatProviderNeeded, effort, subscriptionRows]);
 
   /** Where a local turn runs. Jaroku's own directory, never the user's project. See the fork. */
   const localTurnCwd = useMemo(

@@ -20,7 +20,7 @@
 // signed in and still read as unavailable — Muse Spark does, because Meta documents no third-party
 // mechanism — and this component renders that truthfully rather than inventing a way to try anyway.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { ProviderMark } from "../lib/icons.tsx";
 import { reportHostProviders } from "../lib/socket.ts";
@@ -33,9 +33,25 @@ export function useSubscriptionConnected(): boolean {
   return useProviderStore((s) => s.subscriptions.some((r) => r.connected));
 }
 
-/** The rows worth showing: providers with an official mechanism. See the module note on Muse Spark. */
+/**
+ * The rows worth showing: providers with an official mechanism. See the module note on Muse Spark.
+ *
+ * THE FILTER IS OUTSIDE THE SELECTOR, AND THAT IS NOT A STYLE CHOICE — it is the bug this codebase
+ * has already paid for once, in `chatStore.threadFor`. Zustand compares snapshots BY REFERENCE
+ * through `useSyncExternalStore`, and `.filter()` returns a new array every call. A selector that
+ * filtered would report "changed" on every render, React would re-render, call it again, get
+ * another new array, and give up:
+ *
+ *   The result of getSnapshot should be cached to avoid an infinite loop
+ *   Maximum update depth exceeded
+ *
+ * ...and the panel goes to zero characters. A white screen — which is exactly what opening Settings
+ * did before this. The store's own array is a stable reference (every snapshot REPLACES it), so
+ * selecting that and deriving here is both correct and cheap.
+ */
 export function useConnectableSubscriptions(): SubscriptionStatus[] {
-  return useProviderStore((s) => s.subscriptions.filter((r) => r.supported));
+  const all = useProviderStore((s) => s.subscriptions);
+  return useMemo(() => all.filter((r) => r.supported), [all]);
 }
 
 /** What a row's state is, in one word, so the badge and the copy agree. */

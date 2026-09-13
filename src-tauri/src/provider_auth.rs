@@ -156,7 +156,12 @@ fn probe(exe: &Path, args: &[&str]) -> Option<String> {
         .args(args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
+        // CAPTURED RATHER THAN DISCARDED, AND THIS WAS A REAL BUG. `codex login status` exits 0 and
+        // writes its answer to STDERR, so a probe reading stdout alone got an empty string from a
+        // successful command and reported a signed-in machine as signed out. It survived every
+        // shell test because those were written with `2>&1`, which merged the two and hid which
+        // stream the sentence came from — the app, reading only one, could not.
+        .stderr(std::process::Stdio::piped())
         .spawn()
         .ok()?;
 
@@ -184,7 +189,16 @@ fn probe(exe: &Path, args: &[&str]) -> Option<String> {
     }
 
     let out = child.wait_with_output().ok()?;
-    let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    // STDOUT WINS WHEN THERE IS ANY, and stderr is the fallback rather than a merge: `claude auth
+    // status --json` answers in JSON on stdout, and concatenating a warning onto that would turn a
+    // parseable answer into an unparseable one. Only a command that said nothing on stdout falls
+    // through to what it said on stderr.
+    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let text = if stdout.is_empty() {
+        String::from_utf8_lossy(&out.stderr).trim().to_string()
+    } else {
+        stdout
+    };
     if text.is_empty() {
         // WHY, RATHER THAN JUST "NO". A probe that answers nothing is indistinguishable from a
         // provider that is signed out, and the two want completely different things done about
