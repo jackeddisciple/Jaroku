@@ -2157,11 +2157,6 @@ export function BuildPane({
     [chatSelectedModel, chatProviderNeeded, effort, subscriptionRows],
   );
 
-  /** Where a local turn runs. Jaroku's own directory, never the user's project. See the fork. */
-  const localTurnCwd = useMemo(
-    () => (globalThis as { __JAROKU_CONFIG__?: { home?: string } }).__JAROKU_CONFIG__?.home ?? "/tmp",
-    [],
-  );
   /** The turn in flight, so Stop can kill the process that is spending the plan. */
   const localTurnRef = useRef<{ cancel: () => void } | null>(null);
 
@@ -2637,9 +2632,6 @@ export function BuildPane({
             // §15.1: THE BAND, SO THE OFFER CAN APPEAR UNDER THIS ANSWER TOO. The server path carries
             // it on the message; this one opened its turn with none, and the card never showed.
             planEvidence: routing.planEvidence,
-            // Jaroku's own directory, never the user's project: a chat turn is about an agent
-            // being built, and `codex exec` would otherwise refuse to run outside a trusted repo.
-            cwd: localTurnCwd,
             onComplete: (answer, usage) => {
               // Recorded so the turn survives a reload. The SPEND is deliberately not reported:
               // these tokens came from a plan the user already pays for, and metering them would

@@ -110,7 +110,7 @@ const CLAUDE_STREAM = [
   '{"type":"result","total_cost_usd":0.0683845,"usage":{"input_tokens":2,"output_tokens":10}}',
 ];
 
-const base = { model: null, effort: null, agentId: "agent_x", cwd: "/tmp/jaroku" };
+const base = { model: null, effort: null, agentId: "agent_x" };
 
 console.log("\na Codex turn reaches the conversation and settles once");
 {
@@ -132,10 +132,13 @@ console.log("\na Codex turn reaches the conversation and settles once");
   check("...reporting what it spent", (seen.usage as { output_tokens?: number })?.output_tokens === 8);
   // The record is what persists the turn. Without it the answer vanishes on reload.
   check("the turn is handed on to be recorded", record.seen?.answer === "LAST MILE OK", JSON.stringify(record.seen));
-  // The prompt and cwd reach the shell as fields, never as a command line — see provider_turn.rs.
+  // The prompt reaches the shell as a field, never as a command line — see provider_turn.rs.
   check("the shell was asked for a provider and a prompt, not an argv",
     host.startedWith?.provider === "openai" && host.startedWith?.prompt === "say it"
       && !("argv" in (host.startedWith ?? {})), JSON.stringify(host.startedWith));
+  // NOR A DIRECTORY. The page named one from a config field the shell never injected, so every shipped
+  // turn ran in /tmp; where a turn runs is the shell's decision alone.
+  check("...and was not told where to run it", !("cwd" in (host.startedWith ?? {})), JSON.stringify(host.startedWith));
 }
 
 console.log("\na Claude turn streams in order and does not double");

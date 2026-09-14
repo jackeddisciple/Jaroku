@@ -28,6 +28,7 @@
 // at once, which is not a chat.
 
 use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -35,7 +36,7 @@ use std::sync::Mutex;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
-use crate::{logs, provider_auth};
+use crate::{logs, paths, provider_auth};
 
 /// The event the page listens for. Colon-separated, like every other event this shell emits.
 pub const EVENT: &str = "jaroku:provider-turn";
@@ -106,7 +107,10 @@ pub fn build_argv(provider: &str, prompt: &str, model: Option<&str>, effort: Opt
 
     match provider {
         "openai" => {
-            let mut argv = vec![s("codex"), s("exec"), s("--json"), s("--skip-git-repo-check")];
+            // NO TRANSCRIPT. `codex exec` files every session under `~/.codex/sessions` as plain JSONL
+            // unless told not to, and a Jaroku chat turn is somebody's own conversation: Jaroku's
+            // thread keeps it, and nothing else on disk does.
+            let mut argv = vec![s("codex"), s("exec"), s("--json"), s("--skip-git-repo-check"), s("--ephemeral")];
             if let Some(e) = effort {
                 argv.push(s("-c"));
                 argv.push(format!("model_reasoning_effort=\"{e}\""));
@@ -125,6 +129,9 @@ pub fn build_argv(provider: &str, prompt: &str, model: Option<&str>, effort: Opt
                 s("claude"), s("-p"),
                 s("--output-format"), s("stream-json"),
                 s("--verbose"), s("--include-partial-messages"),
+                // NO TRANSCRIPT, for Codex's reason: `claude -p` otherwise files the conversation under
+                // `~/.claude/projects/<directory>` as plain JSONL.
+                s("--no-session-persistence"),
             ];
             if let Some(m) = model {
                 argv.push(s("--model"));
@@ -146,6 +153,39 @@ pub fn build_argv(provider: &str, prompt: &str, model: Option<&str>, effort: Opt
     }
 }
 
+/// Where every subscription turn runs: `~/.jaroku/chat`, made on first use and private to its owner.
+///
+/// NEVER A DIRECTORY THE PAGE NAMES. The page sent one, read from a `home` field this shell never
+/// injected, so every shipped turn ran in `/tmp` — writable by every process on the machine. Both CLIs
+/// take instructions from the directory they start in (`CLAUDE.md`, `AGENTS.md`, `.mcp.json`), so
+/// anything able to drop a file there was writing into a session holding the user's own plan.
+fn chat_dir() -> Result<PathBuf, String> {
+    let home = paths::jaroku_home().ok_or("this machine does not say where its home directory is")?;
+    chat_dir_in(&home)
+}
+
+/// `<home>/chat`, made private. Apart from `chat_dir` so a test can point it somewhere harmless.
+///
+/// TIGHTENED EVERY TIME, not only when made: a directory somebody widened is put back to owner-only
+/// before a turn runs in it. And A LINK IS REFUSED rather than followed — planted where the directory
+/// belongs, it would send the turn wherever it points.
+fn chat_dir_in(home: &Path) -> Result<PathBuf, String> {
+    let dir = home.join("chat");
+    if let Ok(meta) = std::fs::symlink_metadata(&dir) {
+        if !meta.file_type().is_dir() {
+            return Err(format!("{} is not a directory Jaroku made", dir.display()));
+        }
+    }
+    std::fs::create_dir_all(&dir).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))
+            .map_err(|e| format!("could not make {} private: {e}", dir.display()))?;
+    }
+    Ok(dir)
+}
+
 /// Start a turn. Returns its id, which the page uses to match events and to cancel.
 #[tauri::command]
 pub fn provider_turn_start(
@@ -154,7 +194,6 @@ pub fn provider_turn_start(
     prompt: String,
     model: Option<String>,
     effort: Option<String>,
-    cwd: String,
 ) -> Result<u64, String> {
     let Some(argv) = build_argv(&provider, &prompt, model.as_deref(), effort.as_deref()) else {
         return Err(format!("{provider} cannot run a turn on this machine"));
@@ -164,6 +203,8 @@ pub fn provider_turn_start(
     let Some(exe) = provider_auth::locate(&argv[0]) else {
         return Err(format!("{} is not installed", argv[0]));
     };
+    // Where it runs is this shell's decision alone — see `chat_dir`.
+    let dir = chat_dir()?;
 
     let turn_id = NEXT_TURN.fetch_add(1, Ordering::Relaxed);
     let child = Command::new(&exe)
@@ -173,7 +214,7 @@ pub fn provider_turn_start(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .current_dir(&cwd)
+        .current_dir(&dir)
         .spawn()
         .map_err(|e| format!("could not start {}: {e}", argv[0]))?;
 
@@ -352,5 +393,71 @@ mod tests {
         // And an invented level is dropped rather than passed through, as it is for Codex.
         let argv = build_argv("anthropic", "hi", None, Some("turbo")).unwrap();
         assert!(!argv.contains(&"--effort".to_string()), "{argv:?}");
+    }
+
+    #[test]
+    fn a_turn_leaves_no_transcript_on_disk() {
+        // Found after a replay: the question sat in plain JSONL under ~/.claude/projects/-private-tmp
+        // and ~/.codex/sessions. Jaroku's thread is the one record of a chat turn.
+        let codex = build_argv("openai", "hi", None, None).unwrap();
+        assert!(codex.contains(&"--ephemeral".to_string()), "{codex:?}");
+        let claude = build_argv("anthropic", "hi", None, None).unwrap();
+        assert!(claude.contains(&"--no-session-persistence".to_string()), "{claude:?}");
+        assert_eq!(codex.last().unwrap(), "hi");
+        assert_eq!(claude.last().unwrap(), "hi");
+    }
+
+    /// A directory of its own under the system's temp dir, removed when the test ends.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(name: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!("jaroku-provider-turn-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            Scratch(dir)
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn the_chat_directory_is_made_inside_jarokus_home() {
+        let home = Scratch::new("inside");
+        let dir = chat_dir_in(&home.0).unwrap();
+        assert_eq!(dir, home.0.join("chat"));
+        assert!(dir.is_dir());
+        // And asked again, the same directory — a turn does not fail because the last one made it.
+        assert_eq!(chat_dir_in(&home.0).unwrap(), dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_chat_directory_is_private_even_after_somebody_widens_it() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = Scratch::new("private");
+        let dir = chat_dir_in(&home.0).unwrap();
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&dir), 0o700);
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+        chat_dir_in(&home.0).unwrap();
+        assert_eq!(mode(&dir), 0o700);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_where_the_chat_directory_belongs_is_refused() {
+        let home = Scratch::new("link");
+        let elsewhere = Scratch::new("elsewhere");
+        std::os::unix::fs::symlink(&elsewhere.0, home.0.join("chat")).unwrap();
+        assert!(chat_dir_in(&home.0).is_err());
+        // A plain file in its place is refused too, rather than replaced.
+        let other = Scratch::new("file");
+        std::fs::write(other.0.join("chat"), "not a directory").unwrap();
+        assert!(chat_dir_in(&other.0).is_err());
     }
 }

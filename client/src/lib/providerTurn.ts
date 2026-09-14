@@ -204,7 +204,6 @@ export function runLocalTurn(opts: {
   /** Absent means the active thread, which is what the store's own `In` type expects. */
   threadId?: string;
   agentId: string;
-  cwd: string;
   /** Called once the turn has finished, with what it spent. Used to persist the turn. */
   onComplete?: (answer: string, usage: TurnUsage | null) => void;
   /**
@@ -312,12 +311,13 @@ export function runLocalTurn(opts: {
       };
       unlisten = await h.listen("jaroku:provider-turn", onEvent);
 
+      // NO DIRECTORY. Where a turn runs is the shell's decision alone — see `chat_dir` in
+      // provider_turn.rs. The page used to name one, and every shipped turn ran in /tmp.
       turnId = (await h.invoke("provider_turn_start", {
         provider: opts.provider,
         prompt: opts.prompt,
         model: opts.model,
         effort: opts.effort,
-        cwd: opts.cwd,
       })) as number;
       // AND NOW THAT IT DOES, what arrived in the meantime is replayed — this turn's own lines in the
       // order they came, and any other turn's dropped rather than appended to this answer.
