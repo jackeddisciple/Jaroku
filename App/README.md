@@ -58,7 +58,7 @@ Every claim on the site comes from the repository:
 - **Changelog** — parsed from `../CHANGELOG.md`; newest first, paginated.
 - **Security** — the wording and contact address come from `../SECURITY.md`.
 - **App identifier, deep-link scheme, targets** — `../src-tauri/tauri.conf.json`.
-- **Version** — `0.3.11`, from `../src-tauri/tauri.conf.json` and the changelog head.
+- **Version** — `0.3.15`, from `../src-tauri/tauri.conf.json` and the changelog head.
 
 ## Download buttons are inert this pass
 
