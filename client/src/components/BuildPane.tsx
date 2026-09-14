@@ -60,7 +60,7 @@ import { EffortControl } from "./composer/EffortControl.tsx";
 import { canRunLocally, runLocalTurn } from "../lib/providerTurn.ts";
 import { useSubscriptionConnected } from "./ProviderSubscriptions.tsx";
 import { subscriptionBadge, subscriptionBlockedReason } from "../lib/subscriptionState.ts";
-import { effortName, effortStops, stopFor } from "../lib/effortLevels.ts";
+import { effortName, effortStops, stopFor, subscriptionEffort } from "../lib/effortLevels.ts";
 import { ShieldControl, modeLabel } from "./composer/ShieldControl.tsx";
 import { GreetingEmoji } from "./GreetingEmoji.tsx";
 import { ConnectorDeck } from "./composer/ConnectorDeck.tsx";
@@ -2110,27 +2110,21 @@ export function BuildPane({
     && (subscriptionRows.find((x) => x.provider === chatProviderNeeded)?.connected ?? false);
 
   /**
-   * The effort level in THIS provider's vocabulary, or null when it takes none.
+   * The effort level a subscription turn is sent at, or null when it takes none.
    *
-   * Translated rather than passed through: Codex stops at xhigh, so Jaroku's Max clamps, and a
-   * provider with no reasoning control is sent nothing at all. The table is the same one the
-   * server's `mapEffort` uses — these are the levels the subscription row reported.
+   * THE MODEL'S OWN STOPS AND THE PROVIDER'S ACCEPTED LEVELS, intersected — see `subscriptionEffort`.
+   * This read the provider's list alone, so Haiku 4.5, which has no effort setting and shows no
+   * slider, was still sent a level: the control said nothing would be sent while the request carried
+   * one.
    */
-  const chatEffortValue = useMemo(() => {
-    const sub = subscriptionRows.find((x) => x.provider === chatProviderNeeded);
-    const levels = sub?.effortLevels ?? [];
-    if (levels.length === 0) return null;
-    if (levels.includes(effort)) return effort;
-    // Clamp DOWN to the highest level this provider accepts — never up, which would spend more
-    // than was chosen. Mirrors `mapEffort`'s rule on the server.
-    const order = ["low", "medium", "high", "xhigh", "max"] as const;
-    const wanted = order.indexOf(effort);
-    for (let i = wanted; i >= 0; i--) {
-      const l = order[i]!;
-      if (levels.includes(l)) return l;
-    }
-    return null;
-  }, [chatProviderNeeded, effort, subscriptionRows]);
+  const chatEffortValue = useMemo(
+    () => subscriptionEffort(
+      chatSelectedModel,
+      subscriptionRows.find((x) => x.provider === chatProviderNeeded)?.effortLevels ?? [],
+      effort,
+    ),
+    [chatSelectedModel, chatProviderNeeded, effort, subscriptionRows],
+  );
 
   /** Where a local turn runs. Jaroku's own directory, never the user's project. See the fork. */
   const localTurnCwd = useMemo(

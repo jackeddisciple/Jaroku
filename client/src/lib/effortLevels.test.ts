@@ -6,7 +6,10 @@
 //
 //   npm run test:effort-levels
 
-import { EFFORT_ORDER, effortLabel, effortName, effortStops, stopFor } from "./effortLevels.ts";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+import { EFFORT_ORDER, effortLabel, effortName, effortStops, stopFor, subscriptionEffort } from "./effortLevels.ts";
 import type { ProviderModel } from "../types.ts";
 
 let fail = 0;
@@ -68,6 +71,27 @@ console.log("\nand each provider's own words");
   check("a model with no names of its own falls back to the level's",
     effortName(model({}), "xhigh") === "XHigh" && effortName(model({}), "max") === "Max");
   check("XHigh keeps its capital H", effortLabel("xhigh") === "XHigh");
+}
+
+console.log("\nwhat a subscription turn is sent at");
+{
+  const codex = ["low", "medium", "high", "xhigh"];
+  const haiku = model({ id: "claude-haiku-4-5", name: "Haiku 4.5", reasoning: null, effort_levels: [] });
+  // THE DEFECT: the level came from the PROVIDER's list alone, so a model with no effort setting was
+  // sent one anyway — its slider hidden, and the request still carrying `medium`.
+  check("Haiku 4.5 is sent nothing, though Anthropic accepts five levels", subscriptionEffort(haiku, FIVE, "medium") === null);
+  check("...and Muse Spark nothing", subscriptionEffort(muse, [], "high") === null);
+  check("a level both accept is sent as itself", subscriptionEffort(opus, FIVE, "high") === "high");
+  check("Max on Codex clamps down to xhigh", subscriptionEffort(astra, codex, "max") === "xhigh");
+  check("...and never up: below every stop sends nothing",
+    subscriptionEffort(model({ effort_levels: ["high", "max"] }), FIVE, "low") === null);
+  check("a provider that accepts nothing is sent nothing", subscriptionEffort(opus, [], "high") === null);
+  check("no model selected is sent nothing", subscriptionEffort(undefined, FIVE, "high") === null);
+
+  // AND THE COMPOSER SENDS WHAT THIS SAYS, rather than deciding again inline.
+  const pane = readFileSync(fileURLToPath(new URL("../components/BuildPane.tsx", import.meta.url)), "utf8");
+  check("the composer's chat effort comes from subscriptionEffort",
+    /const chatEffortValue = useMemo\(\s*\(\) => subscriptionEffort\(/.test(pane));
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

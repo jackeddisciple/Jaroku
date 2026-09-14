@@ -46,3 +46,27 @@ export function stopFor(stops: readonly Effort[], level: Effort): Effort | null 
 export function effortName(model: ProviderModel | undefined, level: Effort): string {
   return model?.effort_labels?.[level] ?? effortLabel(level);
 }
+
+/**
+ * The level a SUBSCRIPTION turn is sent at, or null for none.
+ *
+ * TWO SOURCES, AND BOTH HAVE TO AGREE. The model's own stops from the price sheet say whether it has a
+ * reasoning control at all — Haiku 4.5 and Muse Spark have none — and the provider's accepted levels
+ * say which of Jaroku's five its CLI takes: Codex stops at xhigh. Reading only the provider's list
+ * sent `medium` to a model with no effort setting while the slider was hidden for it, which is the rule
+ * capability.ts states in so many words: "Null means send nothing rather than something close."
+ *
+ * CLAMPED DOWN, NEVER UP — a level above what was chosen would spend more than was chosen — and null
+ * when nothing is at or below it, so the provider's own default stands.
+ */
+export function subscriptionEffort(
+  model: ProviderModel | undefined,
+  providerLevels: readonly string[],
+  level: Effort,
+): Effort | null {
+  const stops = effortStops(model).filter((stop) => providerLevels.includes(stop));
+  for (let i = EFFORT_ORDER.indexOf(level); i >= 0; i--) {
+    if (stops.includes(EFFORT_ORDER[i]!)) return EFFORT_ORDER[i]!;
+  }
+  return null;
+}
