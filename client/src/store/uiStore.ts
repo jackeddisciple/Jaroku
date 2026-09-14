@@ -5,7 +5,7 @@
 
 import { create } from "zustand";
 import { useSessionStore } from "./sessionStore.ts";
-import { defaultModelFor, pickRunModel, providerForModel, useProviderStore } from "./providerStore.ts";
+import { defaultModelFor, pickChatModel, pickRunModel, providerForModel, useProviderStore } from "./providerStore.ts";
 import type { GithubAttachment } from "../types.ts";
 
 /**
@@ -669,8 +669,13 @@ export const useUiStore = create<UiState>((set) => ({
    * chip is already describing.
    */
   setChatModel: (chatModel) => {
-    const owner = providerForModel(useProviderStore.getState().models, chatModel);
+    const { models, subscriptions } = useProviderStore.getState();
+    const owner = providerForModel(models, chatModel);
     if (owner === null) return;
+    // NOR A MODEL WHOSE PROVIDER HAS NO SUBSCRIPTION PATH. Chat runs on a plan somebody signed into,
+    // and Muse Spark has none: it runs agents in Test mode on a key from Secrets and is not a Jaroku
+    // Chat model at all. Refused once the rows say so, and `pickChatModel` moves the pair off one then.
+    if (subscriptions.some((s) => s.provider === owner && !s.supported)) return;
     set({ chatModel, chatProvider: owner });
   },
 
@@ -733,29 +738,33 @@ export const useUiStore = create<UiState>((set) => ({
 // provider, a model retired from the price sheet. `setModel` resolves the provider, so the pair is
 // never one no catalogue offers. See `pickRunModel`.
 useProviderStore.subscribe((s, prev) => {
-  if (s.models === prev.models && s.providers === prev.providers) return;
-  const ui = useUiStore.getState();
-  const next = pickRunModel(s.models, s.providers, ui.model);
-  if (next !== ui.model) {
-    if (next) ui.setModel(next);
-    else useUiStore.setState({ provider: "", model: "" });
+  const catalogueMoved = s.models !== prev.models;
+  if (catalogueMoved || s.providers !== prev.providers) {
+    const ui = useUiStore.getState();
+    const next = pickRunModel(s.models, s.providers, ui.model);
+    if (next !== ui.model) {
+      if (next) ui.setModel(next);
+      else useUiStore.setState({ provider: "", model: "" });
+    }
   }
   /**
-   * AND THE CHAT PAIR, PICKED THE SAME WAY — §11.1's "the cheapest capable model from the
-   * configured providers."
+   * AND THE CHAT PAIR, WHICH FOLLOWS THE SUBSCRIPTIONS RATHER THAN THE KEYS.
    *
-   * THE SAME FUNCTION, DELIBERATELY. `pickRunModel` already answers "which of these is reachable
-   * and cheapest, keeping what is chosen if it still is" — which is exactly the question here, and
-   * a second picker would be a second answer to it. What differs is only which of the two
-   * selections it is given.
+   * IT WAS PICKED BY THE RUN'S FUNCTION, and that was the bug: `pickRunModel` asks which API keys can
+   * run, and Chat never spends one. Somebody who connected Codex and held no key landed on the
+   * catalogue's first model — a Claude one — so Send went to the server on Anthropic's key, or
+   * failed asking for it. See `pickChatModel`.
    *
-   * KEPT WHEN IT IS STILL REACHABLE. Somebody who chose Opus for chat does not want it moved back
-   * to Haiku because the catalogue refreshed — and somebody whose key was revoked does want it
-   * moved off a model that can no longer answer.
+   * KEPT WHILE IT IS STILL CONNECTED. Somebody who chose Opus for chat does not want it moved because
+   * the catalogue refreshed — and somebody who signed out of Claude does want it moved to the plan
+   * they still have.
    */
-  const nextChat = pickRunModel(s.models, s.providers, useUiStore.getState().chatModel);
-  if (nextChat !== useUiStore.getState().chatModel) {
-    if (nextChat) useUiStore.getState().setChatModel(nextChat);
-    else useUiStore.setState({ chatProvider: "", chatModel: "" });
+  if (catalogueMoved || s.subscriptions !== prev.subscriptions) {
+    const current = useUiStore.getState().chatModel;
+    const nextChat = pickChatModel(s.models, s.subscriptions, current);
+    if (nextChat !== current) {
+      if (nextChat) useUiStore.getState().setChatModel(nextChat);
+      else useUiStore.setState({ chatProvider: "", chatModel: "" });
+    }
   }
 });

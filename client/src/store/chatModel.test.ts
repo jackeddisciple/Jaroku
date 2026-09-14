@@ -13,9 +13,12 @@
 //
 //   npm run test:chat-model
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { useUiStore } from "./uiStore.ts";
-import { useProviderStore } from "./providerStore.ts";
-import type { ProviderModel, ProviderStatus } from "../types.ts";
+import { pickChatModel, useProviderStore } from "./providerStore.ts";
+import type { ProviderModel, ProviderStatus, SubscriptionStatus } from "../types.ts";
 
 let fail = 0;
 const check = (name: string, ok: boolean, detail = ""): void => {
@@ -69,15 +72,17 @@ console.log("\n§11.1 — changing one must not change another");
 
   // THE ASSERTION THE OLD BEHAVIOUR FAILS. Before §11.1 there was one pair, so setting either was
   // setting both — and "Regenerate with GPT-5.6 Terra" repointed the next test run.
-  ui().setChatModel("muse-spark-1.3");
+  ui().setChatModel("claude-haiku-4-5");
   check("changing the chat model leaves the run model alone",
     ui().model === "claude-opus-5" && ui().provider === "anthropic", `${ui().provider}/${ui().model}`);
-  check("...and moves the chat pair together", ui().chatModel === "muse-spark-1.3" && ui().chatProvider === "meta",
+  check("...and moves the chat pair together", ui().chatModel === "claude-haiku-4-5" && ui().chatProvider === "anthropic",
     `${ui().chatProvider}/${ui().chatModel}`);
 
-  ui().setModel("claude-haiku-4-5");
+  // AN AGENT MAY RUN ON MUSE SPARK — Test mode, on a key from Secrets — which is exactly what Chat may
+  // not do. The run pair moving there must leave the chat pair where it was.
+  ui().setModel("muse-spark-1.3");
   check("and changing the run model leaves the chat model alone",
-    ui().chatModel === "muse-spark-1.3" && ui().chatProvider === "meta", `${ui().chatProvider}/${ui().chatModel}`);
+    ui().chatModel === "claude-haiku-4-5" && ui().chatProvider === "anthropic", `${ui().chatProvider}/${ui().chatModel}`);
 }
 
 console.log("\na model nothing offers is not selected at all");
@@ -96,25 +101,98 @@ console.log("\na model nothing offers is not selected at all");
 
 // --- the catalogue arriving, and a key being revoked ------------------------------------------
 
-console.log("\nthe catalogue moves the selection only when it has to");
+/** One subscription row, connected or not. Muse Spark has no mechanism, so it is never either. */
+const subRow = (provider: "anthropic" | "openai" | "meta", connected: boolean): SubscriptionStatus => ({
+  provider, label: provider, planLabel: provider,
+  available: provider !== "meta", supported: provider !== "meta", requiresApproval: false, runtimeApiSupported: true,
+  reason: null, citation: "https://example.com", unblock: null, effortParam: null, effortLevels: [],
+  binary: null, loginCommand: null, credentialPath: null,
+  host: connected
+    ? { installed: true, version: "1", signedIn: true, account: null, authMode: null, note: null, observedAt: "2026-09-14T00:00:00.000Z" }
+    : null,
+  connected,
+});
+const subs = (connected: { anthropic?: boolean; openai?: boolean }): SubscriptionStatus[] => [
+  subRow("anthropic", connected.anthropic === true), subRow("openai", connected.openai === true), subRow("meta", false),
+];
+const subscribe = (connected: { anthropic?: boolean; openai?: boolean }): void =>
+  useProviderStore.getState().setSubscriptions(subs(connected));
+
+console.log("\nthe catalogue and the subscriptions move the chat selection only when they have to");
 {
   // A CHOICE THAT IS STILL REACHABLE IS KEPT. Somebody who chose Opus for chat does not want it
   // moved back to Haiku because the price sheet refreshed.
   load(["anthropic", "openai", "meta"]);
+  subscribe({ anthropic: true, openai: true });
   const ui = () => useUiStore.getState();
   ui().setChatModel("claude-opus-5");
   load(["anthropic", "openai", "meta"]);
   check("a reachable choice survives a catalogue refresh", ui().chatModel === "claude-opus-5", ui().chatModel);
 
-  // AND ONE THAT IS NOT IS MOVED. A key revoked mid-session leaves the conversation pointed at a
-  // model that can no longer answer, and §11.1's default — the cheapest capable one — is where it
-  // should land rather than at a dead pair.
+  // AND ONE THAT IS NOT IS MOVED — by the SUBSCRIPTION going away, never by a key. Signing out of
+  // Codex leaves the conversation pointed at a plan that can no longer answer.
   ui().setChatModel("gpt-5.6-luna");
+  subscribe({ anthropic: true, openai: false });
+  check("a choice whose subscription went away is moved", ui().chatModel !== "gpt-5.6-luna", ui().chatModel);
+  check("...to a plan that is still connected", ui().chatProvider === "anthropic", `${ui().chatProvider}/${ui().chatModel}`);
+  // AND THE RUN'S SELECTION FOLLOWS ITS OWN RULE, independently — two selections, two pickers.
   load(["anthropic"]);
-  check("a choice whose key went away is moved", ui().chatModel !== "gpt-5.6-luna", ui().chatModel);
-  check("...to something reachable", ui().chatProvider === "anthropic", `${ui().chatProvider}/${ui().chatModel}`);
-  // AND THE RUN'S SELECTION IS MOVED BY THE SAME RULE, independently — two selections, one picker.
-  check("the run pair is reachable too", ui().provider === "anthropic", `${ui().provider}/${ui().model}`);
+  check("the run pair follows the keys", ui().provider === "anthropic", `${ui().provider}/${ui().model}`);
+}
+
+console.log("\na key is never what picks the chat model");
+{
+  // THE ONBOARDING CASE: Codex connected, no API key anywhere. The chat pair used to follow the keys,
+  // land on the catalogue's first model — a Claude one — and send the turn to Anthropic's API.
+  load([]);
+  subscribe({ openai: true });
+  const ui = () => useUiStore.getState();
+  check("Codex connected and no key lands Chat on Codex", ui().chatProvider === "openai", `${ui().chatProvider}/${ui().chatModel}`);
+  load(["anthropic"]);
+  check("...and an Anthropic key arriving does not drag it back", ui().chatProvider === "openai", `${ui().chatProvider}/${ui().chatModel}`);
+
+  check("the picker keeps a connected pick", pickChatModel(CATALOGUE, subs({ anthropic: true, openai: true }), "claude-opus-5") === "claude-opus-5");
+  check("...moves an unconnected one to a connected plan", pickChatModel(CATALOGUE, subs({ openai: true }), "claude-opus-5") === "gpt-5.6-luna");
+  check("...with nothing connected keeps a pick a subscription could answer", pickChatModel(CATALOGUE, subs({}), "gpt-5.6-luna") === "gpt-5.6-luna");
+  check("...but not one no subscription can answer", pickChatModel(CATALOGUE, subs({}), "muse-spark-1.3") === "claude-haiku-4-5",
+    pickChatModel(CATALOGUE, subs({}), "muse-spark-1.3"));
+}
+
+console.log("\nMuse Spark answers no Chat turn");
+{
+  // THE PRODUCT OWNER'S RULE (2026-09-14): Muse Spark is not a Jaroku Chat model. It runs agents in
+  // Test mode, on a key somebody added in Secrets, and that is all it does.
+  load(["anthropic", "openai", "meta"]);
+  subscribe({ anthropic: true, openai: true });
+  const ui = () => useUiStore.getState();
+  ui().setChatModel("gpt-5.6-luna");
+  ui().setChatModel("muse-spark-1.3");
+  check("choosing Muse Spark for Chat is refused", ui().chatModel === "gpt-5.6-luna" && ui().chatProvider === "openai",
+    `${ui().chatProvider}/${ui().chatModel}`);
+  ui().setModel("muse-spark-1.3");
+  check("...while an agent may still run on it", ui().model === "muse-spark-1.3" && ui().provider === "meta",
+    `${ui().provider}/${ui().model}`);
+  const museOnly = [model("muse-spark-1.3", "meta", "Meta")];
+  check("the picker never lands on it, not even as the last model offered", pickChatModel(museOnly, subs({}), "") === "",
+    pickChatModel(museOnly, subs({}), ""));
+  check("...nor keeps it once the rows say it has no subscription path",
+    pickChatModel(museOnly, subs({ anthropic: true }), "muse-spark-1.3") === "", pickChatModel(museOnly, subs({ anthropic: true }), "muse-spark-1.3"));
+  // THE CATALOGUE AND THE ROWS ARE TWO MESSAGES. A catalogue landing first is not news about the plans.
+  check("no rows yet keeps a pick rather than wiping it", pickChatModel(CATALOGUE, [], "gpt-5.6-luna") === "gpt-5.6-luna");
+}
+
+console.log("\nthe composer's gate asks about the chat provider, never about any provider");
+{
+  const pane = readFileSync(fileURLToPath(new URL("../components/BuildPane.tsx", import.meta.url)), "utf8");
+  check("Chat is gated on the chosen provider's own row", /const noSubscription = [^;]*!chatProviderConnected/.test(pane));
+  // "SOME plan is connected" is what let a Codex sign-in send a Claude turn to the server.
+  check("...and never on whether some other plan is connected", !/useSubscriptionConnected\(\)/.test(pane));
+  // THE FALLBACK THAT SPENT THE API KEY. A chat turn with no connected plan went to `sendChat`.
+  const chatCases = pane.match(/case "chat":[\s\S]*?case "generate":/g) ?? [];
+  check("the composer's chat case exists", chatCases.length > 0);
+  check("...and never sends a turn with no connected plan to the server", chatCases.every((c) => !c.includes("sendChat(trimmed")));
+  check("the Chat menu lists only providers with a subscription path",
+    /chatCatalogue = useMemo\(\s*\(\) => catalogue\.filter\(\(p\) => subscriptions\.some\(\(sub\) => sub\.provider === p\.id && sub\.supported\)\)/.test(pane));
 }
 
 console.log("\nnothing reachable at all");

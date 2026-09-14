@@ -219,6 +219,39 @@ export function pickRunModel(models: ProviderModel[], providers: ProviderStatus[
 }
 
 /**
+ * The model CHAT should be on: one whose provider is connected as a subscription on this machine.
+ *
+ * NOT `pickRunModel`, WHICH READS API KEYS. Chat never spends a key — it runs on the plan somebody
+ * signed into — and picking its model by which workspace keys can run left a person who connected
+ * Codex and holds no key on the catalogue's first model, a Claude one. Send was allowed, because a
+ * subscription was connected, and the turn then went to the server on Anthropic's API key, or failed
+ * asking for one, a minute after onboarding said Chat runs on their plan.
+ *
+ * KEEPS A PICK WHOSE PROVIDER IS CONNECTED, or else takes the first connected provider's first model.
+ * With nothing connected it keeps a pick a subscription could answer once connected, or takes the
+ * first such model — so the chip names something Chat can use, and the composer's gate says which
+ * subscription is missing.
+ */
+export function pickChatModel(models: ProviderModel[], subscriptions: SubscriptionStatus[], current: string): string {
+  const offered = runProviders(models);
+  const connected = new Set<string>(subscriptions.filter((s) => s.connected).map((s) => s.provider));
+  const supported = new Set<string>(subscriptions.filter((s) => s.supported).map((s) => s.provider));
+  const owner = providerForModel(models, current);
+  if (owner && connected.has(owner)) return current;
+  const reachable = offered.find((p) => connected.has(p.id));
+  if (reachable?.models[0]) return reachable.models[0];
+  if (owner && supported.has(owner)) return current;
+  // NO ROWS YET IS NOT A NO. The catalogue and the subscriptions arrive as two messages, so a
+  // catalogue landing first must not wipe a pick the rows would keep; nothing is sent meanwhile,
+  // because the composer's gate reads the missing rows as "not connected".
+  if (subscriptions.length === 0) return owner ? current : "";
+  // AND NEVER A PROVIDER WITH NO SUBSCRIPTION PATH, not even as a last resort. Muse Spark runs agents
+  // on an API key in Test mode and answers no Chat turn, so a catalogue offering nothing else picks
+  // nothing rather than a model Chat could never answer on.
+  return offered.find((p) => supported.has(p.id))?.models[0] ?? "";
+}
+
+/**
  * What a provider is CALLED, from the server's own table.
  *
  * THIS REPLACED TWO HARDCODED COPIES that disagreed. The composer's selector had one with four

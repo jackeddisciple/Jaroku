@@ -58,7 +58,6 @@ import { refKey, type AttachKind, type AttachableRow } from "./composer/AttachPi
 import { MAX_ATTACHMENTS, WARN_AT, budgetPercent } from "../lib/attachBudget.ts";
 import { EffortControl } from "./composer/EffortControl.tsx";
 import { canRunLocally, runLocalTurn } from "../lib/providerTurn.ts";
-import { useSubscriptionConnected } from "./ProviderSubscriptions.tsx";
 import { subscriptionBadge, subscriptionBlockedReason } from "../lib/subscriptionState.ts";
 import { effortName, effortStops, stopFor, subscriptionEffort } from "../lib/effortLevels.ts";
 import { ShieldControl, modeLabel } from "./composer/ShieldControl.tsx";
@@ -2085,8 +2084,6 @@ export function BuildPane({
    */
   const chatProviderNeeded = chatProvider || "anthropic";
 
-  /** Whether ANY provider subscription is connected on this machine. The Chat gate's whole question. */
-  const subscriptionConnected = useSubscriptionConnected();
   /**
    * The rows themselves, SUBSCRIBED rather than read out of `getState()`.
    *
@@ -2098,6 +2095,15 @@ export function BuildPane({
   const subscriptionRows = useProviderStore((s) => s.subscriptions);
 
   /**
+   * Whether the provider Chat is SET TO is connected — not whether any provider is.
+   *
+   * "Some plan is connected" was the gate's whole question, and it let a Codex sign-in send a turn the
+   * composer had pointed at Claude: Send was enabled, the local path was skipped because Claude was
+   * not the connected one, and the message went to the server on Anthropic's API key.
+   */
+  const chatProviderConnected = subscriptionRows.find((x) => x.provider === chatProviderNeeded)?.connected ?? false;
+
+  /**
    * Whether THIS turn should run on the user's own subscription rather than on the server.
    *
    * Three things have to be true and all three are the server's answers: Chat mode, a provider the
@@ -2105,9 +2111,7 @@ export function BuildPane({
    * the first two and not the third, which is why `canRunLocally` is part of the condition rather
    * than an assumption about where this code is running.
    */
-  const chatSubscriptionActive = composerMode === "chat"
-    && canRunLocally()
-    && (subscriptionRows.find((x) => x.provider === chatProviderNeeded)?.connected ?? false);
+  const chatSubscriptionActive = composerMode === "chat" && canRunLocally() && chatProviderConnected;
 
   /**
    * The effort level a subscription turn is sent at, or null when it takes none.
@@ -2147,7 +2151,7 @@ export function BuildPane({
    * it exactly as it always did. The two modes block on two different credentials because they
    * spend two different things.
    */
-  const noSubscription = composerMode === "chat" && !operating && !subscriptionConnected;
+  const noSubscription = composerMode === "chat" && !operating && !chatProviderConnected;
 
   const missingKey: string | null = !providersLoaded || operating || composerMode === "chat" ? null
     : isRunnable(providerStatuses, provider) ? null : provider || "anthropic";
@@ -2628,26 +2632,13 @@ export function BuildPane({
           localTurnRef.current = turn;
           break;
         }
-        sendChat(trimmed, activeAgentId, {
-          // §11.1: THE MODEL THE CONVERSATION IS SET TO, on every message — not only on a
-          // regeneration. The server validates it against the shared catalogue and resolves its
-          // provider from the same place, so a client cannot name a mismatched pair.
-          ...(chatModel ? { model: chatModel } : {}),
-          // §13.2: THE ROUTER'S OWN REASON, from the decision that just happened. `routing` is the
-          // return of the same `routeMessage` call the preview renders from — so the sentence under
-          // the turn and the label above the send button describe one decision rather than two.
-          routeReason: routing.reason,
-          // §15.1: THE BAND, SO THE OFFER CAN APPEAR UNDER THE ANSWER. By then the composer has
-          // been cleared and this routing is gone, so it has to travel with the message.
-          planEvidence: routing.planEvidence,
-          // §8.1's `selection:` line, when something is selected. Three fields rather than the
-          // step: the block says WHICH step is open, and `explain` is the route that carries a
-          // step's input, output and error because explaining one is its whole job.
-          ...(selectedStep
-            ? { selection: { seq: selectedStep.seq, type: selectedStep.type, name: selectedStep.name } }
-            : {}),
-        });
-        break;
+        // NEVER THE SERVER'S API KEY. A chat turn whose provider is not a connected subscription on
+        // this machine used to fall through to here and go to the server, which answered it on the
+        // workspace's or the platform's Anthropic key — the crossing the two credential systems exist
+        // to prevent — or refused it for want of one, straight after onboarding said Chat runs on the
+        // user's plan. The gate above stops such a send first; this is the last word if one gets by.
+        useUiStore.getState().openWorkspacePanel("account");
+        return;
       case "generate": {
         // Never straight to generation: the plan gate is the only way in, so nothing gets
         // built that the user hasn't seen described first.
