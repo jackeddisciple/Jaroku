@@ -257,6 +257,87 @@ pub fn read_codex_status(status: &str) -> (bool, Option<String>, Option<String>)
     (false, None, None)
 }
 
+/// The address in a Codex app-server `account/read` answer, when the account is a ChatGPT one.
+///
+/// Split out so it is tested against a captured answer without a `codex` on the machine running the
+/// tests. Bounded like every other display string that leaves this module.
+pub fn read_codex_account(response: &str) -> Option<String> {
+    let v = serde_json::from_str::<serde_json::Value>(response).ok()?;
+    let account = v.get("result")?.get("account")?;
+    if account.get("type")?.as_str()? != "chatgpt" {
+        return None;
+    }
+    let email = account.get("email")?.as_str()?.trim();
+    (!email.is_empty()).then(|| email.chars().take(128).collect())
+}
+
+/// Which ChatGPT account `codex` is signed in with, asked of its own app-server.
+///
+/// `codex login status` SAYS ONLY "Logged in using ChatGPT", so somebody with two ChatGPT accounts
+/// could not tell which one Jaroku was spending. The app-server Codex documents for embedding answers
+/// `account/read` with the address, asked the way its protocol asks — `initialize`, `initialized`,
+/// then the request — and never by opening `~/.codex/auth.json`, which is the credential itself and
+/// none of Jaroku's business.
+///
+/// Display only, under the same timeout as every other probe, and `None` on any surprise: the row
+/// works without an address, it just cannot say which account.
+fn codex_account(exe: &Path) -> Option<String> {
+    use std::io::{BufRead, BufReader, Write};
+    use std::sync::mpsc;
+
+    let mut child = Command::new(exe)
+        .arg("app-server")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+    let (mut stdin, stdout) = (child.stdin.take()?, child.stdout.take()?);
+    let (tx, rx) = mpsc::channel::<String>();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+
+    let deadline = std::time::Instant::now() + PROBE_TIMEOUT;
+    // The first line carrying this id, or `None` once the probe's time is up.
+    let answer_to = |id: u64| -> Option<String> {
+        loop {
+            let left = deadline.checked_duration_since(std::time::Instant::now())?;
+            let line = rx.recv_timeout(left).ok()?;
+            let carries = serde_json::from_str::<serde_json::Value>(&line)
+                .ok()
+                .and_then(|v| v.get("id").and_then(|i| i.as_u64()));
+            if carries == Some(id) {
+                return Some(line);
+            }
+        }
+    };
+    let initialize = format!(
+        r#"{{"id":1,"method":"initialize","params":{{"clientInfo":{{"name":"jaroku","version":"{}"}}}}}}"#,
+        env!("CARGO_PKG_VERSION")
+    );
+    let answer = (|| {
+        writeln!(stdin, "{initialize}").ok()?;
+        answer_to(1)?;
+        writeln!(stdin, r#"{{"method":"initialized"}}"#).ok()?;
+        writeln!(stdin, r#"{{"id":2,"method":"account/read","params":{{}}}}"#).ok()?;
+        answer_to(2)
+    })();
+
+    let _ = child.kill();
+    let _ = child.wait();
+    let account = answer.as_deref().and_then(read_codex_account);
+    if account.is_none() {
+        // NO ADDRESS IN THE LOG EITHER WAY — only that there was none to show.
+        logs::say("codex app-server named no ChatGPT account for a ChatGPT sign-in");
+    }
+    account
+}
+
 /// Turn `claude auth status --json` into a verdict.
 ///
 /// STRUCTURED OUTPUT, SO NO PARSING OF PROSE. Claude Code answers with `loggedIn`, `authMethod`,
@@ -327,7 +408,9 @@ fn observe_codex() -> HostProvider {
         installed: true,
         version,
         signed_in,
-        account: None,
+        // ASKED ONLY OF A CHATGPT SIGN-IN, which is the only one with an account worth naming here —
+        // an API-key sign-in is refused for Chat whichever key it is.
+        account: if signed_in { codex_account(&exe) } else { None },
         auth_mode,
         note,
     }
@@ -449,6 +532,19 @@ mod tests {
             let (signed_in, _, _) = read_codex_status(line);
             assert!(!signed_in, "{line:?} must not count as a subscription");
         }
+    }
+
+    #[test]
+    fn codex_names_its_chatgpt_account_through_the_app_server() {
+        // THE ANSWER `account/read` GAVE on 2026-09-14, with the address changed. `codex login status`
+        // says only "Logged in using ChatGPT", so without this a row could not say which account.
+        let answer = r#"{"id":2,"result":{"account":{"type":"chatgpt","email":"someone@example.com","planType":"go"},"requiresOpenaiAuth":true}}"#;
+        assert_eq!(read_codex_account(answer).as_deref(), Some("someone@example.com"));
+        // An API-key account has no address worth naming, and a surprise is nothing rather than a guess.
+        assert!(read_codex_account(r#"{"id":2,"result":{"account":{"type":"apiKey"},"requiresOpenaiAuth":true}}"#).is_none());
+        assert!(read_codex_account(r#"{"id":2,"result":{"account":null,"requiresOpenaiAuth":true}}"#).is_none());
+        assert!(read_codex_account(r#"{"id":2,"result":{"account":{"type":"chatgpt","email":"  "}}}"#).is_none());
+        assert!(read_codex_account("not json").is_none());
     }
 
     #[test]
