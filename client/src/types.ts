@@ -2088,6 +2088,12 @@ export type ServerMessage =
       /** §15.1's band, so the offer can appear under the answer. See the command's own note. */
       planEvidence?: "none" | "near" | "confident";
     })
+  // ANSWER THIS ON THE USER'S OWN PLAN — to this app alone. The server has written the question and
+  // announced the turn; `runId` is what the answer is settled with. See `runSubscriptionTurn`.
+  | (InThread & {
+      channel: "reply"; type: "run"; agentId: string; runId: string; turnId?: string;
+      provider: string; model: string | null; effort: string | null; prompt: string;
+    })
   | (InThread & { channel: "reply"; type: "delta"; agentId: string; text: string })
   // `citations` ARRIVES WITH `done` AND NOT WITH THE TEXT — Part 3 §7.4. A `[work:…]` marker can be
   // split across two deltas, so a chip drawn mid-stream is half a citation and a stray bracket. Only
@@ -2096,12 +2102,14 @@ export type ServerMessage =
   | (InThread & {
       channel: "reply"; type: "done"; agentId: string; usage?: GenUsage;
       citations?: { id: string; status: string; agent_name: string; created_at: string }[];
+      // The answer as recorded, for a tab that never saw it arrive — a subscription turn's only copy.
+      text?: string;
     })
   // §6.1: SOMEBODY STOPPED IT — its own event rather than a flag on `done`, because three of the
   // four terminal states on this channel render differently and mean different things. It carries
   // the usage because a stopped call's counts arrive by a different route from a finished one's:
   // `finalMessage()` never resolves on an aborted stream, so there is no `done` to ride.
-  | (InThread & { channel: "reply"; type: "stopped"; agentId: string; usage?: GenUsage })
+  | (InThread & { channel: "reply"; type: "stopped"; agentId: string; usage?: GenUsage; text?: string })
   // §7: THE CLASSIFICATION RIDES THE `error` EVENT rather than arriving as a new type — every
   // client already renders this one, and a second type would make a named failure look different
   // from an unnamed one, which is the inconsistency §7 exists to remove. All four fields are
@@ -2109,6 +2117,7 @@ export type ServerMessage =
   | (InThread & {
       channel: "reply"; type: "error"; agentId: string; message: string;
       failure?: string; actions?: string[]; retry_after?: number; retrying?: boolean;
+      text?: string;
     })
   | GenMessage
   | BillingMessage
@@ -2322,6 +2331,9 @@ export type ClientCommand =
       // §15.1's band — how close the router came to the plan threshold. Echoed back on `started`
       // so the offer can appear under the answer, by which time the composer has been cleared.
       planEvidence?: "none" | "near" | "confident";
+      // THE PLAN THAT ANSWERS, when Chat runs on the user's own subscription. The server still owns
+      // the turn and hands this app a `run` to answer on the CLI; no key is resolved for it.
+      subscription?: { provider: string; model: string | null; effort: string | null };
     }
   // §6.1's Stop. It names the conversation and nothing else: there is at most one answer in flight
   // per thread, so a turn id would be a second identifier for the same thing.
@@ -2380,7 +2392,9 @@ export type ClientCommand =
    */
   | {
       cmd: "recordChatTurn";
-      question: string; answer: string; provider: string;
+      // THE RUN THIS SETTLES, and how it ended — a turn the server prepared and handed this app.
+      runId?: string; status?: "done" | "stopped" | "error"; error?: string | null;
+      question?: string; answer: string; provider: string;
       model?: string | null; effort?: string | null;
       inputTokens?: number | null; outputTokens?: number | null;
       agentId?: string | null; threadId?: string;

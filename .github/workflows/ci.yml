@@ -637,6 +637,11 @@ jobs:
           # the code for that absence, and for §12.2's other one — that a run, a generation, a plan
           # and an eval do not consult this limit at all, because each has its own.
           npm run test:chat-budget
+          # A CHAT TURN ON THE USER'S OWN PLAN, prepared here and answered on their machine: the
+          # registry that waits for the app to say how it ended — settled only by the socket it was
+          # handed to, given up on after a timeout — and the seams around it, read as source: the
+          # route hands the turn off before any key is resolved, and the run goes to one socket.
+          npm run test:subscription-turns
           # §11.2, AND THE ONE SUITE IN THIS FILE WRITTEN TO FAIL AGAINST BEHAVIOUR THAT SHIPPED.
           # v0.1.10 recorded it: "the generation model used for cost accounting is fixed in one place
           # regardless of what is configured, and the plan step inherits the same issue." That place

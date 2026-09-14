@@ -11,9 +11,13 @@
 // provider's answer: the JSON is real, and what is substituted is only the process that carried it.
 // A test that invented the JSON too would be testing its own idea of the protocol.
 //
+// THE SERVER OWNS THE TURN. It wrote the question, announced it with `started` and handed this app a
+// run — so what is asserted is that the answer streams into THAT thread's turn, that the page never
+// opens or closes the turn itself, and that the run is settled exactly once with how it ended.
+//
 //   npm run test:provider-turn-flow
 
-import { runLocalTurn } from "./providerTurn.ts";
+import { runLocalTurn, type LocalTurnOutcome } from "./providerTurn.ts";
 import { useChatStore } from "../store/chatStore.ts";
 
 let fail = 0;
@@ -25,22 +29,27 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 
 /** What the store was told, in order. The conversation's view of the turn. */
 interface Seen {
-  started: number; deltas: string[]; done: number; errors: string[]; usage: unknown;
-  /** §15.1's band as the turn was opened with it. */
-  planEvidence: string | null;
+  started: number; deltas: string[]; threads: (string | undefined)[]; settled: number; errors: string[];
 }
 
 function watchStore(): Seen {
-  const seen: Seen = { started: 0, deltas: [], done: 0, errors: [], usage: null, planEvidence: null };
+  const seen: Seen = { started: 0, deltas: [], threads: [], settled: 0, errors: [] };
   const s = useChatStore.getState();
   useChatStore.setState({
     ...s,
-    replyStarted: (e: { planEvidence?: string }) => { seen.started++; seen.planEvidence = e.planEvidence ?? null; },
-    replyDelta: (e: { text: string }) => { seen.deltas.push(e.text); },
-    replyDone: (e: { usage?: unknown }) => { seen.done++; seen.usage = e.usage ?? null; },
+    replyStarted: () => { seen.started++; },
+    replyDelta: (e: { text: string; threadId?: string }) => { seen.deltas.push(e.text); seen.threads.push(e.threadId); },
+    replyDone: () => { seen.settled++; },
+    replyStopped: () => { seen.settled++; },
     replyError: (e: { message: string }) => { seen.errors.push(e.message); },
   } as never);
   return seen;
+}
+
+/** Every settle the turn sent, so settling twice is visible — and whether sending it worked. */
+function settleRecorder(sent = true): { outcomes: LocalTurnOutcome[]; onSettle: (o: LocalTurnOutcome) => boolean } {
+  const outcomes: LocalTurnOutcome[] = [];
+  return { outcomes, onSettle: (o) => { outcomes.push(o); return sent; } };
 }
 
 /**
@@ -79,7 +88,13 @@ function installHost(lines: string[], opts: {
         void (async () => {
           await sleep(opts.delayMs ?? 5);
           for (const line of lines) listener?.({ payload: { turnId: id, line, done: false } });
-          listener?.({ payload: { turnId: id, done: true, code: opts.exitCode ?? 0 } });
+          // THE SHELL NAMES A NON-ZERO EXIT ITSELF, on the final event — see `run` in provider_turn.rs.
+          // A stand-in that left it off would pass a failed turn off as a finished one.
+          const code = opts.exitCode ?? 0;
+          listener?.({ payload: {
+            turnId: id, done: true, code,
+            ...(code !== 0 ? { error: `The provider's CLI exited with status ${code}. Check the desktop log, and that your sign-in is still valid.` } : {}),
+          } });
         })();
         return id;
       },
@@ -110,28 +125,26 @@ const CLAUDE_STREAM = [
   '{"type":"result","total_cost_usd":0.0683845,"usage":{"input_tokens":2,"output_tokens":10}}',
 ];
 
-const base = { model: null, effort: null, agentId: "agent_x" };
+const base = { threadId: "th-1", model: null, effort: null, agentId: "agent_x" };
 
-console.log("\na Codex turn reaches the conversation and settles once");
+console.log("\na Codex turn streams into its thread and is settled once");
 {
   const host = installHost(CODEX_STREAM);
   const seen = watchStore();
-  // A holder rather than a bare `let`: TypeScript narrows a variable assigned only inside a
-  // callback to `never` at the point it is read, because its control-flow analysis cannot see that
-  // the callback ran. A property on an object is not narrowed that way.
-  const record: { seen: { answer: string; usage: unknown } | null } = { seen: null };
-  const turn = runLocalTurn({
-    ...base, provider: "openai", prompt: "say it",
-    onComplete: (answer, usage) => { record.seen = { answer, usage }; },
-  });
-  await turn.finished;
+  const settled = settleRecorder();
+  await runLocalTurn({ ...base, provider: "openai", prompt: "say it", onSettle: settled.onSettle }).finished;
 
-  check("the turn opened exactly one answer", seen.started === 1);
-  check("...carrying the provider's text", seen.deltas.join("") === "LAST MILE OK", seen.deltas.join(""));
-  check("...and settled exactly once", seen.done === 1 && seen.errors.length === 0);
-  check("...reporting what it spent", (seen.usage as { output_tokens?: number })?.output_tokens === 8);
-  // The record is what persists the turn. Without it the answer vanishes on reload.
-  check("the turn is handed on to be recorded", record.seen?.answer === "LAST MILE OK", JSON.stringify(record.seen));
+  check("the provider's text streams in", seen.deltas.join("") === "LAST MILE OK", seen.deltas.join(""));
+  // A TURN STREAMED WITH NO THREAD went to `pending`, which no open conversation shows — the answer
+  // was invisible whenever an agent was selected or a thread was open.
+  check("...into the thread the server opened it in", seen.threads.length > 0 && seen.threads.every((t) => t === "th-1"),
+    JSON.stringify(seen.threads));
+  check("the page neither opens nor closes the turn — the server's events do",
+    seen.started === 0 && seen.settled === 0 && seen.errors.length === 0, JSON.stringify(seen));
+  check("the run is settled exactly once", settled.outcomes.length === 1, String(settled.outcomes.length));
+  const o = settled.outcomes[0];
+  check("...as done, with the answer", o?.status === "done" && o.answer === "LAST MILE OK" && o.error === null, JSON.stringify(o));
+  check("...and what it spent", o?.usage?.output_tokens === 8, JSON.stringify(o?.usage));
   // The prompt reaches the shell as a field, never as a command line — see provider_turn.rs.
   check("the shell was asked for a provider and a prompt, not an argv",
     host.startedWith?.provider === "openai" && host.startedWith?.prompt === "say it"
@@ -145,30 +158,15 @@ console.log("\na Claude turn streams in order and does not double");
 {
   installHost(CLAUDE_STREAM);
   const seen = watchStore();
-  const turn = runLocalTurn({ ...base, provider: "anthropic", prompt: "hi" });
-  await turn.finished;
+  const settled = settleRecorder();
+  await runLocalTurn({ ...base, provider: "anthropic", prompt: "hi", onSettle: settled.onSettle }).finished;
 
   check("deltas arrive in order", seen.deltas.join("") === "Hi!", seen.deltas.join(""));
   // Claude repeats the finished message as its own `assistant` event. Appending that as well is the
   // obvious bug this asserts against: the answer would read "Hi!Hi!".
   check("...and the repeated assistant message does not double it", seen.deltas.length === 2, String(seen.deltas.length));
   check("...settling with Claude Code's own cost estimate",
-    (seen.usage as { cost_usd?: number })?.cost_usd === 0.0683845);
-}
-
-console.log("\na subscription turn is opened with the router's plan band");
-{
-  // §15.1's "Build this as an agent" card reads the band on the turn. A server-answered turn gets it
-  // from `started`; this path was never given one, so the card could not appear under an answer that
-  // ran on the user's own plan — which is the path Chat actually takes.
-  installHost(CODEX_STREAM);
-  const seen = watchStore();
-  await runLocalTurn({ ...base, provider: "openai", prompt: "something that watches my inbox", planEvidence: "near" }).finished;
-  check("the band reaches the turn", seen.planEvidence === "near", String(seen.planEvidence));
-  installHost(CODEX_STREAM);
-  const none = watchStore();
-  await runLocalTurn({ ...base, provider: "openai", prompt: "hi" }).finished;
-  check("...and a turn routed with none carries none", none.planEvidence === null, String(none.planEvidence));
+    settled.outcomes[0]?.usage?.cost_usd === 0.0683845, JSON.stringify(settled.outcomes[0]?.usage));
 }
 
 console.log("\ntwo Codex messages in one turn stay two paragraphs");
@@ -182,13 +180,11 @@ console.log("\ntwo Codex messages in one turn stay two paragraphs");
     '{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":9}}',
   ]);
   const seen = watchStore();
-  const record: { answer: string | null } = { answer: null };
-  await runLocalTurn({
-    ...base, provider: "openai", prompt: "plan it", onComplete: (answer) => { record.answer = answer; },
-  }).finished;
+  const settled = settleRecorder();
+  await runLocalTurn({ ...base, provider: "openai", prompt: "plan it", onSettle: settled.onSettle }).finished;
   const expected = "Let me think about that.\n\nHere is the plan.";
   check("...rendered with a paragraph break between them", seen.deltas.join("") === expected, JSON.stringify(seen.deltas.join("")));
-  check("...recorded the same way", record.answer === expected, JSON.stringify(record.answer));
+  check("...settled the same way", settled.outcomes[0]?.answer === expected, JSON.stringify(settled.outcomes[0]?.answer));
   check("...and with nothing in front of the first", !seen.deltas.join("").startsWith("\n"));
 }
 
@@ -204,9 +200,10 @@ console.log("\nan answer that never streamed is still an answer");
     '{"type":"result","total_cost_usd":0.01,"usage":{"input_tokens":2,"output_tokens":9}}',
   ]);
   const seen = watchStore();
-  await runLocalTurn({ ...base, provider: "anthropic", prompt: "Hi" }).finished;
+  const settled = settleRecorder();
+  await runLocalTurn({ ...base, provider: "anthropic", prompt: "Hi", onSettle: settled.onSettle }).finished;
   check("the whole message becomes the answer", seen.deltas.join("") === "Hi! What can I help you with?", seen.deltas.join(""));
-  check("...settling rather than erroring", seen.done === 1 && seen.errors.length === 0, JSON.stringify(seen.errors));
+  check("...settling as done rather than as a failure", settled.outcomes[0]?.status === "done", JSON.stringify(settled.outcomes[0]));
 }
 
 console.log("\nand a streamed answer is never doubled by the copy that follows it");
@@ -220,23 +217,28 @@ console.log("\nand a streamed answer is never doubled by the copy that follows i
     '{"type":"result","usage":{"input_tokens":1,"output_tokens":2}}',
   ]);
   const seen = watchStore();
-  await runLocalTurn({ ...base, provider: "anthropic", prompt: "Hi" }).finished;
+  const settled = settleRecorder();
+  await runLocalTurn({ ...base, provider: "anthropic", prompt: "Hi", onSettle: settled.onSettle }).finished;
   check("the streamed text stands alone", seen.deltas.join("") === "Hi!", seen.deltas.join(""));
+  check("...and is what the run is settled with", settled.outcomes[0]?.answer === "Hi!", JSON.stringify(settled.outcomes[0]));
 }
 
-console.log("\na failure is reported rather than swallowed");
+console.log("\na failure is settled as one, never swallowed and never erased");
 {
   // A provider that exits non-zero having said nothing: the shape of an expired sign-in.
   installHost([], { exitCode: 1 });
-  const seen = watchStore();
-  await runLocalTurn({ ...base, provider: "openai", prompt: "hi" }).finished;
-  check("the turn errors rather than completing empty", seen.errors.length === 1 && seen.done === 0, JSON.stringify(seen.errors));
+  watchStore();
+  let settled = settleRecorder();
+  await runLocalTurn({ ...base, provider: "openai", prompt: "hi", onSettle: settled.onSettle }).finished;
+  check("a provider that exits non-zero settles as an error",
+    settled.outcomes.length === 1 && settled.outcomes[0]?.status === "error" && Boolean(settled.outcomes[0]?.error),
+    JSON.stringify(settled.outcomes));
 
   // A turn that produced nothing but exited cleanly is still not an answer.
   installHost(['{"type":"turn.started"}'], { exitCode: 0 });
-  const quiet = watchStore();
-  await runLocalTurn({ ...base, provider: "openai", prompt: "hi" }).finished;
-  check("...and so does a clean exit with no answer", quiet.errors.length === 1 && quiet.done === 0);
+  settled = settleRecorder();
+  await runLocalTurn({ ...base, provider: "openai", prompt: "hi", onSettle: settled.onSettle }).finished;
+  check("...and so does a clean exit with no answer", settled.outcomes[0]?.status === "error", JSON.stringify(settled.outcomes[0]));
 
   // A Codex turn that FAILED with an exit of 0 and only `turn.failed` to say why — the shape the parser
   // used to read as nothing specific and render as "The provider reported a failure."
@@ -244,25 +246,39 @@ console.log("\na failure is reported rather than swallowed");
     '{"type":"turn.started"}',
     String.raw`{"type":"turn.failed","error":{"message":"{\"type\":\"error\",\"status\":400,\"error\":{\"message\":\"The 'gpt-x' model is not supported when using Codex with a ChatGPT account.\"}}"}}`,
   ], { exitCode: 0 });
-  const refused = watchStore();
-  await runLocalTurn({ ...base, provider: "openai", prompt: "hi" }).finished;
-  check("...and a turn.failed alone reports the provider's own sentence",
-    refused.errors[0] === "The 'gpt-x' model is not supported when using Codex with a ChatGPT account.", refused.errors[0]);
+  settled = settleRecorder();
+  await runLocalTurn({ ...base, provider: "openai", prompt: "hi", onSettle: settled.onSettle }).finished;
+  check("...and a turn.failed alone settles with the provider's own sentence",
+    settled.outcomes[0]?.error === "The 'gpt-x' model is not supported when using Codex with a ChatGPT account.",
+    String(settled.outcomes[0]?.error));
 
   // The shell refusing to start at all — no CLI, or a provider it will not run.
   installHost([], { failStart: "codex is not installed" });
-  const absent = watchStore();
-  await runLocalTurn({ ...base, provider: "openai", prompt: "hi" }).finished;
-  check("...and a shell that cannot start one says so", absent.errors[0]?.includes("not installed") === true, absent.errors[0]);
+  settled = settleRecorder();
+  await runLocalTurn({ ...base, provider: "openai", prompt: "hi", onSettle: settled.onSettle }).finished;
+  check("...and a shell that cannot start one says so", settled.outcomes[0]?.error?.includes("not installed") === true,
+    String(settled.outcomes[0]?.error));
+
+  // WHAT ARRIVED BEFORE A FAILURE IS PART OF THE TURN. A failed turn used to be handed on to nothing,
+  // so the partial — and the question with it — was gone after a reload.
+  installHost(['{"type":"stream_event","event":{"delta":{"type":"text_delta","text":"half an"}}}'], { exitCode: 1 });
+  settled = settleRecorder();
+  await runLocalTurn({ ...base, provider: "anthropic", prompt: "hi", onSettle: settled.onSettle }).finished;
+  check("a failure after text arrived settles with that text",
+    settled.outcomes[0]?.status === "error" && settled.outcomes[0]?.answer === "half an", JSON.stringify(settled.outcomes[0]));
 }
 
-console.log("\nnothing is recorded for a turn that failed");
+console.log("\nan answer that could not be handed back says so here");
 {
-  installHost([], { exitCode: 1 });
-  let recorded = false;
-  await runLocalTurn({ ...base, provider: "openai", prompt: "hi", onComplete: () => { recorded = true; } }).finished;
-  // Recording a failure as an answer would put an empty assistant message in the thread forever.
-  check("a failed turn is never handed on to be recorded", !recorded);
+  // THE SOCKET CLOSED WHILE THE CLI WAS ANSWERING. The server will never hear how this ended, so the
+  // tab is the only place left to say it: the answer stays on screen, marked as not saved.
+  installHost(CODEX_STREAM);
+  const seen = watchStore();
+  const settled = settleRecorder(false);
+  await runLocalTurn({ ...base, provider: "openai", prompt: "hi", onSettle: settled.onSettle }).finished;
+  check("the settle was attempted", settled.outcomes.length === 1);
+  check("...and its failure is shown on the turn", seen.errors.length === 1 && /saved/.test(seen.errors[0] ?? ""),
+    JSON.stringify(seen.errors));
 }
 
 console.log("\nan earlier turn still printing cannot bleed into this one");
@@ -275,7 +291,7 @@ console.log("\nan earlier turn still printing cannot bleed into this one");
     '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}',
   ], { foreignLines: ['{"type":"item.completed","item":{"type":"agent_message","text":"ANOTHER TURN"}}'] });
   const seen = watchStore();
-  await runLocalTurn({ ...base, provider: "openai", prompt: "hi" }).finished;
+  await runLocalTurn({ ...base, provider: "openai", prompt: "hi", onSettle: settleRecorder().onSettle }).finished;
   check("another turn's line is not appended", seen.deltas.join("") === "mine", JSON.stringify(seen.deltas.join("")));
 
   // ...WHILE THIS TURN'S OWN FIRST LINE, printed in that same window, still lands.
@@ -284,7 +300,7 @@ console.log("\nan earlier turn still printing cannot bleed into this one");
     foreignLines: ['{"type":"item.completed","item":{"type":"agent_message","text":"stale"}}'],
   });
   const fast = watchStore();
-  await runLocalTurn({ ...base, provider: "openai", prompt: "hi" }).finished;
+  await runLocalTurn({ ...base, provider: "openai", prompt: "hi", onSettle: settleRecorder().onSettle }).finished;
   check("...a fast first line from this turn is kept", fast.deltas.join("") === "fast", JSON.stringify(fast.deltas.join("")));
   check("...and the other turn's is still dropped", !fast.deltas.join("").includes("stale"));
 }
@@ -293,7 +309,7 @@ console.log("\ncancelling kills the process that is spending the plan");
 {
   const host = installHost(CODEX_STREAM, { delayMs: 200 });
   watchStore();
-  const turn = runLocalTurn({ ...base, provider: "openai", prompt: "hi" });
+  const turn = runLocalTurn({ ...base, provider: "openai", prompt: "hi", onSettle: settleRecorder().onSettle });
   // Wait for the id to come back, then cancel before the stream arrives.
   await sleep(50);
   turn.cancel();
@@ -301,14 +317,16 @@ console.log("\ncancelling kills the process that is spending the plan");
   await turn.finished;
 }
 
-console.log("\nin a browser it says so rather than doing nothing");
+console.log("\nin a browser it settles as a failure that says why");
 {
   delete (globalThis as Record<string, unknown>).__TAURI__;
   const seen = watchStore();
-  await runLocalTurn({ ...base, provider: "openai", prompt: "hi" }).finished;
+  const settled = settleRecorder();
+  await runLocalTurn({ ...base, provider: "openai", prompt: "hi", onSettle: settled.onSettle }).finished;
   check("a browser reports that this needs the desktop app",
-    seen.errors[0]?.includes("desktop app") === true, seen.errors[0]);
-  check("...and records nothing", seen.done === 0);
+    settled.outcomes[0]?.status === "error" && settled.outcomes[0]?.error?.includes("desktop app") === true,
+    JSON.stringify(settled.outcomes[0]));
+  check("...and streamed nothing", seen.deltas.length === 0);
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

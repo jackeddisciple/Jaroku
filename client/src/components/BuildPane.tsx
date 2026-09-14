@@ -22,7 +22,7 @@ import { isRunnable, modelName, providerLabelOf, runProviders, useProviderStore 
 import {
   sendApplyEdit, sendAskRecord, sendBranchRun, sendChat, sendDiscardEdit, sendDiscardPlan, sendDispatchWork,
   sendCreateThread, sendEditTurn, sendSelectVariant, sendStopChat,
-  sendEdit, sendExplain, sendGenerate, sendLoadWorkItem, sendPlanAgent, sendPromoteTestInput, sendRun, sendRecordChatTurn, reportHostProviders} from "../lib/socket.ts";
+  sendEdit, sendExplain, sendGenerate, sendLoadWorkItem, sendPlanAgent, sendPromoteTestInput, sendRun, reportHostProviders} from "../lib/socket.ts";
 import { useEvalStore } from "../store/evalStore.ts";
 import { UpsellCard } from "./UpsellCard.tsx";
 import { composerMoment } from "../lib/composerMoment.ts";
@@ -57,7 +57,7 @@ import { AttachmentRail, type DraftAttachment } from "./composer/AttachmentRail.
 import { refKey, type AttachKind, type AttachableRow } from "./composer/AttachPicker.tsx";
 import { MAX_ATTACHMENTS, WARN_AT, budgetPercent } from "../lib/attachBudget.ts";
 import { EffortControl } from "./composer/EffortControl.tsx";
-import { canRunLocally, runLocalTurn } from "../lib/providerTurn.ts";
+import { canRunLocally } from "../lib/providerTurn.ts";
 import { hasHost } from "../lib/hostProviders.ts";
 import { subscriptionBadge, subscriptionBlockedReason } from "../lib/subscriptionState.ts";
 import { effortName, effortStops, stopFor, subscriptionEffort } from "../lib/effortLevels.ts";
@@ -2157,8 +2157,6 @@ export function BuildPane({
     [chatSelectedModel, chatProviderNeeded, effort, subscriptionRows],
   );
 
-  /** The turn in flight, so Stop can kill the process that is spending the plan. */
-  const localTurnRef = useRef<{ cancel: () => void } | null>(null);
 
   /**
    * CHAT NEEDS A SUBSCRIPTION, NOT A KEY — the product owner's rule, 2026-09-13: "User can't send a
@@ -2612,43 +2610,31 @@ export function BuildPane({
        * carrying them here would silently spend an attachment budget on a greeting.
        */
       case "chat":
-        // THE ONE FORK BETWEEN THE TWO CREDENTIAL SYSTEMS, and it is here rather than on the server
-        // because only this side can reach the CLI holding the user's sign-in. When the Chat
-        // provider is a connected SUBSCRIPTION, the turn runs on this machine against the user's
-        // own plan and the server never sees the question. Otherwise it goes where it always went.
+        // THE ONE FORK BETWEEN THE TWO CREDENTIAL SYSTEMS. When the Chat provider is a connected
+        // SUBSCRIPTION, the answer comes from this machine against the user's own plan — and the
+        // server still owns the turn: it writes the question, opens the thread, tells every tab, and
+        // hands this app a `run` to answer on the CLI holding the sign-in (`runSubscriptionTurn`).
+        // It used to run here with no thread, so it rendered where no open conversation looked and
+        // was recorded, if at all, somewhere else.
         //
         // `connected` is the server's answer, not ours: it already checked that the provider is
         // permitted, installed and signed in with a plan rather than an API key. Re-deriving any of
         // that here would be a second opinion that could disagree with the one the row renders.
         if (chatSubscriptionActive) {
-          const turn = runLocalTurn({
-            provider: chatProviderNeeded,
-            prompt: trimmed,
-            model: chatModel || null,
-            // The level the composer is set to, translated to this provider's own vocabulary by
-            // the same table the server plans with. Null when the provider takes no reasoning.
-            effort: chatEffortValue,
-            agentId: activeAgentId ?? "",
-            // §15.1: THE BAND, SO THE OFFER CAN APPEAR UNDER THIS ANSWER TOO. The server path carries
-            // it on the message; this one opened its turn with none, and the card never showed.
+          sendChat(trimmed, activeAgentId, {
+            // The plan, the model and the level the composer is set to — the level already in this
+            // provider's own vocabulary, and null when the model takes none.
+            subscription: { provider: chatProviderNeeded, model: chatModel || null, effort: chatEffortValue },
+            // §13.2: THE ROUTER'S OWN REASON, from the decision that just happened.
+            routeReason: routing.reason,
+            // §15.1: THE BAND, SO THE OFFER CAN APPEAR UNDER THE ANSWER. By then the composer has
+            // been cleared and this routing is gone, so it has to travel with the message.
             planEvidence: routing.planEvidence,
-            onComplete: (answer, usage) => {
-              // Recorded so the turn survives a reload. The SPEND is deliberately not reported:
-              // these tokens came from a plan the user already pays for, and metering them would
-              // charge them twice for one answer.
-              sendRecordChatTurn({
-                question: trimmed,
-                answer,
-                provider: chatProviderNeeded,
-                model: chatModel || null,
-                effort: chatEffortValue,
-                inputTokens: usage?.input_tokens ?? null,
-                outputTokens: usage?.output_tokens ?? null,
-                agentId: activeAgentId,
-              });
-            },
+            // §8.1's `selection:` line, when something is selected.
+            ...(selectedStep
+              ? { selection: { seq: selectedStep.seq, type: selectedStep.type, name: selectedStep.name } }
+              : {}),
           });
-          localTurnRef.current = turn;
           break;
         }
         // NEVER THE SERVER'S API KEY. A chat turn whose provider is not a connected subscription on

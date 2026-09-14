@@ -90,6 +90,7 @@ import { offeredLevels, planEffort, type EffortPlan, isEffort} from "./effort.ts
 import { ConversationConnectorStore } from "./conversationConnectors.ts";
 import { TurnInteractionStore } from "./turnInteraction.ts";
 import { subscriptionAvailable } from "./providerAuth/capability.ts";
+import { SubscriptionTurns, type OpenTurn } from "./subscriptionTurns.ts";
 import { TurnVariantStore, type TurnVariant, type VariantOutcome } from "./turnVariants.ts";
 import { classOf, mustConfirm } from "./permissionShield.ts";
 import { attachTurn, turnRoutes, type Attachable, type RequestedAttachment, type TurnRouteDeps } from "./http/turns.ts";
@@ -13526,6 +13527,11 @@ async function chatBudget(ctx: TenantContext, threadId: string): Promise<ChatBud
  * here reaches a provider key, and no spend is recorded.
  */
 async function recordChatTurn(ctx: TenantContext, cmd: RecordChatTurnCommand): Promise<void> {
+  // A TURN THE SERVER PREPARED IS SETTLED, not recorded afresh — see `settleSubscriptionTurn`.
+  if (typeof cmd.runId === "string") {
+    await settleSubscriptionTurn(ctx, cmd);
+    return;
+  }
   const question = typeof cmd.question === "string" ? cmd.question.trim() : "";
   const answer = typeof cmd.answer === "string" ? cmd.answer.trim() : "";
   if (!question || !answer) return;
@@ -13585,6 +13591,18 @@ async function chatWithJaroku(
     return;
   }
 
+  // THE PLAN THAT ANSWERS, CHECKED BEFORE ANYTHING IS WRITTEN. A turn on a provider with no
+  // subscription path would be recorded as one and then answered by nothing — or, falling through to
+  // the code below, by an API key, which is the one crossing the two credential systems never make.
+  const subscription = cmd.subscription === undefined ? null : chatSubscription(cmd.subscription);
+  if (cmd.subscription !== undefined && !subscription) {
+    relay.broadcastReply(ctx, {
+      type: "error", agentId: cmd.agentId ?? "",
+      message: "That provider can't answer Jaroku Chat on a subscription.",
+    });
+    return;
+  }
+
   // THE AGENT IS RESOLVED BEFORE THE THREAD, and an id this workspace does not own resolves to
   // ABSENT rather than to a refusal — the rule every id-taking command here follows, because a
   // refusal confirms the id exists and turns the socket into an enumeration oracle.
@@ -13636,6 +13654,13 @@ async function chatWithJaroku(
     }
   }
 
+  // A SUBSCRIPTION TURN WHOSE APP HAS GONE IS NOT STILL ANSWERING. Its slot is held until the app
+  // settles, and an app that was closed or reloaded mid-answer never will — so the conversation is
+  // released here, where somebody is waiting to use it, rather than only when the timeout comes.
+  const held = subscriptionTurns.inThread(ctx.workspaceId, thread);
+  if (held && !relay.hasRequest(ctx, held.requestId)) {
+    abandonSubscriptionTurn(held, "The app answering this closed before it finished.");
+  }
   if (chatting.has(thread)) {
     relay.broadcastReply(
       ctx,
@@ -13645,6 +13670,8 @@ async function chatWithJaroku(
     return;
   }
   chatting.add(thread);
+  // Whether the answer went to the user's own app, which then holds the slot until it settles.
+  let handedOff = false;
 
   try {
     // §6.2: A REGENERATION ATTACHES TO THE TURN IT IS RE-ANSWERING rather than writing a second
@@ -13681,6 +13708,16 @@ async function chatWithJaroku(
       },
       thread,
     );
+
+    // ON THE USER'S OWN PLAN, THE REST HAPPENS ON THEIR MACHINE. The question is written and every
+    // tab has been told a turn started; what follows is an API call, its key and its ceilings — none
+    // of which a subscription turn has. It is handed to the app that asked, which keeps this
+    // conversation's slot until it says how the answer ended. See `prepareSubscriptionTurn`.
+    if (subscription) {
+      await prepareSubscriptionTurn(ctx, cmd, subscription, thread, turn, message);
+      handedOff = true;
+      return;
+    }
 
     /**
      * §12: THE TWO CEILINGS, CHECKED BEFORE THE CALL AND AFTER THE MESSAGE IS WRITTEN.
@@ -14119,12 +14156,201 @@ async function chatWithJaroku(
     // IN A `finally`, for the reason `answerFromRecord`'s is: everything above is awaited, so a
     // throw between claiming the slot and finishing the stream would otherwise leave this
     // conversation answering "one at a time" until a restart.
-    chatting.delete(thread);
+    // UNLESS THE APP HOLDS IT: a subscription turn's slot is released when its app settles, or when it
+    // is given up on — see `settleSubscriptionTurn` and `abandonSubscriptionTurn`.
+    if (!handedOff) chatting.delete(thread);
     // AND THE HANDLE GOES WITH IT. A stale handle is harmless to call — `stop()` on a finished
     // stream is a no-op — and it is not harmless to HAVE: the composer would keep offering a Stop
     // control for a turn that had already settled.
     chatStops.delete(thread);
   }
+}
+
+/**
+ * The longest answer a subscription turn's app may hand back, in characters.
+ *
+ * A BOUND ON A CLIENT'S WORD, not on a provider's. The server did not see this answer arrive, so what
+ * it stores is what the app says it was — and a record the size of whatever somebody sends is a way to
+ * fill a database from a socket. Two hundred thousand characters is far past any chat answer.
+ */
+const SUBSCRIPTION_ANSWER_MAX = 200_000;
+
+/** A subscription turn as the server holds it while the user's own app answers it. */
+interface HeldSubscriptionTurn {
+  workspaceId: string;
+  /** The socket that asked, and the only one that may settle it. */
+  requestId: string;
+  threadId: string;
+  ctx: TenantContext;
+  /** The `thread_items` row the answer hangs off, when one was written. */
+  turn: string | null;
+  agentId: string;
+  provider: string;
+  model: string | null;
+  effort: EffortPlan | null;
+  routeReason: string | null;
+  settle: (outcome: VariantOutcome) => Promise<void>;
+}
+
+/**
+ * The subscription turns being answered on somebody's machine right now — see subscriptionTurns.ts.
+ *
+ * GIVEN UP ON AFTER THE REGISTRY'S TIMEOUT, which releases the conversation and says so under the
+ * question: an app that closed mid-answer must not leave it "still answering" for ever.
+ */
+const subscriptionTurns = new SubscriptionTurns<HeldSubscriptionTurn>((held) =>
+  abandonSubscriptionTurn(held, "The app answering this never said how it ended, so Jaroku stopped waiting."));
+
+/**
+ * The subscription a chat command names, checked against the capability table and the catalogue.
+ *
+ * NULL WHEN THE PROVIDER HAS NO SUBSCRIPTION PATH — Muse Spark, or anything unknown. A MODEL the
+ * catalogue does not give this provider is dropped rather than refused, so the CLI answers on its own
+ * default: a working turn beats a refused one over a stale menu. A level outside the five is dropped
+ * the same way.
+ */
+function chatSubscription(
+  raw: NonNullable<ChatCommand["subscription"]>,
+): { provider: string; model: string | null; effort: EffortPlan | null } | null {
+  const provider = raw.provider;
+  if (!isProviderId(provider) || !subscriptionAvailable(provider)) return null;
+  const model = typeof raw.model === "string" && isPriced(raw.model) && providerOf(raw.model) === provider
+    ? raw.model
+    : null;
+  // THE SAME PLAN SHAPE THE VARIANT ROW STORES. Requested and applied are one value: the level was
+  // translated to this provider's vocabulary before it was sent, and the CLI is what applies it.
+  const effort: EffortPlan | null = typeof raw.effort === "string" && isEffort(raw.effort)
+    ? { requested: raw.effort, applied: raw.effort, supported: true, clamped: false, reason: null, thinking: null, reasoningEffort: null }
+    : null;
+  return { provider, model, effort };
+}
+
+/**
+ * Hand a subscription turn to the app that asked for it.
+ *
+ * EVERYTHING THE SERVER OWNS HAS HAPPENED BY NOW — the thread, the question, the `started` every tab
+ * rendered — and this adds the two things left: the variant row the answer will settle into, and the
+ * turn held open until the app says how it ended. What it never does is resolve a key or call a
+ * provider. The app answers on the CLI holding the user's sign-in.
+ *
+ * A RUN NOBODY RECEIVED IS GIVEN UP ON AT ONCE, rather than after the timeout: the socket that asked
+ * closed between asking and being answered, and nothing else is going to take the run.
+ */
+async function prepareSubscriptionTurn(
+  ctx: TenantContext,
+  cmd: ChatCommand,
+  subscription: { provider: string; model: string | null; effort: EffortPlan | null },
+  thread: string,
+  turn: string | null,
+  message: string,
+): Promise<void> {
+  const modelId = subscription.model ?? "";
+  const settle = await openVariant(ctx, turn, modelId, subscription.provider, subscription.effort, "subscription");
+  const held = subscriptionTurns.open({
+    workspaceId: ctx.workspaceId,
+    requestId: ctx.requestId,
+    threadId: thread,
+    ctx,
+    turn,
+    agentId: cmd.agentId ?? "",
+    provider: subscription.provider,
+    model: subscription.model,
+    effort: subscription.effort,
+    // BOUNDED, like every other client-supplied string that reaches a turn. Displayed, never branched on.
+    routeReason: typeof cmd.routeReason === "string" && cmd.routeReason.trim() ? cmd.routeReason.trim().slice(0, 200) : null,
+    settle,
+  });
+  const delivered = relay.sendReply(ctx, ctx.requestId, {
+    type: "run",
+    agentId: held.agentId,
+    runId: held.runId,
+    ...(turn ? { turnId: turn } : {}),
+    provider: held.provider,
+    model: held.model,
+    effort: held.effort?.applied ?? null,
+    prompt: message,
+  }, thread);
+  if (delivered === 0) abandonSubscriptionTurn(held, "The app that asked for this answer closed before it could start.");
+}
+
+/**
+ * An app saying how the subscription turn it was handed ended.
+ *
+ * FROM THAT APP ALONE. The registry gives the turn only to the socket it was handed to, in the
+ * workspace it was opened in, so a settle from anywhere else changes nothing.
+ *
+ * THE ANSWER SETTLES THE VARIANT AND NOTHING IS BOOKED. Tokens are kept as the user's own account of
+ * what their plan spent; the cost column stays null, because Jaroku was paid nothing and charges
+ * nothing. Every tab then hears how it ended — with the text, because only the app that answered saw
+ * it arrive. A failure keeps whatever arrived, and the question was written before the run went out,
+ * so neither is lost to a refused or expired sign-in.
+ */
+async function settleSubscriptionTurn(ctx: TenantContext, cmd: RecordChatTurnCommand): Promise<void> {
+  if (typeof cmd.runId !== "string") return;
+  const open = subscriptionTurns.take(cmd.runId, { workspaceId: ctx.workspaceId, requestId: ctx.requestId });
+  if (!open) return;
+  chatting.delete(open.threadId);
+  const answer = typeof cmd.answer === "string" ? cmd.answer.slice(0, SUBSCRIPTION_ANSWER_MAX) : "";
+  const count = (n: unknown): number | null => (typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : null);
+  const written = open.settle({
+    ...(answer ? { body: answer } : {}),
+    tokensIn: count(cmd.inputTokens),
+    tokensOut: count(cmd.outputTokens),
+    costUsd: null,
+    ...(cmd.status === "stopped" ? { stopped: true } : {}),
+  });
+  const thread = open.threadId;
+  if (cmd.status === "error") {
+    const message = typeof cmd.error === "string" && cmd.error.trim()
+      ? cmd.error.trim().slice(0, 500)
+      : "The provider's CLI did not answer.";
+    void written.then(() =>
+      relay.broadcastReply(ctx, { type: "error", agentId: open.agentId, message, ...(answer ? { text: answer } : {}) }, thread));
+    return;
+  }
+  const stopped = cmd.status === "stopped";
+  void written
+    .then(() => subscriptionUsage(ctx, open))
+    .then((usage) =>
+      relay.broadcastReply(
+        ctx,
+        stopped
+          ? { type: "stopped", agentId: open.agentId, usage, text: answer }
+          : { type: "done", agentId: open.agentId, usage, text: answer },
+        thread,
+      ));
+}
+
+/**
+ * §13's line for a subscription turn, read back from the row like every other answer's.
+ *
+ * `route: "subscription"` IS THE DIFFERENCE, and it is the chip's to show: this answer ran on the
+ * user's own plan. The level it ran at is on the line too — a plan turn still ran at one.
+ */
+async function subscriptionUsage(ctx: TenantContext, open: HeldSubscriptionTurn): Promise<Record<string, unknown>> {
+  const [counts, spent] = await Promise.all([variantCounts(ctx, open.turn), spentOnTurn(ctx, open.turn)]);
+  return {
+    ...(open.model ? { model: open.model } : {}),
+    provider: open.provider,
+    ...effortFields(open.effort),
+    ...counts,
+    ...spent,
+    route: "subscription",
+    ...(open.routeReason ? { route_reason: open.routeReason } : {}),
+  };
+}
+
+/**
+ * Give up on a subscription turn whose app is gone — closed, reloaded, or silent past the timeout.
+ *
+ * THE QUESTION STAYS. It was written before the run was handed out, so the conversation keeps what
+ * somebody asked and it can be asked again; what is released is the slot, and every tab is told that
+ * nothing is coming.
+ */
+function abandonSubscriptionTurn(held: OpenTurn<HeldSubscriptionTurn>, message: string): void {
+  subscriptionTurns.drop(held.runId);
+  chatting.delete(held.threadId);
+  relay.broadcastReply(held.ctx, { type: "error", agentId: held.agentId, message }, held.threadId);
 }
 
 // Kick off one run on startup unless suppressed (set JAROKU_NO_AUTORUN=1 to just serve).

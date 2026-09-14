@@ -782,5 +782,34 @@ console.log("\n§6.2, §6.4, §13.1 — the line survives a reload");
     JSON.stringify({ status: st.status, usage: st.usage }));
 }
 
+console.log("\nan answer another tab ran arrives with its text");
+{
+  // A SUBSCRIPTION TURN IS ANSWERED ON ONE MACHINE. Every other tab saw `started` and nothing after
+  // it, so the settling event carries the answer as recorded — and the tab that did watch it arrive
+  // ends up with the same words, not twice as many.
+  for (const [name, settle, status, text] of [
+    ["finished", () => store().replyDone({ threadId: T, agentId: A, text: "Here it is." }), "done", "Here it is."],
+    ["stopped", () => store().replyStopped({ threadId: T, agentId: A, text: "Here it" }), "stopped", "Here it"],
+    ["failed", () => store().replyError({ threadId: T, agentId: A, message: "sign-in expired", text: "Here" }), "error", "Here"],
+  ] as const) {
+    reset();
+    store().replyStarted({ threadId: T, agentId: A, question: "why?" });
+    settle();
+    check(`a ${name} turn this tab never saw streaming shows the recorded text`,
+      reply()?.status === status && reply()?.text === text, reply());
+  }
+  reset();
+  store().replyStarted({ threadId: T, agentId: A, question: "why?" });
+  store().replyDelta({ threadId: T, agentId: A, text: "Here it is." });
+  store().replyDone({ threadId: T, agentId: A, text: "Here it is." });
+  check("...and the tab that answered it keeps one copy", reply()?.text === "Here it is.", reply()?.text);
+  // AN ANSWER THE SERVER STREAMED ITSELF SENDS NO TEXT, and what arrived is left exactly as it is.
+  reset();
+  store().replyStarted({ threadId: T, agentId: A, question: "why?" });
+  store().replyDelta({ threadId: T, agentId: A, text: "streamed" });
+  store().replyDone({ threadId: T, agentId: A });
+  check("...while a done with no text leaves the streamed answer alone", reply()?.text === "streamed", reply()?.text);
+}
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 (globalThis as { process?: { exit(code: number): void } }).process?.exit(fail === 0 ? 0 : 1);

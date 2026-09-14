@@ -189,29 +189,38 @@ export interface LocalTurn {
   finished: Promise<void>;
 }
 
+/** How a local turn ended, which is what the run it answers is settled with. */
+export interface LocalTurnOutcome {
+  /** `error` covers a refused sign-in, a CLI that could not start, and an answer that never came. */
+  status: "done" | "error";
+  /** Everything that arrived — the whole answer, or the part of it before a failure. */
+  answer: string;
+  usage: TurnUsage | null;
+  /** The provider's own sentence when it failed, else null. */
+  error: string | null;
+}
+
 /**
- * Run a turn and stream it into the conversation.
+ * Answer a run the server handed this app, streaming into the turn the server opened.
  *
- * THE STORE IS DRIVEN DIRECTLY rather than through the socket, because the answer never goes near
- * the server: it is produced on this machine by a process holding the user's own credential. The
- * server learns about it afterwards, as a record.
+ * THE SERVER OWNS THE TURN. It wrote the question and announced it with `started` before this was
+ * called, so nothing here opens a turn or closes one: the answer's pieces go into that thread's reply
+ * as they arrive, and how it ended goes back once, through `onSettle`. The server's settling event is
+ * what marks the turn finished — in every tab at once, this one included.
+ *
+ * EXCEPT WHEN THE SETTLE CANNOT BE SENT. With the socket gone the server will never hear how this
+ * ended, so this tab is the only place left to say so — and it does, on the turn itself.
  */
 export function runLocalTurn(opts: {
+  /** The conversation the server opened the turn in. */
+  threadId?: string;
+  agentId: string;
   provider: string;
   prompt: string;
   model: string | null;
   effort: string | null;
-  /** Absent means the active thread, which is what the store's own `In` type expects. */
-  threadId?: string;
-  agentId: string;
-  /** Called once the turn has finished, with what it spent. Used to persist the turn. */
-  onComplete?: (answer: string, usage: TurnUsage | null) => void;
-  /**
-   * §15.1's band, from the router that sent this message here — what the "Build this as an agent"
-   * card under the answer reads. A server-answered turn gets it from the `started` event; this one was
-   * never given it, so the card could not appear under a subscription answer at all.
-   */
-  planEvidence?: "none" | "near" | "confident";
+  /** How the turn ended, sent once. Answers whether it could be sent. */
+  onSettle: (outcome: LocalTurnOutcome) => boolean;
 }): LocalTurn {
   const h = host();
   const chat = useChatStore.getState();
@@ -233,36 +242,33 @@ export function runLocalTurn(opts: {
    */
   const early: TurnEvent[] = [];
   let unlisten: (() => void) | null = null;
-  let settle!: () => void;
-  const finished = new Promise<void>((r) => { settle = r; });
+  let resolveFinished!: () => void;
+  const finished = new Promise<void>((r) => { resolveFinished = r; });
 
   const end = (): void => {
     unlisten?.();
     unlisten = null;
-    if (failed) {
-      chat.replyError({ threadId: opts.threadId, agentId: opts.agentId, message: failed });
-    } else {
-      chat.replyDone({ threadId: opts.threadId, agentId: opts.agentId, usage: usage ?? undefined });
-      opts.onComplete?.(answer, usage);
+    // A FAILURE IS SETTLED TOO, with whatever arrived before it. The question was written before this
+    // run was handed out, so a refused or expired sign-in leaves the message in the thread and the
+    // partial with it — never a turn that vanishes on reload.
+    const sent = opts.onSettle({ status: failed ? "error" : "done", answer, usage, error: failed });
+    if (!sent) {
+      chat.replyError({
+        threadId: opts.threadId,
+        agentId: opts.agentId,
+        message: failed ?? "This answer arrived, but the connection to Jaroku dropped before it could be saved.",
+      });
     }
-    settle();
-  };
-
-  const started = {
-    threadId: opts.threadId, agentId: opts.agentId, question: opts.prompt,
-    ...(opts.planEvidence ? { planEvidence: opts.planEvidence } : {}),
+    resolveFinished();
   };
 
   if (!h) {
-    // A browser has no shell to run this on, and the composer should never have offered it. Said
-    // plainly rather than silently doing nothing.
-    chat.replyStarted(started);
+    // A browser has no shell to run this on, and nothing should have handed it a run. Said plainly
+    // rather than silently doing nothing.
     failed = "Subscription chat needs the Jaroku desktop app — it runs on the provider CLI installed on your machine.";
     end();
     return { cancel: () => {}, finished };
   }
-
-  chat.replyStarted(started);
 
   void (async () => {
     try {

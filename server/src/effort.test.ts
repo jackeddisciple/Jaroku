@@ -356,9 +356,12 @@ console.log("\nand the adapter is actually called, at every dispatch that shippe
   // showed a turn with no metadata row at all — no model, no duration, no tokens, no cost — while
   // the row held 891 in, 2 out and $0.001802. An omission a counter cannot see is the argument for
   // driving the thing rather than only reading it.
+  //
+  // SEVEN WITH THE SUBSCRIPTION TURN, whose line is read back once its app settles it. A turn answered
+  // on the user's own plan still ran at a level, and the chip under it has to say which.
   check(
-    "...on the plan, the generation, the edit, the reply and the chat turn",
-    (index.match(/\.\.\.effortFields\(/g) ?? []).length === 6,
+    "...on the plan, the generation, the edit, the reply, the chat turn and the subscription turn",
+    (index.match(/\.\.\.effortFields\(/g) ?? []).length === 7,
     String((index.match(/\.\.\.effortFields\(/g) ?? []).length),
   );
   // AND THE SLIDER'S STOPS RIDE THE CATALOGUE, from the same adapter — never a client's own table.

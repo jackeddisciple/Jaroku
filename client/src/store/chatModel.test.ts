@@ -190,7 +190,13 @@ console.log("\nthe composer's gate asks about the chat provider, never about any
   // THE FALLBACK THAT SPENT THE API KEY. A chat turn with no connected plan went to `sendChat`.
   const chatCases = pane.match(/case "chat":[\s\S]*?case "generate":/g) ?? [];
   check("the composer's chat case exists", chatCases.length > 0);
-  check("...and never sends a turn with no connected plan to the server", chatCases.every((c) => !c.includes("sendChat(trimmed")));
+  // AND A TURN THAT DOES GO TO THE SERVER GOES AS A SUBSCRIPTION TURN, which the server hands back to
+  // this app to answer rather than answering on a key.
+  check("...and sends the server nothing but a subscription turn", chatCases.every((c) =>
+    (c.match(/sendChat\(trimmed/g) ?? []).length
+      === (c.match(/sendChat\(trimmed, activeAgentId, \{\s*(?:\/\/[^\n]*\n\s*)*subscription:/g) ?? []).length));
+  check("...and one with no connected plan opens the account panel instead",
+    chatCases.every((c) => /openWorkspacePanel\("account"\);\s*return;/.test(c)));
   check("the Chat menu lists only providers with a subscription path",
     /chatCatalogue = useMemo\(\s*\(\) => catalogue\.filter\(\(p\) => subscriptions\.some\(\(sub\) => sub\.provider === p\.id && sub\.supported\)\)/.test(pane));
 }

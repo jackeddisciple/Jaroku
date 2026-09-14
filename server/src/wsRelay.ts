@@ -607,6 +607,18 @@ export type SetOwnKeyForPlatformCommand = { cmd: "setOwnKeyForPlatform"; on: boo
  * a browser tab simply has no machine to report, and every provider reads as not connected there.
  */
 /**
+ * A chat command's `subscription`, when it has one, at least names a provider.
+ *
+ * THE FIELD DECIDES WHERE THE MESSAGE GOES — to the user's own plan rather than anywhere else — so it
+ * is shape-checked here with the other routing fields. Whether that provider may answer is the chat
+ * route's question, asked of the capability table.
+ */
+function validSubscription(v: unknown): boolean {
+  return v === undefined
+    || (typeof v === "object" && v !== null && typeof (v as { provider?: unknown }).provider === "string");
+}
+
+/**
  * A Chat turn that was answered on the user's own machine, recorded so it survives a reload.
  *
  * THE SERVER DID NOT SEE THIS ANSWER AND CANNOT VERIFY IT. The question, the reply and the token
@@ -621,7 +633,16 @@ export type SetOwnKeyForPlatformCommand = { cmd: "setOwnKeyForPlatform"; on: boo
  */
 export type RecordChatTurnCommand = {
   cmd: "recordChatTurn";
-  question: string;
+  /**
+   * THE RUN THIS SETTLES — a turn the server prepared and handed this app to answer, which the server
+   * already wrote the question for. See `SubscriptionTurns`. Absent on the older record-afterwards path.
+   */
+  runId?: string;
+  /** How that run ended. `done` when absent. */
+  status?: "done" | "stopped" | "error";
+  /** The provider's own sentence, when it failed. Bounded and displayed, never branched on. */
+  error?: string | null;
+  question?: string;
   answer: string;
   provider: string;
   model?: string | null;
@@ -1623,6 +1644,17 @@ export type ChatCommand = {
    */
   selection?: { seq: number; type: string; name: string };
   /**
+   * THE PLAN THAT ANSWERS, when the user's own subscription does rather than an API key.
+   *
+   * THE SERVER STILL OWNS THE TURN — the thread, the message, the variant, the one-at-a-time slot —
+   * and hands the requesting app a `run` to answer on the CLI holding the sign-in. Nothing about such
+   * a turn resolves a key or meters a call. See `SubscriptionTurns`.
+   *
+   * `model` AND `effort` ARE CHECKED, NOT TRUSTED: a model the catalogue does not give this provider
+   * runs on the CLI's own default, and a level outside the five is dropped.
+   */
+  subscription?: { provider: string; model?: string | null; effort?: string | null };
+  /**
    * §13: WHY THE ROUTER SENT THIS HERE, in its own words.
    *
    * CARRIED FROM THE CLIENT BECAUSE THE CLIENT IS WHERE THE ROUTER RUNS. v0.1.7 chose deterministic
@@ -1920,6 +1952,16 @@ export type ReplyEvent =
       /** §15.1's band, echoed back so the offer can appear under the answer. */
       planEvidence?: string;
     }
+  /**
+   * ANSWER THIS ON THE USER'S OWN PLAN — sent to the one app that asked, never broadcast.
+   *
+   * The server has written the question, opened the variant and announced the turn; what it cannot do
+   * is reach the CLI holding the sign-in. `runId` is what the app settles the answer with.
+   */
+  | {
+      type: "run"; agentId: string; runId: string; turnId?: string;
+      provider: string; model: string | null; effort: string | null; prompt: string;
+    }
   | { type: "delta"; agentId: string; text: string }
   /**
    * §6.5 METADATA, WHEN THERE IS ANY. Absent on an answer that had nothing to report, which is
@@ -1939,7 +1981,11 @@ export type ReplyEvent =
    * a sentence with nothing behind it". Absent on every reply that cited nothing, so the build
    * composer's answers are byte-identical to what they were.
    */
-  | { type: "done"; agentId: string; usage?: unknown; citations?: CitationView[] }
+  | {
+      type: "done"; agentId: string; usage?: unknown; citations?: CitationView[];
+      /** The answer as recorded, for a tab that never saw it arrive — a subscription turn's only copy. */
+      text?: string;
+    }
   /**
    * §6.1: SOMEBODY STOPPED IT.
    *
@@ -1950,7 +1996,7 @@ export type ReplyEvent =
    * arrive by a different route from a finished one's: `finalMessage()` never resolves on an
    * aborted stream, so there is no `onUsage` to ride.
    */
-  | { type: "stopped"; agentId: string; usage?: unknown }
+  | { type: "stopped"; agentId: string; usage?: unknown; text?: string }
   /**
    * §7: A FAILURE, CLASSIFIED — the same event `error` always was, with three fields on it.
    *
@@ -1971,6 +2017,8 @@ export type ReplyEvent =
       retry_after?: number;
       /** Whether the server is about to try once itself — §7.3's bounded, VISIBLE retry. */
       retrying?: boolean;
+      /** What arrived before it failed, as recorded — for a tab that never saw it arrive. */
+      text?: string;
     };
 
 // Eval rides its own channel too, parallel to trace/gen/edit/debug/reply.
@@ -4665,7 +4713,7 @@ export class WsRelay {
           // planning stage, and "what can you build for me?" is asked exactly then. So the sentence
           // is required and the agent is not, which is the whole difference between this guard and
           // the two above it.
-          } else if (msg.cmd === "chat" && typeof msg.message === "string") {
+          } else if (msg.cmd === "chat" && typeof msg.message === "string" && validSubscription(msg.subscription)) {
             void withContext((ctx) => this.onCommand?.(msg, ctx));
             // THE SELECTION IS NOT SHAPE-CHECKED HERE, deliberately: it is read by exactly one
             // function, which reads three fields off it and renders them into a bounded line, and a
@@ -4675,10 +4723,13 @@ export class WsRelay {
           // the thread is optional and everything else about the command is its name. A `stopChat`
           // with no thread stops nothing, which is the safe direction and needs no validation to
           // reach.
-          } else if (msg.cmd === "recordChatTurn" && typeof msg.question === "string" && typeof msg.answer === "string") {
+          } else if (
+            msg.cmd === "recordChatTurn" && typeof msg.answer === "string"
+            && (typeof msg.runId === "string" || typeof msg.question === "string")
+          ) {
             // Forwarded like `chat` beside it: the app owns the thread store and is the only thing
-            // that can write a turn into it. Both halves of the exchange are required — a record
-            // with no answer is not a turn that happened.
+            // that can write a turn into it. A settle names the run the server prepared, and an
+            // older record names the question it answered — one or the other, never neither.
             void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "stopChat") {
             void withContext((ctx) => this.onCommand?.(msg, ctx));
@@ -5402,6 +5453,34 @@ export class WsRelay {
       if (session.context.requestId !== requestId) continue;
       this.sendTo(ws, { channel: "threads", ...event });
     }
+  }
+
+  /**
+   * Answer ONE client on the reply channel — the socket whose command this is.
+   *
+   * A SUBSCRIPTION TURN'S `run` IS THE REASON. It asks one app to answer on the CLI holding one
+   * person's sign-in; broadcast, every desktop app in the workspace would answer the same question on
+   * its own user's plan. Returns how many sockets it reached, so a run nobody received is known.
+   */
+  sendReply(ctx: TenantContext, requestId: string, event: ReplyEvent, threadId?: string | null): number {
+    let sent = 0;
+    for (const [ws, session] of this.sessions) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      if (session.context.workspaceId !== ctx.workspaceId) continue;
+      if (session.context.requestId !== requestId) continue;
+      this.sendTo(ws, { channel: "reply", ...event, ...(threadId ? { threadId } : {}) });
+      sent++;
+    }
+    return sent;
+  }
+
+  /** Whether the socket with this request id is still open in this workspace. */
+  hasRequest(ctx: TenantContext, requestId: string): boolean {
+    for (const [ws, session] of this.sessions) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      if (session.context.workspaceId === ctx.workspaceId && session.context.requestId === requestId) return true;
+    }
+    return false;
   }
 
   /**

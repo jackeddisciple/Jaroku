@@ -356,9 +356,19 @@ interface ChatState {
     agentId: string;
     usage?: GenUsage;
     citations?: { id: string; status: string; agent_name: string; created_at: string }[];
+    /**
+     * THE ANSWER AS RECORDED, when the event carries it — a subscription turn's.
+     *
+     * Such a turn is answered on ONE machine, so every other tab saw `started` and nothing after it.
+     * The settling event brings the words, and they replace what this tab has — which, in the tab
+     * that answered, is the same words rather than a second copy of them.
+     */
+    text?: string;
   }) => void;
   replyError: (e: In & {
     agentId: string; message: string;
+    /** What arrived before it failed, as recorded. See `replyDone.text`. */
+    text?: string;
     /** §7's classification, when the server could name one. See `ReplyTurn.failure`. */
     failure?: string; actions?: string[]; retry_after?: number; retrying?: boolean;
   }) => void;
@@ -382,7 +392,7 @@ interface ChatState {
    * conversation". A tab that marked its own turn stopped the instant somebody pressed Esc would
    * be the only tab that knew, and would have guessed: the stream may already have finished.
    */
-  replyStopped: (e: In & { agentId: string; usage?: GenUsage }) => void;
+  replyStopped: (e: In & { agentId: string; usage?: GenUsage; text?: string }) => void;
   /**
    * A job this conversation just dispatched — Part 3 §6.
    *
@@ -967,7 +977,7 @@ export const useChatStore = create<ChatState>((set) => ({
       return putTurns(s, threadId, replaceTurn(turns, open.id, { ...open, text: open.text + text }));
     }),
 
-  replyDone: ({ threadId, agentId, usage, citations }) =>
+  replyDone: ({ threadId, agentId, usage, citations, text }) =>
     set((s) => {
       const turns = turnsIn(s, threadId);
       const open = findReply(turns, agentId);
@@ -982,7 +992,7 @@ export const useChatStore = create<ChatState>((set) => ({
         // that cited nothing sends none, and a reply that had them must not lose them to a second
         // `done` — which a regeneration produces.
         ...putTurns(s, threadId, replaceTurn(turns, open.id, {
-          ...open, status: "done" as const, ...(usage ? { usage } : {}),
+          ...open, status: "done" as const, ...(text !== undefined ? { text } : {}), ...(usage ? { usage } : {}),
           ...(citations && citations.length > 0 ? { citations } : {}),
         })),
       };
@@ -1004,7 +1014,7 @@ export const useChatStore = create<ChatState>((set) => ({
       ]);
     }),
 
-  replyError: ({ threadId, agentId, message, failure, actions, retry_after, retrying }) =>
+  replyError: ({ threadId, agentId, message, failure, actions, retry_after, retrying, text }) =>
     set((s) => {
       const key = threadId ?? s.streamingThreadId ?? undefined;
       const turns = turnsIn(s, key);
@@ -1017,6 +1027,7 @@ export const useChatStore = create<ChatState>((set) => ({
         ? replaceTurn(turns, open.id, {
           ...open,
           status: "error" as const,
+          ...(text !== undefined ? { text } : {}),
           error: message,
           // SPREAD RATHER THAN SET, so a `retrying` turn whose RETRY also fails keeps the class the
           // second attempt reported rather than losing it to an undefined — and so an unclassified
@@ -1042,7 +1053,7 @@ export const useChatStore = create<ChatState>((set) => ({
    * `streaming` guard is what makes the later event a no-op rather than a demotion of a finished
    * answer to a partial one.
    */
-  replyStopped: ({ threadId, agentId, usage }) =>
+  replyStopped: ({ threadId, agentId, usage, text }) =>
     set((s) => {
       const key = threadId ?? s.streamingThreadId ?? undefined;
       const turns = turnsIn(s, key);
@@ -1052,7 +1063,7 @@ export const useChatStore = create<ChatState>((set) => ({
         streamingAgentId: null,
         streamingThreadId: null,
         ...putTurns(s, key, replaceTurn(turns, open.id, {
-          ...open, status: "stopped" as const, ...(usage ? { usage } : {}),
+          ...open, status: "stopped" as const, ...(text !== undefined ? { text } : {}), ...(usage ? { usage } : {}),
         })),
       };
     }),

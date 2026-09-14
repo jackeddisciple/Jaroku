@@ -1,4 +1,5 @@
 import { hasHost, readHostProviders, reprobeOnReturn } from "./hostProviders.ts";
+import { runLocalTurn } from "./providerTurn.ts";
 // WebSocket client for the Jaroku relay. Mirrors the reconnect pattern of the original
 // debug-client.html (1s backoff) and dispatches each server message into the trace store.
 // The relay only speaks WebSocket, so this is the single channel between UI and pipeline.
@@ -677,6 +678,8 @@ function dispatch(msg: ServerMessage): void {
       // Unified composer "explain": a streaming prose answer in the conversation (chatStore).
       const c = useChatStore.getState();
       if (msg.type === "started") c.replyStarted(msg);
+      // A TURN TO ANSWER ON THIS MACHINE, after the `started` that opened it — see `runSubscriptionTurn`.
+      else if (msg.type === "run") runSubscriptionTurn(msg);
       else if (msg.type === "delta") c.replyDelta(msg);
       else if (msg.type === "done") c.replyDone(msg);
       else if (msg.type === "stopped") c.replyStopped(msg);
@@ -1489,6 +1492,12 @@ export function sendChat(
     routeReason?: string;
     /** §15.1's band. See the command's own note. */
     planEvidence?: "none" | "near" | "confident";
+    /**
+     * THE PLAN THAT ANSWERS, when Chat runs on the user's own subscription. The server writes and
+     * announces the turn as it does any other, then hands this app a `run` to answer on the CLI — see
+     * `runSubscriptionTurn`. No key is resolved for such a turn anywhere.
+     */
+    subscription?: { provider: string; model: string | null; effort: string | null };
   },
 ): void {
   send({
@@ -1500,6 +1509,7 @@ export function sendChat(
     ...(opts?.selection ? { selection: opts.selection } : {}),
     ...(opts?.routeReason ? { routeReason: opts.routeReason } : {}),
     ...(opts?.planEvidence ? { planEvidence: opts.planEvidence } : {}),
+    ...(opts?.subscription ? { subscription: opts.subscription } : {}),
   });
 }
 
@@ -1620,19 +1630,39 @@ export function sendListProviders(): void {
 }
 
 /**
- * Record a Chat turn this machine answered, so it survives a reload.
+ * Answer a subscription turn the server handed this app, and tell it how the answer ended.
  *
- * THE SERVER NEVER SAW THIS EXCHANGE. It was produced locally by a CLI holding the user's own
- * subscription, which is the whole point of the architecture — so this is the client reporting
- * what happened rather than the server observing it. Nothing about it is billed.
+ * THE SERVER OPENED THE TURN — the question is written and `started` rendered it — so this runs the CLI
+ * holding the user's sign-in, streams into that same turn, and settles the run by its id. Nothing is
+ * marked finished here: the server's `done`, `stopped` or `error` does that for every tab at once, this
+ * one included, with the usage and the text as recorded.
+ *
+ * THE SPEND TRAVELS AS COUNTS AND NEVER AS MONEY. The tokens came from a plan the user already pays
+ * for, and metering them would charge somebody twice for one answer.
  */
-export function sendRecordChatTurn(turn: {
-  question: string; answer: string; provider: string;
-  model: string | null; effort: string | null;
-  inputTokens: number | null; outputTokens: number | null;
-  agentId: string | null;
-}): void {
-  send({ cmd: "recordChatTurn", ...turn, threadId: activeThread() });
+function runSubscriptionTurn(run: Extract<ServerMessage, { channel: "reply"; type: "run" }>): void {
+  runLocalTurn({
+    threadId: run.threadId,
+    agentId: run.agentId,
+    provider: run.provider,
+    prompt: run.prompt,
+    model: run.model,
+    effort: run.effort,
+    onSettle: (outcome) => send({
+      cmd: "recordChatTurn",
+      runId: run.runId,
+      status: outcome.status,
+      error: outcome.error,
+      answer: outcome.answer,
+      provider: run.provider,
+      model: run.model,
+      effort: run.effort,
+      inputTokens: outcome.usage?.input_tokens ?? null,
+      outputTokens: outcome.usage?.output_tokens ?? null,
+      agentId: run.agentId || null,
+      ...(run.threadId ? { threadId: run.threadId } : {}),
+    }),
+  });
 }
 
 /** The report in flight, shared the way `readHostProviders` shares its probe. */
