@@ -92,7 +92,7 @@ console.log("\nevery provider gets a row, gated ones included");
   const rows = subscriptionStatuses(PROVIDER_IDS, new Map());
   check("one row per provider", rows.length === PROVIDER_IDS.length);
   check("...in the providers' own order", rows.map((r) => r.provider).join(",") === PROVIDER_IDS.join(","));
-  // Hiding a gated provider answers "can I use my Claude subscription?" with silence.
+  // Hiding a gated provider answers "can I use my Muse subscription?" with silence.
   check("...and gated providers are present rather than hidden", rows.some((r) => !r.available));
   check("every row is labelled for a person", rows.every((r) => r.label.length > 0 && r.label !== r.provider));
   // Agent runtime is a separate credential system and no subscription verdict may narrow it.

@@ -23,11 +23,12 @@
 // no — an unrecognised line is not a sign-in, because a string we have not seen before is a string
 // whose billing we do not know.
 //
-// AND A GATED PROVIDER IS STILL REPORTED HONESTLY. If somebody has Claude Code installed and signed
-// in, this says so. It does not decide what that means — the server's capability table does, and it
-// answers "not connected" for Anthropic no matter what arrives here. Reporting it anyway is what
-// lets the product say "Claude Code is installed on this machine, and Anthropic does not permit
-// Jaroku to use it yet" rather than pretending not to have noticed.
+// AND IT DOES NOT DECIDE WHAT A SIGN-IN MEANS. It reports what each CLI says about itself; the
+// server's capability table decides whether that provider may answer Chat at all, and answers "not
+// connected" for one it does not permit — Muse Spark, today — no matter what arrives here. A
+// provider that permits nothing is only noted as present (see `observe_gated`), which is what lets
+// the product say "Muse is installed on this machine, and Meta documents no way for Jaroku to use
+// it" rather than pretending not to have noticed.
 //
 // WHY PATH IS NOT ENOUGH. A `.app` launched from Finder, from Spotlight, or by LaunchServices
 // inherits no shell environment at all — the same fact `backend.rs` documents about
@@ -317,10 +318,9 @@ fn observe_codex() -> HostProvider {
 
 /// Ask `claude` about itself.
 ///
-/// PROBED IN FULL EVEN THOUGH CLAUDE IS GATED. The server's capability table refuses Anthropic
-/// today, and this still does the real work: the integration is finished and waiting on an
-/// approval, so the day that arrives the only thing that changes is one field on the server. A
-/// detector stubbed out until then would be a detector nobody had ever run.
+/// PROBED IN FULL, because Claude is permitted: the server's capability table has let Anthropic
+/// answer Chat since 2026-09-13, so `auth status --json` is what decides whether this machine's
+/// sign-in is a plan that may run a turn.
 fn observe_claude() -> HostProvider {
     let Some(exe) = locate("claude") else {
         return HostProvider::absent("anthropic");

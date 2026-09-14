@@ -8,7 +8,7 @@
 //
 // It also asserts the property that makes believing the shell safe at all: a client may report
 // anything it likes, and a gated provider still comes back refused. Nothing on this wire can
-// promote a provider Anthropic or Meta has not sanctioned.
+// promote a provider its owner has not sanctioned — Muse Spark, today.
 //
 //   npm run test:provider-auth-relay
 

@@ -78,7 +78,7 @@ console.log("\nagent runtime is independent of every one of them");
   // Chat would silently remove it from Test — which is the two credential systems leaking.
   check("all three providers run agents on an API key", runtimeApiProviders().join(",") === PROVIDER_IDS.join(","));
   check("...including the one with no subscription path", capabilityOf("meta").runtimeApiSupported);
-  check("...and the one still awaiting approval", capabilityOf("anthropic").runtimeApiSupported);
+  check("...and Claude, whose subscription path is live as well", capabilityOf("anthropic").runtimeApiSupported);
 }
 
 console.log("\nan approval carries a complete mechanism, and it is delegation");

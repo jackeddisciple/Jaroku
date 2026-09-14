@@ -124,8 +124,8 @@ export function planInvocation(provider: ProviderId, req: TurnRequest): Invocati
   }
 
   if (provider === "anthropic") {
-    // Unreachable while Claude is gated — rule 1 returned above. Written and tested anyway, because
-    // "production-ready underneath the gate" means the day approval lands nothing here is new.
+    // Reached: Claude has been permitted since 2026-09-13 (see capability.ts), so rule 1 lets it
+    // through and this branch builds a real command.
     const argv = ["claude", "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"];
     if (req.model) argv.push("--model", req.model);
     // Claude takes its level as a slash command inside the prompt, not as a flag. Prepended rather

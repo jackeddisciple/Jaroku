@@ -106,11 +106,11 @@ console.log("\neffort is clamped to what each CLI accepts, and the clamp is repo
   }
 }
 
-console.log("\nClaude's command is finished and waiting, not a stub");
+console.log("\nClaude's recorded serve mode is the documented programmatic one");
 {
-  // Unreachable through `planInvocation` while gated, so the branch is reached the way it will be
-  // reached on the day approval lands: by asking what it would build. A path that only gets written
-  // when the gate opens is a path nobody has ever run.
+  // Claude is permitted, so `planInvocation` builds its command in the blocks above. This reads the
+  // mechanism the capability table records for it — what the row names, and what must never carry
+  // the flag that switches billing.
   const argv = capabilityOf("anthropic").mechanism!.serve.argv;
   check("it uses -p, the documented programmatic mode", argv.includes("-p"));
   check("...streaming, so a long answer is not a wait", argv.includes("stream-json"));

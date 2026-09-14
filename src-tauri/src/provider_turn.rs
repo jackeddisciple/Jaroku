@@ -96,9 +96,9 @@ fn valid_model(v: &str) -> bool {
 /// Build the command for one provider. The whole of what may ever be executed here.
 ///
 /// Returns `None` for a provider this shell will not run — which is every provider except the two
-/// with an official local mechanism. Muse Spark has none and so has no branch, and a gated Claude
-/// is refused by the SERVER before a turn is ever requested; this function still builds its command
-/// because the integration is finished and waiting on an approval, not on code.
+/// with an official local mechanism. Muse Spark has none and so has no branch. Whether a provider
+/// may answer Chat at all is the SERVER's capability table's decision (both of these may, since
+/// 2026-09-13); this function decides only what runs on this machine once one does.
 pub fn build_argv(provider: &str, prompt: &str, model: Option<&str>, effort: Option<&str>) -> Option<Vec<String>> {
     let s = |x: &str| x.to_string();
     let effort = effort.filter(|e| valid_effort(e));

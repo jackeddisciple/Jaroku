@@ -104,9 +104,10 @@ export interface ReasoningCapability {
  *   requiresProviderApproval    is the gap between those two a business step
  *   runtimeApiSupported         may an agent run on this provider with the user's own API key
  *
- * Claude is the case that proves they are different: supported, not available, approval pending,
- * and fully usable for agent runtime. A single `available` flag would lose three of those facts,
- * and the product would have nothing true to render.
+ * Claude was the case that proved they are different — until 2026-09-13 it was supported, not
+ * available, approval pending, and fully usable for agent runtime. A single `available` flag would
+ * have lost three of those facts, and the product would have had nothing true to render. Muse Spark
+ * keeps the distinction live today: no mechanism at all, and a first-class runtime provider.
  */
 export interface ProviderCapability {
   readonly id: ProviderId;
@@ -300,8 +301,8 @@ export function subscriptionAvailable(id: ProviderId): boolean {
 /**
  * The mechanism for a provider that has one, or null.
  *
- * PRESENT EVEN WHILE GATED, which is deliberate: Claude's integration is finished and this is what
- * it is built from. Nothing may USE it while `subscriptionChatAvailable` is false — that is
+ * PRESENT EVEN WHILE GATED, which is deliberate: a finished integration waiting on an approval is
+ * still built from this. Nothing may USE it while `subscriptionChatAvailable` is false — that is
  * `subscriptionAvailable`'s job, and `status.ts` checks it first.
  */
 export function localAgentFor(id: ProviderId): LocalAgentMechanism | null {

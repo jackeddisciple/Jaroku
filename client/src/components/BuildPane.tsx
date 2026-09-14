@@ -1089,7 +1089,7 @@ function ModelSection({
    *
    * A FUNCTION RATHER THAN A STRING, because the two sections are blocked for different reasons and
    * the reason is the whole value of showing a disabled row. Test says "no API key in this
-   * workspace"; Chat says "Anthropic has not approved this yet", or "run `codex login`", or "that
+   * workspace"; Chat says "Meta documents no third-party path", or "run `codex login`", or "that
    * sign-in is an API key, not a plan". A shared message would be wrong in most of those.
    */
   blockedReason?: (provider: string) => string;

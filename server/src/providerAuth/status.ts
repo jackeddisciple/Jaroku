@@ -8,11 +8,12 @@
 // the machine where the user's credential lives.
 //
 // THE ORDER OF THE TWO INPUTS IS LOAD-BEARING. Permission is checked FIRST and cannot be overturned
-// by observation. A user with Claude Code installed and signed in still gets `connected: false`,
-// because Anthropic has not approved this product to use it — and the shape of that bug, had it
-// gone the other way, is a product that works beautifully on the developer's laptop and quietly
-// violates a provider's terms for every user who happens to have the right CLI installed. Hence
-// `gatedEvenWhenPresent` below, which exists to be asserted rather than to be read.
+// by observation. A machine reporting Muse Spark installed and signed in still gets `connected:
+// false`, because Meta documents no way for a third-party product to use that sign-in — and the
+// shape of that bug, had it gone the other way, is a product that works beautifully on the
+// developer's laptop and quietly violates a provider's terms for every user who happens to have the
+// right CLI installed. Hence `gatedEvenWhenPresent` below, which exists to be asserted rather than to
+// be read.
 //
 // WHAT A HOST OBSERVATION IS NOT. It is not a credential and never carries one. `signedIn` is a
 // boolean the provider's own CLI reported about itself; `account` is a display string that CLI
@@ -61,7 +62,10 @@ export interface SubscriptionStatus {
   readonly planLabel: string;
   /** May Chat use this provider's subscription TODAY. The client renders a gated row, not a hole. */
   readonly available: boolean;
-  /** Does an official mechanism exist at all. True for Claude while `available` is false. */
+  /**
+   * Does an official mechanism exist at all. True even while `available` is false for a provider
+   * awaiting approval — none is, today; Claude was until 2026-09-13.
+   */
   readonly supported: boolean;
   /** Is the gap between the two a provider approval we do not hold. */
   readonly requiresApproval: boolean;
@@ -116,10 +120,11 @@ export function gatedEvenWhenPresent(id: ProviderId, host: HostObservation | und
 /** One row. `observations` is keyed by provider; a missing entry means nothing has reported. */
 export function statusFor(id: ProviderId, host: HostObservation | undefined): SubscriptionStatus {
   const cap = capabilityOf(id);
-  // THE MECHANISM IS SHOWN EVEN WHILE GATED. Claude's integration is finished and sitting under a
-  // flag, and a row that names the binary and the sign-in command tells a user something true about
-  // what is waiting for them. What it must never do is let that row be USED — which the line below
-  // is responsible for, and which no field here can reach around.
+  // THE MECHANISM IS SHOWN EVEN WHILE GATED. A provider whose integration is finished and waiting on
+  // an approval — Claude, until 2026-09-13 — still gets a row that names the binary and the sign-in
+  // command, which tells a user something true about what is waiting for them. What it must never do
+  // is let that row be USED — which the line below is responsible for, and which no field here can
+  // reach around.
   const mechanism = cap.mechanism;
 
   // PERMISSION FIRST. `connected` can only ever narrow from here — there is no branch below that
@@ -158,10 +163,10 @@ export function statusFor(id: ProviderId, host: HostObservation | undefined): Su
 /**
  * Every row, in a stable order.
  *
- * GATED PROVIDERS ARE INCLUDED. Hiding them would answer the user's question ("can I use my Claude
- * subscription?") with silence, and silence gets read as "not built yet" rather than as "Anthropic
- * does not permit it, here is the page, here is how that changes". A row that explains itself is
- * the difference between a missing feature and an informed decision.
+ * GATED PROVIDERS ARE INCLUDED. Hiding them would answer the user's question ("can I use my Muse
+ * subscription?") with silence, and silence gets read as "not built yet" rather than as "Meta
+ * documents no way to do this, here is the page". A row that explains itself is the difference
+ * between a missing feature and an informed decision.
  */
 export function subscriptionStatuses(
   ids: readonly ProviderId[],

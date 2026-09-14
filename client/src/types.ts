@@ -670,7 +670,10 @@ export interface SubscriptionStatus {
   planLabel: string;
   /** May Chat use this provider's subscription today. */
   available: boolean;
-  /** Does an official mechanism exist at all — true for Claude while `available` is false. */
+  /**
+   * Does an official mechanism exist at all — true even while `available` is false for a provider
+   * awaiting approval. None is, today; Claude was until 2026-09-13.
+   */
   supported: boolean;
   /** Is the gap between those two a provider approval. */
   requiresApproval: boolean;
