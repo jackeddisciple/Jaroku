@@ -1663,6 +1663,7 @@ function runSubscriptionTurn(run: Extract<ServerMessage, { channel: "reply"; typ
     prompt: run.prompt,
     model: run.model,
     effort: run.effort,
+    system: run.system,
     onSettle: (outcome) => send({
       cmd: "recordChatTurn",
       runId: run.runId,

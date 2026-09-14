@@ -182,7 +182,7 @@ import {
   alreadyWarned, chatBudgetVerdict, type ChatBudgetVerdict,
 } from "./chatBudget.ts";
 import {
-  chatContext, conversationWindow, providerOf,
+  chatContext, conversationWindow, providerOf, subscriptionPrompt,
   CHAT_MODEL, CHAT_PROVIDER, CHAT_MAX_TOKENS, TRUNCATION_NOTICE,
   type ChatGrounding, type ItemForWindow,
 } from "./chat.ts";
@@ -13722,7 +13722,7 @@ async function chatWithJaroku(
     // of which a subscription turn has. It is handed to the app that asked, which keeps this
     // conversation's slot until it says how the answer ended. See `prepareSubscriptionTurn`.
     if (subscription) {
-      await prepareSubscriptionTurn(ctx, cmd, subscription, thread, turn, message);
+      await prepareSubscriptionTurn(ctx, cmd, subscription, thread, turn, message, agentName);
       handedOff = true;
       return;
     }
@@ -14241,6 +14241,11 @@ function chatSubscription(
  * turn held open until the app says how it ended. What it never does is resolve a key or call a
  * provider. The app answers on the CLI holding the user's sign-in.
  *
+ * A JAROKU TURN, NOT A BARE QUESTION. The CLI is given what the API path gives the model: `CHAT_SYSTEM`
+ * in place of its own system prompt, and the context block, the conversation so far and the closing
+ * rules around the question — read the same way, at send time. It used to be handed the sentence alone,
+ * so it answered as a coding assistant with no idea which agent, which run or which conversation.
+ *
  * A RUN NOBODY RECEIVED IS GIVEN UP ON AT ONCE, rather than after the timeout: the socket that asked
  * closed between asking and being answered, and nothing else is going to take the run.
  */
@@ -14251,7 +14256,15 @@ async function prepareSubscriptionTurn(
   thread: string,
   turn: string | null,
   message: string,
+  agentName: string | null,
 ): Promise<void> {
+  // §4 AND §8, READ AS THE API PATH READS THEM: the preceding turns with this one excluded, and the block
+  // read at send time — "always present, never silently stale".
+  const { history, truncated } = await chatMemory(ctx, thread, turn);
+  const context = chatContext(
+    await chatGrounding(ctx, cmd.agentId ?? null, thread, history.filter((m) => m.role === "user").length + 1, cmd.selection),
+  );
+  const closing = truncated ? `${TRUNCATION_NOTICE}\n\n${chatClosing(agentName)}` : chatClosing(agentName);
   const modelId = subscription.model ?? "";
   const settle = await openVariant(ctx, turn, modelId, subscription.provider, subscription.effort, "subscription");
   const held = subscriptionTurns.open({
@@ -14276,7 +14289,8 @@ async function prepareSubscriptionTurn(
     provider: held.provider,
     model: held.model,
     effort: held.effort?.applied ?? null,
-    prompt: message,
+    system: CHAT_SYSTEM,
+    prompt: subscriptionPrompt({ context, history, question: message, closing }),
   }, thread);
   if (delivered === 0) abandonSubscriptionTurn(held, "The app that asked for this answer closed before it could start.");
 }

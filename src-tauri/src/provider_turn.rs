@@ -228,6 +228,84 @@ fn chat_dir_in(home: &Path) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+/// The longest set of rules a turn may carry, in bytes. Jaroku's own are a few kilobytes.
+const SYSTEM_MAX: usize = 64_000;
+
+/// Put Jaroku's own rules where each CLI's own system prompt would be, just before the prompt.
+///
+/// REPLACED, NOT APPENDED. A subscription turn is a Jaroku turn: the model is told what `CHAT_SYSTEM`
+/// tells it on the API path and nothing else, and a CLI's own prompt — Claude Code's coding-agent
+/// instructions, Codex's — is thousands of tokens that every message re-paid against the plan.
+/// Measured on codex-cli 0.154.0: `model_instructions_file` replaced its instructions (9,986 input
+/// tokens down to 6,460 for one sentence), `developer_instructions` only added to them, and
+/// `base_instructions` and `experimental_instructions_file` were ignored outright.
+pub fn apply_system(argv: &mut Vec<String>, provider: &str, system: Option<&str>, instructions_file: Option<&Path>) {
+    let at = argv.len().saturating_sub(1);
+    match (provider, system, instructions_file) {
+        ("anthropic", Some(system), _) => {
+            argv.splice(at..at, ["--system-prompt".to_string(), system.to_string()]);
+        }
+        ("openai", _, Some(file)) => {
+            let value = format!("model_instructions_file={}", toml_string(&file.to_string_lossy()));
+            argv.splice(at..at, ["-c".to_string(), value]);
+        }
+        _ => {}
+    }
+}
+
+/// `s` as a TOML basic string, so a path with a quote in it stays one value on Codex's `-c`.
+fn toml_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => out.push_str(&format!("\\u{:04X}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// Jaroku's rules for one Codex turn, written where only their owner can read them.
+///
+/// A FILE BECAUSE A FILE IS WHAT CODEX REPLACES ITS OWN INSTRUCTIONS WITH — see `apply_system`. One per
+/// turn, in the private chat directory, and removed when the turn ends.
+fn write_instructions(dir: &Path, turn_id: u64, system: &str) -> Result<PathBuf, String> {
+    let path = dir.join(format!("instructions-{turn_id}.md"));
+    std::fs::write(&path, system).map_err(|e| format!("could not write {}: {e}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("could not make {} private: {e}", path.display()))?;
+    }
+    Ok(path)
+}
+
+/// The command line as the log may keep it: the flags Jaroku chose, without the prompt — the user's
+/// own words, and their conversation — and with Jaroku's rules named rather than printed.
+fn loggable(argv: &[String]) -> String {
+    let flags = argv.get(1..argv.len().saturating_sub(1)).unwrap_or(&[]);
+    let mut out: Vec<&str> = Vec::with_capacity(flags.len());
+    let mut elide = false;
+    for a in flags {
+        if elide {
+            out.push("<jaroku's rules>");
+            elide = false;
+            continue;
+        }
+        elide = a == "--system-prompt";
+        out.push(a);
+    }
+    out.join(" ")
+}
+
 /// Start a turn. Returns its id, which the page uses to match events and to cancel.
 #[tauri::command]
 pub fn provider_turn_start(
@@ -236,10 +314,16 @@ pub fn provider_turn_start(
     prompt: String,
     model: Option<String>,
     effort: Option<String>,
+    system: Option<String>,
 ) -> Result<u64, String> {
-    let Some(argv) = build_argv(&provider, &prompt, model.as_deref(), effort.as_deref()) else {
+    let Some(mut argv) = build_argv(&provider, &prompt, model.as_deref(), effort.as_deref()) else {
         return Err(format!("{provider} cannot run a turn on this machine"));
     };
+    // JAROKU'S OWN RULES, when the server sent them — bounded, because they reach a command line.
+    let system = system.filter(|s| !s.trim().is_empty());
+    if system.as_ref().is_some_and(|s| s.len() > SYSTEM_MAX) {
+        return Err("this turn's instructions are too long to run".to_string());
+    }
     // Resolved through the same search a detection pass uses, so a Finder launch with no PATH finds
     // the binary in the places these tools actually install to.
     let Some(exe) = provider_auth::locate(&argv[0]) else {
@@ -249,7 +333,12 @@ pub fn provider_turn_start(
     let dir = chat_dir()?;
 
     let turn_id = NEXT_TURN.fetch_add(1, Ordering::Relaxed);
-    let child = Command::new(&exe)
+    let instructions = match (provider.as_str(), system.as_deref()) {
+        ("openai", Some(rules)) => Some(write_instructions(&dir, turn_id, rules)?),
+        _ => None,
+    };
+    apply_system(&mut argv, &provider, system.as_deref(), instructions.as_deref());
+    let spawned = Command::new(&exe)
         .args(&argv[1..])
         // STDIN CLOSED. `codex exec` treats an open stdin as additional input and waits on it, so a
         // turn whose stdin stayed open would hang forever rather than answer.
@@ -257,17 +346,21 @@ pub fn provider_turn_start(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .current_dir(&dir)
-        .spawn()
-        .map_err(|e| format!("could not start {}: {e}", argv[0]))?;
+        .spawn();
+    let child = match spawned {
+        Ok(child) => child,
+        Err(e) => {
+            if let Some(path) = &instructions {
+                let _ = std::fs::remove_file(path);
+            }
+            return Err(format!("could not start {}: {e}", argv[0]));
+        }
+    };
 
-    // The argument vector is logged WITHOUT the prompt, which is the user's own words and has no
-    // business in a file on disk. Everything before the last element is flags we chose.
-    logs::say(format!(
-        "provider turn {turn_id}: {} {}",
-        exe.display(),
-        argv[1..argv.len().saturating_sub(1)].join(" ")
-    ));
-    run(app, turn_id, child);
+    // THE ARGUMENT VECTOR IS LOGGED WITHOUT THE PROMPT, which is the user's own words and has no
+    // business in a file on disk — see `loggable`.
+    logs::say(format!("provider turn {turn_id}: {} {}", exe.display(), loggable(&argv)));
+    run(app, turn_id, child, instructions);
     Ok(turn_id)
 }
 
@@ -293,7 +386,7 @@ fn end_error(code: Option<i32>, timed_out: bool) -> Option<String> {
 }
 
 /// Pump one child's output to the page, on its own thread, until it exits.
-fn run(app: AppHandle, turn_id: u64, mut child: Child) {
+fn run(app: AppHandle, turn_id: u64, mut child: Child, cleanup: Option<PathBuf>) {
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     RUNNING.lock().expect("running turns").push((turn_id, child));
@@ -373,6 +466,11 @@ fn run(app: AppHandle, turn_id: u64, mut child: Child) {
                 None => false,
             }
         };
+
+        // THE TURN'S RULES FILE GOES WITH IT — see `write_instructions`.
+        if let Some(path) = cleanup {
+            let _ = std::fs::remove_file(path);
+        }
 
         logs::say(format!("provider turn {turn_id} ended, exit {code:?}, {lines_seen} line(s) of output"));
         let _ = app.emit(EVENT, TurnEvent {
@@ -602,6 +700,55 @@ mod tests {
         assert_eq!(end_error(None, false), None);
         assert_eq!(end_error(Some(0), false), None);
         assert!(end_error(Some(1), false).unwrap().contains("status 1"));
+    }
+
+    #[test]
+    fn jarokus_rules_replace_each_clis_own_just_before_the_prompt() {
+        let mut claude = build_argv("anthropic", "hello", None, None).unwrap();
+        apply_system(&mut claude, "anthropic", Some("You are Jaroku."), None);
+        let at = claude.iter().position(|a| a == "--system-prompt").expect("the rules replace Claude Code's own");
+        assert_eq!(claude[at + 1], "You are Jaroku.");
+        assert!(!claude.iter().any(|a| a == "--append-system-prompt"), "{claude:?}");
+        assert_eq!(claude.last().unwrap(), "hello");
+
+        let file = Path::new("/home/some \"one\"/.jaroku/chat/instructions-7.md");
+        let mut codex = build_argv("openai", "hello", None, None).unwrap();
+        apply_system(&mut codex, "openai", Some("You are Jaroku."), Some(file));
+        let at = codex.iter().position(|a| a.starts_with("model_instructions_file=")).expect("a file replaces Codex's own");
+        assert_eq!(codex[at - 1], "-c");
+        assert_eq!(codex[at], r#"model_instructions_file="/home/some \"one\"/.jaroku/chat/instructions-7.md""#);
+        assert!(!codex.iter().any(|a| a.contains("base_instructions") || a.contains("developer_instructions")), "{codex:?}");
+        assert_eq!(codex.last().unwrap(), "hello");
+
+        // NOTHING SENT, NOTHING CHANGED.
+        let mut plain = build_argv("anthropic", "hello", None, None).unwrap();
+        let before = plain.clone();
+        apply_system(&mut plain, "anthropic", None, None);
+        assert_eq!(plain, before);
+        assert_eq!(toml_string("a\tb\u{1}"), "\"a\\tb\\u0001\"");
+    }
+
+    #[test]
+    fn a_rules_file_is_one_private_file_per_turn() {
+        let home = Scratch::new("rules");
+        let path = write_instructions(&home.0, 42, "You are Jaroku.").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "You are Jaroku.");
+        assert!(path.file_name().unwrap().to_string_lossy().contains("42"), "{path:?}");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+    }
+
+    #[test]
+    fn the_log_keeps_the_flags_and_neither_the_rules_nor_the_words() {
+        let mut argv = build_argv("anthropic", "my private question", None, None).unwrap();
+        apply_system(&mut argv, "anthropic", Some("You are Jaroku, with a long set of rules."), None);
+        let line = loggable(&argv);
+        assert!(line.contains("--system-prompt"), "{line}");
+        assert!(!line.contains("long set of rules"), "{line}");
+        assert!(!line.contains("my private question"), "{line}");
     }
 
     #[test]

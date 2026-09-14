@@ -20,7 +20,7 @@
 
 import { readFileSync } from "node:fs";
 
-import { CHAT_MAX_TOKENS, CHAT_MODEL, chatContext, type ChatGrounding } from "./chat.ts";
+import { CHAT_MAX_TOKENS, CHAT_MODEL, chatContext, subscriptionPrompt, type ChatGrounding } from "./chat.ts";
 import { CHAT_SYSTEM, chatClosing } from "./prompt.ts";
 import { allPrices, capabilityFor, costFor, isPriced, priceFor } from "./pricing.ts";
 import { EXPLAIN_MODEL, usageFromPartial } from "./explainer.ts";
@@ -376,6 +376,31 @@ console.log("\n§16 — an unrecognised run status names itself");
     /still running/.test(chatContext({ ...base, lastRun: { ...run, status: "running" } })));
   check("completed still reads as completed",
     /completed/.test(chatContext({ ...base, lastRun: { ...run, status: "completed" } })));
+}
+
+console.log("\na subscription turn's prompt carries what the API path sends");
+{
+  // A CLI TAKES ONE PROMPT, and it used to be handed the sentence alone — no context block, no
+  // conversation and none of the rules, so it answered as a coding assistant with no idea which agent,
+  // which run or which conversation it was in.
+  const closing = chatClosing("weather_agent");
+  const first = subscriptionPrompt({ context: "agent:       weather_agent", history: [], question: "why did it fail?", closing });
+  check("the context block leads", first.startsWith("Context:\nagent:       weather_agent\n\n"), first);
+  check("...then the question, named as the developer's", first.includes("Developer's question: why did it fail?"), first);
+  check("...and the closing rules come last", first.endsWith(closing), first);
+  check("...with no conversation section when there is none", !first.includes("Earlier in this conversation"), first);
+
+  const later = subscriptionPrompt({
+    context: "agent:       weather_agent",
+    history: [{ role: "user", content: "what does it do?" }, { role: "assistant", content: "It checks the weather." }],
+    question: "and the last run?",
+    closing,
+  });
+  const at = (s: string): number => later.indexOf(s);
+  check("the conversation so far sits between the context and the question",
+    at("Context:") < at("Earlier in this conversation") && at("Earlier in this conversation") < at("Developer's question: and the last run?"),
+    later);
+  check("...in the order it was said", at("Developer: what does it do?") >= 0 && at("Developer: what does it do?") < at("Jaroku (you): It checks the weather."), later);
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

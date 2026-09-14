@@ -110,6 +110,10 @@ console.log("\nthe chat route hands a subscription turn to the app, never to an 
   check("the variant is opened on the subscription route", /openVariant\([^)]*"subscription"\)/.test(prepare));
   check("...the run goes to the socket that asked", /relay\.sendReply\(ctx, ctx\.requestId, \{\s*type: "run"/.test(prepare));
   check("...and nothing in it reaches for a key or a provider call", !/platformKeyFor|streamExplain|meterPlatformCall/.test(prepare));
+  // A JAROKU TURN: it used to be handed the sentence alone.
+  check("...but the rules, the context block and the conversation, read as the API path reads them",
+    /chatMemory\(ctx, thread, turn\)/.test(prepare) && /chatGrounding\(/.test(prepare) && /system: CHAT_SYSTEM/.test(prepare)
+      && /prompt: subscriptionPrompt\(\{ context, history, question: message, closing \}\)/.test(prepare));
 
   const settle = bodyOf("async function settleSubscriptionTurn");
   check("a settle is taken only by the socket it came from",

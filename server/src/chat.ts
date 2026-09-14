@@ -463,6 +463,33 @@ export function conversationWindow(
 }
 
 /**
+ * A chat turn as the one message a provider's CLI takes — the API path's messages, flattened.
+ *
+ * THE SAME MATERIAL IN THE SAME ORDER. The API path sends the context block as its own turn, then the
+ * conversation, then the question with the closing rules after it; a CLI takes a single prompt, so this
+ * writes those, in that order, into one. The stable part comes first and the question last, which is
+ * what a provider's prompt cache can key on from one message to the next.
+ *
+ * THE MODEL'S OWN EARLIER ANSWERS ARE LABELLED AS ITS OWN. Handed back unlabelled inside one message,
+ * they would read as something the developer said about the assistant.
+ */
+export function subscriptionPrompt(p: {
+  context: string;
+  history: readonly { role: "user" | "assistant"; content: string }[];
+  question: string;
+  closing: string;
+  askedBy?: string;
+}): string {
+  const who = p.askedBy ?? "Developer";
+  const earlier = p.history.length === 0
+    ? ""
+    : `Earlier in this conversation:\n\n${p.history
+      .map((m) => `${m.role === "user" ? who : "Jaroku (you)"}: ${m.content}`)
+      .join("\n\n")}\n\n`;
+  return `Context:\n${p.context}\n\n${earlier}${who}'s question: ${p.question}\n\n${p.closing}`;
+}
+
+/**
  * What the model is told when the window was cut — §4.2's notice.
  *
  * IT NAMES NO NUMBER. "Earlier turns are not shown" is actionable; "12 earlier turns are not shown"

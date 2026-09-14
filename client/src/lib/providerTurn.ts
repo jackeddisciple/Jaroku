@@ -223,6 +223,8 @@ export function runLocalTurn(opts: {
   prompt: string;
   model: string | null;
   effort: string | null;
+  /** Jaroku's own rules, which the CLI answers by in place of its own — see `apply_system` in the shell. */
+  system: string | null;
   /** How the turn ended, sent once. Answers whether it could be sent. */
   onSettle: (outcome: LocalTurnOutcome) => boolean;
 }): LocalTurn {
@@ -331,6 +333,7 @@ export function runLocalTurn(opts: {
         prompt: opts.prompt,
         model: opts.model,
         effort: opts.effort,
+        system: opts.system,
       })) as number;
       // A STOP PRESSED WHILE THE SHELL WAS STARTING had no id to name, so it is carried out now —
       // otherwise the process would run on, spending the plan with nobody left to stop it.

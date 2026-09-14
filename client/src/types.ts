@@ -2092,7 +2092,9 @@ export type ServerMessage =
   // announced the turn; `runId` is what the answer is settled with. See `runSubscriptionTurn`.
   | (InThread & {
       channel: "reply"; type: "run"; agentId: string; runId: string; turnId?: string;
-      provider: string; model: string | null; effort: string | null; prompt: string;
+      // `system` is Jaroku's own rules, in place of the CLI's; `prompt` is the context block, the
+      // conversation so far, the question and the closing rules, as the one message a CLI takes.
+      provider: string; model: string | null; effort: string | null; system: string; prompt: string;
     })
   // STOP THE RUN — to the app answering it, which holds the process spending the plan.
   | (InThread & { channel: "reply"; type: "stop"; agentId: string; runId: string })

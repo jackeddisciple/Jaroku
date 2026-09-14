@@ -1960,7 +1960,11 @@ export type ReplyEvent =
    */
   | {
       type: "run"; agentId: string; runId: string; turnId?: string;
-      provider: string; model: string | null; effort: string | null; prompt: string;
+      provider: string; model: string | null; effort: string | null;
+      /** Jaroku's own rules, which the CLI answers by in place of its own. */
+      system: string;
+      /** The context block, the conversation so far, the question and the closing rules, as one message. */
+      prompt: string;
     }
   /**
    * STOP THE RUN — sent to the app answering it, because that app holds the process spending the plan.

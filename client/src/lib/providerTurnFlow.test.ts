@@ -145,7 +145,7 @@ const CLAUDE_STREAM = [
   '{"type":"result","total_cost_usd":0.0683845,"usage":{"input_tokens":2,"output_tokens":10}}',
 ];
 
-const base = { threadId: "th-1", model: null, effort: null, agentId: "agent_x" };
+const base = { threadId: "th-1", model: null, effort: null, system: "You are Jaroku.", agentId: "agent_x" };
 
 console.log("\na Codex turn streams into its thread and is settled once");
 {
@@ -172,6 +172,8 @@ console.log("\na Codex turn streams into its thread and is settled once");
   // NOR A DIRECTORY. The page named one from a config field the shell never injected, so every shipped
   // turn ran in /tmp; where a turn runs is the shell's decision alone.
   check("...and was not told where to run it", !("cwd" in (host.startedWith ?? {})), JSON.stringify(host.startedWith));
+  // JAROKU'S RULES TRAVEL WITH THE RUN, for the shell to put in place of the CLI's own.
+  check("...but was given Jaroku's rules to answer by", host.startedWith?.system === "You are Jaroku.", JSON.stringify(host.startedWith));
 }
 
 console.log("\na Claude turn streams in order and does not double");
