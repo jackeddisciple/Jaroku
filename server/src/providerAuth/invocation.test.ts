@@ -85,6 +85,20 @@ console.log("\nCodex is invoked exactly as it was verified to work");
   check("...reporting the level actually applied", plan.appliedEffort === "high" && plan.effortValue === "high");
 }
 
+console.log("\nClaude takes its level as a flag, and the prompt is exactly the message");
+{
+  // THE FAILURE THIS REPLACES: `/effort high\n<message>` made Claude Code parse the entire message as
+  // the slash command's argument, never call the model, and report "Invalid argument" as a success.
+  for (const effort of EFFORT_LEVELS) {
+    const plan = planInvocation("anthropic", req({ effort })) as Invocation;
+    const at = plan.argv.indexOf("--effort");
+    check(`${effort}: --effort ${plan.effortValue}`, at > 0 && plan.argv[at + 1] === plan.effortValue, plan.argv.join(" "));
+    check(`${effort}: ...and the prompt is the message, untouched`,
+      plan.argv.at(-1) === "what does this agent do?", String(plan.argv.at(-1)));
+    check(`${effort}: ...with no slash command anywhere`, !plan.argv.some((a) => a.includes("/effort")), plan.argv.join(" "));
+  }
+}
+
 console.log("\neffort is clamped to what each CLI accepts, and the clamp is reported");
 {
   // Codex stops at xhigh. Sending "max" would be a value the CLI rejects, failing the whole turn.

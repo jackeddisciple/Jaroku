@@ -135,7 +135,7 @@ console.log("\nthe verdicts are the ones verified on 2026-09-13");
 console.log("\neffort maps to each provider's real parameter, never a shared invention");
 {
   // The three do not agree, and the table must not pretend they do.
-  check("Claude's parameter is its slash command", capabilityOf("anthropic").reasoning?.param === "/effort");
+  check("Claude's parameter is its --effort flag", capabilityOf("anthropic").reasoning?.param === "--effort");
   check("Codex's parameter is model_reasoning_effort", capabilityOf("openai").reasoning?.param === "model_reasoning_effort");
   check("Muse Spark has no reasoning control", capabilityOf("meta").reasoning === null);
   check("...so it offers no levels", reasoningLevels("meta").length === 0);

@@ -76,9 +76,9 @@ export interface LocalAgentMechanism {
  * How Jaroku's five effort levels reach ONE provider's real parameter.
  *
  * NOT ASSUMED TO BE THE SAME SHAPE ANYWHERE. Codex takes a named level on a config key; Claude
- * takes a slash-command argument; Muse Spark takes nothing at all. A single "effort" value sent to
- * all three would be a parameter two of them reject and one ignores, so what is stored here is the
- * PARAMETER'S NAME and a table from our level to that provider's own vocabulary.
+ * takes it as its own `--effort` flag; Muse Spark takes nothing at all. A single "effort" value
+ * sent to all three would be a parameter two of them reject and one ignores, so what is stored here
+ * is the PARAMETER'S NAME and a table from our level to that provider's own vocabulary.
  *
  * A level that maps to a word below its own is a CLAMP, and the clamp is visible: `mapEffort`
  * reports which level was really applied, so §3.2's "never report an effort that wasn't used"
@@ -214,10 +214,12 @@ export const PROVIDER_CAPABILITY: Readonly<Record<ProviderId, ProviderCapability
     reason: null,
     citation: "https://code.claude.com/docs/en/legal-and-compliance",
     unblock: null,
-    // `/effort <level>` in the prompt string, with the same five names Jaroku uses. One-to-one
+    // `--effort <level>` on the command line, with the same five names Jaroku uses. One-to-one
     // because both were written from the product owner's level names, not because it was assumed.
+    // A FLAG AND NEVER A PROMPT PREFIX: `/effort` in the prompt is a slash command that swallows the
+    // whole message as its argument, so the model is never asked anything.
     reasoning: {
-      param: "/effort",
+      param: "--effort",
       levels: ["low", "medium", "high", "xhigh", "max"],
       map: { low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" },
     },

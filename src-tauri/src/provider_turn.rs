@@ -130,12 +130,16 @@ pub fn build_argv(provider: &str, prompt: &str, model: Option<&str>, effort: Opt
                 argv.push(s("--model"));
                 argv.push(s(m));
             }
-            // Claude takes its level as a slash command inside the prompt. Prepended so the user's
-            // own text can never be parsed as the level's argument.
-            argv.push(match effort {
-                Some(e) => format!("/effort {e}\n{prompt}"),
-                None => s(prompt),
-            });
+            // THE LEVEL IS A FLAG, NEVER A PROMPT PREFIX. `claude --effort <level>` takes the same five
+            // names. It used to ride inside the prompt as `/effort <level>\n<prompt>`, and Claude Code
+            // reads a prompt opening with `/` as a slash command whose argument is EVERYTHING after it:
+            // the model was never called, and "Invalid argument: high\n<the message>" came back as a
+            // successful answer on every Claude turn.
+            if let Some(e) = effort {
+                argv.push(s("--effort"));
+                argv.push(s(e));
+            }
+            argv.push(s(prompt));
             Some(argv)
         }
         _ => None,
@@ -334,11 +338,19 @@ mod tests {
     }
 
     #[test]
-    fn claude_carries_its_effort_inside_the_prompt() {
-        // Claude takes `/effort` as a slash command rather than a flag, and it is PREPENDED so the
-        // user's own text cannot be parsed as the level's argument.
-        let argv = build_argv("anthropic", "explain this", None, Some("xhigh")).unwrap();
-        assert!(argv.last().unwrap().starts_with("/effort xhigh\n"));
-        assert!(argv.last().unwrap().ends_with("explain this"));
+    fn claude_carries_its_effort_as_a_flag_and_the_prompt_untouched() {
+        // THE FAILURE THIS REPLACES. `/effort xhigh\nexplain this` made Claude Code parse the whole
+        // message as the slash command's argument: the model was never called and the error text was
+        // rendered as the answer, on every Claude turn at every level.
+        for level in ["low", "medium", "high", "xhigh", "max"] {
+            let argv = build_argv("anthropic", "explain this", None, Some(level)).unwrap();
+            let at = argv.iter().position(|a| a == "--effort").expect("--effort is its own flag");
+            assert_eq!(argv[at + 1], level);
+            assert_eq!(argv.last().unwrap(), "explain this", "{argv:?}");
+            assert!(!argv.iter().any(|a| a.contains("/effort")), "{argv:?}");
+        }
+        // And an invented level is dropped rather than passed through, as it is for Codex.
+        let argv = build_argv("anthropic", "hi", None, Some("turbo")).unwrap();
+        assert!(!argv.contains(&"--effort".to_string()), "{argv:?}");
     }
 }

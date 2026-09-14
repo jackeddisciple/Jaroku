@@ -19,7 +19,7 @@
 //      using their plan. Nothing here can emit it, and a test asserts that for every provider and
 //      every level rather than for the one case somebody remembered.
 //
-// EFFORT IS TRANSLATED, NEVER PASSED THROUGH. Claude takes `/effort <level>` inside the prompt;
+// EFFORT IS TRANSLATED, NEVER PASSED THROUGH. Claude takes `--effort <level>` as its own flag;
 // Codex takes `-c model_reasoning_effort=<level>`; Muse Spark takes nothing and has no path here at
 // all. `mapEffort` owns the vocabulary and the clamp, and this module owns where the result is
 // placed on the command line — which is a different question for each of them.
@@ -128,10 +128,12 @@ export function planInvocation(provider: ProviderId, req: TurnRequest): Invocati
     // through and this branch builds a real command.
     const argv = ["claude", "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"];
     if (req.model) argv.push("--model", req.model);
-    // Claude takes its level as a slash command inside the prompt, not as a flag. Prepended rather
-    // than appended so the user's own text cannot end up parsed as the level's argument.
-    const prompt = value ? `/effort ${value}\n${req.prompt}` : req.prompt;
-    argv.push(prompt);
+    // THE LEVEL IS A FLAG, `--effort <level>`, with the same five names — NEVER a `/effort` line on
+    // the prompt. Claude Code reads a prompt opening with `/` as a slash command and takes the whole
+    // rest of the message as its argument, so that form never reached the model: it answered
+    // "Invalid argument: high\n<the message>" as a successful turn.
+    if (value) argv.push("--effort", value);
+    argv.push(req.prompt);
     return {
       provider, argv, stdin: null, protocol: "stream-json/stdout",
       appliedEffort: applied, effortValue: value,
