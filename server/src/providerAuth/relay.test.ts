@@ -25,6 +25,9 @@ const check = (ok: boolean, msg: string, detail = ""): void => {
   else { failures++; console.log(`  FAIL ${msg}${detail ? ` — ${detail}` : ""}`); }
 };
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+const waitFor = async (cond: () => boolean): Promise<void> => {
+  for (let i = 0; i < 60 && !cond(); i++) await sleep(50);
+};
 
 const db = await openTestSqlite();
 const store = new TraceStore(db);
@@ -32,9 +35,12 @@ const WS = "11111111-1111-4111-8111-111111111111";
 const ctx: TenantContext = systemContextFor(WS, newRequestId());
 
 const PORT = 4519;
+/** What the relay handed on to the app, so a refusal can be told apart from a forward. */
+const forwarded: any[] = [];
 const relay = new WsRelay({
   port: PORT,
   store,
+  onCommand: (cmd: any) => { forwarded.push(cmd); },
   clientHtmlPath: "/dev/null",
   contextFor: () => ({ ...ctx, role: "owner" as const }),
   listProviders: () => ({ providers: [], ownKeyForPlatform: false, models: [] }),
@@ -192,6 +198,49 @@ console.log("\nrows carry no credential, because there is none to carry");
     "...and a machine report carries exactly the facts it should");
   // The path is named so the product can tell somebody where their sign-in lives; it is never read.
   check(rowFor(m, "openai").credentialPath === "~/.codex/auth.json", "...though the row says where the provider keeps it");
+}
+
+console.log("\na subscription turn is taken only on a plan this machine reported");
+{
+  // THE RELAY IS WHERE THE SOCKET IS, so it is the one place that can ask whether the machine at the
+  // other end said this plan was signed in. Past it, a chat naming a plan — or a record filed under
+  // the `subscription` route — is only the client's word.
+  const c = await connect();
+  await c.want(isSubs, "c's opening subscriptions");
+  const chat = { cmd: "chat", message: "hi", subscription: { provider: "openai", model: null, effort: null } };
+  forwarded.length = 0;
+  c.send(chat);
+  const refused = await c.want((m) => m?.channel === "reply" && m?.type === "error", "a refusal for a plan nobody reported");
+  check(!forwarded.some((f) => f.cmd === "chat"), "a chat on a plan this socket never reported is not forwarded");
+  check(typeof refused.message === "string" && refused.message.length > 0, "...and the socket is told why", String(refused.message));
+
+  c.inbox.length = 0;
+  c.send({ cmd: "reportProviderHost", hosts: [{ provider: "openai", installed: true, version: "0.9.1", signedIn: true, account: null }] });
+  await c.want((m) => isSubs(m) && rowFor(m, "openai").connected === true, "c's rows once openai is signed in");
+  c.send(chat);
+  await waitFor(() => forwarded.some((f) => f.cmd === "chat"));
+  check(forwarded.some((f) => f.cmd === "chat" && f.subscription?.provider === "openai"), "once the machine reports it signed in, the chat goes through");
+  // AND ONE PLAN THIS MACHINE REPORTED IS NOT EVERY PLAN.
+  forwarded.length = 0;
+  c.send({ ...chat, subscription: { provider: "anthropic", model: null, effort: null } });
+  await c.want((m) => m?.channel === "reply" && m?.type === "error", "a refusal for the plan it did not report");
+  check(!forwarded.some((f) => f.cmd === "chat"), "...while one on a plan it never reported still is not");
+
+  // THE OLDER RECORD PATH filed a turn under the `subscription` route on the client's word alone.
+  forwarded.length = 0;
+  c.send({ cmd: "recordChatTurn", question: "q", answer: "a", provider: "anthropic" });
+  c.send({ cmd: "recordChatTurn", question: "q", answer: "a", provider: "openai" });
+  await waitFor(() => forwarded.some((f) => f.cmd === "recordChatTurn"));
+  await sleep(150);
+  const records = forwarded.filter((f) => f.cmd === "recordChatTurn");
+  check(records.length === 1 && records[0].provider === "openai", "a record is kept only for the plan this machine reported",
+    JSON.stringify(records));
+  // A SETTLE NAMES A RUN, and the server hands a run to no socket but the one it was handed to.
+  forwarded.length = 0;
+  c.send({ cmd: "recordChatTurn", runId: "run-1", answer: "a", provider: "anthropic" });
+  await waitFor(() => forwarded.some((f) => f.cmd === "recordChatTurn"));
+  check(forwarded.some((f) => f.cmd === "recordChatTurn" && f.runId === "run-1"), "a settle is forwarded for the registry to judge");
+  c.close();
 }
 
 a.close();

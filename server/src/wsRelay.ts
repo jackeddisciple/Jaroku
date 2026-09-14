@@ -4190,6 +4190,21 @@ export class WsRelay {
   private sendSubscriptions(ws: WebSocket): void {
     this.sendTo(ws, { channel: "providers", type: "subscriptions", subscriptions: this.subscriptionsFor(ws) });
   }
+
+  /**
+   * Why this socket may not start or record a subscription turn on `provider` — or null when it may.
+   *
+   * ITS OWN MACHINE'S REPORT DECIDES IT: the rows `subscriptionsFor` derives from what the shell at the
+   * other end of THIS connection said, permission first. A client naming a plan its machine never
+   * reported signed in is naming one nothing verified, and a turn filed under the `subscription` route
+   * would carry a label that was only ever the client's word.
+   */
+  private subscriptionRefusal(ws: WebSocket, provider: string): string | null {
+    const row = this.subscriptionsFor(ws).find((r) => r.provider === provider);
+    if (!row) return "That provider can't answer Jaroku Chat on a subscription.";
+    if (row.connected) return null;
+    return row.host?.note ?? row.reason ?? `Chat on ${row.label} needs your ${row.planLabel} signed in on this machine.`;
+  }
   /** Sockets already told their token is nearly out, so they are told once and not per tick. */
   private warned = new WeakSet<WebSocket>();
   private revalidator?: ReturnType<typeof setInterval>;
@@ -4714,7 +4729,11 @@ export class WsRelay {
           // is required and the agent is not, which is the whole difference between this guard and
           // the two above it.
           } else if (msg.cmd === "chat" && typeof msg.message === "string" && validSubscription(msg.subscription)) {
-            void withContext((ctx) => this.onCommand?.(msg, ctx));
+            // A SUBSCRIPTION TURN ONLY ON A PLAN THIS MACHINE REPORTED — see `subscriptionRefusal`.
+            // Refused to this socket alone and before anything is written, because nothing started.
+            const refusal = msg.subscription ? this.subscriptionRefusal(ws, msg.subscription.provider) : null;
+            if (refusal) this.sendTo(ws, { channel: "reply", type: "error", agentId: msg.agentId ?? "", message: refusal });
+            else void withContext((ctx) => this.onCommand?.(msg, ctx));
             // THE SELECTION IS NOT SHAPE-CHECKED HERE, deliberately: it is read by exactly one
             // function, which reads three fields off it and renders them into a bounded line, and a
             // malformed one produces a malformed line rather than reaching anything. The fields
@@ -4730,7 +4749,13 @@ export class WsRelay {
             // Forwarded like `chat` beside it: the app owns the thread store and is the only thing
             // that can write a turn into it. A settle names the run the server prepared, and an
             // older record names the question it answered — one or the other, never neither.
-            void withContext((ctx) => this.onCommand?.(msg, ctx));
+            //
+            // AN OLDER RECORD IS KEPT ONLY FOR A PLAN THIS MACHINE REPORTED, because it files a turn
+            // under the `subscription` route on nothing but the client's word. A settle needs no such
+            // check: the run it names was handed to this socket, and the server gives it to no other.
+            if (typeof msg.runId === "string" || !this.subscriptionRefusal(ws, msg.provider)) {
+              void withContext((ctx) => this.onCommand?.(msg, ctx));
+            }
           } else if (msg.cmd === "stopChat") {
             void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "selectVariant" && typeof msg.turnId === "string" && typeof msg.ordinal === "number") {
