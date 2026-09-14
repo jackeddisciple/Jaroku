@@ -7,7 +7,10 @@
 //
 //   npm run test:host-providers
 
-import { hasHost, readHostProviders } from "./hostProviders.ts";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+import { RETURN_GAP_MS, hasHost, readHostProviders, reprobeOnReturn } from "./hostProviders.ts";
 
 let fail = 0;
 const check = (name: string, ok: boolean, detail = ""): void => {
@@ -66,6 +69,45 @@ console.log("\na host that errors, or is not there, is an empty answer");
   delete (globalThis as Record<string, unknown>).__TAURI__;
   check("no host at all is an empty list", (await readHostProviders()).length === 0);
   check("...and says there is none", hasHost() === false);
+}
+
+// --- coming back from the terminal --------------------------------------------------------------
+
+console.log("\na return to the window asks again, at most once per gap");
+{
+  let t = 10_000;
+  let asks = 0;
+  const onReturn = reprobeOnReturn(() => { asks++; }, 3000, () => t);
+  t += 500; onReturn();
+  check("a return in the same moment as the connect report asks nothing new", asks === 0, String(asks));
+  t += 2500; onReturn();
+  check("a return once the gap has passed asks", asks === 1, String(asks));
+  onReturn();
+  check("...and the focus and visibility events one return fires are one ask", asks === 1, String(asks));
+  t += 1000; onReturn(); t += 1000; onReturn();
+  check("flicking between windows inside the gap asks nothing more", asks === 1, String(asks));
+  t += 1000; onReturn();
+  check("the first return after it asks again", asks === 2, String(asks));
+  // AT LEAST THE SHELL'S OWN 1.5s CACHE, or a return would be answered from before the sign-in.
+  check("the gap outlasts the shell's cache and nobody signs in inside it", RETURN_GAP_MS >= 1500 && RETURN_GAP_MS <= 5000,
+    String(RETURN_GAP_MS));
+}
+
+console.log("\nwho asks: the socket on a return, and the model menu's sign-in panel");
+{
+  const read = (rel: string): string => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
+  const socket = read("./socket.ts");
+  const pane = read("../components/BuildPane.tsx");
+  check("the first socket to open starts watching for a return",
+    /void reportHostProviders\(\);[\s\S]{0,300}?watchForReturn\(\);/.test(socket));
+  const watch = socket.match(/function watchForReturn\(\): void \{[\s\S]*?\n\}/)?.[0] ?? "";
+  check("...only where there is a shell to ask, and once", /watchingReturn \|\| !hasHost\(\)/.test(watch));
+  check("...on focus", /window\.addEventListener\("focus", onReturn\)/.test(watch));
+  check("...and on becoming visible", /"visibilitychange"[\s\S]{0,120}?visibilityState !== "hidden"[\s\S]{0,40}?onReturn\(\)/.test(watch));
+  check("...through the gap, onto an open socket", /reprobeOnReturn\(\(\) => \{\s*if \(ws && ws\.readyState === WebSocket\.OPEN\) void reportHostProviders\(\);/.test(watch));
+  check("the sign-in panel can ask again", /connectHelp \?[\s\S]{0,3000}?reportHostProviders\(\)[\s\S]{0,200}?"Check again"/.test(pane));
+  // THE PANEL IS DRAWN INSIDE THE MENU, so a way-out that closed the menu hid it.
+  check("...and opening it leaves the menu open", /wayOutLabel="How to connect"[\s\S]{0,700}?onAddKey=\{\(id\) => setConnectHelp\(id\)\}/.test(pane));
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

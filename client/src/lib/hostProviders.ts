@@ -98,3 +98,28 @@ async function probeHost(): Promise<HostProviderReport[]> {
     return [];
   }
 }
+
+/**
+ * How long after one re-ask a return to the window may ask again.
+ *
+ * LONGER THAN ONE RETURN, SHORTER THAN ANY SIGN-IN. Coming back fires `focus` and `visibilitychange`
+ * together, flicking between two windows fires them every second, and the shell caches its own answer
+ * for 1.5s besides. Nobody finishes `codex login` in a terminal and comes back inside three seconds.
+ */
+export const RETURN_GAP_MS = 3_000;
+
+/**
+ * A handler for "somebody came back to the window" that asks the machine again, at most once per gap.
+ *
+ * STARTS AS IF IT HAD JUST ASKED, because it is installed straight after the socket's own report on
+ * connect — a window focused in that same moment has nothing new to tell.
+ */
+export function reprobeOnReturn(probe: () => void, gapMs = RETURN_GAP_MS, now: () => number = Date.now): () => void {
+  let last = now();
+  return () => {
+    const t = now();
+    if (t - last < gapMs) return;
+    last = t;
+    probe();
+  };
+}

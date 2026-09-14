@@ -22,7 +22,7 @@ import { isRunnable, modelName, providerLabelOf, runProviders, useProviderStore 
 import {
   sendApplyEdit, sendAskRecord, sendBranchRun, sendChat, sendDiscardEdit, sendDiscardPlan, sendDispatchWork,
   sendCreateThread, sendEditTurn, sendSelectVariant, sendStopChat,
-  sendEdit, sendExplain, sendGenerate, sendLoadWorkItem, sendPlanAgent, sendPromoteTestInput, sendRun, sendRecordChatTurn} from "../lib/socket.ts";
+  sendEdit, sendExplain, sendGenerate, sendLoadWorkItem, sendPlanAgent, sendPromoteTestInput, sendRun, sendRecordChatTurn, reportHostProviders} from "../lib/socket.ts";
 import { useEvalStore } from "../store/evalStore.ts";
 import { UpsellCard } from "./UpsellCard.tsx";
 import { composerMoment } from "../lib/composerMoment.ts";
@@ -58,6 +58,7 @@ import { refKey, type AttachKind, type AttachableRow } from "./composer/AttachPi
 import { MAX_ATTACHMENTS, WARN_AT, budgetPercent } from "../lib/attachBudget.ts";
 import { EffortControl } from "./composer/EffortControl.tsx";
 import { canRunLocally, runLocalTurn } from "../lib/providerTurn.ts";
+import { hasHost } from "../lib/hostProviders.ts";
 import { subscriptionBadge, subscriptionBlockedReason } from "../lib/subscriptionState.ts";
 import { effortName, effortStops, stopFor, subscriptionEffort } from "../lib/effortLevels.ts";
 import { ShieldControl, modeLabel } from "./composer/ShieldControl.tsx";
@@ -1219,6 +1220,11 @@ function ModelSelector({
    * teaching the one substitution this whole architecture exists to prevent.
    */
   const [connectHelp, setConnectHelp] = useState<string | null>(null);
+  /** Whether the panel's Check again is waiting on the machine. */
+  const [checking, setChecking] = useState(false);
+  // A PANEL BELONGS TO THE MENU IT WAS OPENED IN. Left set, it would greet the next opening with an
+  // answer to a question nobody is asking any more.
+  useEffect(() => { if (!open) setConnectHelp(null); }, [open]);
   const ref = useRef<HTMLDivElement>(null);
   const openSecretsForProvider = useUiStore((s) => s.openSecretsForProvider);
   // WHICH PROVIDERS CAN ACTUALLY RUN: a key in THIS workspace, or one the deployment lends —
@@ -1326,13 +1332,32 @@ function ModelSelector({
                   <p className="mt-1 text-tiny text-faint">Your sign-in stays in {sub.credentialPath}.</p>
                 ) : null}
                 {sub.unblock ? <p className="mt-1 text-tiny text-faint">{sub.unblock}</p> : null}
-                <button
-                  type="button"
-                  className="mt-1.5 text-tiny text-muted underline-offset-2 hover:text-ink hover:underline"
-                  onClick={() => setConnectHelp(null)}
-                >
-                  Close
-                </button>
+                <div className="mt-1.5 flex items-center gap-3">
+                  {/* THE WAY BACK FROM THE TERMINAL. This panel printed the sign-in command and offered
+                      only Close, so somebody who ran it had to find Settings to tell Jaroku. It asks
+                      the machine the way Settings' button does, and the sentence above reads
+                      "Connected." once the answer lands. Only where there is a machine to ask. */}
+                  {sub.available && hasHost() ? (
+                    <button
+                      type="button"
+                      className="text-tiny text-muted underline-offset-2 hover:text-ink hover:underline disabled:opacity-60"
+                      disabled={checking}
+                      onClick={() => {
+                        setChecking(true);
+                        void reportHostProviders().finally(() => setChecking(false));
+                      }}
+                    >
+                      {checking ? "Checking…" : "Check again"}
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="text-tiny text-muted underline-offset-2 hover:text-ink hover:underline"
+                    onClick={() => setConnectHelp(null)}
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
             );
           })() : null}
@@ -1359,7 +1384,9 @@ function ModelSelector({
             selectedProvider={chatProvider}
             selectedModel={chatModel}
             onPick={(m) => { setChatModel(m); setOpen(false); }}
-            onAddKey={(id) => { setConnectHelp(id); setOpen(false); }}
+            /* THE MENU STAYS OPEN, because the panel is drawn inside it. Closing it here hid the very
+               instructions this button exists to show until somebody opened the menu again. */
+            onAddKey={(id) => setConnectHelp(id)}
           />
           <div className="my-1 border-t border-hair" aria-hidden />
           <ModelSection

@@ -1,4 +1,4 @@
-import { hasHost, readHostProviders } from "./hostProviders.ts";
+import { hasHost, readHostProviders, reprobeOnReturn } from "./hostProviders.ts";
 // WebSocket client for the Jaroku relay. Mirrors the reconnect pattern of the original
 // debug-client.html (1s backoff) and dispatches each server message into the trace store.
 // The relay only speaks WebSocket, so this is the single channel between UI and pipeline.
@@ -797,6 +797,9 @@ async function connect(): Promise<void> {
     // lands on a fresh session with no rows, and a stale report would outlive the connection it
     // described. It never rejects and does nothing in a browser.
     void reportHostProviders();
+    // AND AGAIN WHENEVER SOMEBODY COMES BACK TO THE WINDOW, which is what signing in from a terminal
+    // looks like from here. Installed once, by the first socket to open.
+    watchForReturn();
   };
 
   socket.onmessage = (ev) => {
@@ -1617,17 +1620,6 @@ export function sendListProviders(): void {
 }
 
 /**
- * Ask the shell what provider CLIs this machine has, and tell the server.
- *
- * THE PAGE RELAYS WHAT THE SHELL OBSERVED, rather than the shell opening a socket of its own —
- * which would be a second authenticated connection, a second session to expire and a second place
- * for tenancy to be wrong. This socket is already authenticated, so the report rides it.
- *
- * A no-op in a browser: `readHostProviders` resolves empty, and an empty report is still worth
- * sending exactly once so the server replaces any stale rows from a previous desktop session on
- * this same socket. Called on connect and again after the user has been sent off to sign in.
- */
-/**
  * Record a Chat turn this machine answered, so it survives a reload.
  *
  * THE SERVER NEVER SAW THIS EXCHANGE. It was produced locally by a CLI holding the user's own
@@ -1646,6 +1638,16 @@ export function sendRecordChatTurn(turn: {
 /** The report in flight, shared the way `readHostProviders` shares its probe. */
 let reporting: Promise<void> | null = null;
 
+/**
+ * Ask the shell what provider CLIs this machine has, and tell the server.
+ *
+ * THE PAGE RELAYS WHAT THE SHELL OBSERVED, rather than the shell opening a socket of its own —
+ * which would be a second authenticated connection, a second session to expire and a second place
+ * for tenancy to be wrong. This socket is already authenticated, so the report rides it.
+ *
+ * A no-op in a browser. Called on connect, on a return to the window, and from the two Check again
+ * controls — Settings' and the model menu's sign-in panel.
+ */
 export function reportHostProviders(): Promise<void> {
   if (!reporting) reporting = sendHostReport().finally(() => { reporting = null; });
   return reporting;
@@ -1668,6 +1670,31 @@ async function sendHostReport(): Promise<void> {
       authMode: h.authMode,
       note: h.note,
     })),
+  });
+}
+
+/** Whether the return listeners are installed. They live as long as the page, like this module. */
+let watchingReturn = false;
+
+/**
+ * Re-ask the machine when somebody comes back to the window, wherever there is a shell to ask.
+ *
+ * THE FLOW THIS EXISTS FOR IS "GO AND TYPE `codex login`, THEN COME BACK", and nothing asked again
+ * when they did: the socket reported on connect, Settings on mount, and the model menu's sign-in panel
+ * offered only Close — so a sign-in finished in a terminal stayed invisible until something unrelated
+ * reconnected. `reprobeOnReturn` keeps the pair of events one return fires, and a person flicking
+ * between windows, to one ask. Nothing is sent on a socket that is not open; the next one reports on
+ * connect anyway.
+ */
+function watchForReturn(): void {
+  if (watchingReturn || !hasHost() || typeof window === "undefined" || typeof document === "undefined") return;
+  watchingReturn = true;
+  const onReturn = reprobeOnReturn(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) void reportHostProviders();
+  });
+  window.addEventListener("focus", onReturn);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "hidden") onReturn();
   });
 }
 
