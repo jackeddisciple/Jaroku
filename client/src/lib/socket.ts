@@ -1654,6 +1654,11 @@ export async function reportHostProviders(): Promise<void> {
       version: h.version,
       signedIn: h.signedIn,
       account: h.account,
+      // BOTH WERE PARSED AND THEN DROPPED HERE. The shell computes the sentence that explains a
+      // sign-in which cannot answer Chat, `hostProviders.ts` validates it, and this map left it out —
+      // so Settings guessed at the reason instead, for everybody.
+      authMode: h.authMode,
+      note: h.note,
     })),
   });
 }

@@ -291,6 +291,23 @@ pub fn read_claude_status(json: &str) -> (bool, Option<String>, Option<String>, 
     )
 }
 
+/// The sentence for a Claude Code sign-in that cannot answer Chat, or `None`.
+///
+/// THE SAME SENTENCE `read_codex_status` GIVES, FOR THE SAME CASE: signed in, and still refused,
+/// because what is signed in bills an API account rather than a plan. Without it the row tells
+/// somebody who can see they are signed in to go and sign in.
+pub fn claude_note(signed_in: bool, auth_mode: Option<&str>) -> Option<String> {
+    if signed_in || auth_mode.is_none() {
+        return None;
+    }
+    Some(
+        "Claude Code is signed in with API credentials rather than a Claude plan. Chat runs on your \
+         subscription, so it needs `claude auth login` with your Claude account. Your API key stays \
+         where it is and keeps powering agent runs."
+            .to_string(),
+    )
+}
+
 /// Ask `codex` about itself.
 fn observe_codex() -> HostProvider {
     let Some(exe) = locate("codex") else {
@@ -327,7 +344,8 @@ fn observe_claude() -> HostProvider {
     };
     let version = probe(&exe, &["--version"]).map(|v| v.trim().to_string());
     let status = probe(&exe, &["auth", "status", "--json"]).unwrap_or_default();
-    let (signed_in, auth_mode, account, plan) = read_claude_status(&status);
+    let (signed_in, auth_mode, account, _plan) = read_claude_status(&status);
+    let note = claude_note(signed_in, auth_mode.as_deref());
 
     HostProvider {
         provider: "anthropic".to_string(),
@@ -336,7 +354,10 @@ fn observe_claude() -> HostProvider {
         signed_in,
         account,
         auth_mode,
-        note: plan.map(|p| format!("Claude {p} plan")),
+        // WHY NOT, NEVER WHICH PLAN. `note` is the sentence for a sign-in that cannot answer Chat, and
+        // it used to carry "Claude pro plan" for one that could — which a page reading the field as
+        // documented would have shown as the explanation of a refusal that never happened.
+        note,
     }
 }
 
@@ -448,6 +469,19 @@ mod tests {
         let (signed_in, mode, _, _) = read_claude_status(json);
         assert!(!signed_in);
         assert_eq!(mode.as_deref(), Some("apiKey"));
+    }
+
+    #[test]
+    fn a_claude_sign_in_that_bills_an_api_account_says_why() {
+        // THE CASE THE ROW USED TO GUESS AT. Signed in, still refused, and now told why — the same
+        // sentence Codex's reader gives for the same case.
+        let json = r#"{"loggedIn":true,"authMethod":"apiKey","apiProvider":"firstParty"}"#;
+        let (signed_in, mode, _, _) = read_claude_status(json);
+        let note = claude_note(signed_in, mode.as_deref()).expect("an explanation");
+        assert!(note.contains("claude auth login"), "{note}");
+        // A plan sign-in, or no sign-in at all, has nothing to explain.
+        assert!(claude_note(true, Some("claude.ai")).is_none());
+        assert!(claude_note(false, None).is_none());
     }
 
     #[test]

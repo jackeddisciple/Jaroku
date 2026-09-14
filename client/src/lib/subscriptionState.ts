@@ -49,6 +49,10 @@ export function subscriptionBlockedReason(row: SubscriptionStatus | undefined): 
     case "unavailable": return row.reason ?? "This provider is not available for Chat yet.";
     case "missing": return `${row.binary ?? "The CLI"} isn't installed on this machine.`;
     case "signed-out":
+      // THE SHELL'S OWN SENTENCE FIRST, when it named why. "Signed in with API credentials rather than
+      // a ChatGPT plan" is the one case where "run the sign-in command" reads as nonsense to somebody
+      // who can see they are signed in.
+      if (row.host?.note) return row.host.note;
       return row.loginCommand
         ? `Run \`${row.loginCommand}\` to sign in with your plan.`
         : "Not signed in with a subscription.";

@@ -634,7 +634,13 @@ export type RecordChatTurnCommand = {
 
 export type ReportProviderHostCommand = {
   cmd: "reportProviderHost";
-  hosts: { provider: string; installed: boolean; version?: string | null; signedIn: boolean; account?: string | null }[];
+  hosts: {
+    provider: string; installed: boolean; version?: string | null; signedIn: boolean; account?: string | null;
+    /** What the CLI is signed in with, as the shell normalised it. Display only. */
+    authMode?: string | null;
+    /** The shell's sentence for a sign-in that cannot answer Chat. Carried to the row verbatim. */
+    note?: string | null;
+  }[];
 };
 
 /**
@@ -4827,6 +4833,10 @@ export class WsRelay {
                 version: typeof h.version === "string" ? h.version.slice(0, 64) : null,
                 signedIn: h.signedIn === true,
                 account: typeof h.account === "string" ? h.account.slice(0, 128) : null,
+                // BOUNDED LIKE THE TWO ABOVE: display strings a socket supplies. A note is a sentence the
+                // shell wrote to explain a refusal, and nothing decides a row by it — `signedIn` does.
+                authMode: typeof h.authMode === "string" ? h.authMode.slice(0, 32) : null,
+                note: typeof h.note === "string" ? h.note.slice(0, 400) : null,
                 observedAt,
               });
             }

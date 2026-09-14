@@ -107,12 +107,11 @@ function Row({ row }: { row: SubscriptionStatus }) {
           {/* A literal you type. §04 keeps the mono face to the code surfaces, so this reads as a
               command through its own panel and spacing rather than through a typeface. */}
           <p className="rounded-control bg-active px-2 py-1 text-tiny text-ink">{row.loginCommand}</p>
-          {row.host?.signedIn === false && row.host.installed ? (
-            <p className="text-tiny text-faint">
-              Signed in with API credentials rather than a plan? Chat needs the plan sign-in. Your API
-              key stays where it is and keeps powering agent runs.
-            </p>
-          ) : null}
+          {/* THE CLI'S OWN EXPLANATION, when the shell had one: "signed in with API credentials rather
+              than a ChatGPT plan". It was computed in the shell, parsed in the page and dropped on the
+              way to the server, and this line guessed at it instead — for everybody signed out,
+              including somebody who had simply never signed in. */}
+          {row.host?.note ? <p className="text-tiny text-faint">{row.host.note}</p> : null}
         </>
       )}
 

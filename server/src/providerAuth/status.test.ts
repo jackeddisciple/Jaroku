@@ -27,6 +27,8 @@ const perfect = (provider: ProviderId): HostObservation => ({
   version: "1.0.0",
   signedIn: true,
   account: "someone@example.com",
+  authMode: "chatgpt",
+  note: null,
   observedAt: "2026-09-13T00:00:00.000Z",
 });
 
@@ -69,6 +71,10 @@ console.log("\na row carries what the UI needs to explain itself");
   check("...the sign-in command", openai.loginCommand === "codex login");
   check("...where the credential lives", openai.credentialPath === "~/.codex/auth.json");
   check("...and cites the page that sanctions it", /^https:\/\//.test(openai.citation));
+  const refusal = "Codex is signed in with API credentials rather than a ChatGPT plan.";
+  const refused = statusFor("openai", { ...installedOnly("openai"), authMode: "apikey", note: refusal });
+  check("...and the shell's own sentence for a refusal", refused.host?.note === refusal, String(refused.host?.note));
+  check("...beside the mode it explains", refused.host?.authMode === "apikey");
 
   const anthropic = statusFor("anthropic", undefined);
   check("Claude names its binary", anthropic.binary === "claude");

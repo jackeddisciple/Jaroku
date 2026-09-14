@@ -50,6 +50,18 @@ export interface HostObservation {
   readonly signedIn: boolean;
   /** The account that CLI printed, if it printed one. Shown so a user can see WHICH account. */
   readonly account: string | null;
+  /**
+   * What that CLI says it is signed in WITH, as the shell normalised it — `chatgpt`, `claude.ai`, or
+   * `apikey` and its siblings for a sign-in that bills an API account. Display only: `signedIn` is
+   * already the verdict, and nothing here re-derives it.
+   */
+  readonly authMode: string | null;
+  /**
+   * The shell's sentence for a sign-in that cannot answer Chat, when it has one — "Codex is signed in
+   * with API credentials rather than a ChatGPT plan…". The most useful thing this row can say to
+   * somebody who is signed in and still refused, so it reaches the screen verbatim.
+   */
+  readonly note: string | null;
   /** When the shell looked. ISO 8601. */
   readonly observedAt: string;
 }
@@ -93,6 +105,8 @@ export interface SubscriptionStatus {
     readonly version: string | null;
     readonly signedIn: boolean;
     readonly account: string | null;
+    readonly authMode: string | null;
+    readonly note: string | null;
     readonly observedAt: string;
   } | null;
   /**
@@ -153,6 +167,8 @@ export function statusFor(id: ProviderId, host: HostObservation | undefined): Su
         version: host.version,
         signedIn: host.signedIn,
         account: host.account,
+        authMode: host.authMode,
+        note: host.note,
         observedAt: host.observedAt,
       }
       : null,

@@ -149,6 +149,29 @@ console.log("\nmalformed reports are dropped rather than stored");
   check(rowFor(after, "openai").connected === false, "a non-boolean sign-in is not a sign-in");
 }
 
+console.log("\nthe shell's own sentence reaches the row, bounded");
+{
+  // IT USED TO STOP AT THE PAGE. The shell writes "signed in with API credentials rather than a
+  // ChatGPT plan" and the page parsed it, then left it out of this report — so the row guessed.
+  a.inbox.length = 0;
+  const note = "Codex is signed in with API credentials rather than a ChatGPT plan. Chat runs on your subscription, so it needs `codex login` with your ChatGPT account.";
+  a.send({
+    cmd: "reportProviderHost",
+    hosts: [{ provider: "openai", installed: true, signedIn: false, account: null, authMode: "apikey", note }],
+  });
+  const after = await a.want(isSubs, "a's report with a note");
+  check(rowFor(after, "openai").host?.note === note, "the note arrives verbatim", String(rowFor(after, "openai").host?.note));
+  check(rowFor(after, "openai").host?.authMode === "apikey", "...beside the mode it explains");
+  check(rowFor(after, "openai").connected === false, "...and changes nothing about the verdict");
+
+  a.inbox.length = 0;
+  a.send({ cmd: "reportProviderHost", hosts: [{ provider: "openai", installed: true, signedIn: false, note: "x".repeat(5000), authMode: 42 }] });
+  const bounded = await a.want(isSubs, "a's oversized note");
+  check((rowFor(bounded, "openai").host?.note ?? "").length === 400, "an oversized note is cut to a sentence's length",
+    String((rowFor(bounded, "openai").host?.note ?? "").length));
+  check(rowFor(bounded, "openai").host?.authMode === null, "...and a mode that is not a string is dropped");
+}
+
 console.log("\nrows carry no credential, because there is none to carry");
 {
   const m = await a.want(isSubs, "any subscriptions message");
@@ -161,7 +184,7 @@ console.log("\nrows carry no credential, because there is none to carry");
     "reason", "citation", "unblock", "effortParam", "effortLevels",
     "binary", "loginCommand", "credentialPath", "host", "connected",
   ].sort().join(",");
-  const HOST_FIELDS = ["installed", "version", "signedIn", "account", "observedAt"].sort().join(",");
+  const HOST_FIELDS = ["installed", "version", "signedIn", "account", "authMode", "note", "observedAt"].sort().join(",");
   const rows: any[] = m.subscriptions;
   check(rows.every((r) => Object.keys(r).sort().join(",") === ROW_FIELDS), "a row carries exactly the fields it should",
     Object.keys(rows[0]).sort().join(","));

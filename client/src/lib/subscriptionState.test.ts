@@ -29,7 +29,8 @@ const row = (over: Partial<SubscriptionStatus> = {}): SubscriptionStatus => ({
   ...over,
 });
 const host = (over: Partial<NonNullable<SubscriptionStatus["host"]>> = {}): NonNullable<SubscriptionStatus["host"]> => ({
-  installed: true, version: "0.154.0", signedIn: false, account: null, observedAt: "2026-09-14T00:00:00.000Z",
+  installed: true, version: "0.154.0", signedIn: false, account: null, authMode: null, note: null,
+  observedAt: "2026-09-14T00:00:00.000Z",
   ...over,
 });
 
@@ -66,6 +67,9 @@ console.log("\nthe reason says what to do about it");
   check("signed out names the provider's own sign-in",
     subscriptionBlockedReason(row({ host: host() })) === "Run `codex login` to sign in with your plan.",
     subscriptionBlockedReason(row({ host: host() })));
+  const apiKeyNote = "Codex is signed in with API credentials rather than a ChatGPT plan.";
+  check("...unless the shell said why it is refused, which is said instead",
+    subscriptionBlockedReason(row({ host: host({ authMode: "apikey", note: apiKeyNote }) })) === apiKeyNote);
   check("not installed names the binary", /^codex isn't installed/.test(subscriptionBlockedReason(row())));
   check("unavailable is the provider's own reason, verbatim",
     subscriptionBlockedReason(row({ available: false, reason: "Meta documents no way." })) === "Meta documents no way.");

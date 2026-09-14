@@ -700,6 +700,10 @@ export interface SubscriptionStatus {
     version: string | null;
     signedIn: boolean;
     account: string | null;
+    /** What the CLI is signed in with, as the shell normalised it. Display only. */
+    authMode: string | null;
+    /** The shell's own sentence for a sign-in that cannot answer Chat, when it has one. */
+    note: string | null;
     observedAt: string;
   } | null;
   /** The one derived answer: may Chat run on this provider right now. */
