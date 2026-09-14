@@ -2094,6 +2094,8 @@ export type ServerMessage =
       channel: "reply"; type: "run"; agentId: string; runId: string; turnId?: string;
       provider: string; model: string | null; effort: string | null; prompt: string;
     })
+  // STOP THE RUN — to the app answering it, which holds the process spending the plan.
+  | (InThread & { channel: "reply"; type: "stop"; agentId: string; runId: string })
   | (InThread & { channel: "reply"; type: "delta"; agentId: string; text: string })
   // `citations` ARRIVES WITH `done` AND NOT WITH THE TEXT — Part 3 §7.4. A `[work:…]` marker can be
   // split across two deltas, so a chip drawn mid-stream is half a citation and a stray bracket. Only

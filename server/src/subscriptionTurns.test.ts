@@ -119,6 +119,10 @@ console.log("\nthe chat route hands a subscription turn to the app, never to an 
   check("recordChatTurn settles a prepared turn before anything else",
     /async function recordChatTurn[\s\S]{0,300}?if \(typeof cmd\.runId === "string"\) \{\s*await settleSubscriptionTurn\(ctx, cmd\);\s*return;/.test(index));
 
+  const stop = bodyOf("function stopChat");
+  check("Stop reaches the app answering a subscription turn, whichever tab pressed it",
+    /subscriptionTurns\.inThread\(ctx\.workspaceId, threadId\)[\s\S]{0,400}?relay\.sendReply\(ctx, held\.requestId, \{ type: "stop"/.test(stop));
+
   check("the relay answers one socket by its request id",
     /sendReply\(ctx: TenantContext, requestId: string, event: ReplyEvent, threadId\?: string \| null\): number \{/.test(relay));
   check("...and can tell whether that socket is still there", /hasRequest\(ctx: TenantContext, requestId: string\): boolean \{/.test(relay));

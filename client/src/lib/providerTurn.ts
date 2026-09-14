@@ -191,8 +191,12 @@ export interface LocalTurn {
 
 /** How a local turn ended, which is what the run it answers is settled with. */
 export interface LocalTurnOutcome {
-  /** `error` covers a refused sign-in, a CLI that could not start, and an answer that never came. */
-  status: "done" | "error";
+  /**
+   * `stopped` when somebody stopped it — the process was killed on purpose, and what arrived is kept.
+   * `error` covers a refused sign-in, a CLI that could not start, an answer that never came, and a turn
+   * the shell ended at its deadline.
+   */
+  status: "done" | "stopped" | "error";
   /** Everything that arrived — the whole answer, or the part of it before a failure. */
   answer: string;
   usage: TurnUsage | null;
@@ -232,6 +236,8 @@ export function runLocalTurn(opts: {
   let usage: TurnUsage | null = null;
   let failed: string | null = null;
   let turnId: number | null = null;
+  /** Set by `cancel`, so a killed process ends as a stop rather than as a failure. */
+  let cancelled = false;
   /**
    * Events that arrived before this turn knew its own id.
    *
@@ -251,7 +257,8 @@ export function runLocalTurn(opts: {
     // A FAILURE IS SETTLED TOO, with whatever arrived before it. The question was written before this
     // run was handed out, so a refused or expired sign-in leaves the message in the thread and the
     // partial with it — never a turn that vanishes on reload.
-    const sent = opts.onSettle({ status: failed ? "error" : "done", answer, usage, error: failed });
+    const status = cancelled ? "stopped" : failed ? "error" : "done";
+    const sent = opts.onSettle({ status, answer, usage, error: status === "error" ? failed : null });
     if (!sent) {
       chat.replyError({
         threadId: opts.threadId,
@@ -309,7 +316,7 @@ export function runLocalTurn(opts: {
           }
           // The shell's own error only stands when the provider did not give a better one.
           if (!failed && ev.error) failed = ev.error;
-          if (!failed && answer.length === 0) {
+          if (!failed && !cancelled && answer.length === 0) {
             failed = "The provider returned no answer. Check the desktop log for what its CLI reported.";
           }
           end();
@@ -325,6 +332,9 @@ export function runLocalTurn(opts: {
         model: opts.model,
         effort: opts.effort,
       })) as number;
+      // A STOP PRESSED WHILE THE SHELL WAS STARTING had no id to name, so it is carried out now —
+      // otherwise the process would run on, spending the plan with nobody left to stop it.
+      if (cancelled) void h.invoke("provider_turn_cancel", { turnId });
       // AND NOW THAT IT DOES, what arrived in the meantime is replayed — this turn's own lines in the
       // order they came, and any other turn's dropped rather than appended to this answer.
       for (const ev of early.splice(0)) onEvent({ payload: ev });
@@ -336,6 +346,7 @@ export function runLocalTurn(opts: {
 
   return {
     cancel: () => {
+      cancelled = true;
       if (turnId !== null) void h.invoke("provider_turn_cancel", { turnId });
     },
     finished,

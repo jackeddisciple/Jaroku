@@ -17,6 +17,9 @@
 //
 //   npm run test:provider-turn-flow
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { runLocalTurn, type LocalTurnOutcome } from "./providerTurn.ts";
 import { useChatStore } from "../store/chatStore.ts";
 
@@ -61,6 +64,8 @@ function settleRecorder(sent = true): { outcomes: LocalTurnOutcome[]; onSettle: 
  */
 function installHost(lines: string[], opts: {
   exitCode?: number; failStart?: string; delayMs?: number;
+  /** The sentence the shell puts on the last event itself — a turn it ended at its deadline. */
+  endError?: string;
   /** Lines THIS turn prints before `provider_turn_start` has returned its id — a fast first line. */
   earlyLines?: string[];
   /** Lines ANOTHER turn prints in that same window — an earlier turn still running. */
@@ -71,11 +76,20 @@ function installHost(lines: string[], opts: {
   const state = { cancelled: [] as number[], startedWith: null as Record<string, unknown> | null };
   let listener: ((e: { payload: unknown }) => void) | null = null;
   let nextId = 1;
+  const killed = new Set<number>();
 
   (globalThis as Record<string, unknown>).__TAURI__ = {
     core: {
       invoke: async (cmd: string, args?: Record<string, unknown>) => {
-        if (cmd === "provider_turn_cancel") { state.cancelled.push(Number(args?.turnId)); return true; }
+        if (cmd === "provider_turn_cancel") {
+          const id = Number(args?.turnId);
+          state.cancelled.push(id);
+          // A KILL ENDS THE STREAM, as it does in the shell: the pipe closes, and the last event carries
+          // no exit code and no sentence.
+          killed.add(id);
+          listener?.({ payload: { turnId: id, done: true, code: null } });
+          return true;
+        }
         if (cmd !== "provider_turn_start") return null;
         if (opts.failStart) throw new Error(opts.failStart);
         state.startedWith = args ?? null;
@@ -87,13 +101,19 @@ function installHost(lines: string[], opts: {
         // Emitted after this call returns, the way a real spawn does.
         void (async () => {
           await sleep(opts.delayMs ?? 5);
+          // A KILLED PROCESS PRINTS NOTHING MORE — its pipe is closed.
+          if (killed.has(id)) return;
           for (const line of lines) listener?.({ payload: { turnId: id, line, done: false } });
-          // THE SHELL NAMES A NON-ZERO EXIT ITSELF, on the final event — see `run` in provider_turn.rs.
-          // A stand-in that left it off would pass a failed turn off as a finished one.
+          // THE SHELL NAMES A NON-ZERO EXIT, AND A DEADLINE, ITSELF, on the final event — see `run` in
+          // provider_turn.rs. A stand-in that left it off would pass a failed turn off as a finished one.
           const code = opts.exitCode ?? 0;
           listener?.({ payload: {
-            turnId: id, done: true, code,
-            ...(code !== 0 ? { error: `The provider's CLI exited with status ${code}. Check the desktop log, and that your sign-in is still valid.` } : {}),
+            turnId: id, done: true, code: opts.endError ? null : code,
+            ...(opts.endError
+              ? { error: opts.endError }
+              : code !== 0
+                ? { error: `The provider's CLI exited with status ${code}. Check the desktop log, and that your sign-in is still valid.` }
+                : {}),
           } });
         })();
         return id;
@@ -308,13 +328,63 @@ console.log("\nan earlier turn still printing cannot bleed into this one");
 console.log("\ncancelling kills the process that is spending the plan");
 {
   const host = installHost(CODEX_STREAM, { delayMs: 200 });
-  watchStore();
-  const turn = runLocalTurn({ ...base, provider: "openai", prompt: "hi", onSettle: settleRecorder().onSettle });
+  const seen = watchStore();
+  const settled = settleRecorder();
+  const turn = runLocalTurn({ ...base, provider: "openai", prompt: "hi", onSettle: settled.onSettle });
   // Wait for the id to come back, then cancel before the stream arrives.
   await sleep(50);
   turn.cancel();
   check("the shell is told to kill the turn", host.cancelled.length === 1, JSON.stringify(host.cancelled));
   await turn.finished;
+  // A STOP IS NOT A FAILURE. It used to end as "the provider returned no answer", because a killed
+  // process prints nothing more and nothing here knew somebody had asked for that.
+  check("...and the run settles as stopped, not failed",
+    settled.outcomes.length === 1 && settled.outcomes[0]?.status === "stopped" && settled.outcomes[0]?.error === null,
+    JSON.stringify(settled.outcomes));
+  check("...with nothing claimed to have arrived after the kill", seen.deltas.length === 0, JSON.stringify(seen.deltas));
+}
+
+console.log("\na Stop pressed before the shell has named the process still stops it");
+{
+  // THE WINDOW BETWEEN ASKING THE SHELL AND HEARING BACK. A cancel there had no id to name, so the
+  // process started anyway and spent the plan with nobody left to stop it.
+  const host = installHost(CODEX_STREAM, { delayMs: 200 });
+  watchStore();
+  const settled = settleRecorder();
+  const turn = runLocalTurn({ ...base, provider: "openai", prompt: "hi", onSettle: settled.onSettle });
+  turn.cancel();
+  await turn.finished;
+  check("the shell is told to kill it as soon as it has an id", host.cancelled.length === 1, JSON.stringify(host.cancelled));
+  check("...and it settles as stopped", settled.outcomes[0]?.status === "stopped", JSON.stringify(settled.outcomes));
+}
+
+console.log("\na turn the shell ended at its deadline settles as a failure that says so");
+{
+  // NOBODY PRESSED STOP, so it is not a stop — and it is not silence either. The shell names the
+  // deadline on the last event, and what arrived before it is kept.
+  const sentence = "The answer ran past 15 minutes, so Jaroku stopped it. Ask again, or try a lower effort.";
+  installHost(['{"type":"stream_event","event":{"delta":{"type":"text_delta","text":"so far"}}}'], { endError: sentence });
+  watchStore();
+  const settled = settleRecorder();
+  await runLocalTurn({ ...base, provider: "anthropic", prompt: "hi", onSettle: settled.onSettle }).finished;
+  check("the turn settles as an error with the shell's sentence",
+    settled.outcomes[0]?.status === "error" && settled.outcomes[0]?.error === sentence, JSON.stringify(settled.outcomes[0]));
+  check("...keeping what had arrived", settled.outcomes[0]?.answer === "so far", JSON.stringify(settled.outcomes[0]));
+}
+
+console.log("\nStop reaches the process from this tab and from any other");
+{
+  // SOURCE-READ, because the socket is the half this suite does not stand up. What is checkable is that
+  // a running run is kept where a Stop can find it, and that both roads to a Stop reach it.
+  const socket = readFileSync(fileURLToPath(new URL("./socket.ts", import.meta.url)), "utf8");
+  check("a running subscription turn is kept where Stop can find it",
+    /localTurns\.set\(run\.runId, \{ threadId: run\.threadId, turn \}\);/.test(socket));
+  check("...and let go of once it has finished", /turn\.finished\.then\(\(\) => localTurns\.delete\(run\.runId\)\)/.test(socket));
+  check("the server's stop cancels the run it names",
+    /msg\.type === "stop"\) localTurns\.get\(msg\.runId\)\?\.turn\.cancel\(\)/.test(socket));
+  const stop = socket.slice(socket.indexOf("export function sendStopChat"), socket.indexOf("export function sendStopChat") + 700);
+  check("this tab's own Stop cancels its run in the open conversation at once",
+    /for \(const \{ threadId: t, turn \} of localTurns\.values\(\)\) if \(t === threadId\) turn\.cancel\(\);/.test(stop));
 }
 
 console.log("\nin a browser it settles as a failure that says why");

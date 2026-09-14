@@ -400,6 +400,8 @@ pub fn run() {
             // nothing and returns.
             if matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit) {
                 sidecar::stop(app);
+                // AND ANY CHAT TURN STILL SPENDING SOMEBODY'S PLAN — see `provider_turn::cancel_all`.
+                provider_turn::cancel_all();
             }
         });
 }

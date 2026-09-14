@@ -32,6 +32,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
@@ -65,6 +66,17 @@ pub struct TurnEvent {
 /// one element is a data structure chosen for a diagram rather than for a workload.
 static RUNNING: Mutex<Vec<(u64, Child)>> = Mutex::new(Vec::new());
 static NEXT_TURN: AtomicU64 = AtomicU64::new(1);
+
+/// Turns the shell stopped because they ran past `TURN_DEADLINE`, so the end of each can say so.
+static TIMED_OUT: Mutex<Vec<u64>> = Mutex::new(Vec::new());
+
+/// How long one turn may run before the shell stops it.
+///
+/// A TURN THAT NEVER ENDS SPENDS THE PLAN UNTIL THE APP QUITS. Nothing else bounds one: the page's
+/// Stop needs somebody to press it, and a CLI waiting on a network that never answers waits for ever.
+/// `xhigh` on Codex has taken more than three minutes over one line; fifteen is room for that several
+/// times over, and the server stops waiting on a silent app five minutes after this.
+const TURN_DEADLINE: Duration = Duration::from_secs(15 * 60);
 
 /// The levels any provider may be sent, mirroring `EFFORT_LEVELS` on the server.
 ///
@@ -259,11 +271,54 @@ pub fn provider_turn_start(
     Ok(turn_id)
 }
 
+/// The sentence a finished turn's last event carries, if any.
+///
+/// A TURN THE DEADLINE ENDED SAYS SO, rather than looking like a stop somebody chose. A non-zero exit
+/// with no JSON is the shape of a refused or expired sign-in. The provider's own stderr stays in the
+/// log either way, because it can carry a key prefix or an account address and this reaches a browser.
+fn end_error(code: Option<i32>, timed_out: bool) -> Option<String> {
+    if timed_out {
+        return Some(format!(
+            "The answer ran past {} minutes, so Jaroku stopped it. Ask again, or try a lower effort.",
+            TURN_DEADLINE.as_secs() / 60
+        ));
+    }
+    match code {
+        Some(0) | None => None,
+        Some(c) => Some(format!(
+            "The provider's CLI exited with status {c}. Check the desktop log, and that \
+             your sign-in is still valid."
+        )),
+    }
+}
+
 /// Pump one child's output to the page, on its own thread, until it exits.
 fn run(app: AppHandle, turn_id: u64, mut child: Child) {
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     RUNNING.lock().expect("running turns").push((turn_id, child));
+
+    // THE DEADLINE, WATCHED FROM ITS OWN THREAD. It wakes once a second, so a turn that ended long
+    // before the deadline does not keep a thread asleep for fifteen minutes, and it takes the child out
+    // of `RUNNING` exactly as a cancel does — the reader below then finds its pipe closed and ends the
+    // turn, and the end says why.
+    let started = Instant::now();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(1));
+        let mut running = RUNNING.lock().expect("running turns");
+        let Some(i) = running.iter().position(|(id, _)| *id == turn_id) else { return };
+        if started.elapsed() < TURN_DEADLINE {
+            continue;
+        }
+        let (_, mut child) = running.remove(i);
+        drop(running);
+        // MARKED BEFORE THE KILL, so the reader cannot reach the end of the turn without seeing it.
+        TIMED_OUT.lock().expect("timed-out turns").push(turn_id);
+        let _ = child.kill();
+        let _ = child.wait();
+        logs::say(format!("provider turn {turn_id} passed its deadline and was stopped"));
+        return;
+    });
 
     // Stderr is drained on its own thread and kept out of the event stream. Both CLIs print
     // progress and warnings there, and interleaving them with the JSON the page parses would turn
@@ -307,22 +362,25 @@ fn run(app: AppHandle, turn_id: u64, mut child: Child) {
             .and_then(|s| s.code());
         drop(running);
 
+        // WHETHER THE DEADLINE, RATHER THAN SOMEBODY, ENDED IT — see `TURN_DEADLINE`.
+        let timed_out = {
+            let mut marked = TIMED_OUT.lock().expect("timed-out turns");
+            match marked.iter().position(|id| *id == turn_id) {
+                Some(i) => {
+                    marked.remove(i);
+                    true
+                }
+                None => false,
+            }
+        };
+
         logs::say(format!("provider turn {turn_id} ended, exit {code:?}, {lines_seen} line(s) of output"));
         let _ = app.emit(EVENT, TurnEvent {
             turn_id,
             line: None,
             done: true,
             code,
-            // A non-zero exit with no JSON is the shape of a refused or expired sign-in. The page
-            // renders this sentence; the provider's own stderr stays in the log, because it can
-            // carry a key prefix or an account address and this string reaches a browser.
-            error: match code {
-                Some(0) | None => None,
-                Some(c) => Some(format!(
-                    "The provider's CLI exited with status {c}. Check the desktop log, and that \
-                     your sign-in is still valid."
-                )),
-            },
+            error: end_error(code, timed_out),
         });
     });
 }
@@ -342,6 +400,20 @@ pub fn provider_turn_cancel(turn_id: u64) -> bool {
             killed
         }
         None => false,
+    }
+}
+
+/// Stop every running turn, because the app is quitting.
+///
+/// A CLI LEFT RUNNING WHEN THE WINDOW CLOSES keeps spending the plan with nothing left to show the
+/// answer to, and outlives the process that started it. Called from the shell's exit handler beside
+/// the sidecar's own stop, and idempotent the same way: a second call finds the list empty.
+pub fn cancel_all() {
+    let turns: Vec<(u64, Child)> = RUNNING.lock().map(|mut r| r.drain(..).collect()).unwrap_or_default();
+    for (turn_id, mut child) in turns {
+        let _ = child.kill();
+        let _ = child.wait();
+        logs::say(format!("provider turn {turn_id} stopped as the app quit"));
     }
 }
 
@@ -519,5 +591,23 @@ mod tests {
             }
             assert_eq!(argv.last().unwrap(), "hi");
         }
+    }
+
+    #[test]
+    fn a_turn_the_deadline_ended_says_so_rather_than_looking_stopped() {
+        assert!(TURN_DEADLINE >= Duration::from_secs(10 * 60), "{TURN_DEADLINE:?}");
+        let timed_out = end_error(None, true).expect("a sentence");
+        assert!(timed_out.contains("15 minutes"), "{timed_out}");
+        // A KILL SOMEBODY ASKED FOR ENDS WITH NO SENTENCE AT ALL, and the page names it stopped.
+        assert_eq!(end_error(None, false), None);
+        assert_eq!(end_error(Some(0), false), None);
+        assert!(end_error(Some(1), false).unwrap().contains("status 1"));
+    }
+
+    #[test]
+    fn quitting_with_nothing_running_is_harmless() {
+        cancel_all();
+        cancel_all();
+        assert!(RUNNING.lock().unwrap().is_empty());
     }
 }

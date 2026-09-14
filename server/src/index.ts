@@ -13160,6 +13160,14 @@ const RETRY_CEILING_MS = 30_000;
 function stopChat(ctx: TenantContext, cmd: StopChatCommand): void {
   const threadId = typeof cmd.threadId === "string" ? cmd.threadId : "";
   if (!threadId) return;
+  // A SUBSCRIPTION TURN IS STOPPED WHERE IT RUNS. Nothing here holds its stream — the app answering it
+  // does — so that app is told to kill the process spending the plan, whichever tab pressed Stop. It
+  // settles the turn as stopped, with whatever had arrived, the way it settles anything else.
+  const held = subscriptionTurns.inThread(ctx.workspaceId, threadId);
+  if (held) {
+    relay.sendReply(ctx, held.requestId, { type: "stop", agentId: held.agentId, runId: held.runId }, threadId);
+    return;
+  }
   const stop = chatStops.get(threadId);
   if (!stop) return;
   // SCOPED BY CONSTRUCTION rather than by a check. `chatStops` is keyed by thread id, and the only

@@ -1962,6 +1962,11 @@ export type ReplyEvent =
       type: "run"; agentId: string; runId: string; turnId?: string;
       provider: string; model: string | null; effort: string | null; prompt: string;
     }
+  /**
+   * STOP THE RUN — sent to the app answering it, because that app holds the process spending the plan.
+   * Whichever tab pressed Stop, the one running the CLI is the one that can end it.
+   */
+  | { type: "stop"; agentId: string; runId: string }
   | { type: "delta"; agentId: string; text: string }
   /**
    * §6.5 METADATA, WHEN THERE IS ANY. Absent on an answer that had nothing to report, which is

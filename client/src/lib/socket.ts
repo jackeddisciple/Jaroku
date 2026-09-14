@@ -1,5 +1,5 @@
 import { hasHost, readHostProviders, reprobeOnReturn } from "./hostProviders.ts";
-import { runLocalTurn } from "./providerTurn.ts";
+import { runLocalTurn, type LocalTurn } from "./providerTurn.ts";
 // WebSocket client for the Jaroku relay. Mirrors the reconnect pattern of the original
 // debug-client.html (1s backoff) and dispatches each server message into the trace store.
 // The relay only speaks WebSocket, so this is the single channel between UI and pipeline.
@@ -680,6 +680,8 @@ function dispatch(msg: ServerMessage): void {
       if (msg.type === "started") c.replyStarted(msg);
       // A TURN TO ANSWER ON THIS MACHINE, after the `started` that opened it — see `runSubscriptionTurn`.
       else if (msg.type === "run") runSubscriptionTurn(msg);
+      // AND A STOP FOR ONE, from whichever tab pressed it — this app holds the process.
+      else if (msg.type === "stop") localTurns.get(msg.runId)?.turn.cancel();
       else if (msg.type === "delta") c.replyDelta(msg);
       else if (msg.type === "done") c.replyDone(msg);
       else if (msg.type === "stopped") c.replyStopped(msg);
@@ -1553,7 +1555,11 @@ export function sendSelectVariant(turnId: string, ordinal: number): void {
 }
 
 export function sendStopChat(): void {
-  send({ cmd: "stopChat", threadId: activeThread() });
+  const threadId = activeThread();
+  // THIS APP'S OWN RUN IN THIS CONVERSATION STOPS AT ONCE, without waiting on a round trip — the process
+  // is here. The command still goes, so the server can reach a run another app is answering.
+  for (const { threadId: t, turn } of localTurns.values()) if (t === threadId) turn.cancel();
+  send({ cmd: "stopChat", threadId });
 }
 
 // Unified composer "explain": ask for a prose answer about a step / node / the agent, built from
@@ -1630,6 +1636,15 @@ export function sendListProviders(): void {
 }
 
 /**
+ * The subscription turns this app is answering right now, by run id — so a Stop can reach the process.
+ *
+ * WHAT WAS MISSING. The composer kept a handle to the running turn that nothing ever read, and both
+ * stop controls went to the server, which was not running anything — so a turn spent the plan until it
+ * finished or the app quit.
+ */
+const localTurns = new Map<string, { threadId?: string; turn: LocalTurn }>();
+
+/**
  * Answer a subscription turn the server handed this app, and tell it how the answer ended.
  *
  * THE SERVER OPENED THE TURN — the question is written and `started` rendered it — so this runs the CLI
@@ -1641,7 +1656,7 @@ export function sendListProviders(): void {
  * for, and metering them would charge somebody twice for one answer.
  */
 function runSubscriptionTurn(run: Extract<ServerMessage, { channel: "reply"; type: "run" }>): void {
-  runLocalTurn({
+  const turn = runLocalTurn({
     threadId: run.threadId,
     agentId: run.agentId,
     provider: run.provider,
@@ -1663,6 +1678,8 @@ function runSubscriptionTurn(run: Extract<ServerMessage, { channel: "reply"; typ
       ...(run.threadId ? { threadId: run.threadId } : {}),
     }),
   });
+  localTurns.set(run.runId, { threadId: run.threadId, turn });
+  void turn.finished.then(() => localTurns.delete(run.runId));
 }
 
 /** The report in flight, shared the way `readHostProviders` shares its probe. */
