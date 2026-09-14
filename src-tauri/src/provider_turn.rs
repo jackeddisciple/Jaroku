@@ -94,6 +94,18 @@ fn valid_model(v: &str) -> bool {
         && v.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.' || c == '_')
 }
 
+/// The Codex features a chat turn runs without — every one that hands the model a tool.
+///
+/// SET THROUGH `-c features.<name>=false` RATHER THAN `--disable <name>`, and the difference was
+/// measured: `--disable` refuses a name this Codex does not know ("Unknown feature flag"), which would
+/// fail every turn for somebody a version behind, while `-c` lets an unknown name pass. And THE
+/// SANDBOX ALONE IS NOT ENOUGH: under `-s read-only` a probe asked to run `pwd` ran `/bin/zsh -lc pwd`,
+/// a turn that could read any file this user can. With these off it said it had no way to run one.
+const CODEX_OFF: &[&str] = &[
+    "shell_tool", "unified_exec", "apps", "plugins", "multi_agent",
+    "browser_use", "computer_use", "image_generation", "hooks",
+];
+
 /// Build the command for one provider. The whole of what may ever be executed here.
 ///
 /// Returns `None` for a provider this shell will not run — which is every provider except the two
@@ -111,6 +123,14 @@ pub fn build_argv(provider: &str, prompt: &str, model: Option<&str>, effort: Opt
             // unless told not to, and a Jaroku chat turn is somebody's own conversation: Jaroku's
             // thread keeps it, and nothing else on disk does.
             let mut argv = vec![s("codex"), s("exec"), s("--json"), s("--skip-git-repo-check"), s("--ephemeral")];
+            // A CONVERSATION, NOT AN AGENT. None of the user's own `config.toml` — somebody who set
+            // `approval_policy = "never"` with `danger-full-access` for their own work got that here
+            // too — none of their `.rules`, a read-only sandbox, and no tool to use it with.
+            argv.extend([s("--ignore-user-config"), s("--ignore-rules"), s("-s"), s("read-only")]);
+            for feature in CODEX_OFF {
+                argv.push(s("-c"));
+                argv.push(format!("features.{feature}=false"));
+            }
             if let Some(e) = effort {
                 argv.push(s("-c"));
                 argv.push(format!("model_reasoning_effort=\"{e}\""));
@@ -132,6 +152,16 @@ pub fn build_argv(provider: &str, prompt: &str, model: Option<&str>, effort: Opt
                 // NO TRANSCRIPT, for Codex's reason: `claude -p` otherwise files the conversation under
                 // `~/.claude/projects/<directory>` as plain JSONL.
                 s("--no-session-persistence"),
+                // A CONVERSATION, NOT AN AGENT. The shipped turn's own init event listed Bash, Write and
+                // Edit, the user's Gmail, Drive and Calendar servers, and their memory directory. So: no
+                // built-in tools, no MCP server beyond the ones named here (none), none of the user's
+                // settings and so none of their hooks, no skills or slash commands, and no auto-memory —
+                // each confirmed gone from a live init on 2026-09-14, still signed in on the plan.
+                s("--tools"), s(""),
+                s("--strict-mcp-config"),
+                s("--setting-sources"), s(""),
+                s("--disable-slash-commands"),
+                s("--settings"), s(r#"{"autoMemoryEnabled":false}"#),
             ];
             if let Some(m) = model {
                 argv.push(s("--model"));
@@ -459,5 +489,35 @@ mod tests {
         let other = Scratch::new("file");
         std::fs::write(other.0.join("chat"), "not a directory").unwrap();
         assert!(chat_dir_in(&other.0).is_err());
+    }
+
+    #[test]
+    fn a_chat_turn_can_change_nothing_and_reach_nothing() {
+        let after = |argv: &[String], name: &str| argv.iter().position(|a| a == name).map(|i| argv[i + 1].clone());
+
+        let claude = build_argv("anthropic", "hi", None, Some("high")).unwrap();
+        assert_eq!(after(&claude, "--tools").as_deref(), Some(""), "{claude:?}");
+        assert_eq!(after(&claude, "--setting-sources").as_deref(), Some(""), "{claude:?}");
+        assert!(claude.contains(&"--strict-mcp-config".to_string()), "{claude:?}");
+        assert!(claude.contains(&"--disable-slash-commands".to_string()), "{claude:?}");
+        assert_eq!(after(&claude, "--settings").as_deref(), Some(r#"{"autoMemoryEnabled":false}"#), "{claude:?}");
+
+        let codex = build_argv("openai", "hi", None, Some("high")).unwrap();
+        assert!(codex.contains(&"--ignore-user-config".to_string()), "{codex:?}");
+        assert!(codex.contains(&"--ignore-rules".to_string()), "{codex:?}");
+        assert_eq!(after(&codex, "-s").as_deref(), Some("read-only"), "{codex:?}");
+        for feature in ["shell_tool", "unified_exec"] {
+            assert!(codex.contains(&format!("features.{feature}=false")), "{feature}: {codex:?}");
+        }
+        // NEVER `--disable`, which fails the whole turn on a Codex that does not know the name.
+        assert!(!codex.contains(&"--disable".to_string()), "{codex:?}");
+
+        // AND NOTHING THAT WOULD UNDO ANY OF IT, whatever else changes around these lists.
+        for argv in [&claude, &codex] {
+            for forbidden in ["--bare", "--dangerously-skip-permissions", "danger-full-access", "--full-auto", "--yolo"] {
+                assert!(!argv.iter().any(|a| a == forbidden), "{forbidden}: {argv:?}");
+            }
+            assert_eq!(argv.last().unwrap(), "hi");
+        }
     }
 }
