@@ -2346,7 +2346,11 @@ export type ClientCommand =
   | { cmd: "selectVariant"; turnId: string; ordinal: number }
   // §6.3: editing an earlier message FORKS the conversation. The original is never modified — same
   // guarantee as v0.1.5's parent runs — so this produces a new thread rather than changing one.
-  | { cmd: "editTurn"; threadId: string; turnId: string; message: string }
+  | {
+      cmd: "editTurn"; threadId: string; turnId: string; message: string;
+      // The plan the fork's answer rides, as a chat carries it.
+      subscription?: { provider: string; model: string | null; effort: string | null };
+    }
   // Eval: dataset CRUD. Every mutation is answered with a fresh snapshot on the "eval"
   // channel, so the client never reconciles a partial update against local state.
   | { cmd: "createDataset"; agentId: string; name: string }

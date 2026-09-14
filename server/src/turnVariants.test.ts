@@ -314,14 +314,22 @@ console.log("\nthe store is instantiated, written and read — outside a test");
   // run's — and "Regenerate with <model>" overrides it for one answer. The property being asserted
   // is the one that was broken: the chosen model rides the COMMAND, and nothing calls `setModel`,
   // which repoints the model an agent's test run goes to.
+  //
+  // AND IT RIDES THE SUBSCRIPTION NOW. A chat turn is answered on the user's own plan, so the chosen
+  // model travels inside the plan the regeneration is sent on — `chatSubscriptionFor` — rather than as
+  // a bare `model` beside it, which the server only ever read on the API-key path.
   check("...and the chosen model rides the command rather than repointing the run",
-    /opts\?\.modelId\s*\n?\s*\? \{ model: opts\.modelId \}/.test(pane)
+    /chatSubscriptionFor\(\{ modelId: opts\?\.modelId/.test(pane)
+    && /sendChat\(prompt, turn\.agentId \|\| null, \{[\s\S]{0,300}?subscription,/.test(pane)
     && !/setModel\(opts\.modelId\)/.test(pane),
-    /\{[^}]*model:[^}]*\}/.exec(pane.slice(pane.indexOf("function rerunTurn")))?.[0] ?? "no match");
+    pane.slice(pane.indexOf("function rerunTurn"), pane.indexOf("function rerunTurn") + 2400).match(/chatSubscriptionFor\([^)]*\)/)?.[0] ?? "no match");
   // AND THE FALLBACK IS THE CONVERSATION'S OWN MODEL, not the run's — §11.1's separation reaching
-  // the one control most likely to confuse the two.
+  // the one control most likely to confuse the two. It lives in `chatSubscriptionFor` now, which every
+  // way of sending a chat turn shares.
+  const subscription = client("lib/chatSubscription.ts");
   check("...falling back to the conversation's model rather than the run's",
-    /useUiStore\.getState\(\)\.chatModel/.test(pane) && !/model: useUiStore\.getState\(\)\.model\b/.test(pane));
+    /opts\.modelId \?\? ui\.chatModel/.test(subscription) && !/\bui\.model\b/.test(subscription)
+    && !/model: useUiStore\.getState\(\)\.model\b/.test(pane));
   check("...and the switcher finally has a caller", /onSwitchVariant=\{/.test(pane));
   check(
     "...offered only where there are bodies to switch between",

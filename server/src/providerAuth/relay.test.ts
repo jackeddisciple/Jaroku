@@ -240,6 +240,16 @@ console.log("\na subscription turn is taken only on a plan this machine reported
   c.send({ cmd: "recordChatTurn", runId: "run-1", answer: "a", provider: "anthropic" });
   await waitFor(() => forwarded.some((f) => f.cmd === "recordChatTurn"));
   check(forwarded.some((f) => f.cmd === "recordChatTurn" && f.runId === "run-1"), "a settle is forwarded for the registry to judge");
+
+  // AND AN EDIT-AND-FORK, whose answer is a chat turn like any other.
+  c.inbox.length = 0;
+  forwarded.length = 0;
+  c.send({ cmd: "editTurn", threadId: "t-1", turnId: "i-1", message: "m", subscription: { provider: "anthropic", model: null, effort: null } });
+  await c.want((m) => m?.channel === "reply" && m?.type === "error", "a refusal for a fork on a plan it did not report");
+  check(!forwarded.some((f) => f.cmd === "editTurn"), "a fork on a plan this machine never reported is not forwarded");
+  c.send({ cmd: "editTurn", threadId: "t-1", turnId: "i-1", message: "m", subscription: { provider: "openai", model: null, effort: null } });
+  await waitFor(() => forwarded.some((f) => f.cmd === "editTurn"));
+  check(forwarded.some((f) => f.cmd === "editTurn" && f.subscription?.provider === "openai"), "...and one on the plan it did report is");
   c.close();
 }
 

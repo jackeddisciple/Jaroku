@@ -13335,6 +13335,9 @@ async function editTurn(ctx: TenantContext, cmd: EditTurnCommand): Promise<void>
     void chatWithJaroku(ctx, {
       cmd: "chat", message, threadId: forked.id,
       ...(forked.agent_id ? { agentId: forked.agent_id } : {}),
+      // ON THE PLAN THE EDIT WAS SENT WITH. Without it the fork's answer left on the API path, and a
+      // conversation held on somebody's own plan was answered on a key the moment they edited a message.
+      ...(cmd.subscription ? { subscription: cmd.subscription } : {}),
     });
   } catch (err) {
     const m = (err as Error)?.message ?? String(err);

@@ -123,6 +123,9 @@ console.log("\nthe chat route hands a subscription turn to the app, never to an 
   check("recordChatTurn settles a prepared turn before anything else",
     /async function recordChatTurn[\s\S]{0,300}?if \(typeof cmd\.runId === "string"\) \{\s*await settleSubscriptionTurn\(ctx, cmd\);\s*return;/.test(index));
 
+  check("edit-and-fork hands its answer to the plan it was sent with",
+    /void chatWithJaroku\(ctx, \{[\s\S]{0,400}?subscription: cmd\.subscription/.test(bodyOf("async function editTurn")));
+
   const stop = bodyOf("function stopChat");
   check("Stop reaches the app answering a subscription turn, whichever tab pressed it",
     /subscriptionTurns\.inThread\(ctx\.workspaceId, threadId\)[\s\S]{0,400}?relay\.sendReply\(ctx, held\.requestId, \{ type: "stop"/.test(stop));

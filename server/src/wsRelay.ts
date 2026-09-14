@@ -2549,6 +2549,8 @@ export type EditTurnCommand = {
   turnId: string;
   /** What it should have said. */
   message: string;
+  /** The plan the fork's answer rides — the same field, checked the same way, as `ChatCommand`'s. */
+  subscription?: { provider: string; model?: string | null; effort?: string | null };
 };
 
 export type ThreadCommand =
@@ -4771,9 +4773,12 @@ export class WsRelay {
             void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (
             msg.cmd === "editTurn" && typeof msg.threadId === "string"
-            && typeof msg.turnId === "string" && typeof msg.message === "string"
+            && typeof msg.turnId === "string" && typeof msg.message === "string" && validSubscription(msg.subscription)
           ) {
-            void withContext((ctx) => this.onCommand?.(msg, ctx));
+            // THE FORK'S ANSWER RIDES A PLAN, and only one this machine reported — exactly as a chat does.
+            const refusal = msg.subscription ? this.subscriptionRefusal(ws, msg.subscription.provider) : null;
+            if (refusal) this.sendTo(ws, { channel: "reply", type: "error", agentId: "", message: refusal });
+            else void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "listMcpServers") {
             void this.answer(ws, async (ctx) => ({
               channel: "mcp",

@@ -59,6 +59,7 @@ import { MAX_ATTACHMENTS, WARN_AT, budgetPercent } from "../lib/attachBudget.ts"
 import { EffortControl } from "./composer/EffortControl.tsx";
 import { canRunLocally } from "../lib/providerTurn.ts";
 import { hasHost } from "../lib/hostProviders.ts";
+import { chatSubscriptionFor } from "../lib/chatSubscription.ts";
 import { subscriptionBadge, subscriptionBlockedReason } from "../lib/subscriptionState.ts";
 import { effortName, effortStops, stopFor, subscriptionEffort } from "../lib/effortLevels.ts";
 import { ShieldControl, modeLabel } from "./composer/ShieldControl.tsx";
@@ -388,7 +389,14 @@ function FailureActions({ turn, agentId }: { turn: ReplyTurn; agentId: string | 
     // THE ROUTING VERDICT TRAVELS WITH THE RETRY — see `routingOf`. Without it the second attempt
     // arrived with no reason and no band, so the chip stopped explaining itself and §15.1's offer
     // could not appear on a turn whose first attempt had earned it.
-    if (prompt) sendChat(prompt, agentId, { regenerateOf: turn.itemId, ...routingOf(turn) });
+    if (!prompt) return;
+    // ON THE PLAN THE CONVERSATION RUNS ON, or not at all — see `chatSubscriptionFor`.
+    const subscription = chatSubscriptionFor();
+    if (!subscription) {
+      useUiStore.getState().openWorkspacePanel("account");
+      return;
+    }
+    sendChat(prompt, agentId, { regenerateOf: turn.itemId, ...routingOf(turn), subscription });
   };
 
   const control = (id: string): React.ReactNode => {
@@ -634,6 +642,12 @@ function AssistantTurn({
 }) {
   const streaming = useChatStore((s) => s.streamingThreadId !== null);
   const models = useProviderStore((s) => s.models);
+  // WHICH PLANS A REGENERATION CAN RIDE — the connected ones. Muse Spark is never among them.
+  const subscriptions = useProviderStore((s) => s.subscriptions);
+  const chatUsable = useMemo(
+    () => new Set<string>(subscriptions.filter((s) => s.connected).map((s) => s.provider)),
+    [subscriptions],
+  );
   const threadId = useThreadStore((s) => s.activeThreadId);
   const turns = useChatStore((s) => threadFor({ threads: s.threads, pending: s.pending }, threadId));
   const meta = metaForTurn(turn);
@@ -677,7 +691,7 @@ function AssistantTurn({
             // The first three models in the catalogue. The whole list would be a menu longer than the
             // response it is offering to replace. Labelled by the MODEL's name — the provider's label
             // made all three read "Regenerate with Claude".
-            models={models.filter((m) => isProviderId(m.provider)).slice(0, 3).map((m) => ({ id: m.id, label: m.name }))}
+            models={models.filter((m) => isProviderId(m.provider) && chatUsable.has(m.provider)).slice(0, 3).map((m) => ({ id: m.id, label: m.name }))}
             turnId={itemId}
             conversationId={threadId}
             // §5.5's promotion offer is only shown on a turn that PRODUCED a version, because that
@@ -801,18 +815,20 @@ function rerunTurn(
   // AND THE MODEL TRAVELS ON THE COMMAND rather than through `setModel`. That setter moves the
   // model an agent's RUN goes to: pressing "Regenerate with GPT-5.6 Terra" used to repoint the
   // user's next test run and answer on the same model as before.
+  //
+  // ON THE PLAN THE CONVERSATION RUNS ON, OR NOT AT ALL. A regeneration used to leave with no
+  // subscription, so an answer the user's own plan wrote was written again on an API key. The model
+  // from the menu if one was chosen, else the conversation's own — and it rides the plan it belongs to.
+  const subscription = chatSubscriptionFor({ modelId: opts?.modelId, level: opts?.effort ?? null });
+  if (!subscription) {
+    useUiStore.getState().openWorkspacePanel("account");
+    return;
+  }
   sendChat(prompt, turn.agentId || null, {
     regenerateOf: turn.itemId,
     // §13.2 AND §15.1, CARRIED FROM THE TURN BEING RE-ANSWERED.
     ...routingOf(turn),
-    // THE MODEL FROM THE MENU IF ONE WAS CHOSEN, else the conversation's own. A plain ⟳ answers
-    // again on the model the conversation is set to; "Regenerate with <model>" answers on that one
-    // — and §13.3's different chips are what makes the difference visible afterwards.
-    ...(opts?.modelId
-      ? { model: opts.modelId }
-      : useUiStore.getState().chatModel
-        ? { model: useUiStore.getState().chatModel }
-        : {}),
+    subscription,
   });
 }
 
@@ -887,7 +903,13 @@ function UserTurnView({
       setDraft(turn.text);
       return;
     }
-    sendEditTurn(threadId, turn.itemId, next);
+    // THE FORK'S ANSWER RIDES THE SAME PLAN, or the edit stays open until there is one to ride.
+    const subscription = chatSubscriptionFor();
+    if (!subscription) {
+      useUiStore.getState().openWorkspacePanel("account");
+      return;
+    }
+    sendEditTurn(threadId, turn.itemId, next, subscription);
     setEditing(false);
   };
 
@@ -2827,6 +2849,13 @@ export function BuildPane({
           title: "Drop the plan and answer the same message as a question",
           onPick: () => {
             const asked = openPlan.prompt;
+            // THE ANSWER RIDES THE PLAN CHAT RUNS ON — asked before the plan is let go, so a machine
+            // with no connected plan keeps it rather than trading it for an answer that cannot come.
+            const subscription = chatSubscriptionFor({ level: effort });
+            if (!subscription) {
+              useUiStore.getState().openWorkspacePanel("account");
+              return;
+            }
             if (openPlan.planId) sendDiscardPlan(openPlan.planId);
             if (!asked.trim()) return;
             // THE SAME MESSAGE, TO THE CHAT ROUTE. §15.2's acceptance is that it "produces a chat
@@ -2834,6 +2863,7 @@ export function BuildPane({
             // is sent verbatim, and the route is named rather than inferred: this is not the router
             // being asked again, it is the user overriding it.
             sendChat(asked, activeAgentId, {
+              subscription,
               routeReason: "You asked for this to be answered rather than built.",
               // §15.1's CARD MUST NOT THEN APPEAR UNDER THE ANSWER. The message scored well enough
               // to reach the plan route, so its band would be `confident` — and offering to build

@@ -1546,8 +1546,14 @@ export function sendChat(
  * NOTHING IS UPDATED OPTIMISTICALLY. The fork is a row the server writes and a prefix it copies;
  * a client that moved first would have to guess a thread id and then reconcile the real one.
  */
-export function sendEditTurn(threadId: string, turnId: string, message: string): void {
-  send({ cmd: "editTurn", threadId, turnId, message });
+export function sendEditTurn(
+  threadId: string,
+  turnId: string,
+  message: string,
+  /** The plan the fork's answer rides. See `chatSubscriptionFor`. */
+  subscription?: { provider: string; model: string | null; effort: string | null },
+): void {
+  send({ cmd: "editTurn", threadId, turnId, message, ...(subscription ? { subscription } : {}) });
 }
 
 export function sendSelectVariant(turnId: string, ordinal: number): void {

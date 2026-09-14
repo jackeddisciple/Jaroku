@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 
 import { useUiStore } from "./uiStore.ts";
 import { pickChatModel, useProviderStore } from "./providerStore.ts";
+import { chatSubscriptionFor } from "../lib/chatSubscription.ts";
 import type { ProviderModel, ProviderStatus, SubscriptionStatus } from "../types.ts";
 
 let fail = 0;
@@ -199,6 +200,37 @@ console.log("\nthe composer's gate asks about the chat provider, never about any
     chatCases.every((c) => /openWorkspacePanel\("account"\);\s*return;/.test(c)));
   check("the Chat menu lists only providers with a subscription path",
     /chatCatalogue = useMemo\(\s*\(\) => catalogue\.filter\(\(p\) => subscriptions\.some\(\(sub\) => sub\.provider === p\.id && sub\.supported\)\)/.test(pane));
+}
+
+console.log("\nevery way a chat turn is sent rides the plan the conversation runs on");
+{
+  // THE COMPOSER ASKED AND THE TURN'S OWN CONTROLS DID NOT: regenerate, retry, "I just wanted to ask"
+  // and edit-and-fork left with no subscription, and the server answered them on an API key.
+  (globalThis as Record<string, unknown>).__TAURI__ = {
+    core: { invoke: async () => null },
+    event: { listen: async () => () => {} },
+  };
+  load(["anthropic", "openai", "meta"]);
+  subscribe({ openai: true });
+  const ui = () => useUiStore.getState();
+  ui().setChatModel("gpt-5.6-luna");
+  const sub = chatSubscriptionFor();
+  check("the chat model's own connected plan is what a turn rides",
+    sub?.provider === "openai" && sub.model === "gpt-5.6-luna", JSON.stringify(sub));
+  check("...at no level, for a model that takes none", sub?.effort === null, JSON.stringify(sub));
+  check("regenerating on a model whose plan is not connected rides nothing", chatSubscriptionFor({ modelId: "claude-opus-5" }) === null);
+  check("...and Muse Spark is never ridden", chatSubscriptionFor({ modelId: "muse-spark-1.3" }) === null);
+  delete (globalThis as Record<string, unknown>).__TAURI__;
+  check("a browser rides no plan at all", chatSubscriptionFor() === null);
+
+  const pane = readFileSync(fileURLToPath(new URL("../components/BuildPane.tsx", import.meta.url)), "utf8");
+  const sends = [...pane.matchAll(/sendChat\(/g)].map((m) => pane.slice(m.index ?? 0, (m.index ?? 0) + 1200));
+  const bodies = sends.map((s) => s.slice(0, s.indexOf("});") + 3));
+  check(`every chat send in the pane rides a plan (${sends.length})`,
+    sends.length >= 4 && bodies.every((b) => /\bsubscription\b/.test(b)), bodies.filter((b) => !/\bsubscription\b/.test(b)).join(" || "));
+  check("...and so does an edit-and-fork", /sendEditTurn\(threadId, turn\.itemId, next, subscription\)/.test(pane));
+  check("regenerate-with offers only models on a connected plan",
+    /models\.filter\(\(m\) => isProviderId\(m\.provider\) && chatUsable\.has\(m\.provider\)\)/.test(pane));
 }
 
 console.log("\nnothing reachable at all");
