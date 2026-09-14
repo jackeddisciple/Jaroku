@@ -4326,6 +4326,8 @@ export class WsRelay {
           channel: "providers",
           type: "providers",
           ...((await this.opts.listProviders?.(ctx)) ?? { providers: [], ownKeyForPlatform: false, models: [] }),
+          // THIS SERVER'S HALF OF THE HANDSHAKE — see `broadcastProviders`.
+          subscriptionChat: true,
         });
         // And whether this MACHINE can talk to Jaroku on a provider subscription. Sent on frame one
         // beside the keys so the composer knows on its first render which of its two modes has
@@ -4895,6 +4897,7 @@ export class WsRelay {
                 channel: "providers",
                 type: "providers",
                 ...((await this.opts.listProviders?.(ctx)) ?? { providers: [], ownKeyForPlatform: false, models: [] }),
+                subscriptionChat: true,
               });
               this.sendSubscriptions(ws);
             });
@@ -5738,7 +5741,14 @@ export class WsRelay {
    * courtesy but a hard boundary. The shape is already right for it.
    */
   broadcastProviders(ctx: TenantContext, event: ProviderEvent): void {
-    this.broadcastTo(ctx, { channel: "providers", ...event });
+    // EVERY PROVIDERS SNAPSHOT CARRIES THIS SERVER'S HALF OF THE HANDSHAKE: `subscriptionChat` says it
+    // runs Chat on the user's own plan. A server from before that feature never sends it, and the app
+    // reads the absence as exactly that — saying the server needs updating, rather than drawing an
+    // empty Chat section and a Send that loops through a panel with nothing in it to connect.
+    this.broadcastTo(
+      ctx,
+      event.type === "providers" ? { channel: "providers", ...event, subscriptionChat: true } : { channel: "providers", ...event },
+    );
   }
 
   /**

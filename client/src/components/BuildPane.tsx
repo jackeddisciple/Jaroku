@@ -1099,6 +1099,7 @@ function ModelSection({
   blockedReason,
   blockedBadge,
   wayOutLabel,
+  emptyNote,
 }: {
   heading: string;
   catalogue: { id: string; label: string; models: string[] }[];
@@ -1125,6 +1126,8 @@ function ModelSection({
   blockedBadge?: (provider: string) => string | null;
   /** What the way-out says. Test adds a key; Chat sends you to the provider's own sign-in. */
   wayOutLabel?: string;
+  /** What the section says when it has nothing to list, so it is never a heading over nothing. */
+  emptyNote?: string;
 }) {
   return (
     <div>
@@ -1134,6 +1137,7 @@ function ModelSection({
       <div className={`px-2 pb-0.5 pt-1 text-tiny font-medium uppercase tracking-wider text-faint`}>
         {heading}
       </div>
+      {catalogue.length === 0 && emptyNote ? <p className="px-2 pb-1.5 pt-0.5 text-tiny text-muted">{emptyNote}</p> : null}
       {catalogue.map((p) => (
         <div key={p.id} className="mt-1 first:mt-0">
           {/* The provider's own mark on its group, so the menu is scanned by logo the way
@@ -1271,6 +1275,7 @@ function ModelSelector({
   // API key neither grants nor implies. A workspace with an Anthropic key and no Claude sign-in can
   // run agents on Claude all day and cannot chat on it, and the reverse is equally true.
   const subscriptions = useProviderStore((s) => s.subscriptions);
+  const subscriptionChat = useProviderStore((s) => s.subscriptionChat);
   // Only providers with an official mechanism appear at all. Muse Spark has none, so it is absent
   // from Chat rather than listed-and-disabled — there is nothing a user could do about it.
   const chatCatalogue = useMemo(
@@ -1402,6 +1407,11 @@ function ModelSelector({
             /* The way out of Chat is the PROVIDER'S own sign-in, never Jaroku's key form. Sending
                somebody to Secrets from here would be the exact substitution the architecture
                forbids: an API key is not a subscription and must never stand in for one. */
+            /* NEVER AN EMPTY HEADING. With no rows the section said nothing at all — the shape an older
+               server made, and the shape of rows that have not arrived yet. It says which. */
+            emptyNote={subscriptionChat === false
+              ? "This Jaroku server doesn't run Chat on a subscription yet — it needs updating."
+              : "Checking which plans this machine can use…"}
             wayOutLabel="How to connect"
             selectedProvider={chatProvider}
             selectedModel={chatModel}
@@ -2142,6 +2152,8 @@ export function BuildPane({
    * snapshot replaces it — so subscribing costs one comparison.
    */
   const subscriptionRows = useProviderStore((s) => s.subscriptions);
+  /** Whether this server runs Chat on a subscription at all. See `ProviderState.subscriptionChat`. */
+  const subscriptionChat = useProviderStore((s) => s.subscriptionChat);
 
   /**
    * Whether the provider Chat is SET TO is connected — not whether any provider is.
@@ -2220,9 +2232,12 @@ export function BuildPane({
    */
   // A BROWSER TAB CAN NEVER CONNECT ONE — there is no CLI on its side to sign in with — so it is told
   // where Chat does run, rather than to go and connect something it has no way to connect.
-  const SUBSCRIPTION_ASK = canRunLocally()
-    ? "Connect your Claude or Codex subscription to talk to Jaroku — your draft is kept"
-    : "Chat with Jaroku runs in the desktop app, on your own Claude or Codex plan — planning and building work here";
+  // AND A SERVER OLDER THAN THE FEATURE IS NAMED FIRST, because then nothing on this machine can help.
+  const SUBSCRIPTION_ASK = subscriptionChat === false
+    ? "This Jaroku server doesn't run Chat on a subscription yet — it needs updating"
+    : canRunLocally()
+      ? "Connect your Claude or Codex subscription to talk to Jaroku — your draft is kept"
+      : "Chat with Jaroku runs in the desktop app, on your own Claude or Codex plan — planning and building work here";
   const keyAsk = missingKey
     ? `Add ${/^[AEIOU]/.test(missingKeyLabel) ? "an" : "a"} ${missingKeyLabel} key to ${
       composerMode === "test"
@@ -2558,8 +2573,9 @@ export function BuildPane({
     // draft intact. Deliberately NOT Secrets: an API key cannot answer a Chat turn, so sending
     // somebody there would be a dead end wearing the costume of a way out.
     if (noSubscription) {
-      // A BROWSER HAS NOTHING TO CONNECT, and the banner already says where Chat runs.
-      if (canRunLocally()) useUiStore.getState().openWorkspacePanel("account");
+      // A BROWSER HAS NOTHING TO CONNECT, and neither does an app whose server cannot run Chat — the
+      // banner says which, and a panel with nothing in it to connect would be a loop.
+      if (canRunLocally() && subscriptionChat !== false) useUiStore.getState().openWorkspacePanel("account");
       return;
     }
 
@@ -3503,7 +3519,12 @@ export function BuildPane({
               {/* A BROWSER IS TOLD WHERE CHAT RUNS, with no button: there is nothing on its side to
                   connect, and a control that opened a panel saying so would be a loop. */}
               <span className="min-w-0 flex-1 text-muted">
-                {canRunLocally() ? (
+                {subscriptionChat === false ? (
+                  <>
+                    This Jaroku server is older than this app and doesn't run Chat on a subscription yet —
+                    it needs updating. Planning an agent and building one still work.
+                  </>
+                ) : canRunLocally() ? (
                   <>
                     Chat runs on your own Claude or Codex subscription. Connect one to send — your draft
                     is kept.{" "}

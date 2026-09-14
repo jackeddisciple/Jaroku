@@ -69,13 +69,27 @@ interface ProviderState {
    * that has no key.
    */
   ownKeyForPlatform: boolean;
+  /**
+   * Whether the server runs Chat on a subscription at all — null until a providers snapshot says.
+   *
+   * FALSE IS A SERVER OLDER THAN THE FEATURE. It never sends the rows Chat is chosen from, so without
+   * this the app drew an empty Chat section, waited for ever in Settings, and sent Send round a panel
+   * with nothing in it to connect. With it, each of those says the server needs updating.
+   */
+  subscriptionChat: boolean | null;
   /** Providers with a test in flight, so the button can say it is working. */
   testing: Record<string, true>;
   testResult: ProviderTestResult | null;
   error: string | null;
   notice: string | null;
 
-  setProviders: (providers: ProviderStatus[], ownKeyForPlatform: boolean, models: ProviderModel[]) => void;
+  setProviders: (
+    providers: ProviderStatus[],
+    ownKeyForPlatform: boolean,
+    models: ProviderModel[],
+    /** The server's half of the handshake, when the snapshot came off the wire. See `subscriptionChat`. */
+    subscriptionChat?: boolean,
+  ) => void;
   /** Replace, never merge — the same discipline as `setProviders`. */
   setSubscriptions: (subscriptions: SubscriptionStatus[]) => void;
   startTest: (provider: string) => void;
@@ -91,6 +105,7 @@ export const useProviderStore = create<ProviderState>((set) => ({
   subscriptions: [],
   loaded: false,
   ownKeyForPlatform: false,
+  subscriptionChat: null,
   testing: {},
   testResult: null,
   error: null,
@@ -99,8 +114,11 @@ export const useProviderStore = create<ProviderState>((set) => ({
   // A snapshot settles every question a test could still be waiting on, so in-flight state is
   // cleared wholesale rather than by key — a failure we did not anticipate cannot leave a
   // spinner running forever. Same reasoning as mcpStore.setServers.
-  setProviders: (providers, ownKeyForPlatform, models) =>
-    set({ providers, ownKeyForPlatform, models, loaded: true, testing: {} }),
+  setProviders: (providers, ownKeyForPlatform, models, subscriptionChat) =>
+    set({
+      providers, ownKeyForPlatform, models, loaded: true, testing: {},
+      ...(subscriptionChat !== undefined ? { subscriptionChat } : {}),
+    }),
 
   // DELIBERATELY DOES NOT TOUCH `loaded`. That flag is about the API-key snapshot, and the two
   // messages arrive independently — letting this one set it would tell every "do we have a key

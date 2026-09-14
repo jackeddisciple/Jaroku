@@ -131,6 +131,7 @@ function Row({ row }: { row: SubscriptionStatus }) {
  */
 export function ProviderSubscriptions({ compact = false }: { compact?: boolean }) {
   const rows = useConnectableSubscriptions();
+  const subscriptionChat = useProviderStore((s) => s.subscriptionChat);
   const [checking, setChecking] = useState(false);
 
   const recheck = useCallback(async () => {
@@ -171,8 +172,12 @@ export function ProviderSubscriptions({ compact = false }: { compact?: boolean }
           honest thing is to say what is missing rather than draw a blank. */}
       {rows.length === 0 ? (
         <p className="rounded-card border border-edge bg-panel px-3 py-2.5 text-caption text-muted">
-          Waiting for the provider list. If this does not fill in, the Jaroku server this app is
-          connected to is older than this feature and needs updating.
+          {/* THE SERVER SAYS WHICH NOW. Its providers snapshot carries `subscriptionChat`; one that
+              arrived without it came from a server older than this feature, and waiting would be for
+              rows that are never coming. */}
+          {subscriptionChat === false
+            ? "The Jaroku server this app is connected to is older than this feature and needs updating before Chat can run on your plan."
+            : "Waiting for the provider list."}
         </p>
       ) : null}
 

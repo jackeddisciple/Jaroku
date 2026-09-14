@@ -310,7 +310,8 @@ function dispatch(msg: ServerMessage): void {
       // snapshot and this is a replace, never a merge — and nothing on it carries a key, so
       // there is nothing here to be careful with beyond not inventing state the server owns.
       const p = useProviderStore.getState();
-      if (msg.type === "providers") p.setProviders(msg.providers, msg.ownKeyForPlatform, msg.models);
+      // `=== true`, SO AN ABSENT FLAG IS AN ANSWER: a server that predates subscription Chat.
+      if (msg.type === "providers") p.setProviders(msg.providers, msg.ownKeyForPlatform, msg.models, msg.subscriptionChat === true);
       // The subscription half, on its own message because it has a different scope: these rows
       // describe the machine holding THIS socket, so they are sent to it alone and never
       // broadcast. See server/src/wsRelay.ts's `sendSubscriptions`.

@@ -192,9 +192,9 @@ console.log("\nthe composer's gate asks about the chat provider, never about any
   // run on keys, and were all blocked for anybody without a plan — every browser tab included.
   check("...and only a message that is going to chat", /const noSubscription = [^;]*intent\.kind === "chat"/.test(pane));
   check("a browser is told where Chat runs, not to connect what it cannot",
-    /const SUBSCRIPTION_ASK = canRunLocally\(\)/.test(pane) && /Chat with Jaroku runs in the desktop app/.test(pane));
+    /const SUBSCRIPTION_ASK = subscriptionChat === false[\s\S]{0,220}?: canRunLocally\(\)/.test(pane) && /Chat with Jaroku runs in the desktop app/.test(pane));
   check("...and is not sent to a panel that can only say the same",
-    /if \(noSubscription\) \{[\s\S]{0,160}?if \(canRunLocally\(\)\) useUiStore\.getState\(\)\.openWorkspacePanel\("account"\);/.test(pane));
+    /if \(noSubscription\) \{[\s\S]{0,260}?if \(canRunLocally\(\) && subscriptionChat !== false\) useUiStore\.getState\(\)\.openWorkspacePanel\("account"\);/.test(pane));
   // THE FALLBACK THAT SPENT THE API KEY. A chat turn with no connected plan went to `sendChat`.
   const chatCases = pane.match(/case "chat":[\s\S]*?case "generate":/g) ?? [];
   check("the composer's chat case exists", chatCases.length > 0);
@@ -238,6 +238,29 @@ console.log("\nevery way a chat turn is sent rides the plan the conversation run
   check("...and so does an edit-and-fork", /sendEditTurn\(threadId, turn\.itemId, next, subscription\)/.test(pane));
   check("regenerate-with offers only models on a connected plan",
     /models\.filter\(\(m\) => isProviderId\(m\.provider\) && chatUsable\.has\(m\.provider\)\)/.test(pane));
+}
+
+console.log("\nan older server is said to be older, never drawn as an empty Chat");
+{
+  // THE SHIPPED BUILD MET A SERVER FROM BEFORE SUBSCRIPTION CHAT. Its rows never came, so the model menu
+  // drew "You talk to Jaroku on" over nothing, Settings waited for ever, and Send went round a panel with
+  // nothing in it to connect. The server now says it runs Chat on a subscription; the absence is an answer.
+  const p = () => useProviderStore.getState();
+  p().setProviders([], false, CATALOGUE, false);
+  check("a snapshot without the handshake reads as a server that cannot run Chat", p().subscriptionChat === false);
+  p().setProviders([], false, CATALOGUE, true);
+  check("...and one with it as a server that can", p().subscriptionChat === true);
+  p().setProviders([], false, CATALOGUE);
+  check("...while a snapshot that says nothing about it changes nothing", p().subscriptionChat === true);
+
+  const pane = readFileSync(fileURLToPath(new URL("../components/BuildPane.tsx", import.meta.url)), "utf8");
+  const settings = readFileSync(fileURLToPath(new URL("../components/ProviderSubscriptions.tsx", import.meta.url)), "utf8");
+  const socket = readFileSync(fileURLToPath(new URL("../lib/socket.ts", import.meta.url)), "utf8");
+  check("the socket reads an absent flag as an older server", /msg\.subscriptionChat === true\)/.test(socket));
+  check("the composer says the server needs updating", /subscriptionChat === false \? \([\s\S]{0,200}?needs updating/.test(pane));
+  check("the Chat section of the model menu is never an empty heading",
+    /emptyNote=\{subscriptionChat === false/.test(pane) && /catalogue\.length === 0 && emptyNote/.test(pane));
+  check("Settings says so instead of waiting for ever", /subscriptionChat === false/.test(settings) && /needs updating/.test(settings));
 }
 
 console.log("\nnothing reachable at all");

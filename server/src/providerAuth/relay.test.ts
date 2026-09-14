@@ -89,6 +89,19 @@ console.log("\nevery socket is told on frame one, before it asks");
   // A browser tab has no CLI to sign in with, and its rows say so rather than going missing.
   check(first.subscriptions.every((r: any) => r.host === null), "...and no machine has reported");
   check((rowFor(first, "meta").reason?.length ?? 0) > 40, "a gated row explains itself on frame one");
+
+  // AND THIS SERVER'S HALF OF THE HANDSHAKE, on every providers snapshot — on connect, on asking, and on
+  // a broadcast. A server that predates subscription Chat never sends it, and the app says so.
+  const opening = await a.want((m) => m?.channel === "providers" && m?.type === "providers", "a's opening providers");
+  check(opening.subscriptionChat === true, "the providers snapshot says this server runs Chat on a subscription");
+  a.inbox.length = 0;
+  a.send({ cmd: "listProviders" });
+  const asked = await a.want((m) => m?.channel === "providers" && m?.type === "providers", "a's providers on asking");
+  check(asked.subscriptionChat === true, "...when asked for again");
+  a.inbox.length = 0;
+  relay.broadcastProviders(ctx, { type: "providers", providers: [], ownKeyForPlatform: false, models: [] });
+  const broadcast = await a.want((m) => m?.channel === "providers" && m?.type === "providers", "a broadcast providers snapshot");
+  check(broadcast.subscriptionChat === true, "...and on a broadcast, which is how a key change reaches every tab");
 }
 
 console.log("\na machine reports, and only its own socket learns");

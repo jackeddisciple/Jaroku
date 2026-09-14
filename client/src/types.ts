@@ -816,6 +816,11 @@ export type ProviderMessage =
       ownKeyForPlatform: boolean;
       /** Every model a run may be started on, from the server's price sheet. See ProviderModel. */
       models: ProviderModel[];
+      /**
+       * THIS SERVER RUNS CHAT ON A SUBSCRIPTION — its half of the handshake. Absent from a server that
+       * predates the feature, which the app reads as exactly that, and says.
+       */
+      subscriptionChat?: boolean;
     }
   /**
    * The subscription half, sent to ONE socket rather than broadcast.
