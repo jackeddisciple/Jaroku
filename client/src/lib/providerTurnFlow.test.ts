@@ -46,7 +46,13 @@ function watchStore(): Seen {
  * was attached BEFORE the process began — the ordering that decides whether a fast turn's first
  * line is heard or dropped.
  */
-function installHost(lines: string[], opts: { exitCode?: number; failStart?: string; delayMs?: number } = {}): {
+function installHost(lines: string[], opts: {
+  exitCode?: number; failStart?: string; delayMs?: number;
+  /** Lines THIS turn prints before `provider_turn_start` has returned its id — a fast first line. */
+  earlyLines?: string[];
+  /** Lines ANOTHER turn prints in that same window — an earlier turn still running. */
+  foreignLines?: string[];
+} = {}): {
   cancelled: number[]; startedWith: Record<string, unknown> | null;
 } {
   const state = { cancelled: [] as number[], startedWith: null as Record<string, unknown> | null };
@@ -61,6 +67,10 @@ function installHost(lines: string[], opts: { exitCode?: number; failStart?: str
         if (opts.failStart) throw new Error(opts.failStart);
         state.startedWith = args ?? null;
         const id = nextId++;
+        // Delivered synchronously, before this call returns — the window in which the page cannot yet
+        // tell its own turn's events from anybody else's.
+        for (const line of opts.foreignLines ?? []) listener?.({ payload: { turnId: 999, line, done: false } });
+        for (const line of opts.earlyLines ?? []) listener?.({ payload: { turnId: id, line, done: false } });
         // Emitted after this call returns, the way a real spawn does.
         void (async () => {
           await sleep(opts.delayMs ?? 5);
@@ -231,6 +241,30 @@ console.log("\nnothing is recorded for a turn that failed");
   await runLocalTurn({ ...base, provider: "openai", prompt: "hi", onComplete: () => { recorded = true; } }).finished;
   // Recording a failure as an answer would put an empty assistant message in the thread forever.
   check("a failed turn is never handed on to be recorded", !recorded);
+}
+
+console.log("\nan earlier turn still printing cannot bleed into this one");
+{
+  // Until `provider_turn_start` returns, this turn does not know its own id — and the listener has to
+  // be up before then, or a fast first line is lost. Accepting everything in that window appended a
+  // still-running earlier turn's output to this answer.
+  installHost([
+    '{"type":"item.completed","item":{"type":"agent_message","text":"mine"}}',
+    '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}',
+  ], { foreignLines: ['{"type":"item.completed","item":{"type":"agent_message","text":"ANOTHER TURN"}}'] });
+  const seen = watchStore();
+  await runLocalTurn({ ...base, provider: "openai", prompt: "hi" }).finished;
+  check("another turn's line is not appended", seen.deltas.join("") === "mine", JSON.stringify(seen.deltas.join("")));
+
+  // ...WHILE THIS TURN'S OWN FIRST LINE, printed in that same window, still lands.
+  installHost(['{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'], {
+    earlyLines: ['{"type":"item.completed","item":{"type":"agent_message","text":"fast"}}'],
+    foreignLines: ['{"type":"item.completed","item":{"type":"agent_message","text":"stale"}}'],
+  });
+  const fast = watchStore();
+  await runLocalTurn({ ...base, provider: "openai", prompt: "hi" }).finished;
+  check("...a fast first line from this turn is kept", fast.deltas.join("") === "fast", JSON.stringify(fast.deltas.join("")));
+  check("...and the other turn's is still dropped", !fast.deltas.join("").includes("stale"));
 }
 
 console.log("\ncancelling kills the process that is spending the plan");

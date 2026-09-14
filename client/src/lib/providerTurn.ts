@@ -45,6 +45,9 @@ export interface TurnUsage {
 type Invoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 type Listen = (event: string, cb: (e: { payload: unknown }) => void) => Promise<() => void>;
 
+/** One event of a running turn, as `provider_turn.rs` emits it. */
+type TurnEvent = { turnId: number; line?: string; done?: boolean; error?: string };
+
 function host(): { invoke: Invoke; listen: Listen } | null {
   const t = (globalThis as {
     __TAURI__?: { core?: { invoke?: Invoke }; event?: { listen?: Listen } };
@@ -215,6 +218,15 @@ export function runLocalTurn(opts: {
   let usage: TurnUsage | null = null;
   let failed: string | null = null;
   let turnId: number | null = null;
+  /**
+   * Events that arrived before this turn knew its own id.
+   *
+   * THE LISTENER HAS TO BE UP BEFORE THE PROCESS STARTS, because a fast turn can print its first line
+   * before `invoke` resolves — and until it resolves there is no id to match against. Accepting
+   * everything in that window appended a still-running EARLIER turn's output to this one's answer, so
+   * the window is held here and replayed, filtered, once the id comes back.
+   */
+  const early: TurnEvent[] = [];
   let unlisten: (() => void) | null = null;
   let settle!: () => void;
   const finished = new Promise<void>((r) => { settle = r; });
@@ -246,9 +258,11 @@ export function runLocalTurn(opts: {
     try {
       // LISTEN BEFORE STARTING. A fast turn can emit its first line before an await resolves, and a
       // listener attached afterwards would miss it — which reads as a turn that answered nothing.
-      unlisten = await h.listen("jaroku:provider-turn", ({ payload }) => {
-        const ev = payload as { turnId: number; line?: string; done?: boolean; error?: string };
-        if (turnId !== null && ev.turnId !== turnId) return;
+      const onEvent = ({ payload }: { payload: unknown }): void => {
+        const ev = payload as TurnEvent;
+        // NOT KNOWN YET IS HELD, NEVER ACCEPTED — see `early`.
+        if (turnId === null) { early.push(ev); return; }
+        if (ev.turnId !== turnId) return;
         if (ev.line) {
           let parsedLine: Parsed | null = null;
           try {
@@ -284,7 +298,8 @@ export function runLocalTurn(opts: {
           }
           end();
         }
-      });
+      };
+      unlisten = await h.listen("jaroku:provider-turn", onEvent);
 
       turnId = (await h.invoke("provider_turn_start", {
         provider: opts.provider,
@@ -293,6 +308,9 @@ export function runLocalTurn(opts: {
         effort: opts.effort,
         cwd: opts.cwd,
       })) as number;
+      // AND NOW THAT IT DOES, what arrived in the meantime is replayed — this turn's own lines in the
+      // order they came, and any other turn's dropped rather than appended to this answer.
+      for (const ev of early.splice(0)) onEvent({ payload: ev });
     } catch (err) {
       failed = err instanceof Error ? err.message : String(err);
       end();
