@@ -133,7 +133,9 @@ pub fn run() {
     // `--config src-tauri/tauri.updater.conf.json` is what turns it on; see updater.rs.
     //
     // It REPLACES the handler above rather than adding to it, because a builder takes one. That
-    // is why `with_updater` restates the seven names.
+    // is why `with_updater` restates every name above, and why `desktopContract.test.ts` holds the
+    // two lists to each other: a command missing from the second throws "not found" in the build
+    // that ships.
     with_updater(builder)
         .setup(|app| {
             // 0 — THE LOG, BEFORE ANYTHING THAT COULD HAVE SOMETHING TO SAY.
@@ -411,8 +413,9 @@ pub fn run() {
 /// configuration nobody builds by default, which is the worst place to put one — so the whole
 /// registration moves here, where each branch is an ordinary expression.
 ///
-/// The command list is spelled twice as a result. That is the cost, it is seven names, and the
-/// duplication is visible in one function rather than hidden in a macro.
+/// The command list is spelled twice as a result. That is the cost — every command the page may
+/// invoke, twice — and it is paid in one visible function rather than hidden in a macro, with
+/// `desktopContract.test.ts` holding the two copies to each other.
 #[cfg(feature = "updater")]
 fn with_updater(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     builder.plugin(tauri_plugin_updater::Builder::new().build()).invoke_handler(tauri::generate_handler![
@@ -423,12 +426,17 @@ fn with_updater(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         firstrun::focus_window,
         status::backend_status,
         provider_auth::provider_hosts,
+        // MISSING FROM THIS LIST UNTIL 2026-09-14, the way `open_checkout` below once was: every
+        // subscription Chat turn in an updater build failed with "command not found", under a
+        // comment claiming the contract suite compared the two lists. It does now, entry by entry.
+        provider_turn::provider_turn_start,
+        provider_turn::provider_turn_cancel,
         sidecar::restart_backend,
         deeplink::drain_deep_links,
-        // ABSENT FROM THIS LIST UNTIL NOW, which is the whole reason the contract suite asserts
-        // both lists rather than one. A build with `--features updater` is the build that ships,
-        // and it had no `open_checkout` — so the upgrade button in that build would have refused
-        // to open a payment page, in the only configuration anybody pays money in.
+        // ABSENT FROM THIS LIST ONCE TOO, which is why `desktopContract.test.ts` compares this list
+        // with the base one rather than reading either alone. A build with `--features updater` is
+        // the build that ships, and it had no `open_checkout` — so the upgrade button in that build
+        // would have refused to open a payment page, in the only configuration anybody pays money in.
         deeplink::open_checkout,
         deeplink::open_external,
         secrets::secret_get,
