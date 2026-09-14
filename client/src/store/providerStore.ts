@@ -13,7 +13,9 @@
 // which is the whole of what the browser is ever told.
 
 import { create } from "zustand";
-import type { ProviderId, ProviderModel, ProviderStatus, SubscriptionStatus } from "../types.ts";
+import {
+  isProviderId, type ProviderId, type ProviderModel, type ProviderStatus, type SubscriptionStatus,
+} from "../types.ts";
 
 /** The answer to one "Test connection" press. Transient — it describes a moment, not state. */
 export interface ProviderTestResult {
@@ -163,6 +165,11 @@ export interface RunProvider {
 export function runProviders(models: ProviderModel[]): RunProvider[] {
   const out: RunProvider[] = [];
   for (const m of models) {
+    // ONLY PROVIDERS THIS CLIENT KNOWS. The catalogue is the server's, and a backend on another
+    // version offers its own: a shipped build talking to an older one listed a Gemini group with no
+    // mark and the test suites' dry run as selectable models — neither with a key form, a subscription
+    // row or a run path here. What this client cannot run, it does not offer.
+    if (!isProviderId(m.provider)) continue;
     const existing = out.find((p) => p.id === m.provider);
     if (existing) existing.models.push(m.id);
     else out.push({ id: m.provider, label: m.label, models: [m.id] });
@@ -206,7 +213,9 @@ export function pickRunModel(models: ProviderModel[], providers: ProviderStatus[
   if (owner && isRunnable(providers, owner)) return current;
   const runnable = runProviders(models).find((p) => isRunnable(providers, p.id));
   if (runnable?.models[0]) return runnable.models[0];
-  return owner ? current : (models[0]?.id ?? "");
+  // THE CATALOGUE'S FIRST OFFERED MODEL, not the raw list's first — which, from a backend on another
+  // version, can be a provider this client does not offer at all.
+  return owner ? current : (runProviders(models)[0]?.models[0] ?? "");
 }
 
 /**

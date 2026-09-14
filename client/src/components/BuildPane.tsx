@@ -35,7 +35,7 @@ import { WorkGate } from "./WorkGate.tsx";
 import { useWorkStore } from "../store/workStore.ts";
 import { threadById } from "../store/threadStore.ts";
 import { fmtCost, fmtTokens } from "../lib/format.ts";
-import type { ProviderModel } from "../types.ts";
+import { isProviderId, type ProviderModel } from "../types.ts";
 import { secondaryBtn } from "./buttons.ts";
 import { Chip, chipClass } from "./Chip.tsx";
 import { ChoiceRow, type Choice } from "./ChoiceRow.tsx";
@@ -677,7 +677,7 @@ function AssistantTurn({
             // The first three models in the catalogue. The whole list would be a menu longer than the
             // response it is offering to replace. Labelled by the MODEL's name — the provider's label
             // made all three read "Regenerate with Claude".
-            models={models.slice(0, 3).map((m) => ({ id: m.id, label: m.name }))}
+            models={models.filter((m) => isProviderId(m.provider)).slice(0, 3).map((m) => ({ id: m.id, label: m.name }))}
             turnId={itemId}
             conversationId={threadId}
             // §5.5's promotion offer is only shown on a turn that PRODUCED a version, because that

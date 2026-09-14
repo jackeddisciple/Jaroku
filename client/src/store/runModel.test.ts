@@ -103,6 +103,26 @@ console.log("\nthe two directions agree — the invariant is round-trippable");
   check("no model in the catalogue is orphaned", orphans.length === 0, orphans.join(","));
 }
 
+console.log("\na catalogue from a backend on another version offers only what this client can run");
+{
+  // SEEN IN A SHIPPED BUILD: an older backend's price sheet listed a Gemini group — no provider mark,
+  // no key form, no subscription row in this client — and the test suites' dry run as a model.
+  const skewed = [
+    { id: "gemini-2.5-pro", provider: "google", label: "Gemini" },
+    { id: "fake-dry-run", provider: "fake", label: "Dry run" },
+    ...sheet,
+  ] as ProviderModel[];
+  const grouped = runProviders(skewed).map((p) => p.id);
+  check("no provider this client does not know is grouped", grouped.join(",") === "anthropic,openai,meta", grouped.join(","));
+  check("...so the dry run belongs to nobody and cannot be selected", providerForModel(skewed, "fake-dry-run") === null);
+  const none = (["anthropic", "openai", "meta"] as const).map((id) => ({
+    id, env_key: "", configured: false, runnable: false, powers_jaroku: id === "anthropic",
+  })) as ProviderStatus[];
+  // THE FALLBACK READ THE RAW LIST, so with nothing runnable a catalogue that led with Gemini picked it.
+  check("...and a catalogue that leads with one never picks it",
+    pickRunModel(skewed, none, "") === "claude-opus-5", pickRunModel(skewed, none, ""));
+}
+
 console.log("\na model reads as its name, and an unnamed one as its id");
 {
   // Every selector shows this. The id is what a run is started with and recorded under; the name is

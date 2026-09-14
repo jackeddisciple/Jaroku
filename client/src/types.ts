@@ -728,6 +728,21 @@ export interface SubscriptionStatus {
 export type ProviderId = "anthropic" | "openai" | "meta";
 
 /**
+ * The same three, as a value: the providers a model menu in this build may offer.
+ *
+ * A `Record` RATHER THAN AN ARRAY LITERAL, so a provider added to `ProviderId` and not here fails to
+ * compile instead of quietly vanishing from every selector. It exists because the catalogue is the
+ * SERVER's, and a backend on another version offers providers this client has no key form, no mark
+ * and no subscription row for — a Gemini group and the test suites' dry run, both seen in a shipped
+ * build talking to an older backend.
+ */
+const PROVIDERS: Readonly<Record<ProviderId, true>> = { anthropic: true, openai: true, meta: true };
+export const PROVIDER_IDS = Object.keys(PROVIDERS) as readonly ProviderId[];
+export function isProviderId(id: string): id is ProviderId {
+  return Object.prototype.hasOwnProperty.call(PROVIDERS, id);
+}
+
+/**
  * One selectable model, as the server offers it.
  *
  * FROM `runtime/pricing.json`, WHICH IS THE POINT. The client used to hold the catalogue as a
