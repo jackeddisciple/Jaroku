@@ -2192,8 +2192,13 @@ export function BuildPane({
    * TEST MODE IS UNTOUCHED. An agent run spends an API account, so `missingKey` below still governs
    * it exactly as it always did. The two modes block on two different credentials because they
    * spend two different things.
+   *
+   * AND IT GATES A CHAT TURN, NOT CHAT MODE. Every route lives in this mode — planning an agent,
+   * editing one, explaining a step, re-running one, fixing a failure — and none of those runs on a
+   * subscription. Gating the mode blocked all of them for anybody without a connected plan, including
+   * every browser tab, which can never have one.
    */
-  const noSubscription = composerMode === "chat" && !operating && !chatProviderConnected;
+  const noSubscription = composerMode === "chat" && !operating && intent.kind === "chat" && !chatProviderConnected;
 
   const missingKey: string | null = !providersLoaded || operating || composerMode === "chat" ? null
     : isRunnable(providerStatuses, provider) ? null : provider || "anthropic";
@@ -2213,7 +2218,11 @@ export function BuildPane({
    * was for, and it says the draft survives, which is the fear. Pressing opens Settings at the place
    * that fixes it rather than refusing in place.
    */
-  const SUBSCRIPTION_ASK = "Connect your Claude or Codex subscription to talk to Jaroku — your draft is kept";
+  // A BROWSER TAB CAN NEVER CONNECT ONE — there is no CLI on its side to sign in with — so it is told
+  // where Chat does run, rather than to go and connect something it has no way to connect.
+  const SUBSCRIPTION_ASK = canRunLocally()
+    ? "Connect your Claude or Codex subscription to talk to Jaroku — your draft is kept"
+    : "Chat with Jaroku runs in the desktop app, on your own Claude or Codex plan — planning and building work here";
   const keyAsk = missingKey
     ? `Add ${/^[AEIOU]/.test(missingKeyLabel) ? "an" : "a"} ${missingKeyLabel} key to ${
       composerMode === "test"
@@ -2549,7 +2558,8 @@ export function BuildPane({
     // draft intact. Deliberately NOT Secrets: an API key cannot answer a Chat turn, so sending
     // somebody there would be a dead end wearing the costume of a way out.
     if (noSubscription) {
-      useUiStore.getState().openWorkspacePanel("account");
+      // A BROWSER HAS NOTHING TO CONNECT, and the banner already says where Chat runs.
+      if (canRunLocally()) useUiStore.getState().openWorkspacePanel("account");
       return;
     }
 
@@ -3490,16 +3500,27 @@ export function BuildPane({
               <span className="shrink-0" style={{ color: STATUS.warn }} aria-hidden>
                 <AlertTriangleIcon size={ICON.xs} />
               </span>
+              {/* A BROWSER IS TOLD WHERE CHAT RUNS, with no button: there is nothing on its side to
+                  connect, and a control that opened a panel saying so would be a loop. */}
               <span className="min-w-0 flex-1 text-muted">
-                Chat runs on your own Claude or Codex subscription. Connect one to send — your draft
-                is kept.{" "}
-                <button
-                  type="button"
-                  onClick={() => useUiStore.getState().openWorkspacePanel("account")}
-                  className="text-ink underline underline-offset-2 outline-none transition-colors duration-fast hover:text-ink focus-visible:shadow-focusring"
-                >
-                  Connect a provider
-                </button>
+                {canRunLocally() ? (
+                  <>
+                    Chat runs on your own Claude or Codex subscription. Connect one to send — your draft
+                    is kept.{" "}
+                    <button
+                      type="button"
+                      onClick={() => useUiStore.getState().openWorkspacePanel("account")}
+                      className="text-ink underline underline-offset-2 outline-none transition-colors duration-fast hover:text-ink focus-visible:shadow-focusring"
+                    >
+                      Connect a provider
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    Chat with Jaroku runs in the desktop app, on your own Claude or Codex plan. Planning an
+                    agent and building one work here.
+                  </>
+                )}
               </span>
             </div>
           )}

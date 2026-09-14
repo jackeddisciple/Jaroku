@@ -188,6 +188,13 @@ console.log("\nthe composer's gate asks about the chat provider, never about any
   check("Chat is gated on the chosen provider's own row", /const noSubscription = [^;]*!chatProviderConnected/.test(pane));
   // "SOME plan is connected" is what let a Codex sign-in send a Claude turn to the server.
   check("...and never on whether some other plan is connected", !/useSubscriptionConnected\(\)/.test(pane));
+  // IT GATES A CHAT TURN, NOT THE MODE: planning, editing, explaining and fixing live in Chat mode too,
+  // run on keys, and were all blocked for anybody without a plan — every browser tab included.
+  check("...and only a message that is going to chat", /const noSubscription = [^;]*intent\.kind === "chat"/.test(pane));
+  check("a browser is told where Chat runs, not to connect what it cannot",
+    /const SUBSCRIPTION_ASK = canRunLocally\(\)/.test(pane) && /Chat with Jaroku runs in the desktop app/.test(pane));
+  check("...and is not sent to a panel that can only say the same",
+    /if \(noSubscription\) \{[\s\S]{0,160}?if \(canRunLocally\(\)\) useUiStore\.getState\(\)\.openWorkspacePanel\("account"\);/.test(pane));
   // THE FALLBACK THAT SPENT THE API KEY. A chat turn with no connected plan went to `sendChat`.
   const chatCases = pane.match(/case "chat":[\s\S]*?case "generate":/g) ?? [];
   check("the composer's chat case exists", chatCases.length > 0);
