@@ -62,6 +62,14 @@ export interface Parsed {
   /** Text to append to the answer. */
   text?: string;
   /**
+   * `text` is a WHOLE MESSAGE rather than a piece of one, so it starts a new paragraph.
+   *
+   * Codex emits each agent message complete, and a turn can carry more than one — a preamble, then
+   * the answer. Appended bare they ran together into one sentence; Claude's deltas are pieces of a
+   * single message and must not be broken up, which is why this is marked per event.
+   */
+  block?: boolean;
+  /**
    * A COMPLETE message, as opposed to a delta.
    *
    * Both CLIs emit the finished answer a second time after streaming it — Claude as an `assistant`
@@ -90,7 +98,7 @@ export function __parseCodexLine(raw: unknown): Parsed | null {
   if (!raw || typeof raw !== "object") return null;
   const e = raw as Record<string, any>;
   if (e.type === "item.completed" && e.item?.type === "agent_message" && typeof e.item.text === "string") {
-    return { text: e.item.text };
+    return { text: e.item.text, block: true };
   }
   if (e.type === "turn.completed") {
     return {
@@ -252,8 +260,10 @@ export function runLocalTurn(opts: {
           }
           if (!parsedLine) return;
           if (parsedLine.text) {
-            answer += parsedLine.text;
-            chat.replyDelta({ threadId: opts.threadId, agentId: opts.agentId, text: parsedLine.text });
+            // A WHOLE MESSAGE AFTER TEXT ALREADY ON THE TURN STARTS A NEW PARAGRAPH — see `Parsed.block`.
+            const piece = parsedLine.block && answer.length > 0 ? `\n\n${parsedLine.text}` : parsedLine.text;
+            answer += piece;
+            chat.replyDelta({ threadId: opts.threadId, agentId: opts.agentId, text: piece });
           }
           if (parsedLine.whole) whole = parsedLine.whole;
           if (parsedLine.usage) usage = parsedLine.usage;

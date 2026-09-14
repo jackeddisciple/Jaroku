@@ -30,6 +30,7 @@ console.log("\ncodex exec --json, as captured");
 
   const msg = __parseCodexLine(J('{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"BRIDGE OK"}}'));
   check("an agent message becomes text", msg?.text === "BRIDGE OK", JSON.stringify(msg));
+  check("...marked as a whole message, so a second one starts a new paragraph", msg?.block === true, JSON.stringify(msg));
 
   const done = __parseCodexLine(J('{"type":"turn.completed","usage":{"input_tokens":15941,"cached_input_tokens":11008,"cache_write_input_tokens":0,"output_tokens":7,"reasoning_output_tokens":0}}'));
   check("turn.completed becomes usage", done?.usage?.input_tokens === 15941 && done?.usage?.output_tokens === 7, JSON.stringify(done));

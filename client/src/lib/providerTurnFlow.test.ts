@@ -139,6 +139,27 @@ console.log("\na Claude turn streams in order and does not double");
     (seen.usage as { cost_usd?: number })?.cost_usd === 0.0683845);
 }
 
+console.log("\ntwo Codex messages in one turn stay two paragraphs");
+{
+  // Codex emits each agent message whole, and a turn can carry a preamble before its answer. Appended
+  // bare, "Let me think about that." and "Here is the plan." rendered as one run-on sentence.
+  installHost([
+    '{"type":"turn.started"}',
+    '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"Let me think about that."}}',
+    '{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"Here is the plan."}}',
+    '{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":9}}',
+  ]);
+  const seen = watchStore();
+  const record: { answer: string | null } = { answer: null };
+  await runLocalTurn({
+    ...base, provider: "openai", prompt: "plan it", onComplete: (answer) => { record.answer = answer; },
+  }).finished;
+  const expected = "Let me think about that.\n\nHere is the plan.";
+  check("...rendered with a paragraph break between them", seen.deltas.join("") === expected, JSON.stringify(seen.deltas.join("")));
+  check("...recorded the same way", record.answer === expected, JSON.stringify(record.answer));
+  check("...and with nothing in front of the first", !seen.deltas.join("").startsWith("\n"));
+}
+
 console.log("\nan answer that never streamed is still an answer");
 {
   // THE CASE THE APP ACTUALLY HIT. A Claude turn ended with a complete `assistant` message and no
