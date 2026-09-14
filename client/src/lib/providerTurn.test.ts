@@ -40,6 +40,22 @@ console.log("\ncodex exec --json, as captured");
   // conversation.
   const reasoning = __parseCodexLine(J('{"type":"item.completed","item":{"type":"reasoning","text":"thinking out loud"}}'));
   check("a reasoning item is not treated as the answer", reasoning === null);
+
+  // THE TWO FAILURE SHAPES, captured on 2026-09-14 by asking for a model a ChatGPT sign-in cannot
+  // use. The sentence rides as a JSON body inside a string, and `turn.failed` keeps it under `error`.
+  const SENTENCE = "The 'not-a-real-model' model is not supported when using Codex with a ChatGPT account.";
+  const errorEvent = __parseCodexLine(J(String.raw`{"type":"error","message":"{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'not-a-real-model' model is not supported when using Codex with a ChatGPT account.\"}}"}`));
+  check("an error event becomes its sentence, not escaped JSON", errorEvent?.error === SENTENCE, JSON.stringify(errorEvent));
+  const turnFailed = __parseCodexLine(J(String.raw`{"type":"turn.failed","error":{"message":"{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'not-a-real-model' model is not supported when using Codex with a ChatGPT account.\"}}"}}`));
+  check("turn.failed's sentence is read from under `error`", turnFailed?.error === SENTENCE, JSON.stringify(turnFailed));
+  check("...a plain-text failure is kept as it is",
+    __parseCodexLine(J('{"type":"turn.failed","error":{"message":"stream disconnected before completion"}}'))?.error
+      === "stream disconnected before completion");
+  check("...and one with no message still says a failure happened",
+    __parseCodexLine(J('{"type":"turn.failed"}'))?.error === "The provider reported a failure.");
+  // A warning Codex files as an ITEM is not the turn failing — the same run printed one before its
+  // real refusal, and treating it as the failure would report the wrong sentence.
+  check("an error item is a warning, not a failure", __parseCodexLine(J('{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Model metadata for `not-a-real-model` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."}}')) === null);
 }
 
 console.log("\nclaude -p --output-format stream-json, as captured");

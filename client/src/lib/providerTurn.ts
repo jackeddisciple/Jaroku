@@ -102,10 +102,40 @@ export function __parseCodexLine(raw: unknown): Parsed | null {
       },
     };
   }
+  // TWO SHAPES, AND THE SECOND WAS BEING READ AS THE FIRST. Captured from codex-cli 0.154.0 by asking
+  // for a model a ChatGPT sign-in cannot use:
+  //
+  //   {"type":"error","message":"{\"type\":\"error\",\"status\":400,\"error\":{\"message\":\"…\"}}"}
+  //   {"type":"turn.failed","error":{"message":"<the same body>"}}
+  //
+  // `turn.failed` keeps its sentence under `error`, so reading `e.message` turned a specific,
+  // actionable refusal into "The provider reported a failure." — masked only while an `error` event
+  // happened to arrive first. Both carry the backend's JSON body as a STRING, so the sentence inside
+  // it is what reaches the conversation rather than escaped JSON.
   if (e.type === "turn.failed" || e.type === "error") {
-    return { error: typeof e.message === "string" ? e.message : "The provider reported a failure." };
+    const raw = e.type === "turn.failed" ? (e.error?.message ?? e.message) : e.message;
+    return { error: failureSentence(raw) ?? "The provider reported a failure." };
   }
   return null;
+}
+
+/**
+ * The sentence inside a provider's failure message, which Codex hands back as a JSON body in a string.
+ *
+ * Unwrapped as far as a `message` or `detail` and no further; a message that is not JSON is already
+ * the sentence. Null when there is nothing usable, so the caller's generic fallback stands.
+ */
+function failureSentence(raw: unknown): string | null {
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  const text = raw.trim();
+  if (!text.startsWith("{")) return text;
+  try {
+    const body = JSON.parse(text) as Record<string, any>;
+    const inner = body?.error?.message ?? body?.detail ?? body?.message;
+    return typeof inner === "string" && inner.trim() ? inner.trim() : text;
+  } catch {
+    return text;
+  }
 }
 
 /** Claude Code's `--output-format stream-json`, which does emit real token deltas. */

@@ -185,6 +185,17 @@ console.log("\na failure is reported rather than swallowed");
   await runLocalTurn({ ...base, provider: "openai", prompt: "hi" }).finished;
   check("...and so does a clean exit with no answer", quiet.errors.length === 1 && quiet.done === 0);
 
+  // A Codex turn that FAILED with an exit of 0 and only `turn.failed` to say why — the shape the parser
+  // used to read as nothing specific and render as "The provider reported a failure."
+  installHost([
+    '{"type":"turn.started"}',
+    String.raw`{"type":"turn.failed","error":{"message":"{\"type\":\"error\",\"status\":400,\"error\":{\"message\":\"The 'gpt-x' model is not supported when using Codex with a ChatGPT account.\"}}"}}`,
+  ], { exitCode: 0 });
+  const refused = watchStore();
+  await runLocalTurn({ ...base, provider: "openai", prompt: "hi" }).finished;
+  check("...and a turn.failed alone reports the provider's own sentence",
+    refused.errors[0] === "The 'gpt-x' model is not supported when using Codex with a ChatGPT account.", refused.errors[0]);
+
   // The shell refusing to start at all — no CLI, or a provider it will not run.
   installHost([], { failStart: "codex is not installed" });
   const absent = watchStore();
