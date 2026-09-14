@@ -66,6 +66,7 @@
     "test:provider-turn": "tsx src/lib/providerTurn.test.ts",
     "test:provider-turn-flow": "tsx src/lib/providerTurnFlow.test.ts",
     "test:subscription-state": "tsx src/lib/subscriptionState.test.ts",
+    "test:host-providers": "tsx src/lib/hostProviders.test.ts",
     "test:host-backend": "tsx src/lib/hostBackend.test.ts",
     "test:session-vault": "tsx src/lib/sessionVault.test.ts",
     "test:invite": "tsx src/lib/invite.test.ts",

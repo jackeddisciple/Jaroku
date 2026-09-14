@@ -1643,7 +1643,15 @@ export function sendRecordChatTurn(turn: {
   send({ cmd: "recordChatTurn", ...turn, threadId: activeThread() });
 }
 
-export async function reportHostProviders(): Promise<void> {
+/** The report in flight, shared the way `readHostProviders` shares its probe. */
+let reporting: Promise<void> | null = null;
+
+export function reportHostProviders(): Promise<void> {
+  if (!reporting) reporting = sendHostReport().finally(() => { reporting = null; });
+  return reporting;
+}
+
+async function sendHostReport(): Promise<void> {
   const hosts = await readHostProviders();
   if (!hasHost()) return;
   send({

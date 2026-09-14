@@ -66,13 +66,28 @@ function validate(raw: unknown): HostProviderReport | null {
 }
 
 /**
+ * The probe in flight, shared by everybody who asks while it runs.
+ *
+ * A PROBE IS SEVERAL PROCESS SPAWNS, and the page asks from several places at once — the socket
+ * opening, the Settings panel mounting, Check again pressed twice. The desktop log showed fifteen
+ * probes in a minute, six of them 316ms apart. Asked again while one is running, the answer is that
+ * one.
+ */
+let inFlight: Promise<HostProviderReport[]> | null = null;
+
+/**
  * Ask the shell what it can see. Empty in a browser, and empty on any error.
  *
  * NEVER THROWS. This runs on mount and after a sign-in, and the worst honest outcome is "we could
  * not tell" — which is already what an empty list means. A rejected promise here would take out
  * whatever rendered the composer.
  */
-export async function readHostProviders(): Promise<HostProviderReport[]> {
+export function readHostProviders(): Promise<HostProviderReport[]> {
+  if (!inFlight) inFlight = probeHost().finally(() => { inFlight = null; });
+  return inFlight;
+}
+
+async function probeHost(): Promise<HostProviderReport[]> {
   const invoke = invoker();
   if (!invoke) return [];
   try {

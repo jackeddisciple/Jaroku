@@ -1339,6 +1339,10 @@ jobs:
           # model it could not use — in the one place where an API key is explicitly not the
           # credential, pointing somebody at Secrets, which cannot help.
           npm run test:subscription-state
+          # AND HOW OFTEN THE PAGE ASKS THE SHELL WHAT IT HAS. A probe is several process spawns, and the
+          # desktop log showed fifteen in a minute — six of them 316ms apart — from asks that overlapped:
+          # the socket opening, Settings mounting, Check again pressed twice.
+          npm run test:host-providers
           # WHICH OF THE TWO WINDOWS THE PAGE ASKS FOR, and the two ways that goes wrong. The
           # welcome screen is a 560px window and the application is 1440, only the bundle knows
           # which of them a launch needs, and a webview cannot resize the frame it is inside — so

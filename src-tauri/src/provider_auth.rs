@@ -38,7 +38,8 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
@@ -153,6 +154,26 @@ fn is_executable(path: &Path) -> bool {
 /// stderr, and a complaint is not an answer — a probe that concatenated the two would read
 /// "Not logged in" out of a warning about a config file.
 fn probe(exe: &Path, args: &[&str]) -> Option<String> {
+    probe_within(exe, args, PROBE_TIMEOUT).ok()
+}
+
+/// Why a probe produced no answer — kept apart, because the row owes each a different sentence.
+///
+/// A CLI that is signed out ANSWERS. One waiting on a Keychain prompt nobody has seen does not, and
+/// killed at the timeout it used to read exactly like a signed-out one: somebody with a working plan
+/// was told to go and sign in, while the log alone knew better.
+#[derive(Debug, PartialEq, Eq)]
+enum Silence {
+    /// It did not answer inside the timeout, and was killed.
+    TimedOut,
+    /// It could not be started, or waited on.
+    Failed,
+    /// It exited having written nothing to either stream.
+    Empty,
+}
+
+/// `probe`, with the reason for a silence kept and the timeout named by the caller.
+fn probe_within(exe: &Path, args: &[&str], timeout: Duration) -> Result<String, Silence> {
     let mut child = Command::new(exe)
         .args(args)
         .stdin(std::process::Stdio::null())
@@ -164,32 +185,34 @@ fn probe(exe: &Path, args: &[&str]) -> Option<String> {
         // stream the sentence came from — the app, reading only one, could not.
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .ok()?;
+        .map_err(|_| Silence::Failed)?;
 
     // A hand-rolled wait rather than a dependency: this is the only place in the shell that needs
     // a timeout on a child, and `wait_timeout` would be a crate for one loop.
-    let deadline = std::time::Instant::now() + PROBE_TIMEOUT;
+    let deadline = Instant::now() + timeout;
     loop {
         match child.try_wait() {
             Ok(Some(_)) => break,
             Ok(None) => {
-                if std::time::Instant::now() >= deadline {
+                if Instant::now() >= deadline {
                     let _ = child.kill();
+                    // Reaped, so a killed probe is not a zombie for the life of the application.
+                    let _ = child.wait();
                     logs::say(format!(
-                        "provider probe timed out after {}s: {} {}",
-                        PROBE_TIMEOUT.as_secs(),
+                        "provider probe timed out after {}ms: {} {}",
+                        timeout.as_millis(),
                         exe.display(),
                         args.join(" ")
                     ));
-                    return None;
+                    return Err(Silence::TimedOut);
                 }
                 std::thread::sleep(Duration::from_millis(50));
             }
-            Err(_) => return None,
+            Err(_) => return Err(Silence::Failed),
         }
     }
 
-    let out = child.wait_with_output().ok()?;
+    let out = child.wait_with_output().map_err(|_| Silence::Failed)?;
     // STDOUT WINS WHEN THERE IS ANY, and stderr is the fallback rather than a merge: `claude auth
     // status --json` answers in JSON on stdout, and concatenating a warning onto that would turn a
     // parseable answer into an unparseable one. Only a command that said nothing on stdout falls
@@ -212,9 +235,9 @@ fn probe(exe: &Path, args: &[&str]) -> Option<String> {
             args.join(" "),
             out.status.code()
         ));
-        return None;
+        return Err(Silence::Empty);
     }
-    Some(text)
+    Ok(text)
 }
 
 /// The one line of `codex login status` that means a consumer plan, matched exactly.
@@ -389,14 +412,29 @@ pub fn claude_note(signed_in: bool, auth_mode: Option<&str>) -> Option<String> {
     )
 }
 
+/// The sentence for a CLI that did not answer inside the probe's timeout — which is not signed out.
+///
+/// The log always told the two apart and the row did not, so a Keychain prompt nobody had seen became
+/// "sign in with your plan" on screen, for somebody whose plan was working.
+pub fn unanswered_note(product: &str) -> String {
+    format!(
+        "{product} did not answer within {} seconds, so Jaroku cannot tell whether it is signed in. If \
+         macOS asked whether it may use the Keychain, allow it, then press Check again.",
+        PROBE_TIMEOUT.as_secs()
+    )
+}
+
 /// Ask `codex` about itself.
 fn observe_codex() -> HostProvider {
     let Some(exe) = locate("codex") else {
         return HostProvider::absent("openai");
     };
     let version = probe(&exe, &["--version"]).map(|v| v.trim().to_string());
-    let status = probe(&exe, &["login", "status"]).unwrap_or_default();
+    let answer = probe_within(&exe, &["login", "status"], PROBE_TIMEOUT);
+    let status = answer.as_deref().unwrap_or_default().to_string();
     let (signed_in, auth_mode, note) = read_codex_status(&status);
+    // A CLI THAT NEVER ANSWERED IS NOT A SIGNED-OUT ONE, and the row says which it was.
+    let note = if answer == Err(Silence::TimedOut) { Some(unanswered_note("Codex")) } else { note };
     if !signed_in && !status.is_empty() {
         // An unrecognised first line is the third silent outcome, and the log is the only place it
         // can show up: the row just reads "not signed in" either way.
@@ -426,9 +464,17 @@ fn observe_claude() -> HostProvider {
         return HostProvider::absent("anthropic");
     };
     let version = probe(&exe, &["--version"]).map(|v| v.trim().to_string());
-    let status = probe(&exe, &["auth", "status", "--json"]).unwrap_or_default();
+    // `auth status` READS THE KEYCHAIN, and a freshly built or unsigned app raises a Keychain prompt —
+    // one nobody answered inside the timeout used to read as "not signed in", telling somebody with a
+    // working plan to go and sign in.
+    let answer = probe_within(&exe, &["auth", "status", "--json"], PROBE_TIMEOUT);
+    let status = answer.as_deref().unwrap_or_default().to_string();
     let (signed_in, auth_mode, account, _plan) = read_claude_status(&status);
-    let note = claude_note(signed_in, auth_mode.as_deref());
+    let note = if answer == Err(Silence::TimedOut) {
+        Some(unanswered_note("Claude Code"))
+    } else {
+        claude_note(signed_in, auth_mode.as_deref())
+    };
 
     HostProvider {
         provider: "anthropic".to_string(),
@@ -465,14 +511,49 @@ fn observe_gated(provider: &str, binary: &str) -> HostProvider {
     }
 }
 
+/// The last full answer and when it was taken, so a burst of asks costs one set of spawns.
+static LAST: Mutex<Option<(Instant, Vec<HostProvider>)>> = Mutex::new(None);
+/// Held for the length of a probe, so an ask arriving mid-probe waits for that one rather than
+/// starting its own.
+static PROBING: Mutex<()> = Mutex::new(());
+/// How long an answer stands. Long enough to absorb a burst — the log showed six asks 316ms apart —
+/// and far shorter than it takes a person to sign in somewhere and come back.
+const FRESH_FOR: Duration = Duration::from_millis(1500);
+
 /// Everything this machine has, for the page to report inward.
 ///
 /// A COMMAND RATHER THAN AN EVENT, like `status::backend_status` beside it: the page asks when it
 /// mounts and after it sends the user to sign in, and there is no ordering to get right. It is also
 /// several process spawns, which is a thing to do on request rather than on a timer.
+///
+/// ASYNC, SO IT RUNS OFF THE MAIN THREAD. A synchronous command runs on it, and this is up to five
+/// spawns with a five-second timeout each — a Keychain prompt nobody answered froze the whole window
+/// for as long as it waited.
 #[tauri::command]
-pub fn provider_hosts() -> Vec<HostProvider> {
-    let hosts = vec![observe_codex(), observe_claude(), observe_gated("meta", "muse")];
+pub async fn provider_hosts() -> Vec<HostProvider> {
+    tauri::async_runtime::spawn_blocking(observe_machine).await.unwrap_or_default()
+}
+
+/// One answer for this machine: a fresh probe when the last answer is stale, that answer when not.
+fn observe_machine() -> Vec<HostProvider> {
+    let _probing = PROBING.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some((at, hosts)) = LAST.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_ref() {
+        if at.elapsed() < FRESH_FOR {
+            return hosts.clone();
+        }
+    }
+    // THE THREE AT ONCE. Each is mostly waiting on a child process, so the probe takes as long as its
+    // slowest CLI rather than the sum of all three.
+    let hosts = std::thread::scope(|scope| {
+        let codex = scope.spawn(observe_codex);
+        let claude = scope.spawn(observe_claude);
+        let muse = scope.spawn(|| observe_gated("meta", "muse"));
+        vec![
+            codex.join().unwrap_or_else(|_| HostProvider::absent("openai")),
+            claude.join().unwrap_or_else(|_| HostProvider::absent("anthropic")),
+            muse.join().unwrap_or_else(|_| HostProvider::absent("meta")),
+        ]
+    });
     logs::say(format!(
         "provider CLIs: {}",
         hosts
@@ -485,6 +566,7 @@ pub fn provider_hosts() -> Vec<HostProvider> {
             .collect::<Vec<_>>()
             .join(", ")
     ));
+    *LAST.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((Instant::now(), hosts.clone()));
     hosts
 }
 
@@ -545,6 +627,25 @@ mod tests {
         assert!(read_codex_account(r#"{"id":2,"result":{"account":null,"requiresOpenaiAuth":true}}"#).is_none());
         assert!(read_codex_account(r#"{"id":2,"result":{"account":{"type":"chatgpt","email":"  "}}}"#).is_none());
         assert!(read_codex_account("not json").is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_probe_that_does_not_answer_in_time_is_told_apart_from_a_signed_out_one() {
+        // THE CASE THAT READ AS A SIGNED-OUT PLAN: `claude auth status` waiting on a Keychain prompt
+        // nobody answered, killed at the timeout. It has to reach the row as "did not answer".
+        let started = Instant::now();
+        let silence = probe_within(Path::new("/bin/sleep"), &["5"], Duration::from_millis(200));
+        assert_eq!(silence, Err(Silence::TimedOut));
+        assert!(started.elapsed() < Duration::from_secs(3), "the timeout is honoured: {:?}", started.elapsed());
+        // An answer is still an answer, and a command that says nothing is its own case.
+        assert_eq!(
+            probe_within(Path::new("/bin/echo"), &["Logged in using ChatGPT"], PROBE_TIMEOUT).as_deref(),
+            Ok("Logged in using ChatGPT")
+        );
+        assert_eq!(probe_within(Path::new("/usr/bin/true"), &[], PROBE_TIMEOUT), Err(Silence::Empty));
+        // And the row's sentence points at the prompt, not at a sign-in.
+        assert!(unanswered_note("Claude Code").contains("Keychain"));
     }
 
     #[test]
