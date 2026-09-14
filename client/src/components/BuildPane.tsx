@@ -59,6 +59,7 @@ import { MAX_ATTACHMENTS, WARN_AT, budgetPercent } from "../lib/attachBudget.ts"
 import { EffortControl } from "./composer/EffortControl.tsx";
 import { canRunLocally, runLocalTurn } from "../lib/providerTurn.ts";
 import { useSubscriptionConnected } from "./ProviderSubscriptions.tsx";
+import { subscriptionBadge, subscriptionBlockedReason } from "../lib/subscriptionState.ts";
 import { effortName, effortStops, stopFor } from "../lib/effortLevels.ts";
 import { ShieldControl, modeLabel } from "./composer/ShieldControl.tsx";
 import { GreetingEmoji } from "./GreetingEmoji.tsx";
@@ -1074,6 +1075,7 @@ function ModelSection({
   onPick,
   onAddKey,
   blockedReason,
+  blockedBadge,
   wayOutLabel,
 }: {
   heading: string;
@@ -1093,6 +1095,12 @@ function ModelSection({
    * sign-in is an API key, not a plan". A shared message would be wrong in most of those.
    */
   blockedReason?: (provider: string) => string;
+  /**
+   * The word beside a model that cannot be used. Test's is "no API key", which is the truth there;
+   * Chat passes the subscription's own state, because a key is not the credential in that section
+   * and a badge saying otherwise sends somebody to Secrets for something Secrets cannot give.
+   */
+  blockedBadge?: (provider: string) => string | null;
   /** What the way-out says. Test adds a key; Chat sends you to the provider's own sign-in. */
   wayOutLabel?: string;
 }) {
@@ -1154,7 +1162,7 @@ function ModelSection({
                   {active && <CheckIcon size={ICON.xs} />}
                 </span>
                 <span className="min-w-0 flex-1 truncate">{modelName(models, m)}</span>
-                {!usable ? <span className="shrink-0 text-tiny">no API key</span> : null}
+                {!usable ? <span className="shrink-0 text-tiny">{blockedBadge ? blockedBadge(p.id) : "no API key"}</span> : null}
               </button>
             );
           })}
@@ -1245,21 +1253,11 @@ function ModelSelector({
   // Connected means: permitted by the provider, installed on this machine, and signed in with a
   // plan. The server decides it; this set only mirrors the answer.
   const chatUsable = new Set<string>(subscriptions.filter((sub) => sub.connected).map((sub) => sub.provider));
-  /** Why a listed-but-unusable Chat provider cannot be picked, in the provider's own terms. */
-  const chatBlockedReason = (id: string): string => {
-    const sub = subscriptions.find((x) => x.provider === id);
-    if (!sub) return "This provider is not available for Chat.";
-    if (!sub.available) return sub.reason ?? "This provider is not available for Chat yet.";
-    if (!sub.host?.installed) return `${sub.binary ?? "The CLI"} isn't installed on this machine.`;
-    if (!sub.host.signedIn) {
-      // The most confusing case, so it is the most explicit: signed in, and still not usable,
-      // because it is signed in with API credentials rather than a plan.
-      return sub.host.account || sub.loginCommand
-        ? `Run \`${sub.loginCommand}\` to sign in with your plan.`
-        : "Not signed in with a subscription.";
-    }
-    return "Not available for Chat.";
-  };
+  /**
+   * A Chat provider's row, for the reason and the badge the menu gives a model it cannot use. The
+   * words themselves are `subscriptionState.ts`'s, which Settings speaks too.
+   */
+  const subscriptionFor = (id: string) => subscriptions.find((x) => x.provider === id);
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
@@ -1317,7 +1315,7 @@ function ModelSelector({
                 </div>
                 {/* THE PROVIDER'S OWN REASON, VERBATIM. Paraphrasing a terms decision into product
                     copy is how it drifts from what the provider actually said. */}
-                <p className="mt-1 text-muted">{chatBlockedReason(sub.provider)}</p>
+                <p className="mt-1 text-muted">{subscriptionBlockedReason(sub)}</p>
                 {sub.available && sub.loginCommand && !sub.host?.signedIn ? (
                   <p className="mt-1 rounded-control bg-panel px-1.5 py-1 text-tiny text-ink">
                     {sub.loginCommand}
@@ -1353,7 +1351,8 @@ function ModelSelector({
             catalogue={chatCatalogue}
             models={models}
             usableProviders={chatUsable}
-            blockedReason={chatBlockedReason}
+            blockedReason={(id) => subscriptionBlockedReason(subscriptionFor(id))}
+            blockedBadge={(id) => subscriptionBadge(subscriptionFor(id))}
             /* The way out of Chat is the PROVIDER'S own sign-in, never Jaroku's key form. Sending
                somebody to Secrets from here would be the exact substitution the architecture
                forbids: an API key is not a subscription and must never stand in for one. */

@@ -26,6 +26,7 @@ import { ProviderMark } from "../lib/icons.tsx";
 import { reportHostProviders } from "../lib/socket.ts";
 import { hasHost } from "../lib/hostProviders.ts";
 import { useProviderStore } from "../store/providerStore.ts";
+import { subscriptionState, type SubscriptionState } from "../lib/subscriptionState.ts";
 import type { SubscriptionStatus } from "../types.ts";
 
 /** Whether any provider is connected — the one question the composer's gate asks. */
@@ -54,15 +55,7 @@ export function useConnectableSubscriptions(): SubscriptionStatus[] {
   return useMemo(() => all.filter((r) => r.supported), [all]);
 }
 
-/** What a row's state is, in one word, so the badge and the copy agree. */
-function stateOf(row: SubscriptionStatus): "connected" | "signed-out" | "missing" | "unavailable" {
-  if (!row.available) return "unavailable";
-  if (row.connected) return "connected";
-  if (!row.host?.installed) return "missing";
-  return "signed-out";
-}
-
-function Badge({ state }: { state: ReturnType<typeof stateOf> }) {
+function Badge({ state }: { state: SubscriptionState }) {
   const [label, tone] = state === "connected"
     ? ["Connected", "bg-ok/15 text-ok"]
     : state === "signed-out"
@@ -84,7 +77,7 @@ function Badge({ state }: { state: ReturnType<typeof stateOf> }) {
  * and the only control is "Check again", which re-asks the machine.
  */
 function Row({ row }: { row: SubscriptionStatus }) {
-  const state = stateOf(row);
+  const state = subscriptionState(row);
   return (
     <div className="flex flex-col gap-1.5 rounded-card border border-edge bg-panel px-3 py-2.5">
       <div className="flex items-center gap-2">
