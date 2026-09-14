@@ -2603,6 +2603,9 @@ export function BuildPane({
             // the same table the server plans with. Null when the provider takes no reasoning.
             effort: chatEffortValue,
             agentId: activeAgentId ?? "",
+            // §15.1: THE BAND, SO THE OFFER CAN APPEAR UNDER THIS ANSWER TOO. The server path carries
+            // it on the message; this one opened its turn with none, and the card never showed.
+            planEvidence: routing.planEvidence,
             // Jaroku's own directory, never the user's project: a chat turn is about an agent
             // being built, and `codex exec` would otherwise refuse to run outside a trusted repo.
             cwd: localTurnCwd,

@@ -120,6 +120,11 @@ console.log("\n§15 — being wrong costs one click, in both directions");
   // drawn from, so they cannot disagree about what the router decided.
   check("the band the card reads is the one the router produced",
     /planEvidence: routing\.planEvidence/.test(pane), "");
+  // ON THE SUBSCRIPTION PATH TOO, which is where the check above was blind. It matched the server
+  // dispatch alone, so this suite stayed green while a turn answered on the user's own plan — the
+  // path Chat actually takes — was opened with no band, and the card could never appear under it.
+  check("...and a subscription turn is opened with that band as well",
+    /runLocalTurn\(\{[\s\S]{0,1500}?planEvidence: routing\.planEvidence/.test(pane), "");
 }
 
 

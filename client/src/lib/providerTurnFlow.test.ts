@@ -24,14 +24,18 @@ const check = (name: string, ok: boolean, detail = ""): void => {
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 /** What the store was told, in order. The conversation's view of the turn. */
-interface Seen { started: number; deltas: string[]; done: number; errors: string[]; usage: unknown }
+interface Seen {
+  started: number; deltas: string[]; done: number; errors: string[]; usage: unknown;
+  /** §15.1's band as the turn was opened with it. */
+  planEvidence: string | null;
+}
 
 function watchStore(): Seen {
-  const seen: Seen = { started: 0, deltas: [], done: 0, errors: [], usage: null };
+  const seen: Seen = { started: 0, deltas: [], done: 0, errors: [], usage: null, planEvidence: null };
   const s = useChatStore.getState();
   useChatStore.setState({
     ...s,
-    replyStarted: () => { seen.started++; },
+    replyStarted: (e: { planEvidence?: string }) => { seen.started++; seen.planEvidence = e.planEvidence ?? null; },
     replyDelta: (e: { text: string }) => { seen.deltas.push(e.text); },
     replyDone: (e: { usage?: unknown }) => { seen.done++; seen.usage = e.usage ?? null; },
     replyError: (e: { message: string }) => { seen.errors.push(e.message); },
@@ -147,6 +151,21 @@ console.log("\na Claude turn streams in order and does not double");
   check("...and the repeated assistant message does not double it", seen.deltas.length === 2, String(seen.deltas.length));
   check("...settling with Claude Code's own cost estimate",
     (seen.usage as { cost_usd?: number })?.cost_usd === 0.0683845);
+}
+
+console.log("\na subscription turn is opened with the router's plan band");
+{
+  // §15.1's "Build this as an agent" card reads the band on the turn. A server-answered turn gets it
+  // from `started`; this path was never given one, so the card could not appear under an answer that
+  // ran on the user's own plan — which is the path Chat actually takes.
+  installHost(CODEX_STREAM);
+  const seen = watchStore();
+  await runLocalTurn({ ...base, provider: "openai", prompt: "something that watches my inbox", planEvidence: "near" }).finished;
+  check("the band reaches the turn", seen.planEvidence === "near", String(seen.planEvidence));
+  installHost(CODEX_STREAM);
+  const none = watchStore();
+  await runLocalTurn({ ...base, provider: "openai", prompt: "hi" }).finished;
+  check("...and a turn routed with none carries none", none.planEvidence === null, String(none.planEvidence));
 }
 
 console.log("\ntwo Codex messages in one turn stay two paragraphs");

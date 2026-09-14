@@ -207,6 +207,12 @@ export function runLocalTurn(opts: {
   cwd: string;
   /** Called once the turn has finished, with what it spent. Used to persist the turn. */
   onComplete?: (answer: string, usage: TurnUsage | null) => void;
+  /**
+   * §15.1's band, from the router that sent this message here — what the "Build this as an agent"
+   * card under the answer reads. A server-answered turn gets it from the `started` event; this one was
+   * never given it, so the card could not appear under a subscription answer at all.
+   */
+  planEvidence?: "none" | "near" | "confident";
 }): LocalTurn {
   const h = host();
   const chat = useChatStore.getState();
@@ -243,16 +249,21 @@ export function runLocalTurn(opts: {
     settle();
   };
 
+  const started = {
+    threadId: opts.threadId, agentId: opts.agentId, question: opts.prompt,
+    ...(opts.planEvidence ? { planEvidence: opts.planEvidence } : {}),
+  };
+
   if (!h) {
     // A browser has no shell to run this on, and the composer should never have offered it. Said
     // plainly rather than silently doing nothing.
-    chat.replyStarted({ threadId: opts.threadId, agentId: opts.agentId, question: opts.prompt });
+    chat.replyStarted(started);
     failed = "Subscription chat needs the Jaroku desktop app — it runs on the provider CLI installed on your machine.";
     end();
     return { cancel: () => {}, finished };
   }
 
-  chat.replyStarted({ threadId: opts.threadId, agentId: opts.agentId, question: opts.prompt });
+  chat.replyStarted(started);
 
   void (async () => {
     try {
