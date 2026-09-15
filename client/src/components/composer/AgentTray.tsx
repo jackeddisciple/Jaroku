@@ -22,7 +22,7 @@
 // TWO STATES, AND THE TRAY IS HOW YOU MOVE BETWEEN THEM:
 //
 //   An agent is chosen — the tray names it. Hovering offers ×, which takes it out of the composer
-//   the way New does (`startNewAgent`), so the next message plans a new agent.
+//   the way New does (`startNewChat`), so the next message plans a new agent.
 //
 //   None is — the tray says "Choose agent". Its dropdown opens on a search box and the two agents
 //   last worked in (`recentAgents`); every other agent is a search away, which keeps the list short
@@ -41,7 +41,7 @@ import { Icon } from "../../lib/icons/registry.ts";
 import { ICON } from "../../lib/tokens.ts";
 import { recentAgents } from "../../lib/recentAgent.ts";
 import { selectAgent } from "../../lib/selection.ts";
-import { startNewAgent } from "../../lib/newAgent.ts";
+import { startNewChat } from "../../lib/newChat.ts";
 import { useThreadStore } from "../../store/threadStore.ts";
 import { ChevronDownIcon, XIcon } from "../panelIcons.tsx";
 import { Truncate } from "../Truncate.tsx";
@@ -88,7 +88,7 @@ export function AgentTray({
         {!operating && (
           <button
             type="button"
-            onClick={startNewAgent}
+            onClick={startNewChat}
             aria-label={`Remove ${agent.name} from the composer`}
             title={`Remove ${agent.name} — the next message plans a new agent`}
             // Revealed by hovering the tray, and by keyboard focus, so it is never a control that

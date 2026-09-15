@@ -34,7 +34,7 @@ import { identityTitle } from "./AgentIdentityLine.tsx";
 import { AgentEmoji, EMOJI_SIZE } from "./AgentEmoji.tsx";
 import { Capable } from "./Capable.tsx";
 import { keyHint } from "../lib/modKey.ts";
-import { startNewAgent } from "../lib/newAgent.ts";
+import { startNewChat } from "../lib/newChat.ts";
 import { goBack, goForward } from "../lib/navHistory.ts";
 import { canGoBack, canGoForward, useHistoryStore } from "../store/historyStore.ts";
 import { hasHostWindow } from "../lib/windowStage.ts";
@@ -149,37 +149,40 @@ function SidebarChrome() {
  * the product's five surfaces; they are worth a line each.
  */
 function NavList() {
-  const navSection = useUiStore((s) => s.navSection);
+  // `navView`, NOT `navSection` — the product owner's call on 2026-09-15. `navSection` remembers the
+  // list you descended FROM, so opening a chat out of Agents left Agents lit and the chat dark: the
+  // column said you were in a section you were no longer looking at, and the row you actually
+  // pressed said nothing. What is lit is what is on screen.
+  const navView = useUiStore((s) => s.navView);
   const openNav = useUiStore((s) => s.openNav);
   const activeAgentId = useBuildStore((s) => s.activeAgentId);
-  const newIsCurrent = activeAgentId === null && navSection === null;
+  const activeThreadId = useThreadStore((s) => s.activeThreadId);
+  // ONE ROW IS LIT IN THIS COLUMN AT A TIME — the product owner's call on 2026-09-15. `New` is the
+  // last of them: it is where you are only when there is no conversation open, no agent chosen and
+  // no section showing. Anything else selected means you are somewhere, and that somewhere is lit.
+  const newIsCurrent = activeThreadId === null && activeAgentId === null && navView === null;
   const waiting = useInboxStore((s) => s.counts.badge);
   const waitingOnYou = useWorkStore((s) => workBadgeCount(s.workspaceCounts));
 
   return (
     <div className="flex shrink-0 flex-col px-2 pb-1">
-      {/* NEW IS THE FIRST THING AND THE DEFAULT ONE, which is what makes it a destination rather
-          than a button that happened to be moved here. It was a `+` in the Recents header, filed
-          with that section's filter — a creation control scoped by a list it does not belong to.
+      {/* NEW IS THE FIRST THING, which is what makes it a destination rather than a button that
+          happened to be moved here. It was a `+` in the Recents header, filed with that section's
+          filter — a creation control scoped by a list it does not belong to.
 
-          IT IS ACTIVE WHEN NOTHING ELSE IS. `activeAgentId === null` IS the empty composer: it is
-          the state the application already opens in, so this row is lit on first paint without
-          anything having to select it. `navSection` has to be null too, or opening Threads would
-          leave two rows looking chosen. */}
+          IT IS LIT WHEN IT IS WHERE YOU ARE, and not before. The fill used to be permanent, on the
+          argument that this row is a button rather than a tab — which left `New` looking chosen
+          under every conversation somebody opened, two selections in a column that can only be in
+          one place. It lights like the five rows under it now, and for the same reason. */}
       <button
-        onClick={startNewAgent}
+        onClick={startNewChat}
         // ACCURATE EVEN THOUGH THE FILL IS NOT. The background below is permanent; `aria-current`
         // is not, because two rows announcing themselves as the current page is worse for somebody
         // reading this column through a screen reader than no emphasis at all.
         aria-current={newIsCurrent ? "page" : undefined}
-        title={`New agent — ${keyHint("⌘N")}`}
-        className={`group/new flex h-7 w-full shrink-0 items-center gap-2.5 rounded-control bg-sidebar-active px-2 text-left transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
-          // THE FILL IS ALWAYS THERE; ONLY THE INK MOVES. Every other row in this column is lit
-          // only while it is the destination you are in, and this one is not a destination — it is
-          // the thing to press. Keeping the surface makes it read as the column's one button
-          // rather than as a tab that happens to be selected, and the accent still says whether
-          // you are actually sitting in it.
-          newIsCurrent ? "text-accent" : "text-muted hover:text-ink"
+        title={`New chat — ${keyHint("⌘N")}`}
+        className={`group/new flex h-7 w-full shrink-0 items-center gap-2.5 rounded-control px-2 text-left transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+          newIsCurrent ? "bg-sidebar-active text-accent" : "text-muted hover:bg-sidebar-hover hover:text-ink"
         }`}
       >
         {/* THE MARK CARRIES ITSELF NOW. This was a plain plus on a filled ink tile — the one solid
@@ -203,7 +206,7 @@ function NavList() {
       </button>
 
       {NAV_DESTINATIONS.map(({ id, label, icon: Mark }) => {
-        const active = navSection === id;
+        const active = navView === id;
         const badge = id === "inbox" ? waiting : id === "work" ? waitingOnYou : 0;
         const badgeTitle =
           id === "inbox"
@@ -453,7 +456,12 @@ function AgentTreeRow({
   threads: ThreadView[];
 }) {
   const activeAgentId = useBuildStore((s) => s.activeAgentId);
-  const selected = activeAgentId === agent.agent_id;
+  const activeThreadId = useThreadStore((s) => s.activeThreadId);
+  const navView = useUiStore((s) => s.navView);
+  // THE CONVERSATION WINS. Opening a chat selects its agent too — the composer needs one — so both
+  // rows lit, and the column said you were in two places. The agent row is lit while the agent is
+  // where you are and no chat of its own is open; the chat's own row takes it from there.
+  const selected = activeAgentId === agent.agent_id && activeThreadId === null && navView === null;
   // When this agent last did anything — and when it has never run, when it was made. THE ROW SHOWED
   // NOTHING for a new agent, which is the one moment the column is most likely to be looked at: the
   // agent you just described, with no time beside it. Two different facts, so the label below says which.
@@ -980,7 +988,10 @@ function ChatDot() {
  * belongs to the agent above it is the order and the circle in the emoji's column, not a step.
  */
 function ThreadListRow({ thread }: { thread: ThreadView }) {
-  const active = useThreadStore((s) => s.activeThreadId === thread.id);
+  // AND NOT WHILE A SECTION IS ON SCREEN. Opening the Inbox or Activity is going somewhere else;
+  // a chat row still lit under it would be the second selection this column no longer has.
+  const active = useThreadStore((s) => s.activeThreadId === thread.id)
+    && useUiStore((s) => s.navView) === null;
   // The same typing as the header when a topic title arrives — see lib/typedText.ts.
   const shownTitle = useTypedText(chatTitle(thread.title), !thread.title_is_custom);
   return (
@@ -1011,7 +1022,10 @@ function ThreadListRow({ thread }: { thread: ThreadView }) {
  * RESTORE IS ABSENT FOR SOMEBODY WHO CANNOT RESTORE, and disabled while reconnecting, with the reason.
  */
 function ArchivedThreadRow({ thread }: { thread: ThreadView }) {
-  const active = useThreadStore((s) => s.activeThreadId === thread.id);
+  // AND NOT WHILE A SECTION IS ON SCREEN. Opening the Inbox or Activity is going somewhere else;
+  // a chat row still lit under it would be the second selection this column no longer has.
+  const active = useThreadStore((s) => s.activeThreadId === thread.id)
+    && useUiStore((s) => s.navView) === null;
   const connected = useTraceStore((s) => s.connection === "open");
   const canRestore = useCanRun("restoreThread");
   return (
@@ -1069,7 +1083,10 @@ function ListHeading({ label, children }: { label: string; children?: React.Reac
  * name, and the pin mark in the icon column is what says why it is up here rather than in the list.
  */
 function PinnedThreadRow({ thread }: { thread: ThreadView }) {
-  const active = useThreadStore((s) => s.activeThreadId === thread.id);
+  // AND NOT WHILE A SECTION IS ON SCREEN. Opening the Inbox or Activity is going somewhere else;
+  // a chat row still lit under it would be the second selection this column no longer has.
+  const active = useThreadStore((s) => s.activeThreadId === thread.id)
+    && useUiStore((s) => s.navView) === null;
   const shownTitle = useTypedText(chatTitle(thread.title), !thread.title_is_custom);
   return (
     <button
