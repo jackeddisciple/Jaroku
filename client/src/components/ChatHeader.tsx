@@ -396,7 +396,9 @@ export function ChatHeader() {
     // The window's top edge, so it drags the window like the sidebar's own top row does.
     <div data-tauri-drag-region className="flex h-12 shrink-0 items-center gap-1 px-4">
       {name && <MachineButton name={name} connection={connection} />}
-      {thread ? (
+      {/* NOTHING BESIDE THE COMPUTER UNTIL A CONVERSATION HAS STARTED. There is no name to show or
+          rename and nothing for the menu to act on, so the computer stands alone. */}
+      {thread && (
         <>
           {/* KEYED BY THREAD, so opening another conversation mid-edit starts that one's title fresh
               rather than carrying a half-typed name across to it. */}
@@ -409,8 +411,6 @@ export function ChatHeader() {
           />
           <ThreadMenu thread={thread} connected={connected} onRename={() => setRenamingId(thread.id)} />
         </>
-      ) : (
-        <span className="px-2 text-label text-muted">New chat</span>
       )}
     </div>
   );
