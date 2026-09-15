@@ -209,10 +209,12 @@ const CALLOUT: Record<CalloutTone, { Mark: (p: IconProps) => ReactElement; word:
 const HEADING_CLASS: Record<number, string> = {
   1: "text-page text-ink",
   2: "text-section text-ink",
-  3: "text-label uppercase tracking-wider text-ink",
-  4: "text-tiny uppercase tracking-wider text-ink",
-  5: "text-tiny uppercase tracking-wider text-muted",
-  6: "text-tiny uppercase tracking-wider text-muted",
+  // `reply-heading` IS THE WEIGHT THE LADDER HAS NO RUNG FOR — 600 at 13px and at 11px. See
+  // index.css, which spells it out and says why. The two rungs above carry their own 600.
+  3: "reply-heading text-label uppercase tracking-wider text-ink",
+  4: "reply-heading text-tiny uppercase tracking-wider text-ink",
+  5: "reply-heading text-tiny uppercase tracking-wider text-muted",
+  6: "reply-heading text-tiny uppercase tracking-wider text-muted",
 };
 
 function BlockView({ block }: { block: Block }): ReactNode {
@@ -228,16 +230,42 @@ function BlockView({ block }: { block: Block }): ReactNode {
     case "paragraph":
       return <p className="leading-[1.6]"><InlineView pieces={block.inline} /></p>;
     case "list": {
-      const items = block.items.map((item, i) => (
-        <li key={i} className="pl-1 leading-[1.6]">
-          <Blocks blocks={item.blocks} tight />
-        </li>
-      ));
-      return block.ordered ? (
-        <ol start={block.start} className="list-decimal space-y-1 pl-5 marker:text-muted">{items}</ol>
-      ) : (
-        <ul className="list-disc space-y-1 pl-5 marker:text-faint">{items}</ul>
-      );
+      // THE MARKER IS DRAWN, NOT LEFT TO `list-style` — the product owner's call on 2026-09-15, and
+      // a bug this is the end of rather than a patch on. A `::marker` is placed against the item's
+      // first line box, and what that box is depends on the engine and on what the line holds: a
+      // bullet whose sentence began with an inline-code chip sat on a line of its OWN in the app's
+      // webview, with the text beneath it, while the same markup was correct in two browsers.
+      //
+      // A ROW OF TWO CELLS CANNOT DO THAT. The mark and the sentence are siblings in a flex row, so
+      // they share a line by construction, whatever the sentence starts with and whatever the page
+      // is zoomed to. `role="list"` because `display: flex` takes `list-item` off the `li` and
+      // WebKit stops calling it a list without it; the mark itself is decoration and is hidden.
+      const items = block.items.map((item, i) => {
+        // The item's own sentence, then whatever hangs under it — a nested list, a code block, a
+        // second paragraph. The sentence is inline content in the row's second cell; the rest are
+        // blocks under it, which is where they belong.
+        const [lead, ...rest] = item.blocks;
+        return (
+          <li key={i} className="flex gap-2 leading-[1.6]">
+            <span
+              aria-hidden
+              className={`shrink-0 select-none tabular-nums ${block.ordered ? "text-muted" : "text-faint"}`}
+            >
+              {block.ordered ? `${block.start + i}.` : "•"}
+            </span>
+            <div className="min-w-0 flex-1">
+              {lead?.kind === "paragraph" ? <InlineView pieces={lead.inline} /> : lead ? <BlockView block={lead} /> : null}
+              {rest.length > 0 && (
+                <div className="mt-1.5 space-y-1.5">
+                  {rest.map((b, j) => <BlockView key={j} block={b} />)}
+                </div>
+              )}
+            </div>
+          </li>
+        );
+      });
+      const Tag = block.ordered ? "ol" : "ul";
+      return <Tag role="list" className="space-y-1 pl-1">{items}</Tag>;
     }
     case "quote":
       return (

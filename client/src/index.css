@@ -330,6 +330,21 @@
      Tailwind's `tracking-wider` (0.05em) — which is the drift the radius scale was created to
      stop, happening to type. The values are written out here because cmdk owns this element and a
      class cannot reach it; they are §02's `tiny` rung, spelled out, and belong with it. */
+  /* A REPLY'S LOWER HEADINGS, at the weight §03 keeps for headings.
+     
+     The ladder's 600 rungs stop at 16px — `page`, `section`, `title` — and a reply needs two
+     headings under those: a section's name at the body size and a sub-heading below it. They were
+     drawn at the ladder's own 500, which is the weight of the prose they sit over, so a heading
+     read as a line of text in capitals rather than as a heading. The product owner's call on
+     2026-09-15 was to make them bolder.
+
+     THE WEIGHT IS WRITTEN OUT HERE for `[cmdk-group-heading]`'s reason above: what is missing is a
+     rung, and inventing `font-semibold` beside a size class is exactly the second opinion §12's
+     suite refuses. One selector, named for the one surface it serves. */
+  .reply-heading {
+    font-weight: 600;
+  }
+
   [cmdk-group-heading] {
     font-size: 11px;
     font-weight: 500;
