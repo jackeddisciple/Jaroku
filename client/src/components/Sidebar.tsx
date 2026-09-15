@@ -32,7 +32,6 @@ import { Truncate } from "./Truncate.tsx";
 import { identityTitle } from "./AgentIdentityLine.tsx";
 import { AgentEmoji, EMOJI_SIZE } from "./AgentEmoji.tsx";
 import { Capable } from "./Capable.tsx";
-import { Collapse } from "./Collapse.tsx";
 import { keyHint } from "../lib/modKey.ts";
 import { startNewAgent } from "../lib/newAgent.ts";
 import { goBack, goForward } from "../lib/navHistory.ts";
@@ -454,10 +453,6 @@ function AgentTreeRow({
 }) {
   const activeAgentId = useBuildStore((s) => s.activeAgentId);
   const selected = activeAgentId === agent.agent_id;
-  // OPEN FOR THE AGENT YOU ARE IN, closed for the rest: the chats under the selected agent are the ones
-  // somebody is most likely reaching for, and every other agent's would be a wall of rows.
-  const [open, setOpen] = useState(selected);
-  const hasThreads = threads.length > 0;
   // When this agent last did anything — and when it has never run, when it was made. THE ROW SHOWED
   // NOTHING for a new agent, which is the one moment the column is most likely to be looked at: the
   // agent you just described, with no time beside it. Two different facts, so the label below says which.
@@ -538,19 +533,6 @@ function AgentTreeRow({
             </span>
           </span>
         </button>
-        {/* THE CHATS TWISTY, only on an agent that has chats — one with none has nothing under it to
-            open, and a disclosure that discloses nothing is a dead control. */}
-        {hasThreads && (
-          <button
-            onClick={() => setOpen((v) => !v)}
-            title={open ? `Hide ${agent.name}'s chats` : `Show ${agent.name}'s chats`}
-            aria-label={open ? `Hide ${agent.name}'s chats` : `Show ${agent.name}'s chats`}
-            aria-expanded={open}
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-faint transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
-          >
-            {open ? <Icon.workspace.switcherOpen size={ICON.lg} /> : <Icon.workspace.switcherClosed size={ICON.lg} />}
-          </button>
-        )}
         {/* THE PULL REQUEST, ON EVERY ROW AND SHOWN ON HOVER. On every row because it is a control
             rather than a badge: "only when there is one" hid it on exactly the agents somebody would
             want to open one FOR. Shown on hover — and on keyboard focus — like the row's menu beside
@@ -600,15 +582,15 @@ function AgentTreeRow({
         <AgentRowMenu agent={agent} />
       </div>
 
-      {/* ITS CHATS, INDENTED UNDER IT, which is what makes the agent a project: the conversations
-          about it live with it rather than in a list of everything. */}
-      <Collapse open={open && hasThreads}>
+      {/* ITS CHATS, INDENTED UNDER IT AND ALWAYS SHOWN, which is what makes the agent a project: the
+          conversations about it live with it, with no fold to open to find one. */}
+      {threads.length > 0 && (
         <div className="flex flex-col">
           {threads.map((t) => (
             <ThreadListRow key={t.id} thread={t} indented />
           ))}
         </div>
-      </Collapse>
+      )}
     </>
   );
 }
@@ -1052,30 +1034,15 @@ function ArchivedThreadRow({ thread }: { thread: ThreadView }) {
   );
 }
 
-/** A list's heading: its fold control and its name, with room for a control of its own at the end. */
-function ListHeading({
-  label,
-  open,
-  onToggle,
-  children,
-}: {
-  label: string;
-  open: boolean;
-  onToggle: () => void;
-  children?: React.ReactNode;
-}) {
-  const lower = label.toLowerCase();
+/**
+ * A list's heading: its name, with room for a control of its own at the end.
+ *
+ * NO FOLD. The chats a heading sits over are always shown, so there is nothing for it to open or close,
+ * and the name lines up with the rows under it.
+ */
+function ListHeading({ label, children }: { label: string; children?: React.ReactNode }) {
   return (
-    <div className="flex h-8 shrink-0 items-center gap-1 pl-1.5 pr-2">
-      <button
-        onClick={onToggle}
-        aria-expanded={open}
-        title={open ? `Collapse ${lower}` : `Expand ${lower}`}
-        aria-label={open ? `Collapse ${lower}` : `Expand ${lower}`}
-        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-faint transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
-      >
-        {open ? <Icon.workspace.switcherOpen size={ICON.lg} /> : <Icon.workspace.switcherClosed size={ICON.lg} />}
-      </button>
+    <div className="flex h-8 shrink-0 items-center gap-1 pl-4 pr-2">
       {/* NOT `TYPE.panelLabel`, which uppercases. This heading names a place in a column of places, and
           shouting one of them makes it a different kind of thing from the rows above it. */}
       <span className="min-w-0 flex-1 text-label font-normal tracking-wide text-faint">{label}</span>
@@ -1120,9 +1087,6 @@ export function Sidebar() {
   // is now only ever empty here. Kept as the one place the filter reads from, so restoring an
   // in-column box later is a change to one component rather than to the filter predicate.
   const query = "";
-  const [projectsOpen, setProjectsOpen] = useState(true);
-  const [recentsOpen, setRecentsOpen] = useState(true);
-  const [pinnedOpen, setPinnedOpen] = useState(true);
   // Per AGENT rather than per workspace — §4. Different agents legitimately belong in different
   // repositories, and one repo per workspace would break the monorepo case the subdirectory field
   // exists for.
@@ -1259,25 +1223,13 @@ export function Sidebar() {
           appears the moment somebody pins one and goes away again when they unpin the last. */}
       {(pinnedVisible.length > 0 || pinnedThreads.length > 0) && (
         <div className="mt-4 flex shrink-0 flex-col">
-          <div className="flex h-8 shrink-0 items-center gap-1 pl-1.5 pr-2">
-            <button
-              onClick={() => setPinnedOpen((v) => !v)}
-              aria-expanded={pinnedOpen}
-              title={pinnedOpen ? "Collapse pinned" : "Expand pinned"}
-              aria-label={pinnedOpen ? "Collapse pinned" : "Expand pinned"}
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-faint transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
-            >
-              {pinnedOpen ? <Icon.workspace.switcherOpen size={ICON.lg} /> : <Icon.workspace.switcherClosed size={ICON.lg} />}
-            </button>
-            <span className="min-w-0 flex-1 text-label font-normal tracking-wide text-faint">Pinned</span>
-          </div>
+          <ListHeading label="Pinned" />
           {/* CAPPED, WHICH IS THE DIFFERENCE FROM RECENTS. The shelf is `shrink-0` so the list below
               can never squeeze it — and that is exactly what makes an unbounded one dangerous:
               forty pinned agents would push Recents to nothing and shove the account row off the
               bottom of the window. Past the cap it scrolls, so the shelf stays a shelf however many
               things somebody puts on it. In `vh` rather than `%` because a percentage height
               resolves against a parent that is `auto` here, which is to say it does not. */}
-          <Collapse open={pinnedOpen}>
             <div className="flex max-h-[38vh] flex-col overflow-y-auto overflow-x-hidden px-1.5">
               {pinnedThreads.map((t) => (
                 <PinnedThreadRow key={t.id} thread={t} />
@@ -1291,7 +1243,6 @@ export function Sidebar() {
                 />
               ))}
             </div>
-          </Collapse>
         </div>
       )}
 
@@ -1301,7 +1252,7 @@ export function Sidebar() {
       <div className="mt-4 flex min-h-0 min-w-0 flex-1 flex-col">
         {/* THE PROJECTS HEADING STAYS OUT OF THE SCROLLER, and that is for its filter: the filter's
             panel hangs below it, and inside an `overflow` it would be clipped by the list it filters. */}
-        <ListHeading label="Projects" open={projectsOpen} onToggle={() => setProjectsOpen((v) => !v)}>
+        <ListHeading label="Projects">
           <FilterMenu filter={filter} setFilter={setFilter} counts={counts} />
         </ListHeading>
 
@@ -1310,7 +1261,6 @@ export function Sidebar() {
         <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden pb-2">
           {/* NOTHING WHEN EMPTY, the product owner's call on 2026-09-11 — no mark, no "No agents yet".
               The filter in the heading says what is narrowing the list, and `New` leads the column. */}
-          <Collapse open={projectsOpen}>
             <div className="flex min-w-0 flex-col px-1.5">
               {projectAgents.map((a) => (
                 <AgentTreeRow
@@ -1321,23 +1271,16 @@ export function Sidebar() {
                 />
               ))}
             </div>
-          </Collapse>
 
           <div className="mt-4">
             {/* ON ARCHIVED, THE SECOND LIST IS THE ARCHIVED CHATS — beside the archived agents above it —
                 rather than Recents, which only ever holds live ones. */}
-            <ListHeading
-              label={filter === "archived" ? "Archived chats" : "Recents"}
-              open={recentsOpen}
-              onToggle={() => setRecentsOpen((v) => !v)}
-            />
-            <Collapse open={recentsOpen}>
+            <ListHeading label={filter === "archived" ? "Archived chats" : "Recents"} />
               <div className="flex min-w-0 flex-col px-1.5">
                 {filter === "archived"
                   ? archivedThreads.map((t) => <ArchivedThreadRow key={t.id} thread={t} />)
                   : recentThreads.map((t) => <ThreadListRow key={t.id} thread={t} />)}
               </div>
-            </Collapse>
           </div>
         </div>
       </div>
