@@ -66,13 +66,13 @@ console.log("\n...and every key the specification names exists");
   // sidebar and the Agents grid, and counted twice in the header.
   const SPECIFIED = [
     // §5 sidebar rail, sidebar panel, right panel rail
-    "nav.threads", "nav.agents", "nav.cockpit", "nav.inbox", "nav.activity", "nav.providerKeys",
+    "nav.agents", "nav.cockpit", "nav.inbox", "nav.activity", "nav.providerKeys",
     "workspace.switcherClosed", "workspace.switcherOpen", "agents.search", "agents.filter",
     "agents.new", "auth.signOut",
     "panel.agent", "panel.graph", "panel.trace", "panel.evals", "panel.mcp", "panel.connections",
     "panel.deploy", "panel.secrets", "panel.github", "panel.usage",
     // §5 threads, agents, agent detail, cockpit, composer
-    "threads.refresh", "threads.new", "threads.archive", "threads.restore",
+    "threads.archive", "threads.restore",
     "agents.refresh", "agents.filterGrid", "agents.viewGrid", "agents.viewTable",
     "agents.searchGrid", "agents.newThread", "agents.fork", "agents.more", "agents.restore",
     "agentDetail.rename", "agentDetail.export", "agentDetail.copy", "agentDetail.publishVersion",
@@ -94,8 +94,6 @@ console.log("\n...and every key the specification names exists");
     "global.clearSearch", "global.clearFilter", "global.dismissNotice",
     // §6
     "auth.signIn", "auth.openJaroku", "composer.addKey",
-    "threadsFilter.all", "threadsFilter.needsYou", "threadsFilter.running", "threadsFilter.recent",
-    "threadsFilter.archived",
     "cockpitFilter.mine", "cockpitFilter.everyones", "cockpitFilter.all",
     "cockpitFilter.showEverything", "cockpitFilter.showEveryAgent",
     "cockpitWork.openTrace", "cockpitWork.retry", "cockpitWork.stop",
@@ -114,7 +112,9 @@ console.log("\n...and every key the specification names exists");
   // 130 SINCE THE COMPOSER'S EXPAND CONTROL LEFT THE BAR, taking `composer.expand` with it.
   // 131 BEFORE THAT, SINCE THE TOP BAR WENT: `topbar.deploy`, `topbar.dryRun` and `deploy.cancel` —
   // its in-flight swap — were drawn only in that strip, and left with it.
-  check("130 keys named by §5 and §6", SPECIFIED.length === 130, `${SPECIFIED.length}`);
+  // 122 SINCE THE THREADS TAB WENT: `nav.threads`, `threads.refresh`, `threads.new` and the five
+  // `threadsFilter` chips were drawn only by that view.
+  check("122 keys named by §5 and §6", SPECIFIED.length === 122, `${SPECIFIED.length}`);
   const absent = SPECIFIED.filter((k) => !keys.includes(k));
   for (const k of absent) console.log(`  FAIL ${k} is in the specification and not in the manifest`);
   check("every specified key is in the registry", absent.length === 0);
@@ -133,7 +133,7 @@ console.log("\nthe three decisions that contradict the source document are the o
     mark("agents.newThread") === "PlusIcon");
   check("D4 · agents.new keeps PlusSignSquareIcon", mark("agents.new") === "PlusSignSquareIcon");
   // D3: three refresh marks, each meaning something different.
-  check("D3 · a list re-fetch is Refresh03Icon", mark("threads.refresh") === "Refresh03Icon");
+  check("D3 · a list re-fetch is Refresh03Icon", mark("cockpit.refresh") === "Refresh03Icon");
   check("D3 · a failed operation retries with ReloadIcon", mark("cockpitWork.retry") === "ReloadIcon");
   check("D3 · an external sync is RefreshCwIcon", mark("github.syncMore") === "RefreshCwIcon");
   // D7: one key for all 21 palette rows.

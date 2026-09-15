@@ -27,8 +27,8 @@ const cluster = (n: number): string =>
   markup(
     createElement(ToolbarCluster, {
       members: [
-        { icon: Icon.threads.refresh, label: "Ask again" },
-        { icon: Icon.threads.new, label: "New thread" },
+        { icon: Icon.cockpit.refresh, label: "Ask again" },
+        { icon: Icon.agents.newThread, label: "New thread" },
         { icon: Icon.agents.fork, label: "Fork agent" },
       ].slice(0, n),
     }),

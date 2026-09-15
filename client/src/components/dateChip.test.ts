@@ -24,7 +24,6 @@ import { DateChip } from "./Chip.tsx";
 
 /** The six §7.2 sites this pattern lands at. Written out; see the last block for why. */
 const SITE_FILES = [
-  "components/ThreadRow.tsx",     // Threads — last activity
   "components/AgentCard.tsx",     // Agents — last active
   "components/AgentVersions.tsx", // Agent detail — version published
   "components/InboxCard.tsx",     // Inbox — first seen

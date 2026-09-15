@@ -53,7 +53,9 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // 173 WITH `chatHeader.delete`, for deleting a chat for good — `Delete01Icon`, which the sidebar's
   // agent menu already draws, so the mark count below does not move.
   // 174 WITH `panel.runs`, the Runs tab below Usage — `PlayIcon`, already drawn, so no new mark.
-  check("174 registry keys", entries.length === 174, `${entries.length}`);
+  // 166 WITHOUT THE THREADS TAB: `nav.threads`, `threads.refresh`, `threads.new` and the five
+  // `threadsFilter` chips left with the view that drew them.
+  check("166 registry keys", entries.length === 166, `${entries.length}`);
   const names = new Set(entries.map((e) => e.export));
   // 104 from icons_integration's appendix, plus D8's 13 — the composer glyphs that had to move
   // here when `@hugeicons/react` came out. See the note at the top of `registry.ts`.
@@ -69,7 +71,8 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // 125 WITH `FolderClosedIcon`, for the tray behind the composer.
   // 126 WITH `LaptopMinimalIcon`, for the computer in the middle panel's header.
   // 127 WITH `Share08Icon`, for Share Chat.
-  check("127 distinct marks", names.size === 127, `${names.size}`);
+  // 123 WITHOUT THE MARKS ONLY THE THREADS TAB DREW.
+  check("123 distinct marks", names.size === 123, `${names.size}`);
   check("no key is declared twice", new Set(entries.map((e) => e.key)).size === entries.length);
 }
 

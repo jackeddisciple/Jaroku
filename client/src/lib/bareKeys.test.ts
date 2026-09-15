@@ -39,7 +39,7 @@ const THREE_PANE = { navView: null, paletteOpen: false };
 
 console.log("\nthe four screens a bare `r` started a run from");
 {
-  for (const view of ["threads", "agents", "inbox", "activity"]) {
+  for (const view of ["agents", "work", "inbox", "activity"]) {
     check(`the ${view} destination owns the screen, so the pane's bare keys stand down`,
       paneOwnsBareKey(bare(), { navView: view, paletteOpen: false }) === false);
   }
@@ -63,7 +63,7 @@ console.log("\nthe two halves that were already guarded, kept");
 
 console.log("\na destination's OWN bare keys are not disabled by the same rule");
 {
-  // The mirror. `useThreadKeys` is mounted BY ThreadsView, so `navView` is set for every event it
+  // The mirror. A destination's own key listener is mounted BY that destination, so `navView` is set for every event it
   // will ever see — a navView clause there would be the fix that broke the feature.
   check("j/k on the board still fire while the board is up", viewOwnsBareKey(bare(), { paletteOpen: false }) === true);
   check("...but not with a modifier", viewOwnsBareKey(bare({ ctrlKey: true }), { paletteOpen: false }) === false);
@@ -87,7 +87,7 @@ console.log("\nneither predicate is stuck at a constant");
 {
   check("paneOwnsBareKey says both things",
     paneOwnsBareKey(bare(), THREE_PANE) === true &&
-    paneOwnsBareKey(bare(), { navView: "threads", paletteOpen: false }) === false);
+    paneOwnsBareKey(bare(), { navView: "agents", paletteOpen: false }) === false);
   check("viewOwnsBareKey says both things",
     viewOwnsBareKey(bare(), { paletteOpen: false }) === true &&
     viewOwnsBareKey(bare(), { paletteOpen: true }) === false);

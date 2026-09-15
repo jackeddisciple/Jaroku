@@ -26,7 +26,6 @@ import { fileURLToPath } from "node:url";
 // shim rather than for a path. A directory URL and two names is enough.
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const PALETTE = `${HERE}CommandPalette.tsx`;
-const THREAD_KEYS = `${HERE}useThreadKeys.ts`;
 
 let fail = 0;
 const check = (name: string, ok: boolean, detail = ""): void => {
@@ -35,7 +34,6 @@ const check = (name: string, ok: boolean, detail = ""): void => {
 };
 
 const palette = readFileSync(PALETTE, "utf8");
-const threadKeys = readFileSync(THREAD_KEYS, "utf8");
 
 /**
  * Every keycap the palette renders, as the letter the chord is on. `⌘P` → `p`.
@@ -69,18 +67,6 @@ console.log("\nevery keycap on a palette row has a binding behind it in the same
   const orphans = advertised.filter((letter) => !bound.includes(letter));
   check("no keycap is decoration", orphans.length === 0,
     orphans.length ? `⌘${orphans.join(", ⌘").toUpperCase()} advertised with no global handler` : "");
-}
-
-console.log("\nand no chord has two owners");
-{
-  // The file's own rule, written above the ⌘/ removal: "a chord with two owners is a chord whose
-  // behaviour depends on which listener ran first." ⌘N was moved here rather than added here, so
-  // the board's own handler must no longer answer to it — or the Threads view creates two threads.
-  check("useThreadKeys no longer binds n", !/=== "n"/.test(threadKeys), "the board still handles ⌘N");
-  check("...and no longer sends a thread creation at all",
-    !threadKeys.includes("sendCreateThread("), "the board still creates threads on a chord");
-  // Its own bare keys are untouched — this was a chord, and the bare letters belong to the view.
-  check("the board keeps its bare keys", /e\.key/.test(threadKeys));
 }
 
 console.log("\nthe palette's chords survive a full-screen destination");

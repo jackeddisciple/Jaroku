@@ -81,7 +81,6 @@ console.log("\nevery count is a total");
   // because it would disagree with the rows under it the moment somebody filters (§4.3).
   const COUNTED: [string, string][] = [
     ["components/InboxView.tsx", "items.length"],
-    ["components/ThreadsView.tsx", "section.threads.length"],
     ["components/FleetStrip.tsx", "fleet.length"],
     ["components/McpPanel.tsx", "servers.length"],
     ["components/ConnectionsPanel.tsx", "connections.length"],

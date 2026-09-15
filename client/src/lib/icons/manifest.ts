@@ -19,7 +19,6 @@
 export const MANIFEST = {
   // ── §5 Sidebar rail ───────────────────────────────────────────────────────
   nav: {
-    threads: "AddressBookIcon",
     agents: "Robot02Icon",
     cockpit: "GameController03Icon",
     inbox: "InboxIcon",
@@ -180,8 +179,6 @@ export const MANIFEST = {
 
   // ── §5 Threads ────────────────────────────────────────────────────────────
   threads: {
-    refresh: "Refresh03Icon",
-    new: "PlusIcon",
     archive: "Archive04Icon",
     restore: "RestoreBinIcon",
   },
@@ -355,15 +352,6 @@ export const MANIFEST = {
   },
 
   // ── §6 Threads filter ─────────────────────────────────────────────────────
-  threadsFilter: {
-    all: "Layers01Icon",
-    needsYou: "UserRoundCogIcon",
-    // D5: rendered STATIC, never spun. It is a chip that names a filter, not an indicator that
-    // something is loading — and the amber running dot already on those rows is the live signal.
-    running: "LoaderCircleIcon",
-    recent: "Clock02Icon",
-    archived: "Archive04Icon",
-  },
 
   // ── §6 Cockpit filter ─────────────────────────────────────────────────────
   //

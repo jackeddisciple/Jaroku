@@ -374,14 +374,6 @@ console.log("\nand the components themselves stand on it");
   // THE AVATAR, whose radius is a value rather than a class because it is drawn to a canvas.
   check("the agent avatar takes its radius from §04's expressive range",
     /borderRadius: RADIUS\.(?:xl|hero)\b/.test(src("components/GlossAvatar.tsx")));
-
-  // AND THE THREAD ROW, which is §11's one zero: the row owns no radius and no border, and the
-  // divider belongs to the list. A border on the row would make it a card, which is a heavier claim
-  // than the row is entitled to make.
-  const row = src("components/ThreadRow.tsx").match(/className=\{`group relative cursor-pointer[^`]*`/)?.[0] ?? "";
-  check("a thread row draws no corner and no box of its own",
-    row !== "" && !/rounded-|(?:^|[^-])\bborder\b/.test(row), row.slice(0, 120));
-  check("...and the list is what divides them", /divide-y divide-hair/.test(src("components/ThreadsView.tsx")));
 }
 
 console.log("\n§02's four levels of attention");
@@ -426,12 +418,6 @@ console.log("\n§03: each surface's first read, and what it keeps quiet");
     /<Truncate className=\{TYPE\.title\} title=\{agent\.name\}>/.test(agentCard));
   check("...and its slug and footer stay at tertiary",
     /text-tiny text-faint" title=\{agent\.slug\}/.test(agentCard) && /border-t border-hair pt-2 text-tiny text-faint/.test(agentCard));
-
-  // THREADS: the title is the first read and the metadata row is the second.
-  const threadRow = src("components/ThreadRow.tsx");
-  check("a thread row's title is the first read on it",
-    /text-label \$\{thread\.archived_at \? "text-muted" : "text-ink"\}/.test(threadRow));
-  check("...and its ids and figures stay under it", /text-tiny text-muted/.test(threadRow));
 
   // SIDEBAR: the current destination, which is the one thing §03 asks the sidebar to say loudest —
   // and the only surface of the five whose first read is a STATE rather than a piece of content.

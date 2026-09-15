@@ -102,7 +102,6 @@ console.log("\nno call site changes a width");
 {
   const SITES = [
     "components/AgentCard.tsx",
-    "components/ThreadRow.tsx",
     "components/DeployPanel.tsx",
   ];
   for (const path of SITES) {
@@ -137,7 +136,6 @@ console.log("\nno border travels alone");
   // a verb.
   const COMPANION: [string, string][] = [
     ["components/AgentCard.tsx", "StatusGlyph"],
-    ["components/ThreadRow.tsx", "ThreadGlyph"],
     ["components/DeployPanel.tsx", "ActionRow"],
   ];
   for (const [path, companion] of COMPANION) {

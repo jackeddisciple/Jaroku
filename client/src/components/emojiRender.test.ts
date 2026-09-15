@@ -77,7 +77,6 @@ console.log("\nthe seven sites §8.4 names");
     ["components/AgentCard.tsx", "GlossAvatar"],            // the grid card, at avatar size
     ["components/AgentOverview.tsx", "GlossAvatar"],        // the detail header, at avatar size
     ["components/GlossAvatar.tsx", "AgentEmoji"],           // and the one component that draws it
-    ["components/ThreadRow.tsx", "AgentEmoji"],             // 14 — the row default
     ["components/FleetStrip.tsx", "AgentEmoji"],            // 14
     ["components/WorkList.tsx", "AgentEmoji"],              // 14
     ["components/CommandPalette.tsx", "AgentEmoji"],        // 14

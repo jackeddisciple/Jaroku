@@ -41,7 +41,7 @@ import type { GithubAttachment } from "../types.ts";
  * what it holds — `work_items`, the `work` channel, `workStore` — and a destination id spelled
  * after the tab's marketing name would be the one place that vocabulary broke.
  */
-export type NavDestination = "threads" | "agents" | "work" | "inbox" | "activity";
+export type NavDestination = "agents" | "work" | "inbox" | "activity";
 
 /**
  * Which part of the workspace panel is showing, or null for closed.

@@ -1253,8 +1253,6 @@ jobs:
           npm run test:cockpit-format
           npm run test:thread-store
           npm run test:thread-cost
-          npm run test:thread-groups
-          npm run test:thread-filter
           npm run test:thread-resume
           npm run test:thread-archive
           npm run test:secrets-store
@@ -1666,15 +1664,6 @@ jobs:
           # their keyboard. The sweep at the end is the half that keeps it fixed: translating eleven
           # hints is a morning, and the twelfth written next year is what puts it back.
           npm run test:mod-key
-          # THE ONE SURFACE OF FOUR THAT FAILED THE RUNTIME A11Y SWEEP, and it failed it twice: an
-          # input whose only name was a placeholder — which is not exposed as one and disappears the
-          # moment somebody types — and five chips whose active state was the class `bg-active
-          # text-ink` and nothing else. The codebase states the rule itself in ShieldControl
-          # ("COLOUR IS NEVER THE ONLY SIGNAL") and applies it correctly on Activity's range chips
-          # two surfaces away, so this is a local omission rather than a systemic gap. The
-          # load-bearing assertion is that the pressed chip MOVES: hardcoding it on the first passes
-          # a count and lies on four filters out of five.
-          npm run test:thread-filter-a11y
           # PART 3'S SECOND CLASSIFIER, AND IT IS SECOND ON PURPOSE — §6: "Do not extend
           # `lib/intent`'s table; a real job must never be routable into `edit`." That table routes
           # into six destinations that all change or explain an agent's CODE; this one has two, and

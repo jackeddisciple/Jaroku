@@ -389,7 +389,6 @@ export function CommandPalette() {
                     entry is the list that comes next. */}
                 <Item onSelect={() => setMode("agents")}>Go to agent…</Item>
                 <Item onSelect={run(() => useUiStore.getState().openNav("agents"))}>Open Agents</Item>
-                <Item onSelect={run(() => useUiStore.getState().openNav("threads"))}>Open Threads</Item>
                 {/* The palette is where this app puts view navigation — the comment eight lines up
                     says so — and a destination reachable only by finding its icon in the rail is one
                     keyboard users do not have. Beside Agents and Threads rather than after the

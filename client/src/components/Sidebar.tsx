@@ -9,11 +9,13 @@ import { orderedRuns, useTraceStore } from "../store/traceStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import type { AgentSummary, ThreadView } from "../types.ts";
 import { openThread } from "../lib/threadNav.ts";
+import { useCanRun } from "../lib/useCapability.ts";
+import { ThreadGlyph } from "./ThreadGlyph.tsx";
 import { absTime, relTime } from "../lib/format.ts";
 import { agentStatus } from "../lib/agentStatus.ts";
 import { selectAgent } from "../lib/selection.ts";
 import {
-  sendDeleteAgent, sendOpenGithubPr, sendRenameAgent, signOut,
+  sendDeleteAgent, sendOpenGithubPr, sendRenameAgent, sendRestoreThread, signOut,
 } from "../lib/socket.ts";
 import { ICON } from "../lib/tokens.ts";
 import { quietBtn, secondaryBtn } from "./buttons.ts";
@@ -48,7 +50,6 @@ import { Icon, type IconComponent } from "../lib/icons/registry.ts";
  * field here rather than a special case in one of four branches.
  */
 const NAV_DESTINATIONS: { id: NavDestination; label: string; icon: IconComponent }[] = [
-  { id: "threads", label: "Threads", icon: Icon.nav.threads },
   { id: "agents", label: "Agents", icon: Icon.nav.agents },
   { id: "work", label: "Cockpit", icon: Icon.nav.cockpit },
   { id: "inbox", label: "Inbox", icon: Icon.nav.inbox },
@@ -151,7 +152,6 @@ function NavList() {
   const openNav = useUiStore((s) => s.openNav);
   const activeAgentId = useBuildStore((s) => s.activeAgentId);
   const newIsCurrent = activeAgentId === null && navSection === null;
-  const needsYou = useThreadStore((s) => s.counts.needs_you);
   const waiting = useInboxStore((s) => s.counts.badge);
   const waitingOnYou = useWorkStore((s) => workBadgeCount(s.workspaceCounts));
 
@@ -203,13 +203,11 @@ function NavList() {
 
       {NAV_DESTINATIONS.map(({ id, label, icon: Mark }) => {
         const active = navSection === id;
-        const badge = id === "inbox" ? waiting : id === "threads" ? needsYou : id === "work" ? waitingOnYou : 0;
+        const badge = id === "inbox" ? waiting : id === "work" ? waitingOnYou : 0;
         const badgeTitle =
           id === "inbox"
             ? `${waiting} item${waiting === 1 ? "" : "s"} blocked or waiting on a decision`
-            : id === "work"
-              ? `${waitingOnYou} job${waitingOnYou === 1 ? "" : "s"} waiting for somebody to answer something`
-              : `${needsYou} thread${needsYou === 1 ? "" : "s"} waiting on you`;
+            : `${waitingOnYou} job${waitingOnYou === 1 ? "" : "s"} waiting for somebody to answer something`;
         return (
           <button
             key={id}
@@ -227,9 +225,7 @@ function NavList() {
                 // A CLASS RATHER THAN AN INLINE STYLE, so the material can reach it. An inline
                 // `background` wins over every stylesheet rule there is, which left this badge the
                 // one opaque patch in the column that could not be softened with the rest.
-                className={`shrink-0 rounded-xs px-1 text-caption leading-[16px] tabular-nums ${
-                  id === "threads" ? "text-run" : "bg-chrome text-ink"
-                }`}
+                className="shrink-0 rounded-xs bg-chrome px-1 text-caption leading-[16px] tabular-nums text-ink"
               >
                 {badge}
               </span>
@@ -991,10 +987,54 @@ function ThreadListRow({ thread, indented = false }: { thread: ThreadView; inden
         indented ? "pl-9" : "pl-2.5"
       } ${active ? "bg-sidebar-active" : "hover:bg-sidebar-hover"}`}
     >
+      {/* WHAT IS OUTSTANDING, ON THE ROW. The Threads tab's "needs you" count left with the tab; a chat that
+          needs you, is running or has failed says so where it is listed, in the shared glyph. */}
+      {thread.status !== "idle" && thread.status !== "archived" && (
+        <span className="mr-2 shrink-0"><ThreadGlyph status={thread.status} /></span>
+      )}
       <Truncate className={`min-w-0 flex-1 text-label ${active ? "text-ink" : "text-muted"}`} title={thread.title}>
         {thread.title}
       </Truncate>
     </button>
+  );
+}
+
+/**
+ * An archived chat, listed while the filter is on Archived: its name, which opens it, and Restore.
+ *
+ * RESTORE IS ABSENT FOR SOMEBODY WHO CANNOT RESTORE, and disabled while reconnecting, with the reason.
+ */
+function ArchivedThreadRow({ thread }: { thread: ThreadView }) {
+  const active = useThreadStore((s) => s.activeThreadId === thread.id);
+  const connected = useTraceStore((s) => s.connection === "open");
+  const canRestore = useCanRun("restoreThread");
+  return (
+    <div
+      className={`flex h-7 w-full shrink-0 items-center rounded-control pr-1 transition-colors duration-fast ${
+        active ? "bg-sidebar-active" : "hover:bg-sidebar-hover"
+      }`}
+    >
+      <button
+        type="button"
+        onClick={() => openThread(thread)}
+        title={thread.title}
+        className="flex min-w-0 flex-1 items-center pl-2.5 text-left focus-visible:outline-none focus-visible:shadow-focusring"
+      >
+        <Truncate className="min-w-0 flex-1 text-label text-muted" title={thread.title}>{thread.title}</Truncate>
+      </button>
+      {canRestore && (
+        <button
+          type="button"
+          onClick={() => sendRestoreThread(thread.id)}
+          disabled={!connected}
+          title={connected ? "Restore this chat" : "Reconnecting — restoring needs a connection"}
+          aria-label={`Restore ${thread.title}`}
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-faint transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring disabled:cursor-default disabled:text-disabled"
+        >
+          <Icon.threads.restore size={ICON.sm} />
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -1104,6 +1144,12 @@ export function Sidebar() {
     // counting the wrong thing.
     if (githubViews[a.agent_id]) counts.synced++;
   }
+  // ARCHIVED CHATS LIVE HERE NOW, under the same filter as archived agents: the Threads tab that listed
+  // them is gone, and a chat put away has to stay findable to be put back.
+  const archivedThreads = threadRows
+    .filter((t) => t.archived_at)
+    .sort((a, b) => b.last_activity_at.localeCompare(a.last_activity_at));
+  counts.archived += archivedThreads.length;
 
   const q = query.trim().toLowerCase();
   const visible = agents.filter((a) => {
@@ -1263,12 +1309,18 @@ export function Sidebar() {
           </Collapse>
 
           <div className="mt-4">
-            <ListHeading label="Recents" open={recentsOpen} onToggle={() => setRecentsOpen((v) => !v)} />
+            {/* ON ARCHIVED, THE SECOND LIST IS THE ARCHIVED CHATS — beside the archived agents above it —
+                rather than Recents, which only ever holds live ones. */}
+            <ListHeading
+              label={filter === "archived" ? "Archived chats" : "Recents"}
+              open={recentsOpen}
+              onToggle={() => setRecentsOpen((v) => !v)}
+            />
             <Collapse open={recentsOpen}>
               <div className="flex min-w-0 flex-col px-1.5">
-                {recentThreads.map((t) => (
-                  <ThreadListRow key={t.id} thread={t} />
-                ))}
+                {filter === "archived"
+                  ? archivedThreads.map((t) => <ArchivedThreadRow key={t.id} thread={t} />)
+                  : recentThreads.map((t) => <ThreadListRow key={t.id} thread={t} />)}
               </div>
             </Collapse>
           </div>
