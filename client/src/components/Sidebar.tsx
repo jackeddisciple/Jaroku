@@ -588,7 +588,7 @@ function AgentTreeRow({
       {threads.length > 0 && (
         <div className="flex flex-col">
           {threads.map((t) => (
-            <ThreadListRow key={t.id} thread={t} indented />
+            <ThreadListRow key={t.id} thread={t} />
           ))}
         </div>
       )}
@@ -956,20 +956,30 @@ function FilterMenu({
   );
 }
 
-/** The small circle beside every chat in the sidebar — what marks a row as a conversation. */
+/**
+ * The small circle beside every chat in the sidebar — what marks a row as a conversation.
+ *
+ * IN THE AGENT EMOJI'S OWN BOX, and that is the product owner's call on 2026-09-15: "threads icon
+ * should fall just below the agent emoji". The circle is narrower than an emoji, so a shared left
+ * edge is not enough — it takes the same `ICON.md` box and the same 10px gap after it, which puts
+ * the circle under the emoji and a chat's name under its agent's.
+ */
 function ChatDot() {
   return (
-    <span className="mr-2 inline-flex shrink-0 justify-center text-faint" aria-hidden>
+    <span className="mr-2.5 inline-flex shrink-0 justify-center text-faint" style={{ width: ICON.md }} aria-hidden>
       <Icon.threads.chat size={ICON.sm} />
     </span>
   );
 }
 
 /**
- * A chat in the column: its name, and a press that opens it. Indented when it sits under its agent in
- * Projects; flush in Recents, where a chat has no agent to sit under.
+ * A chat in the column: its name, and a press that opens it.
+ *
+ * NO INDENT, UNDER AN AGENT OR NOT — the product owner's call on 2026-09-15. A chat under its agent
+ * in Projects used to start 36px in; it starts where every other row starts now, and what says it
+ * belongs to the agent above it is the order and the circle in the emoji's column, not a step.
  */
-function ThreadListRow({ thread, indented = false }: { thread: ThreadView; indented?: boolean }) {
+function ThreadListRow({ thread }: { thread: ThreadView }) {
   const active = useThreadStore((s) => s.activeThreadId === thread.id);
   // The same typing as the header when a topic title arrives — see lib/typedText.ts.
   const shownTitle = useTypedText(chatTitle(thread.title), !thread.title_is_custom);
@@ -978,9 +988,9 @@ function ThreadListRow({ thread, indented = false }: { thread: ThreadView; inden
       type="button"
       onClick={() => openThread(thread)}
       title={chatTitle(thread.title)}
-      className={`flex h-7 w-full shrink-0 items-center rounded-control pr-2 text-left transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
-        indented ? "pl-9" : "pl-2.5"
-      } ${active ? "bg-sidebar-active" : "hover:bg-sidebar-hover"}`}
+      className={`flex h-7 w-full shrink-0 items-center rounded-control pl-2.5 pr-2 text-left transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+        active ? "bg-sidebar-active" : "hover:bg-sidebar-hover"
+      }`}
     >
       <ChatDot />
       <Truncate className={`min-w-0 flex-1 text-label ${active ? "text-ink" : "text-muted"}`} title={chatTitle(thread.title)}>
