@@ -671,10 +671,9 @@ function AssistantTurn({
     <div className="group/turn">
       {children}
       {source !== null && (
-        <div className="mt-1.5 pl-[26px]">
+        <div className="mt-1.5">
           <TurnActions
             source={source}
-            isLast={isLast}
             streaming={isLast && streaming}
             // §6.1: STOP IS OFFERED ONLY WHERE THERE IS SOMETHING TO STOP — a reply that is
             // streaming right now. `canRerunTurn`'s argument applies here from the other side: a
@@ -700,6 +699,10 @@ function AssistantTurn({
             onPromoteToDataset={() => useUiStore.getState().setRightTab("evals")}
           />
           {meta && (
+            // THE READOUT, ON HOVER. Opacity rather than `display: none`, for §5's reason — a hidden
+            // element is not focusable, and `focus-within` could never fire for one.
+            <div className="opacity-0 transition-opacity duration-fast focus-within:opacity-100
+              group-hover/turn:opacity-100 motion-reduce:transition-none">
             <TurnMetadata
               meta={meta}
               streaming={isLast && streaming}
@@ -729,6 +732,7 @@ function AssistantTurn({
                   : undefined
               }
             />
+            </div>
           )}
         </div>
       )}

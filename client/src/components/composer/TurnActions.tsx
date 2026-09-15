@@ -78,8 +78,6 @@ export function ActionButton({
 export function TurnActions({
   /** The markdown SOURCE of the response. §5.1 — never the rendered text. */
   source,
-  /** Always visible on the last turn; on hover/focus otherwise. */
-  isLast = false,
   streaming = false,
   /** §6.1's Stop. Passed only where there is a stream to stop — see below. */
   onStop,
@@ -96,7 +94,6 @@ export function TurnActions({
   className = "",
 }: {
   source: string;
-  isLast?: boolean;
   streaming?: boolean;
   onStop?: () => void;
   onRegenerate?: () => void;
@@ -115,9 +112,11 @@ export function TurnActions({
 
   return (
     <div
-      className={`flex items-center gap-0.5 transition-opacity duration-fast
-        focus-within:opacity-100 group-hover/turn:opacity-100 motion-reduce:transition-none
-        ${isLast ? "opacity-100" : "opacity-0"} ${className}`}
+      // ALWAYS IN SIGHT — the product owner's call on 2026-09-15. Copy, regenerate and the rest were
+      // revealed on hover of the turn, which made the commonest thing anybody does to an answer the
+      // one thing they had to go looking for. The metadata row below them is what hides now: it
+      // reports on an answer rather than doing anything to it.
+      className={`flex items-center gap-0.5 ${className}`}
       // OPACITY, NOT `display: none`. §5's rule that the row stays in tab order on every turn — a
       // hidden element is not focusable, and `focus-within` above can never fire for it.
       role="group"

@@ -87,6 +87,14 @@ console.log("\n§13 — the provenance line's own four");
   // under a turn nobody routed would be worse than no chip.
   check("no route means no chip", !rendered(full({ route: null })).includes("route"));
 
+  // AND "subscription" IS NOT ONE OF THOSE ROUTES. Every value above names what handled the message;
+  // this one names which credential paid for it, and the product owner's call on 2026-09-15 is that
+  // it does not belong on the line. The record keeps it — `route` is still read, just not rendered.
+  check("a subscription turn shows no route chip", !rendered(full({ route: "subscription" })).includes("route"));
+  check("...while everything else on its line stays",
+    rendered(full({ route: "subscription" })).join(",") === "model,effort,build,duration,tokens,cost,variants",
+    rendered(full({ route: "subscription" })).join(","));
+
   // §13.1's COST IS THE ONE FIGURE WHERE `null` AND `0` ARE DIFFERENT CLAIMS, and both render: an
   // unpriced model is "unknown" and a free one is "$0.0000". The slot is present for both, because
   // this line IS where cost lives and silently omitting the unknown one would leave a reader to

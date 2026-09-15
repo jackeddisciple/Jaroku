@@ -111,7 +111,11 @@ export function presentSlots(meta: TurnMeta): Set<MetadataSlot> {
   // §13.3: THE ROUTE IS ON EVERY TURN THAT HAS ONE, and its absence on a turn that does not is the
   // honest gap rather than a guess — a chip reading "chat" under a plan card would be worse than
   // no chip, which is the argument §13.3 makes about the line as a whole.
-  if (meta.route) slots.add("route");
+  // "subscription" IS NOT A ROUTE, and the product owner's call on 2026-09-15 is that it does not
+  // belong on this line. Every other value here names what HANDLED the message — chat, edit, explain
+  // — while this one names which credential paid for it, which is a fact about the account rather
+  // than about the answer. The record still carries it; the row simply does not read it out.
+  if (meta.route && meta.route !== "subscription") slots.add("route");
   if (meta.modelId) slots.add("model");
   // §6.2: "Model has no reasoning control: omit the chip entirely rather than showing a
   // meaningless 'Low'." An applied level with no support behind it is a level nobody spent.
