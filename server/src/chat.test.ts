@@ -129,6 +129,9 @@ console.log("\nthe rules in CHAT_SYSTEM");
     ["...spelled with the figure that must never appear", /\$0\.00/],
     // §8.1 — a general question is answered as a general question.
     ["general questions are fair game", /General questions/i],
+    // PLANNING IS OFFERED UNDER THE ANSWER NOW, so the answer must neither start it nor claim to.
+    ["a build request is talked through and never started", /WHEN THEY DESCRIBE SOMETHING THEY WANT BUILT/],
+    ["...and a person talking about themselves is simply talked with", /talking about themselves/i],
   ];
   for (const [name, re] of rules) check(name, re.test(CHAT_SYSTEM), name);
   // It is a set of RULES rather than a paragraph of tone. Four of the seven above are honesty

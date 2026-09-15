@@ -10,7 +10,7 @@
 // they send. Those are facts about the text:
 //
 //   §15.1's CARD MUST NOT APPEAR ON EVERY REPLY. "Not on every chat reply, which would be noise."
-//   The gate is `planEvidence === "near"`, and a gate on anything weaker — the route being chat, a
+//   The gate is the `near` and `confident` bands, and a gate on anything weaker — the route being chat, a
 //   reply existing — would put it under every answer in the product.
 //
 //   AND NEITHER MAY SEND THE REPLY. §15.1: "the original user message… not the assistant's reply
@@ -55,7 +55,10 @@ console.log("\n§15.1 — the build offer");
 {
   check("the card exists", pane.includes('id: "build"'), "");
   // THE GATE. §15.1: "shown only when the router's confidence for plan was close to the threshold."
-  check("it is gated on the near band", /planEvidence === "near"/.test(pane), "");
+  // `confident` JOINED WHEN PLANNING BECAME OPT-IN (2026-09-14): a clear brief is answered first, and this
+  // card is how it is planned. `none` — no signal, or a message about the person talking — still gets nothing.
+  check("it is gated on the near and confident bands, never on none",
+    /t\.planEvidence === "near" \|\| t\.planEvidence === "confident"/.test(pane), "");
   // AND ONLY ON A FINISHED ANSWER — an offer under a reply still arriving is a decision about
   // something nobody has read.
   check("...and on a settled turn",
@@ -73,6 +76,26 @@ console.log("\n§15.1 — the build offer");
   // THE ONE MISTAKE THAT WOULD LOOK PLAUSIBLE IN REVIEW.
   check("...and never the assistant's reply", !/\.text\b/.test(build), build.slice(0, 300));
   check("...nor whatever is in the composer now", !/\btrimmed\b|\btext\b/.test(build), build.slice(0, 300));
+  // WITH A DRAFT SELECTED THE PRESS BUILDS INTO IT — the draft rung no longer does, so the card must.
+  check("...into the selected draft when there is one", /agentIsDraft && activeAgentId \? \{ intoAgentId: activeAgentId \}/.test(build),
+    build.slice(0, 400));
+  check("...and says which draft", /Build this into \$\{agent\.name\}/.test(build), build.slice(0, 300));
+}
+
+// --- §15.1 with no answer to put it under -----------------------------------------------------
+
+console.log("\n§15.1 — planning when there is no Chat to answer first");
+{
+  // A BRIEF IS ANSWERED FIRST, AND WITH NO CONNECTED PLAN THERE IS NO ANSWER. Planning never needed a
+  // plan — it runs on the platform's key — so the banner offers it directly for a message that reads like
+  // a brief, rather than leaving planning unreachable for everybody without Chat.
+  const at = pane.indexOf("const planInstead = ");
+  const fn = at < 0 ? "" : pane.slice(at, at + 1400);
+  check("there is a way to plan straight from the composer", at >= 0, "");
+  check("...that sends the composer's own message to the plan route", /sendPlanAgent\(trimmed/.test(fn), fn.slice(0, 200));
+  check("...into the selected draft when there is one", /intoAgentId: activeAgentId/.test(fn), fn.slice(0, 400));
+  check("the banner that says Chat is unavailable offers it, for a brief",
+    /routing\.planEvidence !== "none"[\s\S]{0,400}?onClick=\{planInstead\}/.test(pane), "");
 }
 
 // --- §15.2: plan → chat -----------------------------------------------------------------------

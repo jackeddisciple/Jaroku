@@ -2752,6 +2752,27 @@ export function BuildPane({
     setAttachments([]);
   };
 
+  /**
+   * §15.1 WITH NO ANSWER TO PUT IT UNDER — plan the composer's message straight away.
+   *
+   * A BRIEF IS ANSWERED FIRST NOW, with the offer to plan it under the answer. With no Chat to answer it
+   * — no connected plan, a browser tab, a server older than the feature — there is no answer to sit
+   * under, and planning never needed one: it runs on the platform's key. So the banner that says Chat is
+   * unavailable offers the plan itself, for a message that reads like a brief; without it, planning an
+   * agent would be unreachable for everybody without Chat.
+   */
+  const planInstead = (): void => {
+    const trimmed = text.trim();
+    if (!connected || !trimmed || operating) return;
+    plannedConnectors.current = connectorKey;
+    const identity = useAccountOnboardingStore.getState().takeFirstAgentIdentity();
+    const attachRefs = attachments.map((a) => ({ kind: a.kind, ref: a.ref, agent_id: activeAgentId ?? "" }));
+    sendPlanAgent(trimmed, selected, name.trim() || undefined, undefined, selectedMcp, attachRefs,
+      { ...(identity ?? {}), ...(agentIsDraft && activeAgentId ? { intoAgentId: activeAgentId } : {}) });
+    setChatDraft("");
+    setAttachments([]);
+  };
+
   const lastGenId = [...turns].reverse().find((t) => t.role === "jaroku" && t.kind === "gen")?.id;
 
   // ── The fork the session is at, if it is at one ──────────────────────────────
@@ -2780,9 +2801,11 @@ export function BuildPane({
    * wrong costs one click." And §13's provenance line is what makes this discoverable — "the user
    * can see the route was chosen, so a control to change it makes sense."
    *
-   * SHOWN ONLY ON `near`, WHICH IS THE WHOLE OF ITS DISCIPLINE. "Not on every chat reply, which
-   * would be noise." A message with no build-request signal at all gets nothing; one that scored
-   * below the bar gets the offer once, under the answer it produced.
+   * SHOWN ON `near` AND `confident`, NEVER ON `none` — the whole of its discipline. "Not on every chat
+   * reply, which would be noise." A message with no build-request signal gets nothing, and neither does
+   * one about the person talking; a brief, or something close to one, gets the offer once, under the
+   * answer it produced. `confident` joined when planning became opt-in (2026-09-14): a clear brief is
+   * answered first now, and this card is how it gets planned.
    *
    * `ChoiceRow`, WHICH §15.1 NAMES — "the component that exists precisely to surface the forks a
    * session is already at as option cards. No new component." It sits in the same slot the plan
@@ -2803,7 +2826,7 @@ export function BuildPane({
         // newest reply, and the `status` test keeps it off one still arriving — §15.1's card is a
         // decision about a finished answer.
         && (t.status === "done" || t.status === "stopped")
-        && t.planEvidence === "near"
+        && (t.planEvidence === "near" || t.planEvidence === "confident")
         && Boolean(t.askedWith),
     ) ?? null
     : null;
@@ -2958,11 +2981,13 @@ export function BuildPane({
       // KEYED ON THE TURN, so dismissing it dismisses THIS offer rather than the next one too.
       // `ChoiceRow`'s Skip is per fork, and §15.1's card should come back for a different message.
       key: `near:${nearMiss.id}`,
-      question: "Did you want an agent for this?",
+      question: nearMiss.planEvidence === "confident" ? "Want Jaroku to plan this?" : "Did you want an agent for this?",
       choices: [
         {
           id: "build",
-          label: "Build this as an agent",
+          // WITH A DRAFT SELECTED THE PRESS BUILDS INTO IT, and says so: the row onboarding made is what
+          // the brief was written for, and a second agent beside it is what nobody wanted.
+          label: agentIsDraft && agent ? `Build this into ${agent.name}` : "Plan this as an agent",
           hint: "plan it from what you asked",
           icon: SparklesIcon,
           accent: ACCENT.bespoke,
@@ -2977,7 +3002,7 @@ export function BuildPane({
             const identity = useAccountOnboardingStore.getState().takeFirstAgentIdentity();
             sendPlanAgent(
               original, selected, name.trim() || undefined, undefined, selectedMcp, [],
-              { ...(identity ?? {}) },
+              { ...(identity ?? {}), ...(agentIsDraft && activeAgentId ? { intoAgentId: activeAgentId } : {}) },
             );
           },
         },
@@ -3335,7 +3360,7 @@ export function BuildPane({
                 <kbd className={`${chipClass({ size: "sm", mono: true, tone: "faint" })} shadow-[inset_0_0_0_1px_theme(colors.hair)]`}>
                   {keyHint("⌘↵")}
                 </kbd>
-                {routeLabel(intent)}
+                {routeLabel(intent, routing.planEvidence)}
               </span>
             )}
           </div>
@@ -3542,6 +3567,19 @@ export function BuildPane({
                     agent and building one work here.
                   </>
                 )}
+                {/* AND A BRIEF CAN STILL BE PLANNED, with no answer to offer it under — see `planInstead`. */}
+                {routing.planEvidence !== "none" ? (
+                  <>
+                    {" "}
+                    <button
+                      type="button"
+                      onClick={planInstead}
+                      className="text-ink underline underline-offset-2 outline-none transition-colors duration-fast hover:text-ink focus-visible:shadow-focusring"
+                    >
+                      Plan this as an agent instead
+                    </button>
+                  </>
+                ) : null}
               </span>
             </div>
           )}
@@ -3905,8 +3943,8 @@ export function BuildPane({
                     // NOT CONNECTED IS CHECKED FIRST, ahead of the key and the mode: it is the one
                     // state where none of the other labels is true yet, and a tooltip promising a
                     // route on a button that cannot dispatch is the mismatch §3.4 already paid for.
-                    aria-label={!connected ? OFFLINE_SEND : noSubscription ? SUBSCRIPTION_ASK : missingKey ? keyAsk : composerMode === "test" ? "Run the agent on this input" : `Send — ${routeLabel(intent)}`}
-                    title={!connected ? OFFLINE_SEND : noSubscription ? SUBSCRIPTION_ASK : missingKey ? keyAsk : composerMode === "test" ? "Run the agent on this input" : `Send — ${routeLabel(intent)} (${keyHint("⌘↵")})`}
+                    aria-label={!connected ? OFFLINE_SEND : noSubscription ? SUBSCRIPTION_ASK : missingKey ? keyAsk : composerMode === "test" ? "Run the agent on this input" : `Send — ${routeLabel(intent, routing.planEvidence)}`}
+                    title={!connected ? OFFLINE_SEND : noSubscription ? SUBSCRIPTION_ASK : missingKey ? keyAsk : composerMode === "test" ? "Run the agent on this input" : `Send — ${routeLabel(intent, routing.planEvidence)} (${keyHint("⌘↵")})`}
                     // The one ink-filled control on the screen, and the only one in this bar that
                     // is not a glyph on open background.
                     //

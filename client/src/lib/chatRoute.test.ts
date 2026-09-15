@@ -100,9 +100,11 @@ console.log("\na social opener on a real request is still the real request");
   check('"hi, can you explain the graph" (node selected) → explain',
     route("hi, can you explain the graph", onNode) === "explain", route("hi, can you explain the graph", onNode));
   check('"ok so the webhook is wrong" → edit', route("ok so the webhook is wrong", ctx) === "edit", route("ok so the webhook is wrong", ctx));
-  // A BUILD REQUEST THAT OPENS WITH A GREETING IS STILL A BUILD REQUEST.
-  check('"hey, build me an inbox watcher" → generate', route("hey, build me an inbox watcher", { agentId: null }) === "generate",
-    route("hey, build me an inbox watcher", { agentId: null }));
+  // A BUILD REQUEST THAT OPENS WITH A GREETING IS STILL A BUILD REQUEST — answered first since planning
+  // became opt-in, with the plan offered on the whole request's evidence rather than the greeting's.
+  const greeted = routeMessage("hey, build me an inbox watcher", { agentId: null });
+  check('"hey, build me an inbox watcher" is still a build request',
+    greeted.intent.kind === "chat" && greeted.planEvidence === "confident", { kind: greeted.intent.kind, band: greeted.planEvidence });
   // AND A WORD INSIDE ANOTHER WORD IS NOT THE WORD.
   check('"testing the retry path against staging" → edit', route("testing the retry path against staging", ctx) === "edit",
     route("testing the retry path against staging", ctx));
@@ -112,16 +114,20 @@ console.log("\na social opener on a real request is still the real request");
 //
 // DRIVEN AS A TABLE rather than as prose, because what matters is that NONE of them moved. Each
 // row is a route that existed before `chat` did, with the context that claims it.
+//
+// EXCEPT THE TWO THAT PLANNED UNASKED. The product owner's decision (2026-09-14) is that planning is
+// opt-in: a description is answered, with "Plan this as an agent" under the answer. Those two rows say
+// so now; every other route is exactly where it was.
 
 console.log("\nthe five existing routes are unchanged");
 {
   const rows: { text: string; ctx: ComposerContext; want: string; why: string }[] = [
-    { text: "an agent that triages support email", ctx: { agentId: null }, want: "generate",
-      why: "a description with no agent is still a plan" },
+    { text: "an agent that triages support email", ctx: { agentId: null }, want: "chat",
+      why: "a description with no agent is answered, with the plan offered" },
     { text: "drop the summariser", ctx: { agentId: null, pendingPlanId: "p1" }, want: "replan",
       why: "a plan on screen still takes feedback" },
-    { text: "when a customer emails, reply with the policy", ctx: { agentId: "draft_1", agentIsDraft: true }, want: "generate",
-      why: "a draft still short-circuits to a build into that row" },
+    { text: "when a customer emails, reply with the policy", ctx: { agentId: "draft_1", agentIsDraft: true }, want: "chat",
+      why: "a brief for a draft is answered, with building into that row offered" },
     { text: "add a LIMIT clause", ctx: { agentId: "weather_agent" }, want: "edit",
       why: "the default with an agent selected is still an edit" },
     { text: "why did this fail?", ctx: { agentId: "weather_agent", step: FAILED }, want: "explain",
@@ -173,7 +179,7 @@ console.log("\n§3.5's fixture table");
   const ON_FAILED: ComposerContext = { agentId: "weather_agent", step: FAILED };
   const ON_NODE: ComposerContext = { agentId: "weather_agent", nodeId: "router" };
 
-  const table: { text: string; ctx: ComposerContext; want: Intent["kind"]; why: string }[] = [
+  const table: { text: string; ctx: ComposerContext; want: Intent["kind"]; band?: "none" | "near" | "confident"; why: string }[] = [
     // ── greetings ────────────────────────────────────────────────────────────────────────────
     { text: "hi", ctx: NO_AGENT, want: "chat", why: "§0's opening example: a greeting is never a build request" },
     { text: "hello there", ctx: NO_AGENT, want: "chat", why: "a greeting with a second word is the same greeting" },
@@ -220,20 +226,20 @@ console.log("\n§3.5's fixture table");
     { text: "fix the retry logic in my webhook agent", ctx: NO_AGENT, want: "chat", why: "§3.1 again, with nothing to edit — so the cheap side, with §15.1 one click away" },
 
     // ── explicit build requests in English ───────────────────────────────────────────────────
-    { text: "build me an agent that watches my inbox", ctx: NO_AGENT, want: "generate", why: "§0's fourth case: a verb, a thing and what it does" },
-    { text: "create a bot that posts to slack when a deploy fails", ctx: NO_AGENT, want: "generate", why: "three signals, and a trigger clause besides" },
-    { text: "I need something to watch my inbox", ctx: NO_AGENT, want: "generate", why: "§3.1: a genuine brief that names no artifact word — the placeholder carries it" },
-    { text: "a support agent", ctx: NO_AGENT, want: "generate", why: "a bare indefinite artifact phrase IS a brief; v0.1.7 asserted this and it still holds" },
-    { text: "an inbox watcher", ctx: NO_AGENT, want: "generate", why: "same shape, and why the artifact list holds agent-ish nouns and not only 'agent'" },
-    { text: "can you build me a tool that summarises PDFs", ctx: NO_AGENT, want: "generate", why: "a request phrased as a question is still a request — 'can you' proposes Jaroku does it" },
-    { text: "when a customer emails us, reply with the refund policy", ctx: NO_AGENT, want: "generate", why: "a trigger and an action is what an agent IS; worth the threshold alone" },
-    { text: "every time a PR opens, run the tests and comment", ctx: NO_AGENT, want: "generate", why: "the same shape without a comma after the trigger's own clause" },
+    { text: "build me an agent that watches my inbox", ctx: NO_AGENT, want: "chat", band: "confident", why: "answered, with the plan offered — §0's fourth case: a verb, a thing and what it does" },
+    { text: "create a bot that posts to slack when a deploy fails", ctx: NO_AGENT, want: "chat", band: "confident", why: "answered, with the plan offered — three signals, and a trigger clause besides" },
+    { text: "I need something to watch my inbox", ctx: NO_AGENT, want: "chat", band: "confident", why: "answered, with the plan offered — §3.1: a genuine brief that names no artifact word — the placeholder carries it" },
+    { text: "a support agent", ctx: NO_AGENT, want: "chat", band: "confident", why: "answered, with the plan offered — a bare indefinite artifact phrase IS a brief; v0.1.7 asserted this and it still holds" },
+    { text: "an inbox watcher", ctx: NO_AGENT, want: "chat", band: "confident", why: "answered, with the plan offered — same shape, and why the artifact list holds agent-ish nouns and not only 'agent'" },
+    { text: "can you build me a tool that summarises PDFs", ctx: NO_AGENT, want: "chat", band: "confident", why: "answered, with the plan offered — a request phrased as a question is still a request — 'can you' proposes Jaroku does it" },
+    { text: "when a customer emails us, reply with the refund policy", ctx: NO_AGENT, want: "chat", band: "confident", why: "answered, with the plan offered — a trigger and an action is what an agent IS; worth the threshold alone" },
+    { text: "every time a PR opens, run the tests and comment", ctx: NO_AGENT, want: "chat", band: "confident", why: "answered, with the plan offered — the same shape without a comma after the trigger's own clause" },
 
     // ── build requests in Hinglish and casual phrasing ───────────────────────────────────────
-    { text: "kuch aisa jo mails padhe aur summary bheje", ctx: NO_AGENT, want: "generate", why: "§3.1's own Hinglish example; `jo` is the relative pronoun doing the work" },
-    { text: "ek agent banao jo slack pe post kare", ctx: NO_AGENT, want: "generate", why: "banao + agent + jo — three signals, none of them English patterns" },
-    { text: "mujhe ek bot chahiye jo invoices padhe", ctx: NO_AGENT, want: "generate", why: "chahiye is the ask; bot is the thing; jo says what it does" },
-    { text: "something that scrapes a page every hour", ctx: NO_AGENT, want: "generate", why: "casual phrasing with no artifact word and no build verb" },
+    { text: "kuch aisa jo mails padhe aur summary bheje", ctx: NO_AGENT, want: "chat", band: "confident", why: "answered, with the plan offered — §3.1's own Hinglish example; `jo` is the relative pronoun doing the work" },
+    { text: "ek agent banao jo slack pe post kare", ctx: NO_AGENT, want: "chat", band: "confident", why: "answered, with the plan offered — banao + agent + jo — three signals, none of them English patterns" },
+    { text: "mujhe ek bot chahiye jo invoices padhe", ctx: NO_AGENT, want: "chat", band: "confident", why: "answered, with the plan offered — chahiye is the ask; bot is the thing; jo says what it does" },
+    { text: "something that scrapes a page every hour", ctx: NO_AGENT, want: "chat", band: "confident", why: "answered, with the plan offered — casual phrasing with no artifact word and no build verb" },
 
     // ── asking HOW is not asking for it ──────────────────────────────────────────────────────
     { text: "how do I build an agent that watches my inbox", ctx: NO_AGENT, want: "chat", why: "AMBIGUOUS: it scores three plan signals and is a question about approach — the guard wins, and §15.1 is one click" },
@@ -258,6 +264,13 @@ console.log("\n§3.5's fixture table");
   for (const r of table) {
     const got = route(r.text, r.ctx);
     check(`${r.want.padEnd(8)} "${r.text.slice(0, 46)}" — ${r.why}`, got === r.want, { got, want: r.want });
+  }
+
+  // AND A BRIEF KEEPS ITS OFFER. Every row that used to plan is answered now, and what makes that a
+  // decision rather than a regression is that the evidence survives to put "Plan this as an agent" under it.
+  for (const r of table.filter((row) => row.band)) {
+    const { planEvidence } = routeMessage(r.text, r.ctx);
+    check(`...and "${r.text.slice(0, 34)}" offers the plan`, planEvidence === r.band, planEvidence);
   }
 
   // AND EVERY `chat` ROW IN THE TABLE CARRIES A REASON, which is §3.3 rule 5: the router records
@@ -392,7 +405,7 @@ console.log("\n§16 — a paste is not a brief");
   // AND THE PROSE STILL DECIDES WHEN THERE IS PROSE. This is the half that makes the fix a fix
   // rather than a refusal to route: the ask is in the sentence, the fence is the illustration.
   const asked = routeMessage("build me an agent that does this:\n```\ndef f(): pass\n```", NO_AGENT);
-  check("an ask above a fence still generates", asked.intent.kind === "generate", asked.intent.kind);
+  check("an ask above a fence is still a build request, answered with the plan offered", asked.intent.kind === "chat", asked.intent.kind);
   check("...confidently", asked.planEvidence === "confident", asked.planEvidence);
 
   // WHERE THE FIX STOPS, ASSERTED RATHER THAN LEFT TO BE DISCOVERED.
@@ -409,9 +422,9 @@ console.log("\n§16 — a paste is not a brief");
   // surface." Each of those patterns would also fire on ordinary sentences. The real-world shape
   // this leaves open is pasting a prompt file raw; wrapping it in a fence routes it correctly, and
   // §15.2's "just asking" card is the one-click recovery §3.2 describes for the rest.
-  check("unfenced code carrying an English ask still plans — a documented limit",
+  check("unfenced code carrying an English ask still reads as a brief — a documented limit, which costs an offer now rather than a plan",
     routeMessage("def build_agent():\n    make an agent that watches inbox\n    return 1", NO_AGENT)
-      .intent.kind === "generate");
+      .planEvidence === "confident");
 
   // AN ALL-QUOTED MESSAGE WITH AN AGENT OPEN IS A CONVERSATION, not an edit. Without the rung the
   // agent-selected fallback hands the editor an instruction with no instruction in it.
@@ -420,15 +433,16 @@ console.log("\n§16 — a paste is not a brief");
     routeMessage("```\nadd a retry\n```", AGENT).intent.kind);
   // ...AND WITH A DRAFT OPEN IT IS A BRIEF, because that rung sits ABOVE the quoted-only check on
   // purpose: "here is the API I want you to use: ```…```" is a legitimate brief for a draft.
-  check("a fenced paste with a DRAFT open still generates into it",
-    routeMessage("```\nGET /v1/messages\n```", DRAFT).intent.kind === "generate");
+  check("a fenced paste with a DRAFT open is still a brief for it, offered as a build",
+    routeMessage("```\nGET /v1/messages\n```", DRAFT).intent.kind === "chat"
+      && routeMessage("```\nGET /v1/messages\n```", DRAFT).planEvidence === "confident");
 
   // BLOCKQUOTES ARE DELIBERATELY NOT STRIPPED. A fence means "literal text I am showing you" in
   // markdown's own grammar; a `>` means "somebody said this", and what somebody said can still be
   // the ask — "my boss said: > we need a bot that files receipts" is a build request being relayed.
   // Asserted so the decision is visible rather than incidental.
   check("a relayed build request is still a build request",
-    routeMessage("my boss said:\n> we need a bot that files receipts", NO_AGENT).intent.kind === "generate");
+    routeMessage("my boss said:\n> we need a bot that files receipts", NO_AGENT).planEvidence === "confident");
 
   // NO BACKTRACKING SURFACE. `prose` walks lines, and this runs on every keystroke behind the live
   // route preview — §16.1's 10,000-character attack applied to the new code path.
@@ -447,6 +461,58 @@ console.log("\n§16 — a paste is not a brief");
   check("a lone backtick does not fuse words",
     prose("a ` b") === "a   b", JSON.stringify(prose("a ` b")));
   check("nothing but a fence is empty", prose("```\nx\n```") === "");
+}
+
+console.log("\na message about the person talking is answered, and offers no build");
+{
+  // FOUND IN THE PACKAGED APP. "I have been feeling stuck in my career and I want to talk about it"
+  // previewed as "plan a new agent": a want and a to-clause are two plan signals, and they are how people
+  // say anything about themselves. Ten of eighteen ordinary personal messages planned an agent nobody asked
+  // for; with a draft selected — where onboarding leaves every new user — thirteen did.
+  const NO_AGENT: ComposerContext = { agentId: null };
+  const DRAFT: ComposerContext = { agentId: "new_agent", agentIsDraft: true };
+  for (const text of [
+    "I have been feeling stuck in my career and I want to talk about it",
+    "I want to talk about my career",
+    "I need to figure out what to do with my life",
+    "I'd like to tell you about my day",
+    "I want to understand why my relationship keeps failing",
+    "I need someone to talk to tonight",
+    "I want to know how to be happier at work",
+    "I want to quit my job and travel",
+    "I want to write a letter to my dad",
+    "I need to vent about my boss",
+    "give me some advice about my love life",
+  ]) {
+    for (const [ctx, where] of [[NO_AGENT, "nothing selected"], [DRAFT, "a draft selected"]] as const) {
+      const r = routeMessage(text, ctx);
+      check(`"${text.slice(0, 40)}" (${where}) → an answer, with no build offered`,
+        r.intent.kind === "chat" && r.planEvidence === "none", { kind: r.intent.kind, band: r.planEvidence });
+    }
+  }
+  // AND NOTHING THAT DESCRIBES A THING IS MISTAKEN FOR TALK — a brief in the first person keeps its offer.
+  for (const text of ["I need something to watch my inbox", "I want an agent that reads my invoices", "we need a bot that files receipts"]) {
+    const r = routeMessage(text, NO_AGENT);
+    check(`"${text}" → still offered as a plan`, r.intent.kind === "chat" && r.planEvidence === "confident",
+      { kind: r.intent.kind, band: r.planEvidence });
+  }
+}
+
+console.log("\nplanning is offered, never started by a message");
+{
+  // THE PRODUCT OWNER'S DECISION (2026-09-14): planning is always opt-in. A build request is answered, and
+  // planning it is one press under the answer; with a draft selected, the press builds into that draft.
+  for (const [text, ctx] of [
+    ["build me an agent that watches my inbox", { agentId: null }],
+    ["a support agent", { agentId: null }],
+    ["triage inbound support email and draft a reply", { agentId: "tracey", agentIsDraft: true }],
+  ] as [string, ComposerContext][]) {
+    const r = routeMessage(text, ctx);
+    check(`"${text.slice(0, 40)}" is answered, with planning offered`,
+      r.intent.kind === "chat" && r.planEvidence === "confident", { kind: r.intent.kind, band: r.planEvidence });
+  }
+  check("the preview says the plan is offered", routeLabel({ kind: "chat" }, "confident") === "answer, then offer to build it");
+  check("...and a plain answer still says nothing is built", routeLabel({ kind: "chat" }) === "answer, without building anything");
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

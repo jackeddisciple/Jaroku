@@ -13,7 +13,7 @@
 //
 //   npm run test:plan-flow
 
-import { classifyIntent, routeLabel } from "../lib/intent.ts";
+import { classifyIntent, routeLabel, routeMessage } from "../lib/intent.ts";
 import { isPlanning, pendingPlanId, threadFor, useChatStore, type PlanTurn } from "./chatStore.ts";
 import type { AgentPlan, GenUsage } from "../types.ts";
 
@@ -70,11 +70,16 @@ const userTexts = () => turns().filter((t) => t.role === "user").map((t) => (t a
 
 // --- routing --------------------------------------------------------------------------
 
-// 1 — no agent, no plan: a message asks for a plan, never a generation.
+// 1 — no agent, no plan: a description is ANSWERED, and planning it is offered — never started. The
+//     product owner's decision (2026-09-14): planning is always opt-in. What the plan gate guarantees is
+//     unchanged: nothing is generated that nobody saw planned, and now nothing is planned unasked.
 {
-  const i = classifyIntent("a support agent", { agentId: null });
-  check("no agent, no plan -> generate (the plan gate)", i.kind === "generate", i);
-  check("routing hint names the plan, not the build", routeLabel(i) === "plan a new agent", routeLabel(i));
+  const r = routeMessage("a support agent", { agentId: null });
+  check("no agent, no plan -> an answer, with planning offered", r.intent.kind === "chat" && r.planEvidence === "confident", r);
+  check("routing hint says the plan is offered, not started",
+    routeLabel(r.intent, r.planEvidence) === "answer, then offer to build it", routeLabel(r.intent, r.planEvidence));
+  // AND THE PLAN ROUTE ITSELF STILL NAMES THE PLAN, for the press that reaches it.
+  check("the plan route's own hint names the plan, not the build", routeLabel({ kind: "generate" }) === "plan a new agent");
 }
 
 // 2 — no agent, plan awaiting a decision: a message revises THAT plan.
@@ -109,11 +114,12 @@ const userTexts = () => turns().filter((t) => t.role === "user").map((t) => (t a
 //      Both of these route with agentId === null, which is exactly the case the composer's
 //      routing hint used to skip, so the label was unreachable in the UI.
 {
-  const fresh = classifyIntent("a support agent", { agentId: null });
+  const fresh = routeMessage("a support agent", { agentId: null });
   const revise = classifyIntent("drop the summariser", { agentId: null, pendingPlanId: "p1" });
+  const freshLabel = routeLabel(fresh.intent, fresh.planEvidence);
   check("both new-agent intents produce a distinct, showable label",
-    routeLabel(fresh) !== routeLabel(revise) && routeLabel(fresh).length > 0 && routeLabel(revise).length > 0,
-    [routeLabel(fresh), routeLabel(revise)]);
+    freshLabel !== routeLabel(revise) && freshLabel.length > 0 && routeLabel(revise).length > 0,
+    [freshLabel, routeLabel(revise)]);
 }
 
 // 4c — A DRAFT IS AN IDENTITY WITH NO CODE, so a typed message builds INTO it rather than editing
@@ -121,18 +127,20 @@ const userTexts = () => turns().filter((t) => t.role === "user").map((t) => (t a
 //      therefore sits ABOVE the question test — which matters, because "when a customer emails us,
 //      reply with…" is both an ordinary first description and a `RE_EXPLAIN` match.
 {
-  const i = classifyIntent("triage inbound support email and draft a reply", {
+  // ANSWERED FIRST SINCE PLANNING BECAME OPT-IN (2026-09-14): a brief for the draft gets a reply with
+  // "Build this into …" under it, and the build that press starts adopts this row.
+  const r = routeMessage("triage inbound support email and draft a reply", {
     agentId: "tracey", agentIsDraft: true,
   });
-  check("a draft routes to generate, not edit", i.kind === "generate", i);
-  check("...and names the row to build into", i.kind === "generate" && i.into === "tracey", i);
-  check("...and the hint says which agent", routeLabel(i) === "plan tracey", routeLabel(i));
+  check("a draft's brief is answered, not edited", r.intent.kind === "chat", r);
+  check("...with the build into it offered", r.planEvidence === "confident", r.planEvidence);
+  check("...and a build into the row still names it", routeLabel({ kind: "generate", into: "tracey" }) === "plan tracey");
 
-  const worded = classifyIntent("when a customer emails us, reply with the refund policy", {
+  const worded = routeMessage("when a customer emails us, reply with the refund policy", {
     agentId: "tracey", agentIsDraft: true,
   });
   check("a description that opens like a question is still a description",
-    worded.kind === "generate", worded);
+    worded.intent.kind === "chat" && worded.planEvidence === "confident", worded);
 
   // AND THE PENDING PLAN STILL WINS, the same as it does with nothing selected: while a plan is on
   // screen awaiting a decision, what somebody types is feedback on that plan.
@@ -150,8 +158,7 @@ const userTexts = () => turns().filter((t) => t.role === "user").map((t) => (t a
   // string to reach it with — a string that now routes to chat, because §3.5 asks for exactly that
   // ("ambiguous one-word messages" resolve to chat, every time). The assertion is unchanged; what
   // it is driven with is a sentence that genuinely asks for an agent.
-  check("an untargeted generate keeps its old label",
-    routeLabel(classifyIntent("an agent that watches my inbox", { agentId: null })) === "plan a new agent");
+  check("an untargeted generate keeps its old label", routeLabel({ kind: "generate" }) === "plan a new agent");
 }
 
 // --- turn lifecycle -------------------------------------------------------------------

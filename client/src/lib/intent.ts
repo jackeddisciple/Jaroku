@@ -208,7 +208,16 @@ const RE_PLACEHOLDER = /\b(something|anything|some ?thing|a thing|kuch)\b/i;
 
 /** An ask for a thing to exist. Not `fix`, `add`, `change` — those ask for an existing thing to move. */
 const RE_BUILD_VERB =
-  /\b(build|create|make me|make a|make an|set ?up|spin ?up|scaffold|design|generate me|write me|i need|i want|i'?d like|can you build|can you make|give me|banao|bana ?do|bana ?do|banana hai|chahiye)\b/i;
+  /\b(build|create|make me|make a|make an|set ?up|spin ?up|scaffold|design|generate me|write me|can you build|can you make|banao|bana ?do|banana hai|chahiye)\b/i;
+
+/**
+ * A first-person want — "i need", "i want", "give me". Evidence that something is being asked for, and
+ * nothing at all about WHAT.
+ *
+ * APART FROM `RE_BUILD_VERB` BECAUSE IT IS HOW PEOPLE TALK ABOUT THEMSELVES. It scores the point it always
+ * did; what it no longer does is count as asking for a thing to be made — see `aboutTheSpeaker`.
+ */
+const RE_WANT = /\b(i need|i want|i'?d like|give me)\b/i;
 
 /**
  * A clause saying what the thing would DO — the half that turns a noun into a brief.
@@ -315,8 +324,9 @@ export interface Routing {
   /**
    * How near the plan evidence came, as a band — never a number (§13.2).
    *
-   * `confident` on a plan route, and on a chat route it is `near` or `none`: §15.1's card appears
-   * on `near` and nowhere else.
+   * WHAT §15.1'S CARD READS, and since planning became opt-in it rides the chat route too: `confident`
+   * and `near` put "Plan this as an agent" under the answer, and `none` puts nothing there. A message
+   * reaches the plan route only by somebody pressing that.
    */
   planEvidence: "none" | "near" | "confident";
 }
@@ -334,12 +344,26 @@ function planScore(t: string): { score: number; signals: string[] } {
 
   if (RE_BRIEF.test(t) && RE_ARTIFACT.test(t)) add(PLAN_CONFIDENCE, "named a thing to build");
   if (RE_TRIGGER.test(t)) add(PLAN_CONFIDENCE, "described a trigger and what should happen");
-  if (RE_BUILD_VERB.test(t)) add(1, "asked for something to be built");
+  if (RE_BUILD_VERB.test(t) || RE_WANT.test(t)) add(1, "asked for something to be built");
   if (RE_ARTIFACT.test(t) || RE_PLACEHOLDER.test(t)) add(1, "named a thing to build");
   if (RE_CAPABILITY.test(t)) add(1, "said what it should do");
   if (RE_HINGLISH.test(t)) add(1, "asked for something to be built");
 
   return { score, signals };
+}
+
+/**
+ * A message about the person talking, however much it sounds like an ask.
+ *
+ * THE BUG THIS NAMES, FOUND IN THE PACKAGED APP. "I have been feeling stuck in my career and I want to talk
+ * about it" previewed as "plan a new agent": a want and a to-clause are two signals, and they are how
+ * people say anything about themselves. Ten of eighteen ordinary personal messages planned an agent, and
+ * with a draft selected thirteen did. What a brief has and these do not is a THING — an artifact, a
+ * placeholder standing in for one, a trigger and an action, or a verb that asks for something to be made.
+ */
+function aboutTheSpeaker(t: string): boolean {
+  return RE_PERSONAL.test(t) && !RE_BUILD_VERB.test(t) && !RE_ARTIFACT.test(t) && !RE_PLACEHOLDER.test(t)
+    && !RE_TRIGGER.test(t) && !RE_HINGLISH.test(t);
 }
 
 /**
@@ -479,11 +503,15 @@ export function routeMessage(text: string, ctx: ComposerContext): Routing {
     if (!pastedOnly && asked.score < PLAN_NEAR && (RE_PERSONAL.test(t) || words <= 3)) {
       return chat("A draft is selected, but this is conversation rather than a brief.");
     }
-    return {
-      intent: { kind: "generate", into: ctx.agentId },
-      reason: "A draft agent is selected; this describes what to build into it.",
-      planEvidence: "confident",
-    };
+    // AND A MESSAGE ABOUT THE PERSON IS CONVERSATION WHATEVER IT SCORES — see `aboutTheSpeaker`. A draft
+    // is where onboarding leaves every new user, so this is where the most personal messages were planned.
+    if (!pastedOnly && aboutTheSpeaker(t)) {
+      return chat("A draft is selected, but this is about the person talking rather than the agent.");
+    }
+    // ANSWERED FIRST, WITH THE BUILD ONE CLICK AWAY — the product owner's decision, 2026-09-14: planning is
+    // always opt-in. What reads as a brief for this draft gets a reply with "Build this into …" under it,
+    // rather than a planning call nobody agreed to. Pressing that builds into this row.
+    return chat("A draft agent is selected, and this reads like what to build into it; answered first, with building it one click away.", "confident");
   }
 
   // A MESSAGE THAT IS NOTHING BUT QUOTED CODE IS A CONVERSATION, because nobody asked for anything.
@@ -576,12 +604,19 @@ export function routeMessage(text: string, ctx: ComposerContext): Routing {
       score >= PLAN_NEAR ? "near" : "none",
     );
   }
+  // A MESSAGE ABOUT THE PERSON TALKING IS A CONVERSATION, and offers nothing to build — see
+  // `aboutTheSpeaker`. "I want to talk about my career" scored two signals and planned an agent.
+  if (aboutTheSpeaker(t)) return chat("About the person talking rather than a thing to build; nothing selected.");
   if (score >= PLAN_CONFIDENCE) {
     // THE SIGNALS THAT FIRED, NOT THE COUNT — §13.2: "state the signal, not the arithmetic."
     // De-duplicated, because two patterns can report the same signal and a reason that said
     // "named a thing to build, named a thing to build" would read as a bug.
+    //
+    // AND ANSWERED FIRST. Planning is opt-in — the product owner's decision, 2026-09-14 — so even a
+    // confident brief gets a reply with "Plan this as an agent" under it, and spends no planning call
+    // until somebody presses that.
     const why = [...new Set(signals)].join("; ");
-    return { intent: { kind: "generate" }, reason: `${why[0]?.toUpperCase()}${why.slice(1)}.`, planEvidence: "confident" };
+    return chat(`${why[0]?.toUpperCase()}${why.slice(1)}; answered first, with planning it one click away.`, "confident");
   }
   // §3.3 rule 2: uncertain between chat and plan resolves to chat, EVERY time. The band is what
   // §15.1 reads to decide whether to offer the build route under the reply.
@@ -603,12 +638,14 @@ export function classifyIntent(text: string, ctx: ComposerContext): Intent {
 
 /** A one-line, human summary of where a message will route — shown live by the composer so the
  *  routing is transparent and teachable. */
-export function routeLabel(intent: Intent): string {
+export function routeLabel(intent: Intent, planEvidence: Routing["planEvidence"] = "none"): string {
   switch (intent.kind) {
     // NOT "chat", WHICH NAMES THE MECHANISM. Every other label in this function says what will
     // HAPPEN in the words a person would use, and this one has to as well — a preview reading "chat"
     // beside a send button tells somebody the name of a route rather than what pressing it does.
-    case "chat": return "answer, without building anything";
+    //
+    // AND A BRIEF SAYS THE PLAN IS OFFERED, because it is no longer started: the answer comes first.
+    case "chat": return planEvidence === "confident" ? "answer, then offer to build it" : "answer, without building anything";
     case "generate": return intent.into ? `plan ${intent.into}` : "plan a new agent";
     case "replan": return "revise the plan";
     case "edit":

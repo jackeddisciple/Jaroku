@@ -213,9 +213,11 @@ console.log("\nthe attachments actually reach a turn, and the turn's prompt");
   // THE REFS TRAVEL ON THE COMMAND, which is the shape §7's GitHub attachments already use.
   check("the four composer commands can carry attachments", (relay.match(/attachments\?: CommandAttachment\[\]/g) ?? []).length === 4);
   check("the composer sends them", /const attachRefs = attachments\.map\(/.test(client));
-  // BOTH `sendPlanAgent` CALLS — a fresh brief and a revision of one. Counted rather than matched
-  // once, because a revision is the same gesture to a user and the two calls are eleven lines
-  // apart, which is exactly the distance at which one of them gets missed.
+  // EVERY `sendPlanAgent` CALL THAT SENDS THE COMPOSER'S MESSAGE — a fresh brief, a revision of one,
+  // and (since planning became opt-in) a brief planned straight from the composer when there is no Chat
+  // to answer it first. Counted rather than matched once, because all three are the same gesture to a
+  // user and live far enough apart for one of them to get missed. The build card is not among them: it
+  // plans a message sent earlier, whose attachments left with it.
   //
   // NOT ANCHORED TO THE END OF A LINE. It was `attachRefs\)` once, which asserted that the refs were
   // the LAST argument on a SINGLE line — two facts about formatting that the rule has no interest
@@ -223,7 +225,7 @@ console.log("\nthe attachments actually reach a turn, and the turn's prompt");
   // wraps and this read "1 of 2" while both calls carried the refs perfectly well. `[^;]` is what
   // keeps the match inside one statement: it spans newlines and cannot run on into the next call.
   const planCalls = client.match(/sendPlanAgent\((?:[^;])*?attachRefs/g) ?? [];
-  check(`...on both plan commands (${planCalls.length} of 2)`, planCalls.length === 2);
+  check(`...on every plan command the composer sends (${planCalls.length} of 3)`, planCalls.length === 3);
   check("...on the edit command", /sendEdit\(activeAgentId, trimmed, attachRefs\)/.test(client));
   check("...and on the explain command", /attachRefs,\s*\);/.test(client));
   check("...and clears them with the draft they belonged to", /setAttachments\(\[\]\);\s*\};/.test(client));
