@@ -131,15 +131,18 @@ const billing = new BillingRepository(db);
     deleters.join(", "),
   );
 
-  // THE ITEMS ARE A DIFFERENT PROMISE. A deleted chat's items go by the cascading key, never by a
-  // statement of their own, so exactly one file may still sweep them: retention, and only alongside
-  // the runs and evals that orphaned the rows.
+  // THE ITEMS ARE A DIFFERENT PROMISE, and exactly two files may touch them. A deleted chat's items
+  // still go by the cascading key rather than by a statement of their own; what may sweep them is
+  // retention — only alongside the runs and evals that orphaned the rows — and, since the product
+  // owner's call on 2026-09-15, the store's `rewindTo`: somebody editing their own message and
+  // sending it again, which asks for the turns under it to go. Pinned below to that one method.
   const itemDeleters = sources
     .filter((f) => /DELETE\s+FROM\s+thread_items\b/i.test(f.text))
-    .map((f) => f.path);
+    .map((f) => f.path)
+    .sort();
   check(
-    "only the retention sweeper removes items, and only ones whose run or eval is gone",
-    itemDeleters.length === 1 && itemDeleters[0] === "lifecycle/retention.ts",
+    "only the retention sweeper and the store's rewind remove items",
+    itemDeleters.join(",") === "lifecycle/retention.ts,threadStore.ts",
     itemDeleters.join(", "),
   );
   const retention = sources.find((f) => f.path === "lifecycle/retention.ts")?.text ?? "";
@@ -162,6 +165,17 @@ const billing = new BillingRepository(db);
   const removers = [...storeSource.matchAll(/\basync ((?:delete|remove|destroy|purge)\w*)\s*\(/g)].map((m) => m[1]);
   check("the store has exactly one method that removes one", removers.length === 1 && removers[0] === "deleteForGood",
     removers.join(", "));
+
+  // AND THE STORE'S ONE ITEM DELETE IS THE REWIND, naming the rows it takes. The interesting refusal
+  // is the statement this must never become: a `WHERE thread_id = ?` with no list beside it empties
+  // a conversation, which is `deleteForGood`'s job and has none of its gates — one owner-only
+  // command, confirmed in the menu. An edit takes the turns from one message down, and says which.
+  const itemDeletes = storeSource.match(/DELETE\s+FROM\s+thread_items[\s\S]{0,200}?`/gi) ?? [];
+  check("the store deletes items in exactly one statement", itemDeletes.length === 1, String(itemDeletes.length));
+  check("...inside the rewind", /async rewindTo\([\s\S]{0,1200}?DELETE\s+FROM\s+thread_items/i.test(storeSource));
+  check("...naming the thread and the rows it takes",
+    /WHERE workspace_id = \? AND thread_id = \? AND id IN \(/.test(itemDeletes[0] ?? ""),
+    itemDeletes[0] ?? "");
 }
 
 // --- 4. deleting takes the chat and what hangs off it, and nothing else --------------------

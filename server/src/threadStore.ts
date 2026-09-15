@@ -760,6 +760,50 @@ export class ThreadStore {
   }
 
   /**
+   * This turn and everything after it, gone — what editing a message and sending it again leaves.
+   *
+   * THE PRODUCT OWNER'S CALL ON 2026-09-15, and it replaces §6.3's fork for the edit path: "the
+   * conversation resumes from the recent edit, the way it happens in Claude or Codex". Editing turn
+   * N and answering it in a NEW thread meant the conversation somebody was having carried on
+   * somewhere else, and they had two — the one they were reading and the one that answered them.
+   *
+   * `branch` IS UNTOUCHED AND STILL THE OTHER HALF. `branch @3` is a deliberate second copy of a
+   * conversation, and that is a different intent from correcting what you just said. The two paths
+   * are separate because one keeps the original and the other is the original.
+   *
+   * INCLUSIVE OF THE TURN ITSELF, because the edited message replaces it rather than following it —
+   * the same rule `branch`'s `atTurn - 1` slice states from the other side.
+   *
+   * ONE TRANSACTION, so a rewind is all of the turns or none of them. Half a rewind is a thread
+   * whose question is gone and whose answer is still there, which reads as an answer to nothing.
+   *
+   * WHAT GOES WITH THEM: the notes, pins, feedback, attachments and variants hanging off each row —
+   * by `ON DELETE CASCADE` on `(workspace_id, id)` (migrations 055, 057, 058), never by a second
+   * pass here. What does NOT go is the spend: `runs` and the usage they were billed are rows about
+   * money that was really spent, and a rewind is not a refund.
+   */
+  async rewindTo(ctx: TenantContext, threadId: string, itemId: string): Promise<number> {
+    const items = await this.itemsFor(ctx, threadId);
+    const at = items.findIndex((i) => i.id === itemId);
+    // NOT HERE IS NOT AN ERROR. A turn that is already gone — a second click, another tab that got
+    // there first — leaves a thread in exactly the state the caller wanted it in.
+    if (at < 0) return 0;
+    const doomed = items.slice(at).map((i) => i.id);
+    await this.db.scoped(ctx.workspaceId, async (q) => {
+      // IN CHUNKS, because a long conversation is more placeholders than a driver will bind at once.
+      for (let i = 0; i < doomed.length; i += 100) {
+        const batch = doomed.slice(i, i + 100);
+        await q.run(
+          `DELETE FROM thread_items
+            WHERE workspace_id = ? AND thread_id = ? AND id IN (${batch.map(() => "?").join(", ")})`,
+          [ctx.workspaceId, threadId, ...batch],
+        );
+      }
+    });
+    return doomed.length;
+  }
+
+  /**
    * Every thread forked from this one, newest first — what §6.3's lineage renders from.
    *
    * SCOPED AND INDEXED (migration 075's `threads_parent`), because the Threads list asks this for a

@@ -1538,21 +1538,21 @@ export function sendChat(
  * against answer three.
  */
 /**
- * §6.3: edit an earlier message by FORKING the conversation.
+ * Edit an earlier message and send it again — the conversation carries on from there.
  *
- * IT CHANGES NOTHING IN THE THREAD IT IS SENT FROM, which is the whole guarantee and the reason the
- * function is not called `sendEditMessage`. What comes back is a new thread carrying turns 1..N−1
- * with the edited message as turn N — answered on the `threads` channel with `reason: "branched"`,
- * which the client opens the way a branched RUN takes focus.
+ * IT REWINDS THE THREAD IT IS SENT FROM, which is the product owner's call on 2026-09-15 and the
+ * reverse of what this did: that turn and everything after it are replaced by the edited message and
+ * its answer. §6.3 forked instead, and answered somebody in a thread they were not reading.
  *
- * NOTHING IS UPDATED OPTIMISTICALLY. The fork is a row the server writes and a prefix it copies;
- * a client that moved first would have to guess a thread id and then reconcile the real one.
+ * NOTHING IS UPDATED OPTIMISTICALLY. The rewind is the server's write, and what comes back on the
+ * `threads` channel is the thread as it now stands — `reason: "loaded"`, which re-hydrates the
+ * conversation in place rather than navigating, since this is the thread already on screen.
  */
 export function sendEditTurn(
   threadId: string,
   turnId: string,
   message: string,
-  /** The plan the fork's answer rides. See `chatSubscriptionFor`. */
+  /** The plan the new answer rides. See `chatSubscriptionFor`. */
   subscription?: { provider: string; model: string | null; effort: string | null },
 ): void {
   send({ cmd: "editTurn", threadId, turnId, message, ...(subscription ? { subscription } : {}) });

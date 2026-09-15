@@ -123,8 +123,18 @@ console.log("\nthe chat route hands a subscription turn to the app, never to an 
   check("recordChatTurn settles a prepared turn before anything else",
     /async function recordChatTurn[\s\S]{0,300}?if \(typeof cmd\.runId === "string"\) \{\s*await settleSubscriptionTurn\(ctx, cmd\);\s*return;/.test(index));
 
-  check("edit-and-fork hands its answer to the plan it was sent with",
-    /void chatWithJaroku\(ctx, \{[\s\S]{0,400}?subscription: cmd\.subscription/.test(bodyOf("async function editTurn")));
+  const edited = bodyOf("async function editTurn");
+  check("editing a message hands its answer to the plan it was sent with",
+    /void chatWithJaroku\(ctx, \{[\s\S]{0,400}?subscription: cmd\.subscription/.test(edited));
+  // AND IT ANSWERS IN THE SAME CONVERSATION, which is what makes it a rewind rather than a fork.
+  check("...in the thread it was sent from", /void chatWithJaroku\(ctx, \{[\s\S]{0,120}?threadId: cmd\.threadId/.test(edited));
+  // THE ORDER THAT MATTERS: refuse a busy conversation BEFORE the turns are taken. `chatWithJaroku`
+  // refuses a second turn while one is in flight, so a rewind that ran first would delete half a
+  // thread and then send nothing — the one way this command can lose somebody's messages for good.
+  const guardAt = edited.indexOf("chatting.has(cmd.threadId)");
+  const rewindAt = edited.indexOf("threadStore.rewindTo(");
+  check("...and refuses a conversation that is still answering, before it rewinds anything",
+    guardAt >= 0 && rewindAt >= 0 && guardAt < rewindAt, `guard ${guardAt}, rewind ${rewindAt}`);
 
   const stop = bodyOf("function stopChat");
   check("Stop reaches the app answering a subscription turn, whichever tab pressed it",

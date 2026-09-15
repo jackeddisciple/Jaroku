@@ -13317,17 +13317,25 @@ async function selectVariant(ctx: TenantContext, cmd: SelectVariantCommand): Pro
 }
 
 /**
- * §6.3: EDIT AN EARLIER MESSAGE BY FORKING THE THREAD.
+ * EDIT AN EARLIER MESSAGE AND SEND IT AGAIN — the conversation carries on from there.
  *
- * THE PARENT IS NOT TOUCHED. Every write below goes to the new thread; `threadStore.branch` issues
- * no statement against the parent or its items, and §6.5's acceptance is exactly that — "leaves the
- * original 5-turn thread byte-identical, asserted in a test".
+ * THE PRODUCT OWNER'S CALL ON 2026-09-15, replacing §6.3's fork on this path: "it should let me edit
+ * that message and the conversation resumes from the recent edit, the way it happens in Claude or
+ * Codex". §6.3 forked instead, for a reason it stated well — nothing was overwritten — and the cost
+ * was that correcting a typo in turn 2 answered you in a DIFFERENT conversation from the one you
+ * were reading, leaving two threads where somebody meant to have one.
  *
- * AND IT DOES NOT RE-RUN ANYTHING. §6.3: "editing does not re-run anything that was run. It forks
- * the conversation, not the execution." The prefix that is copied is the questions and one line per
- * consequence; nothing here reaches the run pool, the generator or the editor, and the fork
- * deliberately does not copy `turn_variants` — so no cost the parent already accounted for is
- * duplicated into a thread that never spent it.
+ * SO THE REWIND IS THE WRITE. This turn and everything after it go (`threadStore.rewindTo`), the
+ * edited message becomes the thread's next turn, and the answer lands here. §6.3's forking lives on
+ * where it was always the right shape: `branch @3`, which is somebody deliberately taking a copy.
+ *
+ * AND IT STILL DOES NOT RE-RUN ANYTHING. §6.3's other half holds unchanged — "editing does not
+ * re-run anything that was run" — so nothing here reaches the run pool, the generator or the editor.
+ * What those turns DID stays done, and when they did something that cannot be unhappened the rewind
+ * says so in the thread rather than leaving a timeline that reads as clean.
+ *
+ * NOR IS IT A REFUND. The rows deleted are the conversation's; `runs` and the usage they were billed
+ * are not touched, because the money was really spent and a thread that forgot it would under-report.
  */
 async function editTurn(ctx: TenantContext, cmd: EditTurnCommand): Promise<void> {
   const message = typeof cmd.message === "string" ? cmd.message.trim() : "";
@@ -13336,7 +13344,10 @@ async function editTurn(ctx: TenantContext, cmd: EditTurnCommand): Promise<void>
   if (!message) return refuse("an edited message still has to say something");
 
   try {
-    const items = await threadStore.itemsFor(ctx, cmd.threadId);
+    const [thread, items] = await Promise.all([
+      threadStore.get(ctx, cmd.threadId),
+      threadStore.itemsFor(ctx, cmd.threadId),
+    ]);
     const at = items.findIndex((i) => i.id === cmd.turnId);
     // ABSENT RATHER THAN FORBIDDEN, and the same sentence for both — this codebase's rule wherever
     // an id crosses a tenant boundary. A scoped read of another workspace's thread returns no
@@ -13350,58 +13361,72 @@ async function editTurn(ctx: TenantContext, cmd: EditTurnCommand): Promise<void>
       return refuse("only your own messages can be edited — an answer is regenerated instead");
     }
 
-    const effects = sideEffectsAfter(items, cmd.turnId);
-    // 1-BASED, because `branch @3` is a position somebody counted and `branch` slices `atTurn - 1`.
-    const forked = await threadStore.branch(ctx, cmd.threadId, at + 1, { title: message });
+    // NOT WHILE IT IS ANSWERING, for `deleteThread`'s reason and one the rewind adds: `chatWithJaroku`
+    // refuses a second turn in a busy conversation, so a rewind here would take the turns away and
+    // then have nothing to put in their place — an edit that deleted half a thread and sent nothing.
+    if (chatting.has(cmd.threadId)) {
+      return refuse("that chat is still answering — stop it before editing a message");
+    }
 
-    // §6.3: AND SAY SO. The fork starts before the side effect, and the side effect still happened —
-    // so the fork opens with a line naming it rather than pretending the timeline is clean. This is
-    // the same honesty v0.1.10 applied when a refused confirmation no longer consumed the plan:
-    // state the real situation.
+    const effects = sideEffectsAfter(items, cmd.turnId);
+
+    // THE CONVERSATION RESUMES HERE — the product owner's call on 2026-09-15, and it replaces §6.3's
+    // fork on this path: "the conversation resumes from the recent edit, the way it happens in Claude
+    // or Codex". This turn and everything after it go, the edited message takes their place, and the
+    // answer lands in the thread somebody is actually reading. `branch @N` still forks, deliberately.
+    await threadStore.rewindTo(ctx, cmd.threadId, cmd.turnId);
+
+    // AND SAY SO, which is the one thing the fork did that a rewind must keep doing. The turns are
+    // gone from the conversation; what they DID is not undone, and a timeline that reads as clean
+    // when a run was started or a version was written would be the product lying about the world.
     if (effects.length > 0) {
-      await threadStore.addItem(ctx, forked.id, {
+      await threadStore.addItem(ctx, cmd.threadId, {
         kind: "message",
         role: null,
         body:
-          `Forked before this message's consequences. ${effects.join(", ")} in the original `
-          + `conversation, and that has not been undone.`,
+          `The messages after this point were replaced. ${effects.join(", ")} before that, `
+          + `and that has not been undone.`,
       });
     }
 
-    // THE ROW AND ITS COPIED PREFIX, TO THE SOCKET THAT ASKED — which is what makes v0.1.6's
-    // "automatic branch focus after creation, with the copied execution prefix loaded immediately"
-    // true rather than a promise the client has to chase with a second request.
+    // THE THREAD AS IT NOW STANDS, TO EVERY CLIENT — not only the one that asked. The turns after
+    // the edit are gone server-side, and a tab still rendering them would offer to regenerate an
+    // answer whose row no longer exists.
+    //
+    // `reason: "loaded"` RATHER THAN `"branched"`, and that is what makes it a rewind rather than a
+    // fork on screen: "loaded" re-hydrates the conversation in place, where "branched" navigates —
+    // see socket.ts, which opens a thread on `created` and `branched` only.
     //
     // ONE SNAPSHOT, READ TWICE, exactly as `createThread` does it: the broadcast is the list and
     // this is one row of the same list, so building each from its own scan would cost two full
     // reads of the workspace to produce two views that are required to agree.
     const snapshot = await threadSnapshot(ctx);
     relay.broadcastThreads(ctx, { type: "threads", ...snapshot });
-    const made = snapshot.threads.find((t) => t.id === forked.id);
-    if (made) {
-      relay.sendThreads(ctx, ctx.requestId, {
+    const row = snapshot.threads.find((t) => t.id === cmd.threadId);
+    if (row) {
+      relay.broadcastThreads(ctx, {
         type: "thread",
-        reason: "branched",
-        thread: made,
-        items: await threadStore.itemsFor(ctx, forked.id),
+        reason: "loaded",
+        thread: row,
+        items: await threadStore.itemsFor(ctx, cmd.threadId),
       });
     }
 
-    // THE EDITED MESSAGE IS TURN N OF THE FORK, and the answer is generated fresh from there — which
-    // is `chatWithJaroku`'s ordinary path against the new thread. Reusing it rather than inlining a
-    // second dispatch is what keeps the fork's answer identical to any other: the same grounded
-    // context, the same window, the same ceilings, the same accounting. It also writes the edited
-    // message as the fork's own turn, so nothing above has to.
+    // THE EDITED MESSAGE IS THE THREAD'S NEXT TURN, and the answer is generated fresh from there —
+    // `chatWithJaroku`'s ordinary path against this same thread. Reusing it rather than inlining a
+    // second dispatch is what keeps an edited message's answer identical to any other: the same
+    // grounded context, the same window, the same ceilings, the same accounting. It also writes the
+    // edited message as the thread's own turn, so nothing above has to.
     void chatWithJaroku(ctx, {
-      cmd: "chat", message, threadId: forked.id,
-      ...(forked.agent_id ? { agentId: forked.agent_id } : {}),
-      // ON THE PLAN THE EDIT WAS SENT WITH. Without it the fork's answer left on the API path, and a
+      cmd: "chat", message, threadId: cmd.threadId,
+      ...(thread?.agent_id ? { agentId: thread.agent_id } : {}),
+      // ON THE PLAN THE EDIT WAS SENT WITH. Without it the answer left on the API path, and a
       // conversation held on somebody's own plan was answered on a key the moment they edited a message.
       ...(cmd.subscription ? { subscription: cmd.subscription } : {}),
     });
   } catch (err) {
     const m = (err as Error)?.message ?? String(err);
-    console.error(`[threads] could not fork ${cmd.threadId} at ${cmd.turnId}: ${m}`);
+    console.error(`[threads] could not resend ${cmd.threadId} from ${cmd.turnId}: ${m}`);
     refuse(m);
   }
 }

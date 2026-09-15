@@ -837,17 +837,17 @@ function rerunTurn(
 }
 
 /**
- * §6.3: EDIT YOUR OWN MESSAGE — which forks the conversation rather than rewriting it.
+ * EDIT YOUR OWN MESSAGE AND SEND IT AGAIN — the conversation carries on from there.
  *
  * AN INLINE EDITOR IN THE TURN, not a dialog. §14.2: "entering edit mode: focus moves into the
  * inline editor with the existing text selected; Esc cancels and returns focus to the composer with
  * the draft intact." A modal would take the conversation off screen at the moment somebody is
  * reading it to decide what to change.
  *
- * IT SAYS WHAT WILL HAPPEN BEFORE IT HAPPENS. The control reads "Fork from here", not "Save",
- * because §6.3's whole point is that nothing is overwritten: the original thread stays exactly as
- * it is and a new one opens with the turns before this one. A button labelled Save would promise
- * the thing this deliberately does not do.
+ * IT SAYS WHAT WILL HAPPEN BEFORE IT HAPPENS. The control reads "Send" — the product owner's call on
+ * 2026-09-15 — and the line beside it says what Send costs: this message and everything after it are
+ * replaced by the answer to the edited one. It read "Fork from here" and opened a second thread,
+ * which answered somebody in a conversation they were not reading. See the server's `editTurn`.
  *
  * ONLY ON A USER MESSAGE, and the server checks the row's own kind and role besides — the client's
  * copy of that rule hides the control, and the server's is what enforces it.
@@ -862,11 +862,12 @@ function UserTurnView({
    * right shape for a control somebody clicks and the wrong one for a BINDING: `↑` opens the editor
    * on the last user message, and a keystroke on the window cannot reach a boolean inside one of
    * forty components. Lifting it also makes "one editor at a time" true rather than incidental —
-   * two open editors in one conversation would be two drafts of two different messages, both
-   * labelled "Fork from here".
-   *
    * KEYED BY `itemId` RATHER THAN BY THE RENDER KEY, because the binding resolves the last user
    * message from the store and the durable id is what both halves can agree on.
+   *
+   * ONE EDITOR AT A TIME, which lifting also makes true rather than incidental: two open editors in
+   * one conversation would be two drafts of two different messages, each offering to replace
+   * everything below it.
    */
   editingTurnId,
   setEditingTurnId,
@@ -897,17 +898,17 @@ function UserTurnView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing]);
 
-  const fork = (): void => {
+  const resend = (): void => {
     const next = draft.trim();
-    // UNCHANGED TEXT FORKS NOTHING. A fork whose edited message is identical to its parent's is a
-    // duplicate conversation somebody would have to clean up, and the honest reading of pressing
-    // the control without typing is that they changed their mind.
+    // UNCHANGED TEXT SENDS NOTHING. Re-asking the identical question would throw away the answer
+    // that is already there to buy another one just like it, and the honest reading of pressing the
+    // control without typing is that they changed their mind.
     if (!next || !threadId || !turn.itemId || next === turn.text.trim()) {
       setEditing(false);
       setDraft(turn.text);
       return;
     }
-    // THE FORK'S ANSWER RIDES THE SAME PLAN, or the edit stays open until there is one to ride.
+    // THE ANSWER RIDES THE SAME PLAN, or the edit stays open until there is one to ride.
     const subscription = chatSubscriptionFor();
     if (!subscription) {
       useUiStore.getState().openWorkspacePanel("account");
@@ -936,11 +937,11 @@ function UserTurnView({
                 useUiStore.getState().focusChat();
                 return;
               }
-              // ⌘↵ FORKS, which is the composer's own send chord. One gesture for "send this
+              // ⌘↵ SENDS, which is the composer's own send chord. One gesture for "send this
               // sentence", wherever the sentence is being typed.
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
-                fork();
+                resend();
               }
             }}
             rows={Math.min(8, Math.max(2, draft.split("\n").length + 1))}
@@ -950,11 +951,11 @@ function UserTurnView({
           <div className="mt-1.5 flex items-center gap-2">
             <button
               type="button"
-              onClick={fork}
-              title="Open a new thread with the turns before this one, and this message changed"
+              onClick={resend}
+              title="Send this message again — the conversation carries on from here"
               className={secondaryBtn}
             >
-              Fork from here
+              Send
             </button>
             <button
               type="button"
@@ -963,11 +964,11 @@ function UserTurnView({
             >
               Cancel
             </button>
-            {/* SAID BEFORE IT HAPPENS, not after. Somebody about to press this needs to know the
-                original is kept — otherwise the honest expectation is that their history is about
-                to be rewritten, which is what every other product does here. */}
+            {/* SAID BEFORE IT HAPPENS, not after. Sending replaces this message and everything
+                under it, and that is not recoverable — so the row says so while somebody still has
+                the choice, rather than after the turns are gone. */}
             <span className="ml-auto text-tiny text-faint">
-              This conversation is kept — a new one opens with the turns above
+              This message and everything below it are replaced
             </span>
           </div>
         </div>
@@ -990,7 +991,7 @@ function UserTurnView({
             type="button"
             onClick={() => { setDraft(turn.text); setEditing(true); }}
             aria-label="Edit this message"
-            title="Edit — forks a new thread from here and keeps this one"
+            title="Edit and send again — the conversation carries on from here"
             className="shrink-0 rounded-control p-1 text-faint opacity-0 transition-opacity duration-fast
               hover:text-ink focus-visible:opacity-100 focus-visible:outline-none focus-visible:shadow-focusring
               group-hover/user:opacity-100 motion-reduce:transition-none"

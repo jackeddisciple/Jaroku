@@ -1,4 +1,10 @@
-// §6.3 — editing a message forks the thread, and the original is never touched.
+// §6.3's fork — `branch @N` — and the rewind that editing a message does instead.
+//
+// TWO PATHS, DELIBERATELY. Editing a message used to fork: the thread somebody was reading stayed as
+// it was and the answer arrived in a new one. The product owner's call on 2026-09-15 is that an edit
+// RESUMES the conversation — "the way it happens in Claude or Codex" — so `rewindTo` drops that turn
+// and everything after it and the answer lands here. `branch` is untouched and still what `branch @3`
+// means: a deliberate second copy, which is a different intent from correcting what you just said.
 //
 // THE ASSERTION THIS SUITE EXISTS FOR is §6.5's: "editing turn 3 of a 5-turn thread produces a new
 // thread with 2 copied turns and leaves the original 5-turn thread BYTE-IDENTICAL, asserted in a
@@ -129,6 +135,63 @@ console.log("\n§6.5 — the original is byte-identical afterwards");
   check("the fork inherits the mode", fork.mode === parent.mode);
   check("...and is not marked custom-titled", fork.title_is_custom === false);
   check("...and starts idle and unarchived", fork.status === "idle" && fork.archived_at === null);
+
+  await h.close();
+}
+
+// --- editing a message rewinds the thread it is in --------------------------------------------
+
+console.log("\nediting a message rewinds, rather than forking");
+{
+  const h = await harness();
+  const thread = await h.threads.create(A, { title: "pooling" });
+  const ids: string[] = [];
+  for (const [kind, body] of [
+    ["message", "why is it 429ing?"],
+    ["run", null],
+    ["message", "add a retry"],
+    ["proposal", null],
+    ["message", "and a jitter"],
+  ] as const) {
+    ids.push(await h.threads.addItem(A, thread.id, {
+      kind, ...(kind === "message" ? { role: "user" as const, body } : { refId: randomUUID() }),
+    }));
+  }
+  // AN ANSWER ON THE TURN BEING REWOUND TO, so the cascade has something to take with it.
+  const v = await h.variants.begin(A, ids[2]!, { modelId: "claude-haiku-4-5", provider: "anthropic" });
+  await h.variants.settle(A, v.id, { body: "add it in the client", costUsd: 0.0042, tokensIn: 900, tokensOut: 40 });
+
+  const before = await h.threads.itemsFor(A, thread.id);
+  const gone = await h.threads.rewindTo(A, thread.id, ids[2]!);
+  check("the edited turn and everything after it go", gone === 3, String(gone));
+
+  const left = await h.threads.itemsFor(A, thread.id);
+  check("...leaving the turns before it", left.length === 2, String(left.length));
+  check("...unchanged, ids and moments and all",
+    JSON.stringify(left) === JSON.stringify(before.slice(0, 2)), JSON.stringify(left));
+  // THE SAME THREAD, which is the whole point: no second row, no lineage, nothing to go back to.
+  const row = await h.threads.get(A, thread.id);
+  check("the thread itself is the one that was there", row?.id === thread.id && row.parent_thread_id === null);
+  check("and no fork was made", (await h.threads.childrenOf(A, thread.id)).length === 0);
+  // WHAT HUNG OFF THE DELETED ROWS GOES WITH THEM — by ON DELETE CASCADE, never by a second pass.
+  check("a rewound turn's recorded answer goes with it", (await h.variants.forTurn(A, ids[2]!)).length === 0);
+
+  // TWICE IS ONCE. A second click, or another tab that got there first, leaves the thread exactly
+  // as the caller wanted it rather than erroring at somebody who already got what they asked for.
+  check("rewinding to a turn that is already gone changes nothing",
+    (await h.threads.rewindTo(A, thread.id, ids[2]!)) === 0);
+  check("...and takes nothing else with it", (await h.threads.itemsFor(A, thread.id)).length === 2);
+
+  // AND THE TENANCY BOUNDARY, the same way every other id crossing it is treated: another
+  // workspace's rewind finds no rows rather than being told this thread exists.
+  check("another workspace cannot rewind this thread", (await h.threads.rewindTo(B, thread.id, ids[0]!)) === 0);
+  check("...and the turns are still here", (await h.threads.itemsFor(A, thread.id)).length === 2);
+
+  // EDITING THE FIRST MESSAGE empties the conversation, which is what starting it differently means.
+  check("rewinding to the first turn empties the thread",
+    (await h.threads.rewindTo(A, thread.id, ids[0]!)) === 2
+    && (await h.threads.itemsFor(A, thread.id)).length === 0);
+  check("...and the thread is still there to be answered in", (await h.threads.get(A, thread.id))?.id === thread.id);
 
   await h.close();
 }
