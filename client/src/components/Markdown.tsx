@@ -5,10 +5,15 @@
 // a table and a code block sit on the panel surface with a hairline, like every other card-like thing
 // in this client. Nothing in a reply introduces a colour, a radius or a size of its own.
 
-import { useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
+import { highlightCode, isCommandBlock, languageLabel } from "../lib/highlight.ts";
+import { Icon } from "../lib/icons/registry.ts";
 import { parseMarkdown, type Block, type Inline } from "../lib/markdown.ts";
+import { ICON } from "../lib/tokens.ts";
+import { iconBtn } from "./buttons.ts";
 import { CHIP_INK } from "./InlineCode.tsx";
+import { CheckIcon } from "./panelIcons.tsx";
 
 /** Text with its line breaks kept: a single newline in a reply is a line the writer broke on purpose. */
 function Lines({ text }: { text: string }) {
@@ -52,6 +57,66 @@ function InlineView({ pieces }: { pieces: readonly Inline[] }) {
         }
       })}
     </>
+  );
+}
+
+/**
+ * A code or command block: what it is — its language, or "Terminal" for something to run — with a copy
+ * button over it, and highlighted once it has closed. While it is still streaming it stays plain text:
+ * re-highlighting on every delta is wasted work, and half a string colours the rest of a block wrong.
+ */
+function CodeBlock({ lang, text, closed }: { lang: string; text: string; closed: boolean }) {
+  const [html, setHtml] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    setHtml(null);
+    if (!closed) return;
+    let live = true;
+    void highlightCode(text, lang).then((h) => {
+      if (live) setHtml(h);
+    });
+    return () => {
+      live = false;
+    };
+  }, [text, lang, closed]);
+
+  useEffect(() => {
+    if (!copied) return;
+    const t = window.setTimeout(() => setCopied(false), 1400);
+    return () => window.clearTimeout(t);
+  }, [copied]);
+
+  const command = isCommandBlock(lang);
+  const what = command ? "command" : "code";
+  return (
+    <div className="overflow-hidden rounded-card border border-hair bg-panel">
+      <div className="flex h-8 items-center justify-between border-b border-hair pl-3 pr-1">
+        <span className="text-tiny text-muted">{languageLabel(lang)}</span>
+        <button
+          type="button"
+          className={iconBtn}
+          title={copied ? "Copied" : `Copy ${what}`}
+          aria-label={copied ? "Copied" : `Copy ${what}`}
+          onClick={() => {
+            void navigator.clipboard?.writeText(text).then(() => setCopied(true), () => setCopied(false));
+          }}
+        >
+          {copied ? <CheckIcon size={ICON.xs} /> : <Icon.turn.copy size={ICON.xs} />}
+        </button>
+      </div>
+      {html ? (
+        // shiki's own markup: every character of the code is escaped into spans, never interpreted.
+        <div
+          className="shiki-host overflow-x-auto px-3 py-2.5 font-mono text-caption leading-[1.6] [&_pre]:!bg-transparent"
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      ) : (
+        <pre className="overflow-x-auto px-3 py-2.5 font-mono text-caption leading-[1.6] text-ink">
+          <code>{text}</code>
+        </pre>
+      )}
+    </div>
   );
 }
 
@@ -99,11 +164,7 @@ function BlockView({ block }: { block: Block }): ReactNode {
         </blockquote>
       );
     case "code":
-      return (
-        <pre className="overflow-x-auto rounded-card border border-hair bg-panel px-3 py-2.5 font-mono text-caption leading-[1.6] text-ink">
-          <code>{block.text}</code>
-        </pre>
-      );
+      return <CodeBlock lang={block.lang} text={block.text} closed={block.closed} />;
     case "table":
       return (
         <div className="overflow-x-auto rounded-card border border-hair">

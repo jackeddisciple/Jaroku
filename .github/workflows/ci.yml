@@ -1356,6 +1356,9 @@ jobs:
           # HOW A REPLY'S MARKDOWN IS READ: headings, lists and nesting, quotes, code, tables and inline
           # emphasis — and that half a reply, still streaming, is always some structure rather than an error.
           npm run test:markdown
+          # AND THE CODE INSIDE A REPLY: which fences are commands to run, what each block is called, and
+          # that it is really highlighted — with the code escaped, never markup.
+          npm run test:highlight
           # WHICH OF THE TWO WINDOWS THE PAGE ASKS FOR, and the two ways that goes wrong. The
           # welcome screen is a 560px window and the application is 1440, only the bundle knows
           # which of them a launch needs, and a webview cannot resize the frame it is inside — so

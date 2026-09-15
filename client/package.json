@@ -72,6 +72,7 @@
     "test:typed-text": "tsx src/lib/typedText.test.ts",
     "test:turn-dates": "tsx src/lib/turnDates.test.ts",
     "test:markdown": "tsx src/lib/markdown.test.ts",
+    "test:highlight": "tsx src/lib/highlight.test.ts",
     "test:host-backend": "tsx src/lib/hostBackend.test.ts",
     "test:session-vault": "tsx src/lib/sessionVault.test.ts",
     "test:invite": "tsx src/lib/invite.test.ts",
