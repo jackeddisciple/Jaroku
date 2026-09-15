@@ -984,12 +984,11 @@ function UserTurnView({
   }
 
   return (
-    // The `›` it replaces was a prompt character — it said "input", not "you". At the top of a
-    // scrolled-back thread, the question is whose turn this was, and a face answers that faster
-    // than punctuation does.
-    <TurnRow marker={<UserCircleIcon size={ICON.sm} className="text-faint" />}>
-      <div className="group/user flex items-start gap-1.5">
-        <span className="min-w-0 flex-1 text-ink text-label whitespace-pre-wrap break-words">{turn.text}</span>
+    // YOUR MESSAGE, IN A BUBBLE ON THE RIGHT — the product owner's call on 2026-09-15, after how Codex draws
+    // a conversation. The bubble is the shape of the text inside it and it does not move: no transition,
+    // no animation. It stands in for the face that sat in the gutter, because the bubble already says
+    // whose message this is.
+    <div className="group/user flex items-start justify-end gap-1.5">
         {/* ON HOVER OR FOCUS, NEVER HIDDEN FROM THE KEYBOARD — the rule §5 already holds for the
             assistant action row, for the same reason: "must be reachable in tab order". Opacity
             rather than `display: none`, because a hidden element is not focusable and
@@ -1010,8 +1009,10 @@ function UserTurnView({
             <PencilIcon size={ICON.xs} />
           </button>
         )}
-      </div>
-    </TurnRow>
+        <span className="max-w-[80%] rounded-xl bg-bubble px-3.5 py-2 text-label text-ink whitespace-pre-wrap break-words">
+          {turn.text}
+        </span>
+    </div>
   );
 }
 

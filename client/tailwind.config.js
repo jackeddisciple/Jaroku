@@ -78,6 +78,7 @@ export default {
         // reads as a type step that does not exist.
         runssoft: "#FCE7F3", // --color-runs-soft
         runsink: "#DB2777", // --color-runs-ink
+        bubble: "#E9E0D2", // --color-user-bubble — the user's message bubble
         ok: "#3B8F5A", // --color-success
         err: "#C94A43", // --color-danger
         run: "#B77A1B", // --color-warning — in this product amber means IN FLIGHT

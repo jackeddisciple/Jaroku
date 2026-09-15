@@ -151,6 +151,15 @@ export const RUNS = {
 } as const;
 
 /**
+ * THE USER'S MESSAGE BUBBLE — the product owner's call on 2026-09-15, with this value.
+ *
+ * A warm sand behind what the person wrote, so their side of a conversation reads apart from Jaroku's
+ * without a face in the gutter. Like `RUNS`, it extends the specification rather than coming from it,
+ * and it lives here rather than as a hex in the component for the same reason.
+ */
+export const USER_BUBBLE = "#E9E0D2";
+
+/**
  * §05. There is no brand colour, and that is the brand.
  *
  * "No separate coloured brand accent. Jaroku's brand is the neutral/off-white system itself." So
@@ -202,6 +211,7 @@ export const SPEC_TOKENS: Readonly<Record<string, string>> = {
 
   "--color-runs-soft": RUNS.soft,
   "--color-runs-ink": RUNS.ink,
+  "--color-user-bubble": USER_BUBBLE,
 
   "--color-success": SEMANTIC.success,
   "--color-warning": SEMANTIC.warning,

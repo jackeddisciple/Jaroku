@@ -107,6 +107,9 @@ console.log("\nevery token in the specification's tables, transcribed from the P
     // four only where their meaning is useful, and a run count is a quantity. See `RUNS`.
     "--color-runs-soft": "#FCE7F3",
     "--color-runs-ink": "#DB2777",
+    // AND THE USER'S MESSAGE BUBBLE, the second addition and the same kind: asked for with this value
+    // (2026-09-15), for one thing. See `USER_BUBBLE`.
+    "--color-user-bubble": "#E9E0D2",
   };
 
   for (const [token, value] of Object.entries(SPEC)) {
@@ -200,6 +203,7 @@ console.log("\n...and the Tailwind config, which is the third copy");
     err: "--color-danger",
     run: "--color-warning",
     warn: "--color-info",
+    bubble: "--color-user-bubble",
   };
 
   for (const [name, token] of Object.entries(MAPPING)) {
