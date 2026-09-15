@@ -132,6 +132,13 @@ console.log("\nthe rules in CHAT_SYSTEM");
     // PLANNING IS OFFERED UNDER THE ANSWER NOW, so the answer must neither start it nor claim to.
     ["a build request is talked through and never started", /WHEN THEY DESCRIBE SOMETHING THEY WANT BUILT/],
     ["...and a person talking about themselves is simply talked with", /talking about themselves/i],
+    // THE SHAPE OF A REPLY, which the client now draws as Markdown: formatted by what each part IS, and
+    // never formatted for its own sake — a short answer stays a sentence.
+    ["the reply is Markdown, shaped by what its content is", /rendered as Markdown/],
+    ["...commands go in a bash block and code in a fenced block with its language", /```bash/],
+    ["...callouts, links and maths each have their form", /\[!WARNING\][\s\S]*descriptive text[\s\S]*LaTeX/],
+    ["...and a short reply is not formatted", /Do not format a short reply/],
+    ["...and nothing is formatted just because it exists", /leave it out/],
   ];
   for (const [name, re] of rules) check(name, re.test(CHAT_SYSTEM), name);
   // It is a set of RULES rather than a paragraph of tone. Four of the seven above are honesty
