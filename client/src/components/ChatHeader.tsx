@@ -1,5 +1,5 @@
-// The row over the conversation: the computer it runs on and whether it is connected, then the
-// conversation's own name and what can be done to it.
+// The three controls over the conversation, left to right: the computer it runs on, the chat's name,
+// and what can be done to the chat.
 //
 // A BROWSER GETS NO COMPUTER. There is no machine to name there — `readMachineName` resolves to null —
 // and "Connected" under an empty name would be a status about nothing. The title and its menu still show.
@@ -35,31 +35,73 @@ function useMachineName(): string | null {
   return name;
 }
 
+/** Close a popover on a click outside it or on Escape, while it is open. */
+function useDismiss(open: boolean, ref: React.RefObject<HTMLElement | null>, close: () => void): void {
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent): void => {
+      if (!ref.current?.contains(e.target as Node)) close();
+    };
+    const key = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") close();
+    };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", key);
+    return () => {
+      document.removeEventListener("mousedown", away);
+      document.removeEventListener("keydown", key);
+    };
+  }, [open, ref, close]);
+}
+
 const CONNECTION_WORD: Record<ConnectionState, string> = {
   open: "Connected",
   connecting: "Connecting…",
   closed: "Disconnected",
 };
 
-const CONNECTION_TONE: Record<ConnectionState, string> = {
-  open: "text-muted",
-  connecting: "text-faint",
-  closed: "text-err",
+const CONNECTION_DOT: Record<ConnectionState, string> = {
+  open: "bg-ok",
+  connecting: "bg-faint",
+  closed: "bg-err",
 };
 
-/** The computer, by the name its owner gave it, over whether Jaroku can reach it right now. */
-export function MachineChip({ name, connection }: { name: string; connection: ConnectionState }) {
+const HEADER_BUTTON =
+  "flex h-7 shrink-0 items-center justify-center rounded-control transition-colors duration-fast hover:bg-active/40 focus-visible:outline-none focus-visible:shadow-focusring";
+
+const POPOVER =
+  "absolute left-0 top-full z-50 mt-1 origin-top animate-menu-in rounded-card border border-edge bg-elevated shadow-floating motion-reduce:animate-none";
+
+/**
+ * The computer, as a button. Pressing it shows the name its owner gave it, and under that a dot and
+ * a word for whether Jaroku can reach it right now.
+ */
+export function MachineButton({ name, connection }: { name: string; connection: ConnectionState }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useDismiss(open, ref, () => setOpen(false));
   return (
-    <div className="flex min-w-0 shrink-0 items-center gap-2" title={`Jaroku on ${name}`}>
-      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control bg-chrome text-ink" aria-hidden>
+    <div ref={ref} className="relative shrink-0">
+      <button
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-label="This computer"
+        title={name}
+        onClick={() => setOpen((v) => !v)}
+        className={`${HEADER_BUTTON} w-7 text-ink`}
+      >
         <Icon.chatHeader.machine size={ICON.sm} />
-      </span>
-      <span className="flex min-w-0 flex-col leading-tight">
-        <span className="max-w-[220px] truncate text-label text-ink">{name}</span>
-        <span className={`text-tiny ${CONNECTION_TONE[connection]}`} aria-live="polite">
-          {CONNECTION_WORD[connection]}
-        </span>
-      </span>
+      </button>
+      {open && (
+        <div role="dialog" aria-label="This computer" className={`${POPOVER} min-w-[220px] px-3 py-2.5`}>
+          <div className="max-w-[280px] truncate text-label text-ink">{name}</div>
+          <div className="mt-1 flex items-center gap-1.5 text-tiny text-muted" aria-live="polite">
+            <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${CONNECTION_DOT[connection]}`} />
+            {CONNECTION_WORD[connection]}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -67,13 +109,13 @@ export function MachineChip({ name, connection }: { name: string; connection: Co
 /**
  * The conversation's name, renamed where it stands.
  *
- * A CLICK OPENS THE FIELD IN PLACE, and so does Rename in the menu beside it. Enter saves, Escape puts
- * the old name back. Leaving the field saves only a CHANGED name: saving marks the title as chosen,
- * which stops it being titled automatically, and a click in and out again is not a choice. Enter on
- * an unchanged name is one — the thread list's rename works the same way.
+ * A CLICK TURNS IT INTO A TEXT BOX IN PLACE, and so does Rename in the menu beside it. Enter saves,
+ * Escape puts the old name back. Leaving the box saves only a CHANGED name: saving marks the title as
+ * chosen, which stops it being titled automatically, and a click in and out again is not a choice.
+ * Enter on an unchanged name is one — the thread list's rename works the same way.
  *
- * ONLY FOR SOMEBODY WHO MAY RENAME, AND ONLY WHILE CONNECTED. Otherwise the name is plain text: a
- * field that took a new name over a dead socket would drop it without a word.
+ * ONLY FOR SOMEBODY WHO MAY RENAME, AND ONLY WHILE CONNECTED. Otherwise the name is plain text: a box
+ * that took a new name over a dead socket would drop it without a word.
  */
 export function ThreadTitle({
   thread,
@@ -143,7 +185,7 @@ export function ThreadTitle({
       type="button"
       onClick={() => onEditingChange(true)}
       title="Rename this chat"
-      className="flex h-7 min-w-0 max-w-[360px] items-center rounded-control px-2 text-left transition-colors duration-fast hover:bg-active/40 focus-visible:outline-none focus-visible:shadow-focusring"
+      className={`${HEADER_BUTTON} min-w-0 max-w-[360px] px-2 text-left`}
     >
       <Truncate className="text-label text-ink" title={thread.title}>{thread.title}</Truncate>
     </button>
@@ -178,21 +220,8 @@ function ThreadMenu({ thread, connected, onRename }: { thread: ThreadView; conne
   // Agent-scoped: whether this person may start a chat about THIS chat's agent, or a plain one.
   const canCreate = useCanRun("createThread", thread.agent_id);
 
-  useEffect(() => {
-    if (!open) return;
-    const away = (e: MouseEvent): void => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const key = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", away);
-    document.addEventListener("keydown", key);
-    return () => {
-      document.removeEventListener("mousedown", away);
-      document.removeEventListener("keydown", key);
-    };
-  }, [open]);
+  // `"mousedown"` and `"Escape"` are handled in `useDismiss`, which this menu shares with the computer's popover.
+  useDismiss(open, ref, () => setOpen(false));
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
   useMenuFocus(open, ref);
 
@@ -228,18 +257,14 @@ function ThreadMenu({ thread, connected, onRename }: { thread: ThreadView; conne
         aria-label="Chat actions"
         title="Chat actions"
         onClick={() => setOpen((v) => !v)}
-        className="flex h-7 w-7 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-active/40 hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+        className={`${HEADER_BUTTON} w-7 text-muted hover:text-ink`}
       >
         <Icon.chatHeader.menu size={ICON.sm} />
       </button>
       <span aria-live="polite" className="text-tiny text-muted">{note ?? ""}</span>
 
       {open && (
-        <div
-          role="menu"
-          aria-label="Chat actions"
-          className="absolute left-0 top-full z-50 mt-1 min-w-[200px] origin-top animate-menu-in overflow-hidden rounded-card border border-edge bg-elevated p-1 shadow-floating motion-reduce:animate-none"
-        >
+        <div role="menu" aria-label="Chat actions" className={`${POPOVER} min-w-[200px] overflow-hidden p-1`}>
           <button
             type="button"
             role="menuitem"
@@ -304,11 +329,10 @@ export function ChatHeader() {
   const connected = connection === "open";
   return (
     // The window's top edge, so it drags the window like the sidebar's own top row does.
-    <div data-tauri-drag-region className="flex h-12 shrink-0 items-center gap-3 px-4">
-      {name && <MachineChip name={name} connection={connection} />}
-      {name && <span aria-hidden className="h-5 w-px shrink-0 bg-hair" />}
+    <div data-tauri-drag-region className="flex h-12 shrink-0 items-center gap-1 px-4">
+      {name && <MachineButton name={name} connection={connection} />}
       {thread ? (
-        <div className="flex min-w-0 items-center gap-0.5">
+        <>
           {/* KEYED BY THREAD, so opening another conversation mid-edit starts that one's title fresh
               rather than carrying a half-typed name across to it. */}
           <ThreadTitle
@@ -319,7 +343,7 @@ export function ChatHeader() {
             onEditingChange={(on) => setRenamingId(on ? thread.id : null)}
           />
           <ThreadMenu thread={thread} connected={connected} onRename={() => setRenamingId(thread.id)} />
-        </div>
+        </>
       ) : (
         <span className="px-2 text-label text-muted">New chat</span>
       )}
