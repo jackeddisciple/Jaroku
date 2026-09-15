@@ -17,6 +17,11 @@
 # safe precisely because of the expand/migrate/contract rule: the old code still runs against the
 # new schema. A deploy that broke that rule cannot be rolled back — which is why the gate at step
 # 2 is a gate rather than a warning.
+#
+# TWO WAYS IN, TWO TARGETS. A `v*` tag or a manual run deploys the production topology — the gateway
+# and the workers — exactly as before. And every push to main that CI passes deploys `fly.toml`, the
+# jaroku-api app the shipped desktop build talks to. That second path exists because the two drifted
+# hundreds of commits apart: the app shipped subscription Chat to a server that had never heard of it.
 
 name: Deploy
 
@@ -24,6 +29,12 @@ on:
   workflow_dispatch:
   push:
     tags: ["v*"]
+  # EVERY GREEN MAIN. `workflow_run` fires when CI finishes, passed or not, so the job that uses it
+  # reads the conclusion rather than assuming it.
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
 
 concurrency:
   # One deploy at a time. Two releases migrating the same database concurrently is the situation
@@ -33,6 +44,8 @@ concurrency:
 
 jobs:
   deploy:
+    # THE TAG AND MANUAL PATH, unchanged.
+    if: github.event_name != 'workflow_run'
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -67,3 +80,43 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: flyctl deploy --config deploy/fly/worker.fly.toml --strategy immediate --wait-timeout 10m
+
+  deploy-api:
+    # WHEN CI PASSED ON A PUSH TO MAIN, and only then: a pull request's run never deploys, and neither
+    # does a failed or a cancelled one.
+    if: >-
+      github.event_name == 'workflow_run'
+      && github.event.workflow_run.conclusion == 'success'
+      && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      # THE COMMIT CI PASSED, not whatever main points at by the time this starts.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      # AND ONLY WHILE IT IS STILL THE NEWEST. Two green runs finishing out of order would otherwise
+      # deploy the older commit last; the newer commit's own run deploys that one instead.
+      - name: only the newest green commit deploys
+        id: newest
+        run: |
+          git fetch --depth=1 origin main
+          if [ "$(git rev-parse FETCH_HEAD)" = "${{ github.event.workflow_run.head_sha }}" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "main has moved past this commit; its own green run deploys the newer one."
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # THE GATE RUNS WHERE IT COUNTS. CI already ran `migrate:check` on this exact commit, and
+      # `fly.toml`'s release command runs it again against the live database, then migrates, before any
+      # machine takes traffic — a non-zero exit stops the deploy with the old version still serving.
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+        if: steps.newest.outputs.deploy == 'true'
+
+      - name: jaroku-api - migrations run in the release command, before traffic
+        if: steps.newest.outputs.deploy == 'true'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --config fly.toml --remote-only --wait-timeout 10m
