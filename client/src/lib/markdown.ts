@@ -372,6 +372,18 @@ export function parseInline(src: string): Inline[] {
       }
     }
 
+    // A BARE ADDRESS IS A LINK TOO, with its trailing punctuation left in the sentence rather than
+    // swallowed into the URL — "see https://example.com." links the page, not the full stop.
+    if (ch === "h" && !isWordChar(src[i - 1]) && /^https?:\/\//.test(src.slice(i, i + 8))) {
+      const m = /^https?:\/\/[^\s<>()[\]`]*[^\s<>()[\]`.,;:!?'"]/.exec(src.slice(i));
+      if (m) {
+        flush();
+        out.push({ kind: "link", href: m[0], children: [{ kind: "text", text: m[0] }] });
+        i += m[0].length;
+        continue;
+      }
+    }
+
     buf += ch;
     i++;
   }

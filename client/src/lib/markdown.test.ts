@@ -117,5 +117,18 @@ console.log("\ncallouts");
   check("\"Note:\" outside a quote is just a sentence", parseMarkdown("Note: this is prose.")[0]?.kind === "paragraph");
 }
 
+console.log("\nlinks a reply contains");
+{
+  const bare = parseInline("see https://www.postgresql.org/docs/current. Then continue");
+  const link = bare.find((p) => p.kind === "link") as Extract<Inline, { kind: "link" }> | undefined;
+  check("a bare address is a link", link?.href === "https://www.postgresql.org/docs/current", show(bare));
+  check("...and the full stop after it stays in the sentence", inlineText(bare).endsWith("current. Then continue"), inlineText(bare));
+  check("an address inside inline code is code, not a link",
+    parseInline("run `curl https://example.com/api`").every((p) => p.kind !== "link"));
+  check("a word that merely contains http is not a link", parseInline("the xhttps://thing").every((p) => p.kind !== "link"));
+  check("[text](url) still wins over the bare address inside it",
+    parseInline("[docs](https://example.com)").filter((p) => p.kind === "link").length === 1);
+}
+
 console.log(fail === 0 ? "\nall markdown checks passed" : `\n${fail} markdown check(s) FAILED`);
 (globalThis as { process?: { exit(code: number): void } }).process?.exit(fail === 0 ? 0 : 1);

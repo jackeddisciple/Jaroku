@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from 
 import { highlightCode, isCommandBlock, languageLabel } from "../lib/highlight.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { parseMarkdown, type Block, type CalloutTone, type Inline } from "../lib/markdown.ts";
+import { openLink } from "../lib/openExternal.ts";
 import { ICON } from "../lib/tokens.ts";
 import { iconBtn } from "./buttons.ts";
 import { CHIP_INK } from "./InlineCode.tsx";
@@ -27,6 +28,35 @@ function Lines({ text }: { text: string }) {
         </span>
       ))}
     </>
+  );
+}
+
+/**
+ * A link in a reply: the words, underlined, opening the page in the user's own browser. An `<a href>` left
+ * to itself would navigate the desktop app away to the page with no route back — see lib/openExternal.ts.
+ * Anything that is not a web address is shown as its words with the address in the tooltip, and never
+ * opened.
+ */
+function ReplyLink({ href, children }: { href: string; children: ReactNode }) {
+  if (!/^https?:\/\//i.test(href)) {
+    return (
+      <span title={href} className="underline decoration-edge underline-offset-2">
+        {children}
+      </span>
+    );
+  }
+  return (
+    <a
+      href={href}
+      title={href}
+      onClick={(e) => {
+        e.preventDefault();
+        void openLink(href);
+      }}
+      className="text-ink underline decoration-edge underline-offset-2 transition-colors hover:decoration-ink focus-visible:outline-none focus-visible:shadow-focusring"
+    >
+      {children}
+    </a>
   );
 }
 
@@ -48,11 +78,10 @@ function InlineView({ pieces }: { pieces: readonly Inline[] }) {
           case "code":
             return <code key={i} className={CHIP_INK}>{p.text}</code>;
           case "link":
-            // The words, marked as a link, with the address in the tooltip.
             return (
-              <span key={i} title={p.href} className="underline decoration-edge underline-offset-2">
+              <ReplyLink key={i} href={p.href}>
                 <InlineView pieces={p.children} />
-              </span>
+              </ReplyLink>
             );
         }
       })}

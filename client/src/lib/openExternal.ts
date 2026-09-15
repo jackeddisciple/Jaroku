@@ -75,3 +75,30 @@ export async function openExternal(url: string): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Open a link from one of Jaroku's replies, and say whether that worked.
+ *
+ * ANY WEB PAGE, BECAUSE A REPLY CAN LINK ANYWHERE — the shell's `open_link` admits http and https and
+ * nothing else, where `openExternal` above is held to this product's own pages. Refused here first for
+ * anything that is not a web address, so a `javascript:` link in a reply never reaches the shell at all.
+ */
+export async function openLink(url: string): Promise<boolean> {
+  if (!/^https?:\/\/[^\s]+$/i.test(url)) return false;
+  const tauri = bridge();
+  if (!tauri?.core?.invoke) {
+    try {
+      window.open(url, "_blank", "noopener,noreferrer");
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  try {
+    await tauri.core.invoke("open_link", { url });
+    return true;
+  } catch (err) {
+    console.warn(`[jaroku] could not open ${url}: ${String(err)}`);
+    return false;
+  }
+}

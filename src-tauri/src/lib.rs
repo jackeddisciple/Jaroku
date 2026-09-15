@@ -121,6 +121,7 @@ pub fn run() {
             deeplink::drain_deep_links,
             deeplink::open_checkout,
             deeplink::open_external,
+            deeplink::open_link,
             secrets::secret_get,
             secrets::secret_set,
             secrets::secret_delete,
@@ -443,6 +444,7 @@ fn with_updater(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         // would have refused to open a payment page, in the only configuration anybody pays money in.
         deeplink::open_checkout,
         deeplink::open_external,
+        deeplink::open_link,
         secrets::secret_get,
         secrets::secret_set,
         secrets::secret_delete,

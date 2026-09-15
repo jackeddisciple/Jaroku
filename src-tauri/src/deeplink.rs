@@ -322,6 +322,35 @@ fn launch(url: String) -> Result<(), String> {
     })
 }
 
+// A LINK IN ONE OF JAROKU'S REPLIES, and a third rule rather than a longer list. A model can link to
+// any page on the web, so no allowlist of hosts can describe what a reply may point at; what CAN be said
+// is what a reply link must be — a web page, opened only because somebody clicked it. So this admits
+// http and https with a real host and refuses everything else a string can ask an operating system to
+// open: files, scripts, our own scheme, and a URL that hides a credential in front of its host.
+//
+// NEITHER OTHER LIST IS WIDENED BY IT. A payment page still goes through `open_checkout` and a sign-in
+// page through `open_external`; a reply link that happens to point at either is simply a web page here.
+
+/// Whether a link from a reply may be handed to the operating system: a web page, and nothing else.
+pub fn may_open_link(url: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(url) else { return false };
+    matches!(parsed.scheme(), "https" | "http")
+        && parsed.host_str().is_some_and(|host| !host.is_empty())
+        && parsed.username().is_empty()
+        && parsed.password().is_none()
+}
+
+/// Open a link in one of Jaroku's replies, in the user's own browser, when somebody clicks it.
+#[tauri::command]
+pub fn open_link(url: String) -> Result<(), String> {
+    if !may_open_link(&url) {
+        // Not echoed into the error, for `open_checkout`'s reason. The log line has it.
+        logs::say(format!("refused to open a reply link that is not a web page: {url}"));
+        return Err("that link is not a web page".into());
+    }
+    launch(url)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -410,5 +439,25 @@ mod tests {
         assert!(!may_open("checkout.stripe.com"), "a bare host is not a URL");
         assert!(!may_open("not a url at all"));
         assert!(!may_open("https://"), "a scheme with no host is not a page");
+    }
+
+    #[test]
+    fn a_reply_link_may_be_any_web_page() {
+        assert!(may_open_link("https://www.postgresql.org/docs/current/"));
+        assert!(may_open_link("http://localhost:3000/"));
+        assert!(may_open_link("https://github.com/jackeddisciple/Jaroku/pull/1?x=y#section"));
+    }
+
+    #[test]
+    fn a_reply_link_is_a_web_page_and_nothing_else() {
+        assert!(!may_open_link("file:///etc/passwd"));
+        assert!(!may_open_link("javascript:alert(1)"));
+        assert!(!may_open_link("jaroku://auth/complete?ticket=x"), "our own scheme is not a web page");
+        assert!(!may_open_link("mailto:someone@example.com"));
+        assert!(!may_open_link("https://user:secret@evil.example/"), "a credential before the host is refused");
+        assert!(!may_open_link("https://github.com@evil.example/"), "and so is a host hidden behind one");
+        assert!(!may_open_link("https://"));
+        assert!(!may_open_link("not a url"));
+        assert!(!may_open_link(""));
     }
 }
