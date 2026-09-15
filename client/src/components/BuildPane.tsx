@@ -3189,9 +3189,15 @@ export function BuildPane({
             spanned the whole pane, so a question and its answer ran the width of a wide window while
             the box they were typed into sat centred under them. The same 48rem as the composer, so
             the edges line up; the scroller itself stays full width, so the scrollbar is at the pane's
-            edge rather than beside the text. */}
+            edge rather than beside the text.
+
+            AND THE SAME INSET INSIDE IT, which is the rest of that call: "it should not spill even a
+            bit beyond" the composer. The composer's box is not its column — it sits in `px-6` of it —
+            so a column that used all 48rem put every turn 24px past the box below it on each side.
+            The padding goes here rather than on the scroller, which keeps it off the rail and the
+            empty states, whose insets are their own. */}
         {turns.length > 0 && (
-          <div className="mx-auto w-full max-w-[48rem] space-y-6">
+          <div className="mx-auto w-full max-w-[48rem] space-y-6 px-6">
             {turns.map((t) => (
               // The id on the wrapper is what §4.5's resume scrolls to. One place, rather than a ref
               // inside each of the four card components.
