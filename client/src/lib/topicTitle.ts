@@ -45,16 +45,18 @@ export function titlePrompt(message: string): string {
 /**
  * The first message to title from, or null when this chat should not be titled now.
  *
- * ONLY A CHAT NOBODY HAS RENAMED, and only at its FIRST exchange — one message from the user and an
- * answer that finished. A later answer, a regenerated one, or a chat somebody named themselves keeps
- * the title it has.
+ * ONLY A CHAT NOBODY HAS RENAMED, and only at its FIRST exchange — one message from the user. A second
+ * message, or a chat somebody named themselves, keeps the title it has.
+ *
+ * WHETHER THE ANSWER FINISHED IS THE CALLER'S TO SAY, from the turn's own outcome. It used to be read
+ * off the reply turn here, and that is always too early: the app settles the run the moment the CLI
+ * ends, and the reply is only marked done when the server's answer to that settle comes back — so at
+ * the one moment this is asked, every reply still read `streaming` and no chat was ever titled.
  */
 export function needsTopicTitle(thread: ThreadView | undefined, turns: readonly ChatTurn[]): string | null {
   if (!thread || thread.title_is_custom) return null;
   const asked = turns.filter((t) => t.role === "user");
   if (asked.length !== 1) return null;
-  const answered = turns.some((t) => t.role === "jaroku" && t.kind === "reply" && t.status === "done");
-  if (!answered) return null;
   const first = asked[0];
   const text = first && first.role === "user" ? first.text.trim() : "";
   return text.length > 0 ? text : null;

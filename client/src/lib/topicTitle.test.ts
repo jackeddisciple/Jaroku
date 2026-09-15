@@ -18,12 +18,15 @@ const user = (text: string): ChatTurn => ({ id: `u-${text}`, role: "user", text 
 const reply = (status: string): ChatTurn =>
   ({ id: `r-${status}`, role: "jaroku", kind: "reply", status, agentId: "", text: "hello" }) as unknown as ChatTurn;
 
-console.log("\nonly the first finished exchange of a chat nobody renamed is titled");
+console.log("\nonly the first exchange of a chat nobody renamed is titled");
 {
-  check("a first message with a finished answer is titled from that message",
+  check("a first message is titled from that message",
     needsTopicTitle(thread(), [user("  Hi there "), reply("done")]) === "Hi there");
-  check("an answer still streaming is not titled yet", needsTopicTitle(thread(), [user("Hi"), reply("streaming")]) === null);
-  check("an answer that failed is not titled", needsTopicTitle(thread(), [user("Hi"), reply("error")]) === null);
+  // THE BUG THIS PINS. The app asks at the moment the CLI ends, and the reply is only marked done when
+  // the server answers that settle — so the reply still reads `streaming` here, every time, and a check
+  // on it meant no chat was ever titled. Whether the answer finished comes from the turn's outcome.
+  check("...even while the reply turn still reads streaming, which it always does at that moment",
+    needsTopicTitle(thread(), [user("Hi"), reply("streaming")]) === "Hi");
   check("a second exchange keeps the title it has",
     needsTopicTitle(thread(), [user("Hi"), reply("done"), user("and another"), reply("done")]) === null);
   check("a chat somebody renamed keeps their name",
