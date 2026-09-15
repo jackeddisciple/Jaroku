@@ -18,6 +18,7 @@ import { McpPanel } from "./McpPanel.tsx";
 import { ConnectionsPanel } from "./ConnectionsPanel.tsx";
 import { DeployPanel } from "./DeployPanel.tsx";
 import { UsagePanel } from "./UsagePanel.tsx";
+import { RunsPanel } from "./RunsPanel.tsx";
 import { SecretsPanel } from "./SecretsPanel.tsx";
 import { GitHubPanel } from "./GitHubPanel.tsx";
 import { useDeployStore } from "../store/deployStore.ts";
@@ -66,6 +67,8 @@ const TABS: { id: RightTab; label: string; Mark: IconComponent }[] = [
   // which is the same kind of question about the same kind of boundary.
   { id: "github", label: "GitHub", Mark: Icon.panel.github },
   { id: "usage", label: "Usage", Mark: Icon.panel.usage },
+  // BELOW USAGE: the selected agent's runs, moved out of the sidebar. Opening one turns to Trace.
+  { id: "runs", label: "Runs", Mark: Icon.panel.runs },
 ];
 
 /**
@@ -199,6 +202,7 @@ export function RightPanel() {
           : tab === "secrets" ? <SecretsPanel />
           : tab === "github" ? <GitHubPanel />
           : tab === "usage" ? <UsagePanel />
+          : tab === "runs" ? <RunsPanel />
           : <TraceTimeline />}
       </div>
 

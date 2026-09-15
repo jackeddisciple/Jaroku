@@ -159,6 +159,8 @@ export const MANIFEST = {
     secrets: "KeyGeneratorFobIcon",
     github: "GithubIcon",
     usage: "LimitationIcon",
+    /** The selected agent's runs, below Usage. The play mark `run` and `resume` already draw. */
+    runs: "PlayIcon",
   },
 
   // ── The middle panel's header ─────────────────────────────────────────────

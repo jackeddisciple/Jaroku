@@ -1,5 +1,5 @@
 // Left sidebar — the agent/run library (doc §4.1). Top: New Agent, search, and status filter
-// tabs over the agent list. A flexible middle holds recent runs (how you re-open a past trace).
+// tabs over the agent list; an agent's runs are in the right panel's Runs tab.
 // Bottom-anchored: Settings and the user/plan chip. Restraint-first: rows float on the panel,
 // separated by spacing and a thin accent on the active one — never boxed.
 
@@ -7,22 +7,18 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { orderedRuns, useTraceStore } from "../store/traceStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
-import type { AgentSummary, RunSummary, RunStatus, ThreadView } from "../types.ts";
+import type { AgentSummary, ThreadView } from "../types.ts";
 import { openThread } from "../lib/threadNav.ts";
 import { absTime, relTime } from "../lib/format.ts";
 import { agentStatus } from "../lib/agentStatus.ts";
-import { StatusGlyph } from "./StatusGlyph.tsx";
-import { RUN_PHASE } from "../lib/domainPhase.ts";
-import { PHASE_WORD, type Phase } from "../lib/statusPhase.ts";
-import { selectAgent, selectRun } from "../lib/selection.ts";
+import { selectAgent } from "../lib/selection.ts";
 import {
-  sendDeleteAgent, sendLoadHistory, sendLoadRun, sendOpenGithubPr, sendRenameAgent, sendRun, signOut,
+  sendDeleteAgent, sendOpenGithubPr, sendRenameAgent, signOut,
 } from "../lib/socket.ts";
 import { ICON } from "../lib/tokens.ts";
 import { quietBtn, secondaryBtn } from "./buttons.ts";
 import { AlertTriangleIcon } from "./panelIcons.tsx";
 import { useUiStore, type NavDestination } from "../store/uiStore.ts";
-import { isRunnable, useProviderStore } from "../store/providerStore.ts";
 import { useGithubStore } from "../store/githubStore.ts";
 import { useThreadStore } from "../store/threadStore.ts";
 import { useInboxStore } from "../store/inboxStore.ts";
@@ -63,260 +59,6 @@ const NAV_DESTINATIONS: { id: NavDestination; label: string; icon: IconComponent
 // threads: an archived thing has LEFT the default list, and a list that showed both would make
 // "archived" a decoration instead of a state. It is last, after the states that describe live work.
 type Filter = "all" | "running" | "deployed" | "synced" | "drafts" | "archived";
-
-// A run's outcome, in the product's one status vocabulary.
-//
-// IT WAS FONT CHARACTERS ONCE — a pulsing ●, a ✗ and a ✓ — which sat on the text baseline at
-// whatever weight the row happened to be and never optically matched the icons two panels over.
-// Then it was four `StatusDot`s: a spinning loader, a pause, a cross and a tick, in three colours.
-// Both were right about this list and unrelated to the six the Cockpit drew for the same four facts
-// one tab over. `RUN_PHASE` is what makes them the same marks now.
-//
-// `paused` STILL DOES NOT FALL THROUGH TO THE TICK, which is the defect this function was rewritten
-// for once already: it arrived after the other three and wore the same green as a run that finished,
-// and this list is the only place a paused run can be found and resumed from. `RUN_PHASE` is a
-// `Record<RunStatus, Phase>`, so a fifth status is a compile error rather than a silent fall-through.
-//
-// THE WORDS ARE THIS LIST'S OWN. "paused — resumable" says the thing somebody scanning for a run to
-/**
- * How long a run took, from the two timestamps it already carries.
- *
- * SHOWN ONLY WHEN IT FINISHED. A duration computed against `Date.now()` for a run still in flight
- * is a number that changes every render and means "so far" while reading as "took" — and the row
- * already says `running` in its capsule, which is the honest answer to how long it took.
- */
-function runDuration(run: RunSummary): string | null {
-  if (!run.ended_at) return null;
-  const ms = new Date(run.ended_at).getTime() - new Date(run.started_at).getTime();
-  if (!Number.isFinite(ms) || ms < 0) return null;
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  const m = Math.floor(ms / 60_000);
-  return `${m}m ${Math.round((ms % 60_000) / 1000)}s`;
-}
-
-/**
- * The first line of an error, short enough to sit at the end of a row.
- *
- * The stored message is a whole Python traceback in the common case — `BadRequestError: Error code:
- * 400 - {...}` runs to three hundred characters. What fits here is the class and the first clause,
- * and the full text is one click away in the trace.
- */
-function errorSnippet(error: string): string {
-  const first = error.split("\n")[0] ?? error;
-  const clipped = first.length > 34 ? `${first.slice(0, 33)}…` : first;
-  return clipped;
-}
-
-/**
- * A run's outcome as a capsule: a coloured ground, the SHARED glyph, and the phase's own word.
- *
- * THE MARK IS `StatusGlyph` AND THE WORD IS `PHASE_WORD`, NOT A CHECK AND A CROSS PICKED HERE.
- * This product draws one status vocabulary across nine surfaces — the Cockpit, Threads, Deploy,
- * MCP, evals, the agent cards — and `test:status-glyph` holds every one of them to it, in both
- * directions: the surfaces that must draw it and the four that must not. A tick chosen locally
- * would have been a tenth vocabulary that agreed with the other nine today and drifted the first
- * time `done` changed shape.
- *
- * WHAT IS NEW HERE IS THE CAPSULE, not the glyph: a soft ground and the word beside the mark, so a
- * run's outcome reads at a glance in a dense list. `RUN_PHASE` maps the four run statuses onto the
- * four phases, so `paused` gets amber and its own word for free rather than falling into an
- * `ok ? green : red` that would call it a failure.
- */
-const PHASE_TONE: Record<Phase, string> = {
-  pending: "bg-sidebar-active text-muted",
-  ready: "bg-sidebar-active text-muted",
-  // The only phase permitted amber, here as everywhere else.
-  active: "bg-run/10 text-run",
-  waiting: "bg-sidebar-active text-muted",
-  // GREEN FOR DONE IS THIS CAPSULE'S OWN CHOICE, and worth naming: `PHASE_COLOUR` draws a finished
-  // thing NEUTRAL across the product, because "it worked" is the ordinary case and a wall of green
-  // ticks is a wall of noise. On one row inside a list of runs the outcome IS the content, so the
-  // ground carries it. The GLYPH is still the shared one; only the capsule around it is new.
-  done: "bg-ok/10 text-ok",
-  failed: "bg-err/10 text-err",
-  halted: "bg-sidebar-active text-muted",
-};
-
-function RunStatusCapsule({ status }: { status: RunStatus }) {
-  const phase = RUN_PHASE[status];
-  return (
-    <span
-      className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-tiny font-medium ${PHASE_TONE[phase]}`}
-    >
-      <StatusGlyph phase={phase} size={ICON.xs} />
-      {PHASE_WORD[phase]}
-    </span>
-  );
-}
-
-/**
- * The overflow, revealed on hover and on focus.
- *
- * TWO ITEMS, NOT FOUR. The specification asked for view trace, retry, delete and export logs; the
- * first two are commands this application has (`loadRun`/`selectRun`, and `run` against the agent),
- * and the second two are not — there is no `deleteRun` and no log export on the wire, and deleting
- * a run correctly means cascading across `steps` (partitioned by month), `usage_events` and the
- * checkpoints, none of which has a foreign key onto `runs`. A menu row that closes the menu and
- * does nothing is the exact control `test:dead-controls` exists to keep out, so the two that cannot
- * work are absent rather than disabled-with-a-tooltip.
- */
-/**
- * "Run again", for THIS agent on the model the composer has chosen.
- *
- * It sent a bare `run` with neither, and the server reads a run with no agent as the hand-written
- * test agent and one with no provider as the dry run — so it ran the wrong agent on a model nobody
- * picked. With no key for the chosen model it opens Secrets at that provider instead.
- */
-function runAgain(agentId: string): void {
-  const { provider, model } = useUiStore.getState();
-  const { providers, loaded } = useProviderStore.getState();
-  if (loaded && !isRunnable(providers, provider)) {
-    useUiStore.getState().openSecretsForProvider(provider || "anthropic");
-    return;
-  }
-  sendRun(undefined, provider, model, agentId);
-}
-
-function RunOverflow({ run, agentId }: { run: RunSummary; agentId: string }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  // Portalled for the same reason as `AgentRowMenu` — run rows nest under agent rows, so this menu
-  // opens from inside the same scroller and was clipped by the same `overflow`.
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const away = (e: MouseEvent): void => {
-      const t = e.target as Node;
-      if (ref.current?.contains(t) || panelRef.current?.contains(t)) return;
-      setOpen(false);
-    };
-    const key = (e: KeyboardEvent): void => { if (e.key === "Escape") setOpen(false); };
-    document.addEventListener("mousedown", away);
-    document.addEventListener("keydown", key);
-    return () => {
-      document.removeEventListener("mousedown", away);
-      document.removeEventListener("keydown", key);
-    };
-  }, [open]);
-
-  // See lib/menuFocus.ts — the panel is rendered BEFORE its trigger, so without this the
-  // keyboard steps straight over the menu it just opened, and Escape drops focus to <body>.
-  useMenuFocus(open, panelRef, ref);
-  useAnchoredMenu(open, ref, panelRef);
-
-  return (
-    <div ref={ref} className="relative shrink-0">
-      <button
-        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title="More"
-        aria-label={`More actions for run ${shortRunId(run.id)}`}
-        className={`flex h-6 w-6 items-center justify-center rounded-control text-faint transition-opacity hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring ${
-          open ? "opacity-100" : "opacity-0 group-hover/run:opacity-100 group-focus-within/run:opacity-100"
-        }`}
-      >
-        <Icon.agents.more size={ICON.sm} />
-      </button>
-      {open && createPortal(
-        <div
-          ref={panelRef}
-          role="menu"
-          aria-label="Run actions"
-          className="fixed left-0 top-0 z-50 w-40 origin-top animate-menu-in overflow-hidden rounded-control border border-sidebar-border bg-panel py-1 shadow-pop motion-reduce:animate-none"
-        >
-          <button
-            role="menuitem"
-            onClick={(e) => {
-              e.stopPropagation();
-              setOpen(false);
-              if (useTraceStore.getState().needsLoad(run.id)) sendLoadRun(run.id);
-              selectRun(run.id);
-            }}
-            className={ACCOUNT_MENU_ROW}
-          >
-            <Icon.panel.trace size={ICON.sm} />
-            <span className="min-w-0 flex-1 truncate">View trace</span>
-          </button>
-          <button
-            role="menuitem"
-            onClick={(e) => { e.stopPropagation(); setOpen(false); selectAgent(agentId); runAgain(agentId); }}
-            className={ACCOUNT_MENU_ROW}
-          >
-            <Icon.cockpit.refresh size={ICON.sm} />
-            <span className="min-w-0 flex-1 truncate">Run again</span>
-          </button>
-        </div>,
-        document.body,
-      )}
-    </div>
-  );
-}
-
-/**
- * Which run this is, for a person rather than for a database.
- *
- * A POSITION, NOT AN IDENTIFIER, AND THAT IS A REAL LIMITATION. There is no per-agent counter on
- * the server — a run is a uuid — so this counts backwards from the newest run LOADED. The history
- * is a window, so a run's number changes when older runs arrive behind it: today's run is #12 of
- * twelve loaded and #47 once the rest are fetched. It is the right shape for the row and the wrong
- * shape for anything durable, which is why nothing quotes it and the tooltip carries the id.
- */
-function runNumber(runs: RunSummary[], run: RunSummary): number {
-  return runs.length - runs.indexOf(run);
-}
-
-/** The first segment of a uuid — enough to tell two runs apart in a tooltip. */
-const shortRunId = (id: string): string => id.slice(0, 8);
-
-function RunRow({ run, runs, agentId }: { run: RunSummary; runs: RunSummary[]; agentId: string }) {
-  const activeRunId = useTraceStore((s) => s.activeRunId);
-  const needsLoad = useTraceStore((s) => s.needsLoad);
-  const active = run.id === activeRunId;
-  const duration = runDuration(run);
-  const failed = run.status === "error";
-
-  return (
-    <div
-      className={`group/run relative flex h-7 w-full items-center gap-2 rounded-control pl-2 pr-1 transition-colors ${
-        active ? "bg-sidebar-active" : "hover:bg-sidebar-hover"
-      }`}
-    >
-      {active && <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-accent" aria-hidden />}
-      <button
-        onClick={() => { if (needsLoad(run.id)) sendLoadRun(run.id); selectRun(run.id); }}
-        title={`${shortRunId(run.id)} · ${run.provider} · ${absTime(run.started_at)}`}
-        className="flex min-w-0 flex-1 items-center gap-2 text-left focus-visible:outline-none focus-visible:shadow-focusring"
-      >
-        <RunStatusCapsule status={run.status} />
-        {/* Branches keep their fork mark: a branched run is a different thing from a re-run. */}
-        {run.parent_run_id && (
-          <span className="shrink-0 text-faint" title="branch"><Icon.agents.fork size={ICON.xs} /></span>
-        )}
-        {/* THE SELECTED RUN IS SAID BY THE ROW, NOT BY THE FIGURE. This was
-            `active ? "text-accent" : "text-ink"`, and it worked while the accent was a near-navy;
-            new-theme.pdf's accent is §05's charcoal, which is `ink` — the same value on both arms.
-            The row already carries `bg-sidebar-active` and a 2px bar, which is how every other
-            selected thing in the product says so, and dimming the unselected run numbers to buy a
-            third signal would cost the column the one figure people scan it for. */}
-        <span className="shrink-0 text-label font-normal tabular-nums text-ink">
-          Run #{runNumber(runs, run)}
-        </span>
-        {/* THE TIME, THEN WHAT IT COST YOU — a duration when it worked, the reason when it did not.
-            One slot, because they answer the same question: what happened after it started. */}
-        <span className="ml-auto flex min-w-0 shrink items-center gap-1.5 overflow-hidden text-caption tabular-nums text-faint">
-          <span className="shrink-0" title={absTime(run.started_at)}>{relTime(run.started_at)}</span>
-          {failed && run.error
-            ? <span className="min-w-0 truncate text-err" title={run.error}>{errorSnippet(run.error)}</span>
-            : duration && <span className="shrink-0">{duration}</span>}
-        </span>
-      </button>
-      <RunOverflow run={run} agentId={agentId} />
-    </div>
-  );
-}
 
 /**
  * The window's own top row, and the first thing in the sidebar rather than a bar above it.
@@ -499,20 +241,9 @@ function NavList() {
   );
 }
 
-/** How many of an agent's runs are shown before "Show more" — a glance, not a history. */
-const RUNS_AT_FIRST = 5;
-
 /**
- * An agent, and its runs beneath it when you open it.
- *
- * THE TREE IS THE POINT, and it replaces two flat lists that were not related to each other on
- * screen. Runs used to sit in their own section under every agent, so the question "what has THIS
- * agent been doing" was answered by reading a mixed list and matching ids by eye. A run belongs to
- * exactly one agent; nesting is what that fact looks like.
- *
- * AN AGENT WITH NO RUNS DOES NOT OPEN, and shows no chevron. A disclosure control that discloses
- * nothing is the dead control this codebase has a suite about — and the absence of the twisty is
- * itself the answer to "has this ever run".
+ * An agent, as a row in the column. Its runs are not under it: they are in the right panel's Runs
+ * tab, which lists the selected agent's runs beside its trace.
  */
 /**
  * What you can do to an agent, at the end of its row.
@@ -714,18 +445,12 @@ function AgentRowMenu({ agent }: { agent: AgentSummary }) {
   );
 }
 
-function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[] }) {
-  const [open, setOpen] = useState(false);
-  const [all, setAll] = useState(false);
+function AgentTreeRow({ agent, lastRunAt }: { agent: AgentSummary; lastRunAt: string | null }) {
   const activeAgentId = useBuildStore((s) => s.activeAgentId);
   const selected = activeAgentId === agent.agent_id;
-  const hasRuns = runs.length > 0;
-  const shown = all ? runs : runs.slice(0, RUNS_AT_FIRST);
-  // `runs` is newest-first, so the head is when this agent last did anything — and when it has
-  // never run, when it was made. THE ROW SHOWED NOTHING for a new agent, which is the one moment
-  // the column is most likely to be looked at: the agent you just described, with no time beside
-  // it. Two different facts, so the label below says which.
-  const lastRunAt = runs[0]?.started_at ?? null;
+  // When this agent last did anything — and when it has never run, when it was made. THE ROW SHOWED
+  // NOTHING for a new agent, which is the one moment the column is most likely to be looked at: the
+  // agent you just described, with no time beside it. Two different facts, so the label below says which.
   const stamp = lastRunAt ?? agent.created_at ?? null;
   const stampWord = lastRunAt ? "last run" : "created";
   // Null until this agent has a pull request open — see the marker below.
@@ -803,20 +528,6 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
             </span>
           </span>
         </button>
-        {/* THE RUNS TWISTY, AT THE ROW'S RIGHT END since the emoji took its column. Only on an agent
-            that has runs: one that has never run has nothing under it to open, and no longer needs
-            a blank of the twisty's width to keep the names in line. */}
-        {hasRuns && (
-          <button
-            onClick={() => setOpen((v) => !v)}
-            title={open ? `Hide ${agent.name}'s runs` : `Show ${agent.name}'s runs`}
-            aria-label={open ? `Hide ${agent.name}'s runs` : `Show ${agent.name}'s runs`}
-            aria-expanded={open}
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-faint transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
-          >
-            {open ? <Icon.workspace.switcherOpen size={ICON.lg} /> : <Icon.workspace.switcherClosed size={ICON.lg} />}
-          </button>
-        )}
         {/* THE PULL REQUEST, ON EVERY ROW AND SHOWN ON HOVER. On every row because it is a control
             rather than a badge: "only when there is one" hid it on exactly the agents somebody would
             want to open one FOR. Shown on hover — and on keyboard focus — like the row's menu beside
@@ -866,28 +577,6 @@ function AgentTreeRow({ agent, runs }: { agent: AgentSummary; runs: RunSummary[]
         <AgentRowMenu agent={agent} />
       </div>
 
-      <Collapse open={open && hasRuns}>
-        <div className="flex flex-col">
-          {shown.map((r) => (
-            // Indented to where the agent's name starts, so a run reads as belonging to the row above
-            // it — the emoji column is the tabs' icon column now, and the name follows it.
-            <div key={r.id} className="pl-7">
-              <RunRow run={r} runs={runs} agentId={agent.agent_id} />
-            </div>
-          ))}
-          {/* Offered only when there is genuinely more, and it says how much more rather than
-              "Show more" — a count is the difference between a control you can decide about and
-              one you have to press to find out. */}
-          {!all && runs.length > RUNS_AT_FIRST && (
-            <button
-              onClick={() => setAll(true)}
-              className="w-full py-1 pl-10 pr-3 text-left text-caption text-muted transition-colors hover:bg-sidebar-hover hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
-            >
-              Show {runs.length - RUNS_AT_FIRST} more…
-            </button>
-          )}
-        </div>
-      </Collapse>
     </>
   );
 }
@@ -1352,23 +1041,15 @@ export function Sidebar() {
     // top of the column it was just removed from, which is the one place it must not be.
     .filter((a): a is AgentSummary => a !== undefined && !a.archived_at);
 
-  const runList = orderedRuns(runs);
-  // How wide the window is, and whether the server says there is anything behind it.
-  const historyWindow = useTraceStore((st) => st.historyWindow);
-  const historyComplete = useTraceStore((st) => st.historyComplete);
-
   /**
-   * Every run, filed under the agent that produced it.
+   * When each agent last ran, for the time on its row.
    *
-   * BUILT ONCE PER RENDER RATHER THAN FILTERED PER ROW. A `runList.filter(...)` inside `AgentRow`
-   * is O(agents x runs) and this column is the one that redraws on every trace event — the list is
-   * already ordered newest-first, so a single pass keeps that order inside each bucket for free.
+   * BUILT ONCE PER RENDER RATHER THAN FILTERED PER ROW — this column redraws on every trace event,
+   * and the list is newest-first, so the first run seen for an agent is its latest.
    */
-  const runsByAgent = new Map<string, RunSummary[]>();
-  for (const r of runList) {
-    const bucket = runsByAgent.get(r.agent_id);
-    if (bucket) bucket.push(r);
-    else runsByAgent.set(r.agent_id, [r]);
+  const lastRunByAgent = new Map<string, string>();
+  for (const r of orderedRuns(runs)) {
+    if (!lastRunByAgent.has(r.agent_id)) lastRunByAgent.set(r.agent_id, r.started_at);
   }
 
   // §2 wanted pinned agents first and no agent appearing twice; a section of their own gives both,
@@ -1428,14 +1109,14 @@ export function Sidebar() {
                 <PinnedThreadRow key={t.id} thread={t} />
               ))}
               {pinnedVisible.map((a) => (
-                <AgentTreeRow key={a.agent_id} agent={a} runs={runsByAgent.get(a.agent_id) ?? []} />
+                <AgentTreeRow key={a.agent_id} agent={a} lastRunAt={lastRunByAgent.get(a.agent_id) ?? null} />
               ))}
             </div>
           </Collapse>
         </div>
       )}
 
-      {/* RECENTS — the agents, and their runs under them. */}
+      {/* RECENTS — the agents. */}
       {/* THE GAP IS THE SECTION BREAK. Above it are six places you can go; below it is the contents
           of one of them. They were four pixels apart, so the column read as ten interchangeable
           rows and `Recents` looked like a seventh destination rather than a heading over a list. */}
@@ -1474,21 +1155,8 @@ export function Sidebar() {
                 already on screen — the filter in the header says what is narrowing the list, and
                 `New` leads the column for a workspace that has no agents at all. */}
             {recents.map((a) => (
-              <AgentTreeRow key={a.agent_id} agent={a} runs={runsByAgent.get(a.agent_id) ?? []} />
+              <AgentTreeRow key={a.agent_id} agent={a} lastRunAt={lastRunByAgent.get(a.agent_id) ?? null} />
             ))}
-
-            {/* THE WINDOW, WIDENED FROM HERE. The history read stops at a cap, so the runs nested
-                above are the ones that have been FETCHED — this is how the 51st-newest becomes
-                reachable at all, and it stays out of any one agent's subtree because it widens the
-                window for all of them. */}
-            {runList.length >= historyWindow && !historyComplete && (
-              <button
-                onClick={() => sendLoadHistory(Math.min(historyWindow * 2, 500))}
-                className="mt-1 w-full rounded-control px-2 py-1.5 text-left text-caption text-muted transition-colors hover:bg-sidebar-hover hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
-              >
-                Load older runs…
-              </button>
-            )}
           </div>
         </Collapse>
       </div>

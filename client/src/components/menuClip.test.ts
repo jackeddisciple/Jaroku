@@ -38,7 +38,11 @@ const withoutComments = (text: string): string =>
     .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "))
     .replace(/(^|[^:])\/\/[^\n]*/g, (m, p1: string) => p1 + " ".repeat(m.length - p1.length));
 
+// THE RUNS TAB HOLDS THE OTHER LIST MENU NOW. Run rows left the sidebar for the right panel, and their
+// menu still opens from inside a scroller, so the wiring counts below read both files.
 const sidebar = withoutComments(read("components/Sidebar.tsx"));
+const runsPanel = withoutComments(read("components/RunsPanel.tsx"));
+const both = sidebar + runsPanel;
 
 /**
  * Every component in `Sidebar.tsx`, sliced at its top-level `function` boundaries.
@@ -79,7 +83,7 @@ const inTheList = ((): Set<string> => {
 console.log("\nevery menu that opens from inside the scrolling list is portalled out of it");
 {
   const menus = [...inTheList].filter((n) => /role="menu"/.test(bodies.get(n) ?? ""));
-  check("found the menus in the list", menus.length >= 2, `${menus.join(", ") || "none"}`);
+  check("found the menus in the list", menus.length >= 1, `${menus.join(", ") || "none"}`);
 
   for (const name of menus) {
     const body = bodies.get(name)!;
@@ -94,6 +98,13 @@ console.log("\nevery menu that opens from inside the scrolling list is portalled
   }
 }
 
+console.log("\n...and the Runs tab's run menu, which opens from inside its own scrolling list");
+{
+  check("RunsPanel declares a run menu", /role="menu"/.test(runsPanel));
+  check("...rendered through a portal into the body", /createPortal\(/.test(runsPanel) && /document\.body,/.test(runsPanel));
+  check("...not positioned inside the row", !/className="absolute/.test(runsPanel));
+}
+
 console.log("\n...and a portalled panel keeps the wiring the portal breaks");
 {
   // CLICK-AWAY IS THE ONE THAT FAILS SILENTLY AND TOTALLY. Once the panel is not inside the
@@ -101,21 +112,21 @@ console.log("\n...and a portalled panel keeps the wiring the portal breaks");
   // closes on mousedown and the item never receives the click. Every item is dead, and the menu
   // still looks completely normal.
   check("click-away tests the panel as well as the trigger",
-    (sidebar.match(/panelRef\.current\?\.contains\(t\)/g) ?? []).length >= 2,
+    (both.match(/panelRef\.current\?\.contains\(t\)/g) ?? []).length >= 2,
     "a portalled panel is `outside` its own trigger, so its items stop receiving clicks");
   // And the keyboard: `useMenuFocus` looks for items in the element it is given, so a portalled
   // menu has to hand it the panel — and the trigger separately, since they are no longer one tree.
   check("the focus hook is given the panel and the trigger separately",
-    (sidebar.match(/useMenuFocus\(open, panelRef, ref\)/g) ?? []).length >= 2);
+    (both.match(/useMenuFocus\(open, panelRef, ref\)/g) ?? []).length >= 2);
   check("both are anchored back to their trigger",
-    (sidebar.match(/useAnchoredMenu\(open, ref, panelRef\)/g) ?? []).length >= 2);
+    (both.match(/useAnchoredMenu\(open, ref, panelRef\)/g) ?? []).length >= 2);
 }
 
 console.log("\n...and the trigger does not fade out from under its own open menu");
 {
   // The panel used to be a child of the row, so hovering it kept `group-hover` alive and the
   // overflow button shown. Portalled, the row un-hovers the moment somebody reaches for the menu.
-  const openStays = sidebar.match(/open \? "opacity-100"/g) ?? [];
+  const openStays = both.match(/open \? "opacity-100"/g) ?? [];
   check("an open menu pins its trigger visible", openStays.length >= 2, `${openStays.length} found`);
 }
 

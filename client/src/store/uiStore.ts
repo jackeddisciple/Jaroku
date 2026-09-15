@@ -70,7 +70,7 @@ export type RightTab =
    * the two columns inside the surface, and Trace is one click away rather than a navigation away.
    */
   | "agent"
-  | "graph" | "trace" | "evals" | "mcp" | "connections" | "deploy" | "usage" | "code";
+  | "graph" | "trace" | "evals" | "mcp" | "connections" | "deploy" | "usage" | "runs" | "code";
 
 // The single composer has two send modes: "chat" talks to Jaroku (generate/edit/explain/…),
 // "test" sends the agent's runtime input (a Run). Lifted here so it survives re-renders and the

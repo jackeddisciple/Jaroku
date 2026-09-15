@@ -198,7 +198,8 @@ console.log("\n...and the nine it does go on");
   // surface leaves no trace anywhere except a screenshot nobody takes. Every surface the applied
   // commit names, held to its own vocabulary module.
   const AT: [string, string][] = [
-    ["components/Sidebar.tsx", "RUN_PHASE"],
+    // The run capsule moved with the run rows, from the sidebar to the right panel's Runs tab.
+    ["components/RunsPanel.tsx", "RUN_PHASE"],
     ["components/ThreadGlyph.tsx", "THREAD_PHASE"],
     ["components/WorkGlyph.tsx", "WORK_PHASE"],
     ["components/DeployPanel.tsx", "DEPLOY_PHASE"],

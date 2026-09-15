@@ -52,7 +52,8 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // `share` is a new mark; the other five borrow marks the sidebar and the thread list already draw.
   // 173 WITH `chatHeader.delete`, for deleting a chat for good — `Delete01Icon`, which the sidebar's
   // agent menu already draws, so the mark count below does not move.
-  check("173 registry keys", entries.length === 173, `${entries.length}`);
+  // 174 WITH `panel.runs`, the Runs tab below Usage — `PlayIcon`, already drawn, so no new mark.
+  check("174 registry keys", entries.length === 174, `${entries.length}`);
   const names = new Set(entries.map((e) => e.export));
   // 104 from icons_integration's appendix, plus D8's 13 — the composer glyphs that had to move
   // here when `@hugeicons/react` came out. See the note at the top of `registry.ts`.
