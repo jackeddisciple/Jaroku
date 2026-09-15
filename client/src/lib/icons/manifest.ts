@@ -238,6 +238,16 @@ export const MANIFEST = {
   },
 
   // ── D8 · the message action row under an assistant turn ───────────────────
+  // ── The plan gate's own decision ──────────────────────────────────────────
+  //
+  // GENERATE IS A SEND — the product owner's call on 2026-09-15. Pressing it hands the plan to the
+  // generator the way pressing the composer's own send hands over a message, and the two now carry
+  // the same kind of mark: `SendIcon` there, and its horizontal twin here, where the press is a
+  // commitment rather than a line in a conversation.
+  plan: {
+    generate: "SendHorizontalIcon",
+  },
+
   turn: {
     copy: "CopyIcon",
     note: "Note02Icon",

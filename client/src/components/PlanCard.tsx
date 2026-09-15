@@ -20,7 +20,8 @@ import type { PlanTurn } from "../store/chatStore.ts";
 import { sendDiscardPlan, sendGenerate } from "../lib/socket.ts";
 import { fmtCost } from "../lib/format.ts";
 import { useUiStore } from "../store/uiStore.ts";
-import { ACCENT, ICON, TYPE } from "../lib/tokens.ts";
+import { Icon } from "../lib/icons/registry.ts";
+import { ACCENT, ICON } from "../lib/tokens.ts";
 import { noteKind } from "../lib/noteKind.ts";
 import { useStreamedText } from "../lib/useStreamedText.ts";
 import { BRAND_COLOR } from "../lib/icons.tsx";
@@ -128,7 +129,10 @@ function Section({
         <span className="shrink-0 flex items-center" style={accent ? { color: accent } : undefined}>
           {icon}
         </span>
-        <span className={TYPE.sectionLabel}>{label}</span>
+        {/* INK, NOT MUTED — the product owner's call on 2026-09-15: "the plan box has no visual
+            hierarchy inside the box". `TYPE.sectionLabel`'s recipe, at the ink a heading takes, so
+            the four sections read as headings over their rows rather than as more grey. */}
+        <span className="text-tiny uppercase tracking-wider text-ink">{label}</span>
         {/* Normally the count is only worth showing for more than one row. Collapsed, it is the
             only thing left saying how much is behind the header, so it always shows. */}
         {count !== undefined && (count > 1 || !open) && (
@@ -413,7 +417,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
   return (
     <Card>
       <div className="flex animate-slide-in items-center gap-2 border-b border-hair pb-2.5 motion-reduce:animate-none">
-        <span className="text-ink font-medium">Here’s the plan</span>
+        <span className="text-section text-ink">Here’s the plan</span>
         {turn.revision > 1 && (
           <span className="text-faint text-tiny tabular-nums">
             revision {turn.revision}
@@ -656,7 +660,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
         // for the same reason the title does.
         <div className="mt-5 pt-3.5 border-t border-hair flex items-center gap-2">
           <button
-            className={primaryBtn}
+            className={`${primaryBtn} inline-flex items-center gap-1.5`}
             disabled={turn.status === "stale"}
             title={
               turn.status === "stale"
@@ -670,6 +674,9 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
             }
           >
             Generate
+            {/* THE MARK THE COMPOSER'S SEND CARRIES, because this press is the same gesture: the
+                plan goes off to be written. Trailing the word, which is where a send points. */}
+            <Icon.plan.generate size={ICON.xs} />
           </button>
           <button
             className={quietBtn}

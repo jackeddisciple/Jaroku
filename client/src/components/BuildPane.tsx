@@ -22,7 +22,7 @@ import { isRunnable, modelName, providerLabelOf, runProviders, useProviderStore 
 import {
   sendApplyEdit, sendAskRecord, sendBranchRun, sendChat, sendDiscardEdit, sendDiscardPlan, sendDispatchWork,
   sendCreateThread, sendEditTurn, sendSelectVariant, sendStopChat,
-  sendEdit, sendExplain, sendGenerate, sendLoadWorkItem, sendPlanAgent, sendPromoteTestInput, sendRun, reportHostProviders} from "../lib/socket.ts";
+  sendEdit, sendExplain, sendLoadWorkItem, sendPlanAgent, sendPromoteTestInput, sendRun, reportHostProviders} from "../lib/socket.ts";
 import { useEvalStore } from "../store/evalStore.ts";
 import { UpsellCard } from "./UpsellCard.tsx";
 import { composerMoment } from "../lib/composerMoment.ts";
@@ -2804,42 +2804,23 @@ export function BuildPane({
     : null;
 
   if (openPlan?.planId && openPlan.status === "pending") {
+    /**
+     * ONE DECISION SURFACE, NOT TWO — the product owner's call on 2026-09-15: "too much congested
+     * this area around generate, once the planning is done".
+     *
+     * Generate, Discard and "or say what to change" are the plan CARD's footer, on a divider of its
+     * own, directly under the plan they act on. This row repeated all three as option cards a few
+     * pixels below them, and then the composer said a third time that a plan was waiting — three
+     * statements of one question, in a column somebody is reading to make up their mind.
+     *
+     * WHAT STAYS IS THE ONE THING THE CARD CANNOT SAY. §15.2's hatch is not another way to act on
+     * the plan; it is the answer to "I did not want a plan at all", which the card's own footer has
+     * no business offering, and §15's standard is that being wrong here costs one click.
+     */
     fork = {
       key: `plan:${openPlan.planId}`,
-      question: "This plan is waiting on you",
+      question: "Not what you meant?",
       choices: [
-        {
-          id: "generate",
-          label: "Generate",
-          hint: "write the project",
-          icon: SparklesIcon,
-          accent: ACCENT.bespoke,
-          primary: true,
-          title: "Generate the agent this plan describes",
-          onPick: () => sendGenerate(openPlan.prompt, [], undefined, openPlan.planId ?? undefined),
-        },
-        {
-          id: "revise",
-          label: "Revise",
-          hint: "say what to change",
-          icon: PencilIcon,
-          title: "Type feedback — the plan is re-written against it",
-          onPick: () => {
-            setComposerMode("chat");
-            composerRef.current?.focus();
-          },
-        },
-        {
-          id: "discard",
-          label: "Discard",
-          hint: "hand the brief back",
-          icon: XIcon,
-          title: "Drop this plan and return your description to the composer",
-          onPick: () => {
-            if (openPlan.planId) sendDiscardPlan(openPlan.planId);
-            useUiStore.getState().prefillChat(openPlan.prompt);
-          },
-        },
         /**
          * §15.2: [ I just wanted to ask ] — the router was wrong in the other direction.
          *
