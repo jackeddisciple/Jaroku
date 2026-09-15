@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from 
 import { highlightCode, isCommandBlock, languageLabel } from "../lib/highlight.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { parseMarkdown, type Block, type CalloutTone, type Inline } from "../lib/markdown.ts";
+import { loadMathStyles, typesetAlready, typesetMath } from "../lib/math.ts";
 import { openLink } from "../lib/openExternal.ts";
 import { ICON } from "../lib/tokens.ts";
 import { iconBtn } from "./buttons.ts";
@@ -60,6 +61,40 @@ function ReplyLink({ href, children }: { href: string; children: ReactNode }) {
   );
 }
 
+/**
+ * An equation: typeset once it is whole, and until then — or if KaTeX cannot load — its TeX in the code
+ * face, so a half-written formula reads as the source it is rather than as broken maths.
+ */
+function MathView({ tex, display, closed = true }: { tex: string; display: boolean; closed?: boolean }) {
+  const [html, setHtml] = useState<string | null>(() => (closed ? typesetAlready(tex, display) ?? null : null));
+
+  useEffect(() => {
+    if (!closed) {
+      setHtml(null);
+      return;
+    }
+    let live = true;
+    void Promise.all([typesetMath(tex, display), loadMathStyles()]).then(([h]) => {
+      if (live) setHtml(h);
+    });
+    return () => {
+      live = false;
+    };
+  }, [tex, display, closed]);
+
+  if (display) {
+    return html ? (
+      // KaTeX's own markup, with trust off: its spans, never anything the reply wrote.
+      <div className="overflow-x-auto overflow-y-hidden py-1 text-ink" dangerouslySetInnerHTML={{ __html: html }} />
+    ) : (
+      <pre className="overflow-x-auto rounded-card border border-hair bg-panel px-3 py-2.5 font-mono text-caption leading-[1.6] text-muted">
+        <code>{tex}</code>
+      </pre>
+    );
+  }
+  return html ? <span className="text-ink" dangerouslySetInnerHTML={{ __html: html }} /> : <code className={CHIP_INK}>{tex}</code>;
+}
+
 function InlineView({ pieces }: { pieces: readonly Inline[] }) {
   return (
     <>
@@ -77,6 +112,8 @@ function InlineView({ pieces }: { pieces: readonly Inline[] }) {
             return <del key={i} className="text-muted"><InlineView pieces={p.children} /></del>;
           case "code":
             return <code key={i} className={CHIP_INK}>{p.text}</code>;
+          case "math":
+            return <MathView key={i} tex={p.tex} display={false} />;
           case "link":
             return (
               <ReplyLink key={i} href={p.href}>
@@ -206,6 +243,8 @@ function BlockView({ block }: { block: Block }): ReactNode {
       );
     case "code":
       return <CodeBlock lang={block.lang} text={block.text} closed={block.closed} />;
+    case "math":
+      return <MathView tex={block.tex} display closed={block.closed} />;
     case "table":
       return (
         <div className="overflow-x-auto rounded-card border border-hair">

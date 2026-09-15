@@ -1359,6 +1359,9 @@ jobs:
           # AND THE CODE INSIDE A REPLY: which fences are commands to run, what each block is called, and
           # that it is really highlighted — with the code escaped, never markup.
           npm run test:highlight
+          # AND THE MATHS: that an equation is really typeset, that KaTeX's trust stays off so `\href` and
+          # markup never come back from a reply, and that a formula with a mistake is marked, never thrown.
+          npm run test:math
           # WHICH OF THE TWO WINDOWS THE PAGE ASKS FOR, and the two ways that goes wrong. The
           # welcome screen is a 560px window and the application is 1440, only the bundle knows
           # which of them a launch needs, and a webview cannot resize the frame it is inside — so

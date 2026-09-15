@@ -130,5 +130,29 @@ console.log("\nlinks a reply contains");
     parseInline("[docs](https://example.com)").filter((p) => p.kind === "link").length === 1);
 }
 
+console.log("\nmathematics");
+{
+  const inlineMath = (src: string) => parseInline(src).filter((p) => p.kind === "math").map((p) => (p as Extract<Inline, { kind: "math" }>).tex);
+  check("$x^2$ is inline maths", show(inlineMath("the square $x^2$ grows")) === show(["x^2"]), show(parseInline("the square $x^2$ grows")));
+  check("\\( … \\) is inline maths", show(inlineMath("so \\(a + b\\) holds")) === show(["a + b"]));
+  check("$5 and $10 are money", inlineMath("between $5 and $10").length === 0, show(parseInline("between $5 and $10")));
+  check("$5-$10 is money", inlineMath("costs $5-$10 a month").length === 0, show(parseInline("costs $5-$10 a month")));
+  check("an escaped dollar is a dollar", inlineText(parseInline("\\$x$")) === "$x$" && inlineMath("\\$x$").length === 0, show(parseInline("\\$x$")));
+  check("a dollar inside inline code is code", inlineMath("run `echo $HOME$`").length === 0);
+  check("inline maths reads as its TeX in plain text", inlineText(parseInline("so $n^2$ steps")) === "so n^2 steps");
+
+  const block = parseMarkdown("The area is\n\n$$\nA = \\pi r^2\n$$\n\nfor a circle.");
+  check("$$ on their own lines are a maths block", kinds(block) === "paragraph,math,paragraph", show(block));
+  const m = block[1] as Extract<Block, { kind: "math" }>;
+  check("...holding the TeX between them, closed", m?.tex === "A = \\pi r^2" && m.closed, show(m));
+  const one = parseMarkdown("$$E = mc^2$$")[0] as Extract<Block, { kind: "math" }>;
+  check("$$ … $$ on one line is a maths block", one?.kind === "math" && one.tex === "E = mc^2" && one.closed, show(one));
+  const bracket = parseMarkdown("\\[\nx = 1\n\\]")[0] as Extract<Block, { kind: "math" }>;
+  check("\\[ … \\] is a maths block", bracket?.kind === "math" && bracket.tex === "x = 1" && bracket.closed, show(bracket));
+  const half = parseMarkdown("$$\n\\frac{a}{")[0] as Extract<Block, { kind: "math" }>;
+  check("a maths block still streaming is open", half?.kind === "math" && !half.closed, show(half));
+  check("a paragraph ends where a maths block starts", kinds(parseMarkdown("Consider\n$$x$$")) === "paragraph,math", show(parseMarkdown("Consider\n$$x$$")));
+}
+
 console.log(fail === 0 ? "\nall markdown checks passed" : `\n${fail} markdown check(s) FAILED`);
 (globalThis as { process?: { exit(code: number): void } }).process?.exit(fail === 0 ? 0 : 1);

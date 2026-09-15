@@ -21,7 +21,8 @@ export type Inline =
   | { kind: "em"; children: Inline[] }
   | { kind: "del"; children: Inline[] }
   | { kind: "code"; text: string }
-  | { kind: "link"; href: string; children: Inline[] };
+  | { kind: "link"; href: string; children: Inline[] }
+  | { kind: "math"; tex: string };
 
 export type Align = "left" | "center" | "right" | null;
 
@@ -38,7 +39,9 @@ export type Block =
   | { kind: "table"; align: Align[]; head: Inline[][]; rows: Inline[][][] }
   | { kind: "rule" }
   /** A note, tip or warning set apart from the answer — see `calloutOf`. */
-  | { kind: "callout"; tone: CalloutTone; title: string; blocks: Block[] };
+  | { kind: "callout"; tone: CalloutTone; title: string; blocks: Block[] }
+  /** Mathematics on lines of its own: `$$ … $$` or `\[ … \]`. Unclosed while it streams, like a fence. */
+  | { kind: "math"; tex: string; closed: boolean };
 
 /** The five kinds of callout, named the way GitHub's alerts name them. */
 export type CalloutTone = "note" | "tip" | "important" | "warning" | "caution";
@@ -53,6 +56,7 @@ const HEADING = /^ {0,3}(#{1,6})(?:\s+(.*?))?\s*#*\s*$/;
 const RULE = /^ {0,3}([-*_])(?: *\1){2,} *$/;
 const QUOTE = /^ {0,3}>/;
 const MARKER = /^( *)([-*+]|\d{1,9}[.)])(?: +(.*))?$/;
+const MATH_OPEN = /^ {0,3}(\$\$(?!\$)|\\\[)/;
 
 interface Marker {
   indent: number;
@@ -112,7 +116,7 @@ function startsTable(lines: string[], i: number): boolean {
 /** Whether line `i` opens a block of its own, and so ends the paragraph running into it. */
 function startsBlock(lines: string[], i: number): boolean {
   const line = lines[i]!;
-  return FENCE.test(line) || HEADING.test(line) || RULE.test(line) || QUOTE.test(line)
+  return FENCE.test(line) || MATH_OPEN.test(line) || HEADING.test(line) || RULE.test(line) || QUOTE.test(line)
     || listMarker(line) !== null || startsTable(lines, i);
 }
 
@@ -206,6 +210,35 @@ function parseBlocks(lines: string[]): Block[] {
       continue;
     }
 
+    const math = MATH_OPEN.exec(line);
+    if (math) {
+      // `$$ x^2 $$` on one line, or an opening line the matching mark closes further down.
+      const close = math[1] === "$$" ? "$$" : "\\]";
+      const after = line.trim().slice(2);
+      const end = after.indexOf(close);
+      if (end !== -1) {
+        out.push({ kind: "math", tex: after.slice(0, end).trim(), closed: true });
+        i++;
+        continue;
+      }
+      const body: string[] = after.trim() ? [after] : [];
+      let closed = false;
+      i++;
+      while (i < lines.length) {
+        const at = lines[i]!.indexOf(close);
+        if (at !== -1) {
+          body.push(lines[i]!.slice(0, at));
+          closed = true;
+          i++;
+          break;
+        }
+        body.push(lines[i]!);
+        i++;
+      }
+      out.push({ kind: "math", tex: body.join("\n").trim(), closed });
+      continue;
+    }
+
     const heading = HEADING.exec(line);
     if (heading) {
       out.push({ kind: "heading", level: heading[1]!.length as 1 | 2 | 3 | 4 | 5 | 6, inline: parseInline(heading[2] ?? "") });
@@ -270,7 +303,7 @@ export function parseMarkdown(src: string): Block[] {
 
 // --- inline -------------------------------------------------------------------------------------
 
-const ESCAPABLE = /[\\`*_{}[\]()#+\-.!|~>]/;
+const ESCAPABLE = /[\\`*_{}[\]()#+\-.!|~>$]/;
 const isWordChar = (ch: string | undefined): boolean => ch !== undefined && /[\p{L}\p{N}_]/u.test(ch);
 const isSpace = (ch: string | undefined): boolean => ch === undefined || /\s/.test(ch);
 
@@ -303,6 +336,22 @@ function closeSingle(src: string, ch: string, from: number): number {
   return -1;
 }
 
+/**
+ * Where an inline `$` closes, held to the rules that keep a price a price: something other than a space
+ * before it, no digit straight after it, and on the same line. So "$5 and $10" and "$5-$10" stay money.
+ */
+function closeDollar(src: string, from: number): number {
+  for (let at = from; at < src.length; at++) {
+    const ch = src[at]!;
+    if (ch === "\\") { at++; continue; }
+    if (ch === "\n") return -1;
+    if (ch !== "$") continue;
+    if (isSpace(src[at - 1]) || /\d/.test(src[at + 1] ?? "")) continue;
+    return at;
+  }
+  return -1;
+}
+
 const LINK = /^\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/;
 
 /** A run of text as inline pieces: emphasis, code, links, and the text between them. */
@@ -315,6 +364,26 @@ export function parseInline(src: string): Inline[] {
   let i = 0;
   while (i < src.length) {
     const ch = src[i]!;
+
+    // MATHEMATICS INLINE, before escapes, because `\(` would otherwise be an escaped bracket.
+    if (ch === "\\" && src[i + 1] === "(") {
+      const end = src.indexOf("\\)", i + 2);
+      if (end !== -1) {
+        flush();
+        out.push({ kind: "math", tex: src.slice(i + 2, end).trim() });
+        i = end + 2;
+        continue;
+      }
+    }
+    if (ch === "$" && src[i + 1] !== "$" && src[i - 1] !== "$" && !isSpace(src[i + 1])) {
+      const end = closeDollar(src, i + 1);
+      if (end !== -1) {
+        flush();
+        out.push({ kind: "math", tex: src.slice(i + 1, end) });
+        i = end + 1;
+        continue;
+      }
+    }
 
     if (ch === "\\" && i + 1 < src.length && ESCAPABLE.test(src[i + 1]!)) {
       buf += src[i + 1];
@@ -393,5 +462,7 @@ export function parseInline(src: string): Inline[] {
 
 /** The plain words of some inline pieces — what a heading or a link says, without its styling. */
 export function inlineText(pieces: readonly Inline[]): string {
-  return pieces.map((p) => (p.kind === "text" || p.kind === "code" ? p.text : inlineText(p.children))).join("");
+  return pieces
+    .map((p) => (p.kind === "text" || p.kind === "code" ? p.text : p.kind === "math" ? p.tex : inlineText(p.children)))
+    .join("");
 }
