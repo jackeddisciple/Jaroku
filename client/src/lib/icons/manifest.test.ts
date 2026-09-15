@@ -47,7 +47,8 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // 165 WITH `turn.stop` (§6.1), the control that ends a streaming answer and keeps what arrived —
   // `StopIcon`, which `trace.stop` and `cockpitWork.stop` already draw for the same verb, so the
   // count of distinct marks below does not move either.
-  check("165 registry keys", entries.length === 165, `${entries.length}`);
+  // 166 WITH `chatHeader.machine`, the computer beside its name over the conversation.
+  check("166 registry keys", entries.length === 166, `${entries.length}`);
   const names = new Set(entries.map((e) => e.export));
   // 104 from icons_integration's appendix, plus D8's 13 — the composer glyphs that had to move
   // here when `@hugeicons/react` came out. See the note at the top of `registry.ts`.
@@ -61,7 +62,8 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // card borrows the Trace tab's `FootprintsIcon`.
   // 124 WITHOUT `FullScreenIcon`, which only the composer's expand control drew.
   // 125 WITH `FolderClosedIcon`, for the tray behind the composer.
-  check("125 distinct marks", names.size === 125, `${names.size}`);
+  // 126 WITH `LaptopMinimalIcon`, for the computer in the middle panel's header.
+  check("126 distinct marks", names.size === 126, `${names.size}`);
   check("no key is declared twice", new Set(entries.map((e) => e.key)).size === entries.length);
 }
 

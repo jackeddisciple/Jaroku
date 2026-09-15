@@ -161,6 +161,12 @@ export const MANIFEST = {
     usage: "LimitationIcon",
   },
 
+  // ── The middle panel's header ─────────────────────────────────────────────
+  chatHeader: {
+    /** The computer the conversation runs on, beside its name and whether it is connected. */
+    machine: "LaptopMinimalIcon",
+  },
+
   // ── §5 Threads ────────────────────────────────────────────────────────────
   threads: {
     refresh: "Refresh03Icon",

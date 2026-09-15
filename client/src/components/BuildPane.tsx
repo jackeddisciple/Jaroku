@@ -64,6 +64,7 @@ import { subscriptionBadge, subscriptionBlockedReason } from "../lib/subscriptio
 import { effortName, effortStops, stopFor, subscriptionEffort } from "../lib/effortLevels.ts";
 import { ShieldControl, modeLabel } from "./composer/ShieldControl.tsx";
 import { GreetingEmoji } from "./GreetingEmoji.tsx";
+import { ChatHeader } from "./ChatHeader.tsx";
 import { ConnectorDeck } from "./composer/ConnectorDeck.tsx";
 import { TurnActions } from "./composer/TurnActions.tsx";
 import { PinRail, pinLabel, type PinnedTurn } from "./composer/PinRail.tsx";
@@ -3086,8 +3087,9 @@ export function BuildPane({
     // sit at different rhythms depending on which component rendered them. 1.55 for everything the
     // panel reads as prose; code overrides back down where it needs to (diff hunks).
     <div className={`flex h-full flex-col bg-bg leading-[1.55] ${anchored ? "justify-center" : ""}`}>
-      {/* NO HEADER. The row that stood here — "New agent" or "Fix", then the agent's name — said
-          what the sidebar already says one column over, so the middle panel starts with its content. */}
+      {/* THE COMPUTER THIS RUNS ON, and whether it is connected. Not the old "New agent" row, which
+          repeated what the sidebar says one column over. Absent while onboarding centres the pane. */}
+      {!anchored && <ChatHeader />}
 
       {/* conversation */}
       {/* Turns are distinct moments — a prompt, a plan, a generation. 24px between them, the

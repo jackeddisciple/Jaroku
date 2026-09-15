@@ -15,6 +15,7 @@ mod clock;
 mod deeplink;
 mod firstrun;
 mod logs;
+mod machine;
 mod marker;
 mod menu;
 mod paths;
@@ -125,6 +126,7 @@ pub fn run() {
             secrets::secret_delete,
             window::set_window_title,
             window::set_window_stage,
+            machine::machine_name,
         ]);
 
     // OFF BY DEFAULT AND BUILT ON PURPOSE. The updater needs a signing key pair to build at all —
@@ -446,6 +448,7 @@ fn with_updater(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         secrets::secret_delete,
         window::set_window_title,
         window::set_window_stage,
+        machine::machine_name,
         updater::check_for_update,
         updater::install_update,
     ])
