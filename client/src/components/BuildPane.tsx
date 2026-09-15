@@ -1471,37 +1471,7 @@ function ModelSelector({
 // menu carries the same way out: "Add key" beside each provider and "Add a provider key…" under them.
 
 export function BuildPane({
-  /**
-   * What to show in an empty conversation instead of the default prompt.
-   *
-   * The one seam onboarding needs. Its first-prompt step wants a few real examples where this
-   * pane's "Describe the agent you want" normally sits — the same words, so rendering both
-   * printed the heading twice with a gap between them. A slot rather than a fork: everything
-   * about the composer, the routing and the cards stays the one implementation.
-   */
-  emptySlot,
-  /**
-   * This pane IS the screen, rather than the middle column of three.
-   *
-   * True for exactly one moment: onboarding step 3, where nothing else is mounted. Three things
-   * follow, and all three are the same observation — chrome that orients you between panels is
-   * noise when there are no other panels:
-   *
-   *   * the header goes. "NEW AGENT" labels a column against its neighbours; with none, it is a
-   *     caption on a blank screen sitting directly above a heading that says the same thing in
-   *     a sentence
-   *   * the optional name field goes. The name is taken from the description when it is left
-   *     empty, which is what everybody does with their first agent, and it is the only control
-   *     here that can be ignored entirely with no consequence
-   *   * an empty conversation stops being a tall scroll area with the composer pinned beneath
-   *     it. The examples and the composer become one centred group, so the box you type into is
-   *     the middle of the screen rather than the thing at the bottom of it
-   *
-   * Everything else — the routing, the connectors, the modes, the cards — is untouched. This is
-   * about what surrounds the composer, never about what it does.
-   */
-  standalone = false,
-}: { emptySlot?: React.ReactNode; standalone?: boolean } = {}) {
+}: Record<string, never> = {}) {
   // One composer, two send modes. Each mode keeps its OWN draft so toggling never clobbers text
   // (a half-typed chat message can't be sent as agent input, and vice-versa). `text`/`setText`
   // are the active mode's draft, so the rest of the component is unchanged.
@@ -2256,12 +2226,8 @@ export function BuildPane({
     : "";
   /** Instead of sending: Secrets, open at the provider the send needed. The draft stays put. */
   const askForKey = useCallback((id: string): void => {
-    const ui = useUiStore.getState();
-    // Onboarding's first prompt has no side panel to open Secrets in, so it moves on to the phase the
-    // app arrives in — asking for a key does not finish onboarding, which is the server's fact.
-    if (standalone) ui.setOnboardingStep("run");
-    ui.openSecretsForProvider(id);
-  }, [standalone]);
+    useUiStore.getState().openSecretsForProvider(id);
+  }, []);
 
   // Promote the current test input into the eval dataset (doc §4.7.6, "one click"). The
   // draft is the subject when there is one, otherwise the remembered last input — so this
@@ -3079,9 +3045,6 @@ export function BuildPane({
     operating,
   });
 
-  // An empty thread on a screen this pane owns. The one case where the composer is not the
-  // bottom of a conversation but the middle of a page — see `standalone`.
-  const anchored = standalone && turns.length === 0;
   // Which messages open a day of this conversation, and so carry its date and time above them.
   const dayStartIds = dayStarts(turns.map((t) => ({ id: t.id, at: t.role === "user" ? t.at : undefined })));
 
@@ -3093,10 +3056,10 @@ export function BuildPane({
     // on some blocks and the 1.5 body default on others, so two paragraphs of the same size could
     // sit at different rhythms depending on which component rendered them. 1.55 for everything the
     // panel reads as prose; code overrides back down where it needs to (diff hunks).
-    <div className={`flex h-full flex-col bg-bg leading-[1.55] ${anchored ? "justify-center" : ""}`}>
+    <div className="flex h-full flex-col bg-bg leading-[1.55]">
       {/* THE COMPUTER THIS RUNS ON, and whether it is connected. Not the old "New agent" row, which
-          repeated what the sidebar says one column over. Absent while onboarding centres the pane. */}
-      {!anchored && <ChatHeader />}
+          repeated what the sidebar says one column over. */}
+      <ChatHeader />
 
       {/* conversation */}
       {/* Turns are distinct moments — a prompt, a plan, a generation. 24px between them, the
@@ -3104,28 +3067,23 @@ export function BuildPane({
           continuous document. */}
       <div
         ref={scrollRef}
-        className={`px-6 ${
-          anchored ? "shrink-0" : "flex-1 min-h-0 overflow-y-auto py-2 space-y-6"
-        }`}
+        className="flex-1 min-h-0 overflow-y-auto px-6 py-2 space-y-6"
       >
         {/* §5.3's pinned rail. Sticky at the top of the thread, and PERSONAL — the ids in it came
             from a read scoped to this user, and nothing here could ask for anybody else's. */}
-        {!anchored && (
-          <PinRail
-            pins={pinnedTurns}
-            collapsed={railCollapsed}
-            onToggleCollapsed={() => setRailCollapsed((v) => !v)}
-            onOpen={scrollToTurn}
-            onUnpin={(itemId) => void togglePin(activeThreadId ?? "", itemId)}
-          />
-        )}
-        {turns.length === 0 && emptySlot}
+        <PinRail
+          pins={pinnedTurns}
+          collapsed={railCollapsed}
+          onToggleCollapsed={() => setRailCollapsed((v) => !v)}
+          onOpen={scrollToTurn}
+          onUnpin={(itemId) => void togglePin(activeThreadId ?? "", itemId)}
+        />
         {/* PART 3 §11: THE EMPTY STATE OF AN OPERATE THREAD IS NOT THE BUILD ONE. Both sentences
             below are about writing code — "describe the agent you want", "describe a change" — and
             an operate conversation can do neither. An empty state is the one piece of copy a person
             reads before they have decided anything, so it is the last place the surface may
             misdescribe itself. */}
-        {turns.length === 0 && !emptySlot && operating && (
+        {turns.length === 0 && operating && (
           <EmptyState
             icon={WrenchIcon}
             title={`Ask ${activeThread?.agent_name ?? "this agent"} what it has been doing`}
@@ -3138,7 +3096,7 @@ export function BuildPane({
             }
           />
         )}
-        {turns.length === 0 && !emptySlot && !operating &&
+        {turns.length === 0 && !operating &&
           (mode === "generate" ? (
             // THE NEW-AGENT SCREEN GREETS RATHER THAN INSTRUCTS: one group, a small empty-state mark
             // above one question, set in the space above the composer. `min-h-full` rather than
@@ -3427,7 +3385,7 @@ export function BuildPane({
               ? "flex min-h-0 flex-1 flex-col bg-panel p-4 pb-3"
               // ITS LIFT IS NOT ITS OWN. In the pane the card is raised to E2 by `ComposerShell`'s
               // wrapper, the height the dialog gives it — the product owner's call on 2026-09-10 —
-              // because the card's own shadow is the standalone composer's `shadow-glow`, a border
+              // because the card's own shadow is the composer's `shadow-glow`, a border
               // deepened to §03's strongest plus §07's one sanctioned step.
               //
               // AND NO RING WHEN SOMEBODY CLICKS IN, the same day's call: a black outline round the
@@ -3435,7 +3393,7 @@ export function BuildPane({
               //
               // ON THE `xl` RUNG, §04's prominent surfaces — a step rounder than the `lg` cards around
               // it, the product owner's call on 2026-09-10. `ComposerShell`'s wrapper matches it.
-              : `rounded-xl border border-edge bg-panel px-4 pb-2.5 pt-3.5 ${standalone ? "shadow-glow" : ""}`
+              : "rounded-xl border border-edge bg-panel px-4 pb-2.5 pt-3.5"
           }
         >
           {/* WHAT THE TIER JUST REFUSED, above the input and inside the composer card.
@@ -3617,11 +3575,6 @@ export function BuildPane({
           >
             <textarea
               ref={composerRef}
-              // First run only. The caret belongs in the one control the screen exists for, and
-              // §4.5's keyboard-first rule is not satisfied by a screen you have to click into
-              // before you can type. In the three-column app the pane does not get to steal focus
-              // from wherever the user actually is.
-              autoFocus={standalone}
               value={text}
               onChange={(e) => {
                 setText(e.target.value);

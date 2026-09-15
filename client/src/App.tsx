@@ -5,6 +5,7 @@ import { RightPanel, RightPanelRail, useRightPanelFollow } from "./components/Ri
 import { StatusBar } from "./components/StatusBar.tsx";
 import { CommandPalette } from "./components/CommandPalette.tsx";
 import { ProviderKeysDialog } from "./components/ProviderKeysDialog.tsx";
+import { BuildPane } from "./components/BuildPane.tsx";
 import { CodeOverlay } from "./components/CodeOverlay.tsx";
 import { AuthFlow, SignInSwapPrompt } from "./components/auth/AuthFlow.tsx";
 import { SetUpAccountScreen } from "./components/auth/SetUpAccountScreen.tsx";
@@ -31,7 +32,6 @@ import { RoleRefusal } from "./components/RoleRefusal.tsx";
 import { InviteNotice } from "./components/InviteNotice.tsx";
 import { redeemPendingInvite } from "./lib/invite.ts";
 import { switchWorkspace } from "./lib/socket.ts";
-import { ComposerColumn } from "./components/onboarding/ComposerColumn.tsx";
 import {
   AccountOnboarding,
   accountOnboardingOnScreen,
@@ -39,7 +39,6 @@ import {
 } from "./components/onboarding/account/AccountOnboarding.tsx";
 import { FinishSetupBanner } from "./components/onboarding/account/FinishSetupBanner.tsx";
 import { useAccountOnboardingStore } from "./store/accountOnboardingStore.ts";
-import { useOnboarding } from "./components/onboarding/useOnboarding.ts";
 import { sendLoadAgentFiles, startSocket } from "./lib/socket.ts";
 import { useBuildStore } from "./store/buildStore.ts";
 import { useSessionStore } from "./store/sessionStore.ts";
@@ -175,12 +174,19 @@ export function App() {
    */
   const [sidebarMoving, setSidebarMoving] = useState(false);
 
-  // First run. Everything below is the normal app once `phase` is "complete", which it is for
-  // every session after the first — see components/onboarding/useOnboarding.ts.
-  const { phase, mountSidebar, mountRightPanel } = useOnboarding();
+  // THE WORKSPACE IS THE ONLY THING THIS RENDERS — the product owner's call on 2026-09-15: "in any
+  // phase of a user using jaroku he should never see this screen. User should always start at our
+  // main workspace." What it replaced was a product tour that took the sidebar and the right panel
+  // away and put three example briefs where the conversation goes.
+  //
+  // IT WAS NOT ONLY THE FIRST RUN. The tour was on whenever the account's `onboarded` flag read
+  // false, and that flag arrives with the session snapshot — so every reconnect showed it for as
+  // long as the snapshot took, which is why it turned up "sometimes" long after anybody's first
+  // run. There is no phase left to be in: the sidebar, the composer and the right panel mount
+  // together, and BuildPane's own empty state is the greeting and the cards.
 
-  // When the right panel opens by itself — see RightPanel.tsx. Here rather than in the panel, which
-  // is not mounted for the first run's early steps and would miss what happened during them.
+  // When the right panel opens by itself — see RightPanel.tsx. Here rather than in the panel, so
+  // an opening that happened while it was collapsed is not missed.
   useRightPanelFollow();
   /**
    * The right panel, driven the way the sidebar is: the store decides, the panel follows.
@@ -212,7 +218,7 @@ export function App() {
     else panel.collapse();
     const done = setTimeout(() => setInspectorMoving(false), 260);
     return () => clearTimeout(done);
-  }, [rightPanelOpen, mountRightPanel]);
+  }, [rightPanelOpen]);
   /**
    * The panel's own size reports, which are where the group and the store meet.
    *
@@ -537,7 +543,7 @@ export function App() {
           autoSaveId="jaroku-layout-v4"
           className={`flex-1 min-h-0 ${sidebarMoving ? "panels-moving" : ""}`}
         >
-          {mountSidebar && (
+          {(
             <>
               {/* `minSize` IS A MEASURED PIXEL FLOOR, not a share of the window. 16% is 307px
                   at 1920 and 164px at 1024 — one rule expressing two different requirements, and
@@ -589,7 +595,7 @@ export function App() {
 
                 It keeps `data-tauri-drag-region` because with the sidebar gone this is what sits
                 under the traffic lights, and the window still has to be draggable by its top edge. */}
-            {mountSidebar && sidebarHidden && (
+            {sidebarHidden && (
               <div
                 data-tauri-drag-region
                 className={`flex h-11 shrink-0 items-center ${hasHostWindow() ? "pl-[76px]" : "pl-2"}`}
@@ -636,15 +642,16 @@ export function App() {
                       once per mount. One panel gets the whole width because that is what it has. */}
                   <Panel
                     id="composer"
-                    defaultSize={mountRightPanel ? 45 : 100}
+                    defaultSize={45}
                     minSize={composerMin}
                     order={1}
                   >
-                    {/* The composer, alone during step 3 and still the centre of the screen through
-                        step 4. Wrapped rather than swapped, so BuildPane is never torn down. */}
-                    <ComposerColumn phase={phase} />
+                    {/* The conversation and the composer — the centre of the screen, always. */}
+                    <div className="h-full">
+                      <BuildPane />
+                    </div>
                   </Panel>
-                  {mountRightPanel && (
+                  {(
                     <>
                       {/* The handle goes with the panel, for the sidebar's reason: left in place it
                           would be a grip against the rail, resizing a column that is not there. */}
@@ -671,7 +678,7 @@ export function App() {
                 </PanelGroup>
                 </div>
                 {/* The rail stays when the panel is closed. See RightPanelRail. */}
-                {mountRightPanel && <RightPanelRail />}
+                <RightPanelRail />
               </div>
               {navView && (
                 <div className="absolute inset-0 animate-panel-in motion-reduce:animate-none">
@@ -688,10 +695,8 @@ export function App() {
 
       {/* Outside the shell on purpose: all three are fixed-position and cover the viewport, and
           the shell clips its own overflow so the columns can round their corners. */}
-      {/* command palette (Cmd+K) + global keyboard nav — mounted once, renders in a portal.
-          Held back until onboarding is over: its shortcuts jump between panels that are not
-          mounted yet, and a first-run user has nothing to navigate to. */}
-      {phase === "complete" && <CommandPalette />}
+      {/* command palette (Cmd+K) + global keyboard nav — mounted once, renders in a portal. */}
+      <CommandPalette />
       {/* code opens on demand (diff card / Cmd+P), overlaying the conversation */}
       <CodeOverlay />
       {/* Who is in this workspace, and everything else true of the workspace rather than of an

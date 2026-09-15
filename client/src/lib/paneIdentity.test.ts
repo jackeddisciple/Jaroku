@@ -75,13 +75,26 @@ console.log("\nevery saved pane layout is keyed by a panel that keeps its name")
   );
 }
 
-console.log("\na panel that is alone does not declare a share of a sibling that is not there");
+console.log("\nthe panels in the group declare the whole of it");
 {
-  // The composer renders without the right panel through onboarding step 3. A `defaultSize` of 45
-  // in a one-panel group is a layout totalling 45%, which the library normalises and warns about
-  // on every mount.
-  const composer = /<Panel\s+id="composer"[\s\S]*?>/.exec(SOURCE)?.[0] ?? "";
-  check("the composer's default share is conditioned on its sibling", /defaultSize=\{mountRightPanel\s*\?/.test(composer), composer.replace(/\s+/g, " ").slice(0, 120));
+  // THE COMPOSER IS NEVER ALONE ANY MORE. It rendered without the right panel through onboarding
+  // step 3, so its share had to be conditioned on the sibling: a `defaultSize` of 45 in a
+  // one-panel group is a layout totalling 45%, which the library normalises and warns about on
+  // every mount. That screen is gone — App.tsx mounts the workspace and nothing else (2026-09-15)
+  // — so both panels are always here and what this asks is that their shares still add up.
+  const tagOf = (id: string): string => new RegExp(`<Panel\\s+id="${id}"[\\s\\S]*?>`).exec(SOURCE)?.[0] ?? "";
+  const shareOf = (tag: string): number => Number(/defaultSize=\{(\d+)\}/.exec(tag)?.[1] ?? NaN);
+  const composer = tagOf("composer");
+  const inspector = tagOf("inspector");
+  check("the composer declares a fixed share", Number.isFinite(shareOf(composer)),
+    composer.replace(/\s+/g, " ").slice(0, 120));
+  check("...and so does the panel beside it", Number.isFinite(shareOf(inspector)),
+    inspector.replace(/\s+/g, " ").slice(0, 120));
+  check("...and together they are the whole group", shareOf(composer) + shareOf(inspector) === 100,
+    `${shareOf(composer)} + ${shareOf(inspector)}`);
+  // AND NEITHER IS CONDITIONAL, which is the same claim from the other side: a share that depended
+  // on whether a sibling was mounted would mean a screen exists where one of them is not.
+  check("neither share is conditional", !/defaultSize=\{[^}]*\?/.test(composer + inspector));
 }
 
 console.log("\nthe library still prefers an id over the constraints when it builds the key");
