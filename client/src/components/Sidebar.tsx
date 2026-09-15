@@ -10,6 +10,7 @@ import { useBuildStore } from "../store/buildStore.ts";
 import type { AgentSummary, ThreadView } from "../types.ts";
 import { openThread } from "../lib/threadNav.ts";
 import { useTypedText } from "../lib/typedText.ts";
+import { chatTitle } from "../lib/chatTitle.ts";
 import { useCanRun } from "../lib/useCapability.ts";
 import { ThreadGlyph } from "./ThreadGlyph.tsx";
 import { absTime, relTime } from "../lib/format.ts";
@@ -971,18 +972,18 @@ function ChatDot() {
 function ThreadListRow({ thread, indented = false }: { thread: ThreadView; indented?: boolean }) {
   const active = useThreadStore((s) => s.activeThreadId === thread.id);
   // The same typing as the header when a topic title arrives — see lib/typedText.ts.
-  const shownTitle = useTypedText(thread.title, !thread.title_is_custom);
+  const shownTitle = useTypedText(chatTitle(thread.title), !thread.title_is_custom);
   return (
     <button
       type="button"
       onClick={() => openThread(thread)}
-      title={thread.title}
+      title={chatTitle(thread.title)}
       className={`flex h-7 w-full shrink-0 items-center rounded-control pr-2 text-left transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
         indented ? "pl-9" : "pl-2.5"
       } ${active ? "bg-sidebar-active" : "hover:bg-sidebar-hover"}`}
     >
       <ChatDot />
-      <Truncate className={`min-w-0 flex-1 text-label ${active ? "text-ink" : "text-muted"}`} title={thread.title}>
+      <Truncate className={`min-w-0 flex-1 text-label ${active ? "text-ink" : "text-muted"}`} title={chatTitle(thread.title)}>
         {shownTitle}
       </Truncate>
       {/* WHAT IS OUTSTANDING, AT THE ROW'S END. The circle holds the left for every chat alike; a chat
@@ -1012,11 +1013,11 @@ function ArchivedThreadRow({ thread }: { thread: ThreadView }) {
       <button
         type="button"
         onClick={() => openThread(thread)}
-        title={thread.title}
+        title={chatTitle(thread.title)}
         className="flex min-w-0 flex-1 items-center pl-2.5 text-left focus-visible:outline-none focus-visible:shadow-focusring"
       >
         <ChatDot />
-        <Truncate className="min-w-0 flex-1 text-label text-muted" title={thread.title}>{thread.title}</Truncate>
+        <Truncate className="min-w-0 flex-1 text-label text-muted" title={chatTitle(thread.title)}>{chatTitle(thread.title)}</Truncate>
       </button>
       {canRestore && (
         <button
@@ -1024,7 +1025,7 @@ function ArchivedThreadRow({ thread }: { thread: ThreadView }) {
           onClick={() => sendRestoreThread(thread.id)}
           disabled={!connected}
           title={connected ? "Restore this chat" : "Reconnecting — restoring needs a connection"}
-          aria-label={`Restore ${thread.title}`}
+          aria-label={`Restore ${chatTitle(thread.title)}`}
           className="flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-faint transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring disabled:cursor-default disabled:text-disabled"
         >
           <Icon.threads.restore size={ICON.sm} />
@@ -1059,12 +1060,12 @@ function ListHeading({ label, children }: { label: string; children?: React.Reac
  */
 function PinnedThreadRow({ thread }: { thread: ThreadView }) {
   const active = useThreadStore((s) => s.activeThreadId === thread.id);
-  const shownTitle = useTypedText(thread.title, !thread.title_is_custom);
+  const shownTitle = useTypedText(chatTitle(thread.title), !thread.title_is_custom);
   return (
     <button
       type="button"
       onClick={() => openThread(thread)}
-      title={thread.title}
+      title={chatTitle(thread.title)}
       className={`flex h-8 w-full shrink-0 items-center gap-2.5 rounded-control pl-2.5 pr-2 text-left transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
         active ? "bg-sidebar-active" : "hover:bg-sidebar-hover"
       }`}
@@ -1072,7 +1073,7 @@ function PinnedThreadRow({ thread }: { thread: ThreadView }) {
       <span className="inline-flex shrink-0 justify-center text-faint" style={{ width: ICON.md }} aria-hidden>
         <Icon.threads.chat size={ICON.sm} />
       </span>
-      <Truncate className="min-w-0 flex-1 text-label text-ink" title={thread.title}>
+      <Truncate className="min-w-0 flex-1 text-label text-ink" title={chatTitle(thread.title)}>
         {shownTitle}
       </Truncate>
     </button>

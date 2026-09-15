@@ -204,6 +204,7 @@ import {
   type ThreadItemKind,
   type ThreadStatus,
 } from "./threadStore.ts";
+import { UNTITLED } from "./threadStore.ts";
 import { sideEffectsAfter } from "./sideEffects.ts";
 import { threadTitle, topicTitle } from "./threadTitle.ts";
 import { InboxStore } from "./inbox/inboxStore.ts";
@@ -7687,7 +7688,17 @@ function noteThreadItem(
  * floated inside — a message that failed to title is not a message that failed to arrive — and
  * every existing caller ignores the returned promise exactly as it ignored the old `void`.
  */
-function noteUserMessage(ctx: TenantContext, threadId: string, body: string): Promise<string | null> {
+function noteUserMessage(
+  ctx: TenantContext,
+  threadId: string,
+  body: string,
+  /**
+   * `title: false` when a topic title is on its way — a chat on the user's own plan, which that plan
+   * names once it has answered. Writing the first line meanwhile put the person's own words up as the
+   * name and then swapped them out, which read as the title being wrong and then corrected.
+   */
+  opts: { title?: boolean } = {},
+): Promise<string | null> {
   const text = body.trim();
   if (!text) return Promise.resolve(null);
   return (async () => {
@@ -7704,14 +7715,36 @@ function noteUserMessage(ctx: TenantContext, threadId: string, body: string): Pr
     // be wrong for a different reason — §5 says the first — and `autoTitle` is a no-op on a thread
     // somebody has renamed, a guarantee that lives in its UPDATE's own WHERE rather than in a branch
     // here, so two clients racing cannot get past it either.
-    const first = await threadStore.firstMessage(ctx, threadId);
-    if (first) await threadStore.autoTitle(ctx, threadId, threadTitle(first));
+    if (opts.title !== false) {
+      const first = await threadStore.firstMessage(ctx, threadId);
+      if (first) await threadStore.autoTitle(ctx, threadId, threadTitle(first));
+    }
     scheduleListRefresh(ctx);
     return itemId;
   })().catch((err) => {
     console.error(`[threads] could not record a message:`, (err as Error)?.message ?? err);
     return null;
   });
+}
+
+/**
+ * The first-line title, for a chat that was waiting on a topic title that is no longer coming.
+ *
+ * A subscription turn that failed, was stopped or was abandoned will not be followed by a title turn, so
+ * the chat would stay `Untitled thread` for good. ONLY WHILE IT IS STILL UNTITLED: a later message
+ * failing must not replace the topic title an earlier answer earned, and a rename is never touched.
+ */
+async function titleFromFirstMessage(ctx: TenantContext, threadId: string): Promise<void> {
+  try {
+    const thread = await threadStore.get(ctx, threadId);
+    if (!thread || thread.title !== UNTITLED) return;
+    const first = await threadStore.firstMessage(ctx, threadId);
+    if (!first) return;
+    await threadStore.autoTitle(ctx, threadId, threadTitle(first));
+    await broadcastThreads(ctx);
+  } catch (err) {
+    console.error(`[threads] could not title a chat from its first message:`, (err as Error)?.message ?? err);
+  }
 }
 
 /**
@@ -13721,7 +13754,9 @@ async function chatWithJaroku(
     // cost me" is exactly the line that makes a conversation recognisable a week later.
     const turn = cmd.regenerateOf
       ? await turnForRegenerate(ctx, cmd.regenerateOf)
-      : await noteUserMessage(ctx, thread, message);
+      // ON A SUBSCRIPTION THE PLAN NAMES THE CHAT once it has answered, so the first line is not written
+      // as its title in the meantime — see `noteUserMessage` and client/src/lib/topicTitle.ts.
+      : await noteUserMessage(ctx, thread, message, { title: !subscription });
     // THE SERVER'S VERIFIED ID, echoed back so every tab replaces the same turn rather than
     // appending one. A regeneration whose id this workspace does not own carries nothing here and
     // arrives as an ordinary message, which is the honest degradation.
@@ -14352,6 +14387,9 @@ async function settleSubscriptionTurn(ctx: TenantContext, cmd: RecordChatTurnCom
     ...(cmd.status === "stopped" ? { stopped: true } : {}),
   });
   const thread = open.threadId;
+  // NO TOPIC TITLE FOLLOWS an answer that failed or was stopped, so a chat still waiting for one takes its
+  // first line instead.
+  if (cmd.status === "error" || cmd.status === "stopped") void titleFromFirstMessage(ctx, thread);
   if (cmd.status === "error") {
     const message = typeof cmd.error === "string" && cmd.error.trim()
       ? cmd.error.trim().slice(0, 500)
@@ -14403,6 +14441,8 @@ function abandonSubscriptionTurn(held: OpenTurn<HeldSubscriptionTurn>, message: 
   subscriptionTurns.drop(held.runId);
   chatting.delete(held.threadId);
   relay.broadcastReply(held.ctx, { type: "error", agentId: held.agentId, message }, held.threadId);
+  // Nothing is going to title it now either.
+  void titleFromFirstMessage(held.ctx, held.threadId);
 }
 
 // Kick off one run on startup unless suppressed (set JAROKU_NO_AUTORUN=1 to just serve).

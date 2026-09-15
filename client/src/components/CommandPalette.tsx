@@ -23,6 +23,7 @@ import { useThreadStore } from "../store/threadStore.ts";
 import { useAgentGridStore } from "../store/agentGridStore.ts";
 import { useWorkStore } from "../store/workStore.ts";
 import { openThread } from "../lib/threadNav.ts";
+import { chatTitle } from "../lib/chatTitle.ts";
 import { openAgentDetail } from "../lib/agentNav.ts";
 import { AgentEmoji } from "./AgentEmoji.tsx";
 import { relTime } from "../lib/format.ts";
@@ -268,7 +269,7 @@ export function CommandPalette() {
                 // beside it. A palette entry that showed only the title would make a person open two
                 // threads to find the one with the pending diff.
                 <Item key={t.id} onSelect={run(() => openThread(t))} meta={relTime(t.last_activity_at)}>
-                  <Truncate>{t.title}</Truncate>
+                  <Truncate>{chatTitle(t.title)}</Truncate>
                   {t.fragment && <span className="shrink-0 text-faint text-tiny">{t.fragment}</span>}
                 </Item>
               ))}

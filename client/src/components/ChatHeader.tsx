@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { chatMarkdown } from "../lib/chatMarkdown.ts";
 import { useTypedText } from "../lib/typedText.ts";
+import { chatTitle } from "../lib/chatTitle.ts";
 import { readMachineName } from "../lib/hostMachine.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { useMenuFocus } from "../lib/menuFocus.ts";
@@ -133,8 +134,8 @@ export function ThreadTitle({
 }) {
   const canRename = useCanRun("renameThread");
   // A NEW NAME TYPES ITSELF OUT — a topic title arriving — unless somebody typed it themselves.
-  const shownTitle = useTypedText(thread.title, !thread.title_is_custom);
-  const [draft, setDraft] = useState(thread.title);
+  const shownTitle = useTypedText(chatTitle(thread.title), !thread.title_is_custom);
+  const [draft, setDraft] = useState(chatTitle(thread.title));
   const input = useRef<HTMLInputElement>(null);
   /** Escape ended this edit, so the blur that follows must not save it. */
   const cancelled = useRef(false);
@@ -142,7 +143,7 @@ export function ThreadTitle({
   useEffect(() => {
     if (!editing) return;
     cancelled.current = false;
-    setDraft(thread.title);
+    setDraft(chatTitle(thread.title));
     input.current?.focus();
     input.current?.select();
     // `thread.title` left out on purpose: a list update arriving mid-edit must not replace what is typed.
@@ -180,7 +181,7 @@ export function ThreadTitle({
   if (!canRename || !connected) {
     return (
       <span className="min-w-0 max-w-[360px] px-2">
-        <Truncate className="text-label text-ink" title={thread.title}>{shownTitle}</Truncate>
+        <Truncate className="text-label text-ink" title={chatTitle(thread.title)}>{shownTitle}</Truncate>
       </span>
     );
   }
@@ -192,7 +193,7 @@ export function ThreadTitle({
       title="Rename this chat"
       className={`${HEADER_BUTTON} min-w-0 max-w-[360px] px-2 text-left`}
     >
-      <Truncate className="text-label text-ink" title={thread.title}>{shownTitle}</Truncate>
+      <Truncate className="text-label text-ink" title={chatTitle(thread.title)}>{shownTitle}</Truncate>
     </button>
   );
 }
@@ -289,7 +290,7 @@ function ThreadMenu({ thread, connected, onRename }: { thread: ThreadView; conne
           {confirming ? (
             <div className="flex max-w-[280px] flex-col gap-1.5 p-1.5">
               <p className="px-1 text-tiny leading-[1.5] text-muted">
-                Delete <span className="text-ink">{thread.title}</span> for good? Its messages go with it. Its
+                Delete <span className="text-ink">{chatTitle(thread.title)}</span> for good? Its messages go with it. Its
                 agent, runs and costs stay.
               </p>
               <div className="flex gap-3 px-1 pb-0.5">

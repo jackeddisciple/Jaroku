@@ -5,6 +5,7 @@
 import type { ChatTurn } from "../store/chatStore.ts";
 import type { ThreadView } from "../types.ts";
 import { TITLE_SYSTEM, TOPIC_WORDS, needsTopicTitle, runTitleTurn, titlePrompt } from "./topicTitle.ts";
+import { NEW_CHAT, UNTITLED, chatTitle } from "./chatTitle.ts";
 
 let fail = 0;
 const check = (name: string, ok: boolean, detail = ""): void => {
@@ -74,6 +75,13 @@ console.log("\na shell answers, and only this turn's lines count");
   };
   const title = await runTitleTurn({ provider: "anthropic", model: null, prompt: "p" });
   check("the title is this turn's text", title === "Support Email Triage", String(title));
+}
+
+console.log("\na chat waiting for its topic title is a New chat, not its own first line");
+{
+  check("the stored placeholder reads New chat", chatTitle(UNTITLED) === NEW_CHAT);
+  check("...and so does an empty one", chatTitle("  ") === NEW_CHAT);
+  check("a real name is shown as it is", chatTitle("Greeting") === "Greeting");
 }
 
 console.log(fail === 0 ? "\nall topic-title checks passed" : `\n${fail} topic-title check(s) FAILED`);

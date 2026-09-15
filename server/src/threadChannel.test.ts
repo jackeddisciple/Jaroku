@@ -302,7 +302,9 @@ console.log("\n§4.3 — a thread the client did not name is opened, not merely 
   // the question itself, so sending this after `noteUserMessage` puts the same sentence on screen
   // twice. Asserted as an ORDER, which is the part that would break silently.
   const eventAt = index.indexOf('reason: "created",', at);
-  const writeAt = index.indexOf("await noteUserMessage(ctx, thread, message)", at);
+  // THE CALL, WITH OR WITHOUT ITS OPTIONS. A chat on the user's own plan passes `{ title: false }`, because
+  // that plan names the chat once it has answered; what this asserts is only where the write sits.
+  const writeAt = index.indexOf("await noteUserMessage(ctx, thread, message", at);
   check(`...and before the user's message is recorded (event ${eventAt}, write ${writeAt})`, eventAt > 0 && writeAt > 0 && eventAt < writeAt);
 
   // AND NEVER FATAL: failing to navigate is a worse screen, not a lost answer.

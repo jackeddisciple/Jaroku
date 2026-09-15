@@ -1709,7 +1709,9 @@ function titleOnce(threadId: string, provider: string, model: string | null): vo
   if (!message) return;
   titled.add(threadId);
   void runTitleTurn({ provider, model, prompt: titlePrompt(message) }).then((title) => {
-    if (title) sendTitleThread(threadId, title);
+    // NO TOPIC CAME BACK — a refused sign-in, a timeout — so the first message stands in, cut to six words
+    // by the server. The chat was left untitled for this turn, and must not stay that way.
+    sendTitleThread(threadId, title ?? message);
   });
 }
 
