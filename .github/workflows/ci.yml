@@ -1343,6 +1343,9 @@ jobs:
           # WHAT THE SHELL SAYS THIS COMPUTER IS CALLED, for the header over the conversation: asked
           # once per page, and validated so a malformed answer leaves the header empty.
           npm run test:host-machine
+          # WHAT SHARE CHAT PUTS ON THE CLIPBOARD: the conversation as Markdown, replies as their source
+          # so code fences survive the paste, and nothing a turn has no words for.
+          npm run test:chat-markdown
           # WHICH OF THE TWO WINDOWS THE PAGE ASKS FOR, and the two ways that goes wrong. The
           # welcome screen is a 560px window and the application is 1440, only the bundle knows
           # which of them a launch needs, and a webview cannot resize the frame it is inside — so

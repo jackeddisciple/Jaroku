@@ -7,7 +7,8 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { orderedRuns, useTraceStore } from "../store/traceStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
-import type { AgentSummary, RunSummary, RunStatus } from "../types.ts";
+import type { AgentSummary, RunSummary, RunStatus, ThreadView } from "../types.ts";
+import { openThread } from "../lib/threadNav.ts";
 import { absTime, relTime } from "../lib/format.ts";
 import { agentStatus } from "../lib/agentStatus.ts";
 import { StatusGlyph } from "./StatusGlyph.tsx";
@@ -1251,6 +1252,33 @@ function FilterMenu({
   );
 }
 
+/**
+ * A pinned chat on the Pinned shelf: its name, and a press that opens it.
+ *
+ * ONE LINE, NOT THE AGENT ROW'S TWO. A chat has no category and no run history to show under its
+ * name, and the pin mark in the icon column is what says why it is up here rather than in the list.
+ */
+function PinnedThreadRow({ thread }: { thread: ThreadView }) {
+  const active = useThreadStore((s) => s.activeThreadId === thread.id);
+  return (
+    <button
+      type="button"
+      onClick={() => openThread(thread)}
+      title={thread.title}
+      className={`flex h-8 w-full shrink-0 items-center gap-2.5 rounded-control pl-2.5 pr-2 text-left transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+        active ? "bg-sidebar-active" : "hover:bg-sidebar-hover"
+      }`}
+    >
+      <span className="inline-flex shrink-0 justify-center text-faint" style={{ width: ICON.md }} aria-hidden>
+        <Icon.chatHeader.pin size={ICON.sm} />
+      </span>
+      <Truncate className="min-w-0 flex-1 text-label text-ink" title={thread.title}>
+        {thread.title}
+      </Truncate>
+    </button>
+  );
+}
+
 export function Sidebar() {
   const runs = useTraceStore((s) => s.runs);
   const agents = useBuildStore((s) => s.agents);
@@ -1268,6 +1296,13 @@ export function Sidebar() {
   // §2: pinned agents, then the active/recent ones. The pins are this person's own, from localStorage
   // keyed by workspace — see uiStore.
   const pinnedIds = useUiStore((s) => s.pinnedAgents);
+  // Pinned chats sit on the same shelf, above the agents, in the order they were pinned — and only
+  // the ones that still exist and are not archived, for the reasons given for agents below.
+  const pinnedThreadIds = useUiStore((s) => s.pinnedThreads);
+  const threadRows = useThreadStore((s) => s.threads);
+  const pinnedThreads = pinnedThreadIds
+    .map((id) => threadRows.find((t) => t.id === id))
+    .filter((t): t is ThreadView => t !== undefined && !t.archived_at);
 
   const counts = { running: 0, deployed: 0, synced: 0, drafts: 0, archived: 0 };
   for (const a of agents) {
@@ -1367,7 +1402,7 @@ export function Sidebar() {
           NOTHING WHEN EMPTY, deliberately: a permanent `Pinned` header over nothing is a section
           that teaches people it is broken — the same rule that leaves an empty Recents empty. It
           appears the moment somebody pins one and goes away again when they unpin the last. */}
-      {pinnedVisible.length > 0 && (
+      {(pinnedVisible.length > 0 || pinnedThreads.length > 0) && (
         <div className="mt-4 flex shrink-0 flex-col">
           <div className="flex h-8 shrink-0 items-center gap-1 pl-1.5 pr-2">
             <button
@@ -1389,6 +1424,9 @@ export function Sidebar() {
               resolves against a parent that is `auto` here, which is to say it does not. */}
           <Collapse open={pinnedOpen}>
             <div className="flex max-h-[38vh] flex-col overflow-y-auto overflow-x-hidden px-1.5">
+              {pinnedThreads.map((t) => (
+                <PinnedThreadRow key={t.id} thread={t} />
+              ))}
               {pinnedVisible.map((a) => (
                 <AgentTreeRow key={a.agent_id} agent={a} runs={runsByAgent.get(a.agent_id) ?? []} />
               ))}

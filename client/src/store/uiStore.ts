@@ -139,6 +139,35 @@ function writePinned(slugs: string[]): void {
   }
 }
 
+// --- pinned chats ---------------------------------------------------------------------------
+//
+// THE SAME KIND OF FACT AS A PINNED AGENT, kept the same way: one person's shelf, in localStorage,
+// per workspace. A separate key rather than a mixed list, because a thread id and an agent slug are
+// different namespaces and a list holding both would have to guess which each entry was.
+export const PINNED_THREADS_KEY_PREFIX = "jaroku.pinnedThreads.";
+
+const pinnedThreadsKey = (): string =>
+  `${PINNED_THREADS_KEY_PREFIX}${useSessionStore.getState().workspaceId ?? "_"}`;
+
+function readPinnedThreads(): string[] {
+  try {
+    const raw = localStorage.getItem(pinnedThreadsKey());
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function writePinnedThreads(ids: string[]): void {
+  try {
+    localStorage.setItem(pinnedThreadsKey(), JSON.stringify(ids));
+  } catch {
+    /* see readPinned */
+  }
+}
+
 // --- first-run onboarding ----------------------------------------------------------------
 //
 // WHETHER somebody has onboarded is NOT here. It is `sessionStore.user.onboarded`, from the
@@ -321,6 +350,10 @@ interface UiState {
   loadPinnedAgents: () => void;
   /** §4.7's `P`, on the selected thread's agent. */
   togglePinnedAgent: (agentId: string) => void;
+  /** Chat ids this person has pinned, in the order they pinned them. Loaded with the agent pins. */
+  pinnedThreads: string[];
+  /** Pin from the chat's own menu, or unpin. */
+  togglePinnedThread: (threadId: string) => void;
 
   // The right panel's active tab, lifted here so the palette / shortcuts can switch it while the
   // panel's own auto-follow (new run → trace, new deploy → deploy) still writes the same field.
@@ -583,7 +616,17 @@ export const useUiStore = create<UiState>((set) => ({
   // Empty at module load, for the reason onboarding progress is: there is no session yet, so there is
   // no workspace to read the pins OF. `loadPinnedAgents` runs once one lands.
   pinnedAgents: [],
-  loadPinnedAgents: () => set({ pinnedAgents: readPinned() }),
+  // Both shelves are this workspace's, so both are read the moment it is known.
+  loadPinnedAgents: () => set({ pinnedAgents: readPinned(), pinnedThreads: readPinnedThreads() }),
+  pinnedThreads: [],
+  togglePinnedThread: (threadId) =>
+    set((s) => {
+      const pinnedThreads = s.pinnedThreads.includes(threadId)
+        ? s.pinnedThreads.filter((t) => t !== threadId)
+        : [...s.pinnedThreads, threadId];
+      writePinnedThreads(pinnedThreads);
+      return { pinnedThreads };
+    }),
   togglePinnedAgent: (agentId) =>
     set((s) => {
       const pinnedAgents = s.pinnedAgents.includes(agentId)

@@ -48,7 +48,9 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // `StopIcon`, which `trace.stop` and `cockpitWork.stop` already draw for the same verb, so the
   // count of distinct marks below does not move either.
   // 166 WITH `chatHeader.machine`, the computer beside its name over the conversation.
-  check("166 registry keys", entries.length === 166, `${entries.length}`);
+  // 172 WITH THE CHAT MENU beside it: `menu`, `pin`, `rename`, `archive`, `share` and `newChat`. Only
+  // `share` is a new mark; the other five borrow marks the sidebar and the thread list already draw.
+  check("172 registry keys", entries.length === 172, `${entries.length}`);
   const names = new Set(entries.map((e) => e.export));
   // 104 from icons_integration's appendix, plus D8's 13 — the composer glyphs that had to move
   // here when `@hugeicons/react` came out. See the note at the top of `registry.ts`.
@@ -63,7 +65,8 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // 124 WITHOUT `FullScreenIcon`, which only the composer's expand control drew.
   // 125 WITH `FolderClosedIcon`, for the tray behind the composer.
   // 126 WITH `LaptopMinimalIcon`, for the computer in the middle panel's header.
-  check("126 distinct marks", names.size === 126, `${names.size}`);
+  // 127 WITH `Share08Icon`, for Share Chat.
+  check("127 distinct marks", names.size === 127, `${names.size}`);
   check("no key is declared twice", new Set(entries.map((e) => e.key)).size === entries.length);
 }
 

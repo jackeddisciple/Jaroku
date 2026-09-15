@@ -165,6 +165,14 @@ export const MANIFEST = {
   chatHeader: {
     /** The computer the conversation runs on, beside its name and whether it is connected. */
     machine: "LaptopMinimalIcon",
+    /** The chevron beside the chat's name that opens what can be done to it. */
+    menu: "ArrowDown01Icon",
+    pin: "PinIcon",
+    rename: "Edit03Icon",
+    archive: "Archive04Icon",
+    /** Share Chat: the conversation, copied as Markdown. */
+    share: "Share08Icon",
+    newChat: "PlusIcon",
   },
 
   // ── §5 Threads ────────────────────────────────────────────────────────────
