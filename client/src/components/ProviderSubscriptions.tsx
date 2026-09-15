@@ -96,6 +96,10 @@ function Row({ row }: { row: SubscriptionStatus }) {
         </p>
       ) : state === "unavailable" ? (
         // The provider's own reason, verbatim — paraphrasing a terms decision is how it drifts.
+        //
+        // REACHABLE, THOUGH NO PROVIDER TAKES IT TODAY. The list keeps every SUPPORTED provider, and
+        // supported is not available: an integration that is finished and awaiting the provider's
+        // approval — Claude, until 2026-09-13 — is the first and not yet the second, and lands here.
         <p className="text-tiny text-muted">{row.reason}</p>
       ) : (
         <>

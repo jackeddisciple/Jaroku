@@ -56,8 +56,6 @@ export interface LocalAgentMechanism {
    * store it writes to.
    */
   readonly loginCommand: readonly string[];
-  /** The documented subprocess mode Jaroku drives, and the protocol it speaks. */
-  readonly serve: { readonly argv: readonly string[]; readonly protocol: string };
   /**
    * Where the provider's own CLI caches its own credential.
    *
@@ -198,13 +196,6 @@ export const PROVIDER_CAPABILITY: Readonly<Record<ProviderId, ProviderCapability
       // `claude auth login` rather than the in-session `/login`: this is what somebody types in a
       // terminal to sign in, and therefore what a disconnected row can usefully print.
       loginCommand: ["claude", "auth", "login"],
-      // NEVER `--bare`. That mode "never reads OAuth credentials or the system keychain" and wants
-      // ANTHROPIC_API_KEY instead, so it would turn subscription chat into API billing without
-      // anything appearing to go wrong — the exact crossing this architecture exists to prevent.
-      serve: {
-        argv: ["claude", "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"],
-        protocol: "stream-json/stdio",
-      },
       credentialPath: "the macOS Keychain, or ~/.claude/.credentials.json",
       citation: "https://code.claude.com/docs/en/legal-and-compliance",
       sanction:
@@ -240,7 +231,6 @@ export const PROVIDER_CAPABILITY: Readonly<Record<ProviderId, ProviderCapability
       kind: "local-agent",
       binary: "codex",
       loginCommand: ["codex", "login"],
-      serve: { argv: ["codex", "app-server"], protocol: "json-rpc-2.0/stdio" },
       credentialPath: "~/.codex/auth.json",
       citation: "https://learn.chatgpt.com/docs/app-server",
       sanction:

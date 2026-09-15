@@ -183,7 +183,6 @@
     "test:provider-auth-capability": "tsx src/providerAuth/capability.test.ts",
     "test:provider-auth-status": "tsx src/providerAuth/status.test.ts",
     "test:provider-auth-relay": "tsx src/providerAuth/relay.test.ts",
-    "test:provider-auth-invocation": "tsx src/providerAuth/invocation.test.ts",
     "test:deploy-artifacts": "tsx src/deployArtifacts.test.ts",
     "test:deploy-secrets": "tsx src/deploySecrets.test.ts",
     "test:deploy-store": "tsx src/deployStore.test.ts",

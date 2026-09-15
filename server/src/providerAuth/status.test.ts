@@ -11,7 +11,7 @@
 import { PROVIDER_IDS, type ProviderId } from "../providers.ts";
 import { capabilityOf, subscriptionAvailable } from "./capability.ts";
 import {
-  connectedProviders, gatedEvenWhenPresent, statusFor, subscriptionStatuses, type HostObservation,
+  connectedProviders, statusFor, subscriptionStatuses, type HostObservation,
 } from "./status.ts";
 
 let fail = 0;
@@ -49,7 +49,6 @@ console.log("\npermission is checked before the machine, and outranks it");
     } else {
       // THE ASSERTION THIS FILE EXISTS FOR.
       check(`${id} stays refused on a perfectly set-up machine`, !row.connected);
-      check(`...and says it is gated even so`, gatedEvenWhenPresent(id, perfect(id)));
       check(`...and still explains why`, (row.reason ?? "").length > 40);
     }
   }

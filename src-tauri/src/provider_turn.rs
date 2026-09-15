@@ -7,20 +7,19 @@
 // and the credential never moves.
 //
 // THE SHELL BUILDS THE COMMAND, NOT THE PAGE, and that is a security decision rather than a
-// stylistic one. The obvious design has the server plan an argv — it already does, in
-// providerAuth/invocation.ts — and the page forward it here to be spawned. That makes this function
-// "run whatever argv you are given", reachable from anything that can talk to the webview, and the
-// binaries in question take flags like `codex login --with-api-key` (reads a key from stdin) and
-// `claude --dangerously-skip-permissions`. So the page sends FIELDS and this file assembles them:
-// the provider must be one of two, the effort must be one of five, and the prompt is one argv
-// element that no shell ever sees. The worst a caller can do is ask a question.
+// stylistic one. The obvious design has the server plan an argv and the page forward it here to be
+// spawned. That makes this function "run whatever argv you are given", reachable from anything that
+// can talk to the webview, and the binaries in question take flags like `codex login --with-api-key`
+// (reads a key from stdin) and `claude --dangerously-skip-permissions`. So the page sends FIELDS and
+// this file assembles them: the provider must be one of two, the effort must be one of five, and the
+// prompt is one argv element that no shell ever sees. The worst a caller can do is ask a question.
 //
-// THE ARGV IS DELIBERATELY A SECOND IMPLEMENTATION of the server's planner, and it is said out loud
-// rather than pretended away — the same posture `effort.ts` takes about its Python twin. The server
-// one is the POLICY authority: it decides whether a provider may be used at all, and its suite
-// holds the `--bare` prohibition and the effort clamps. This one is the EXECUTION authority: it
-// decides what actually runs on this machine. Each is tested against the same rules, and neither
-// can be talked into something by the other being wrong.
+// THIS IS THE ONE PLACE A COMMAND LINE IS BUILT. The server decides whether a provider may be used at
+// all — its capability table, and the relay's check that this machine reported the plan signed in —
+// and this file decides what runs. A server-side planner once built a second argv beside this one and
+// nothing called it; it is gone rather than kept in step. The `--bare` prohibition, the flags that keep
+// a turn a conversation and the effort values are asserted here, in this file's own tests and in
+// desktopContract.test.ts.
 //
 // STREAMED LINE BY LINE, because both protocols are newline-delimited JSON and a turn can take
 // minutes — `xhigh` on Codex exceeded three minutes for a one-line prompt on 2026-09-13. Anything

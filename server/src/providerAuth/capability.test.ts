@@ -88,16 +88,13 @@ console.log("\nan approval carries a complete mechanism, and it is delegation");
     if (!m) continue;
     check(`${id} names the binary the user installs`, m.binary.length > 0);
     check(`${id} signs in with the PROVIDER'S command`, m.loginCommand[0] === m.binary, m.loginCommand.join(" "));
-    check(`${id} drives a documented subprocess mode`, m.serve.argv[0] === m.binary, m.serve.argv.join(" "));
     check(`${id} cites the page that sanctions embedding`, /^https:\/\//.test(m.citation));
     check(`${id} quotes the sanctioning sentence`, m.sanction.length > 40);
   }
-  // THE ONE FLAG THAT WOULD SILENTLY MOVE CLAUDE ONTO API BILLING. `--bare` "never reads OAuth
-  // credentials or the system keychain" and wants ANTHROPIC_API_KEY instead, so a subscription
-  // chat that passed it would spend the wrong pool with nothing appearing to go wrong.
-  const claude = localAgentFor("anthropic")!;
-  check("Claude is never driven with --bare", !claude.serve.argv.includes("--bare"), claude.serve.argv.join(" "));
-  check("...and is driven with -p, the documented programmatic mode", claude.serve.argv.includes("-p"));
+  // THE COMMAND LINE IS NOT RECORDED HERE. It was once — a `serve` argv beside a server-side planner, and
+  // nothing read either. The one argv that runs is built by the shell, and the prohibition that matters
+  // most — never `--bare`, which would move a subscription turn onto API billing with nothing appearing
+  // to go wrong — is asserted where that argv is built: provider_turn.rs's tests and desktopContract.test.ts.
 }
 
 console.log("\nthe verdicts are the ones verified on 2026-09-13");
@@ -116,7 +113,7 @@ console.log("\nthe verdicts are the ones verified on 2026-09-13");
   check("...and signing in with Anthropic's own command", claude.mechanism?.loginCommand.join(" ") === "claude auth login");
 
   check("Codex is available", subscriptionAvailable("openai"));
-  check("...through codex app-server", localAgentFor("openai")?.serve.argv.join(" ") === "codex app-server");
+  check("...through the codex binary the user installs", localAgentFor("openai")?.binary === "codex");
   check("...signing in with codex login", localAgentFor("openai")?.loginCommand.join(" ") === "codex login");
   check("...needing no approval", !capabilityOf("openai").requiresProviderApproval);
 

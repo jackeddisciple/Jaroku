@@ -86,5 +86,21 @@ console.log("\nthe model menu's Chat section speaks this vocabulary");
   check("Settings derives a row's state from the same function", /subscriptionState\(row\)/.test(settings));
 }
 
+console.log("\na provider with a mechanism but no permission yet is listed, as unavailable");
+{
+  // THE SETTINGS BRANCH THAT READS AS DEAD. The list keeps every SUPPORTED provider, and supported is not
+  // available: a finished integration awaiting the provider's approval — Claude, until 2026-09-13 — is the
+  // first and not yet the second. Nothing takes that branch today, and something will again.
+  const awaiting = row({
+    available: false, requiresApproval: true, reason: "Awaiting the provider's approval.",
+    host: host({ signedIn: true }),
+  });
+  check("a supported row awaiting approval is unavailable, however set up the machine is", subscriptionState(awaiting) === "unavailable");
+  check("...and says so in the provider's own words", subscriptionBlockedReason(awaiting) === "Awaiting the provider's approval.");
+  const settings = readFileSync(fileURLToPath(new URL("../components/ProviderSubscriptions.tsx", import.meta.url)), "utf8");
+  check("Settings keeps supported rows rather than only available ones", /all\.filter\(\(r\) => r\.supported\)/.test(settings));
+  check("...and draws the unavailable branch for them", /state === "unavailable" \? \(/.test(settings));
+}
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 (globalThis as { process?: { exit(code: number): void } }).process?.exit(fail === 0 ? 0 : 1);

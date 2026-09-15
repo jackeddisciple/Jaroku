@@ -12,8 +12,7 @@
 // false`, because Meta documents no way for a third-party product to use that sign-in — and the
 // shape of that bug, had it gone the other way, is a product that works beautifully on the
 // developer's laptop and quietly violates a provider's terms for every user who happens to have the
-// right CLI installed. Hence `gatedEvenWhenPresent` below, which exists to be asserted rather than to
-// be read.
+// right CLI installed. `status.test.ts` asserts exactly that case: a perfectly set-up machine, refused.
 //
 // WHAT A HOST OBSERVATION IS NOT. It is not a credential and never carries one. `signedIn` is a
 // boolean the provider's own CLI reported about itself; `account` is a display string that CLI
@@ -117,18 +116,6 @@ export interface SubscriptionStatus {
    * up permitting something the other two refuse.
    */
   readonly connected: boolean;
-}
-
-/**
- * Whether a provider is gated despite the machine being fully set up for it.
- *
- * Exported because it is the property worth asserting: it is true exactly when somebody has the
- * provider's CLI installed and signed in and we still refuse. That combination is not a bug report,
- * it is the feature — and naming it means a future change that "fixes" it has to delete a function
- * with this comment on it rather than relax an `&&`.
- */
-export function gatedEvenWhenPresent(id: ProviderId, host: HostObservation | undefined): boolean {
-  return !capabilityOf(id).subscriptionChatAvailable && host !== undefined && host.installed && host.signedIn;
 }
 
 /** One row. `observations` is keyed by provider; a missing entry means nothing has reported. */
