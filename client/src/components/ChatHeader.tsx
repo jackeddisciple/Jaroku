@@ -79,6 +79,9 @@ const POPOVER =
 /**
  * The computer, as a button. Pressing it shows the name its owner gave it, and under that a dot and
  * a word for whether Jaroku can reach it right now.
+ *
+ * A SIZE UP from the header's other controls, in ink — the product owner's call on 2026-09-15. It is the
+ * first thing in the row and says the machine is here; the title and the menu beside it are quieter.
  */
 export function MachineButton({ name, connection }: { name: string; connection: ConnectionState }) {
   const [open, setOpen] = useState(false);
@@ -93,9 +96,9 @@ export function MachineButton({ name, connection }: { name: string; connection: 
         aria-label="This computer"
         title={name}
         onClick={() => setOpen((v) => !v)}
-        className={`${HEADER_BUTTON} w-7 text-ink`}
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-control text-ink transition-colors duration-fast hover:bg-active/40 focus-visible:outline-none focus-visible:shadow-focusring"
       >
-        <Icon.chatHeader.machine size={ICON.sm} />
+        <Icon.chatHeader.machine size={ICON.lg} />
       </button>
       {open && (
         <div role="dialog" aria-label="This computer" className={`${POPOVER} min-w-[220px] px-3 py-2.5`}>
