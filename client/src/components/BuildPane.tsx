@@ -89,7 +89,7 @@ import { StatusDot } from "./StatusBadge.tsx";
 import { StatRow, STAT_ICON, type Stat } from "./StatRow.tsx";
 import {
   AlertTriangleIcon, CheckIcon, ChevronRightIcon, DollarSignIcon, FileIcon, HashIcon,
-  LightbulbIcon, LoaderIcon, PencilIcon, PlugIcon, RefreshIcon, SparklesIcon, UserCircleIcon,
+  LightbulbIcon, LoaderIcon, PencilIcon, PlugIcon, RefreshIcon, SparklesIcon,
   WrenchIcon, XIcon, ZapIcon,
 } from "./panelIcons.tsx";
 import { useMcpStore, allMcpTools } from "../store/mcpStore.ts";
@@ -594,11 +594,16 @@ function ReplyTurnView({ turn }: { turn: ReplyTurn }) {
 function TurnRow({ marker, children }: { marker?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="flex gap-2">
-      {/* Fixed width whether or not there is a mark, so the two roles never sit on different
-          left edges. Nudged down to the cap height of the first line rather than its box. */}
-      <span className="w-[18px] shrink-0 flex justify-center pt-[2px]" aria-hidden>
-        {marker}
-      </span>
+      {/* A GUTTER ONLY WHEN SOMETHING IS IN IT — the product owner's call on 2026-09-15. It held a
+          fixed 18px whether or not there was a mark, so that the two roles shared a left edge; the
+          roles no longer need one, now that your own message is a bubble on the right and Jaroku's
+          turns carry no mark at all. An empty column would only indent every answer for nothing.
+          Nudged down to the cap height of the first line rather than its box. */}
+      {marker && (
+        <span className="w-[18px] shrink-0 flex justify-center pt-[2px]" aria-hidden>
+          {marker}
+        </span>
+      )}
       <div className="min-w-0 flex-1">{children}</div>
     </div>
   );
@@ -612,27 +617,6 @@ function DayStamp({ at }: { at: string }) {
   const label = turnStamp(at);
   if (!label) return null;
   return <div className="pb-3 text-center text-caption tabular-nums text-faint">{label}</div>;
-}
-
-/**
- * Jaroku's mark — who is speaking, in the gutter of every turn it takes.
- *
- * This was a sparkle in a filled ring, a stand-in from when the app had no glyph of its own: the
- * ring existed to give a 10px speck enough mass to answer a 14px face across the gutter. There is
- * a real mark now, and a mark that is a solid shape does not need a disc drawn behind it — so the
- * ring goes and the logo takes the whole slot.
- *
- * Muted rather than ink. This says who spoke; it is not the thing you came to read, and at
- * full ink on every second row a solid glyph pulls harder than the sentence beside it. It still
- * sits a step above the `faint` face opposite, which is the right order — one of these two
- * produced what follows it.
- */
-function JarokuMark() {
-  return (
-    <span className="flex h-[18px] w-[18px] items-center justify-center text-muted">
-      <JarokuGlyph size={ICON.md} />
-    </span>
-  );
 }
 
 /**
@@ -931,7 +915,7 @@ function UserTurnView({
 
   if (editing) {
     return (
-      <TurnRow marker={<UserCircleIcon size={ICON.sm} className="text-faint" />}>
+      <TurnRow>
         <div className="rounded-card border border-edge bg-panel p-2">
           <textarea
             ref={ref}
@@ -1042,35 +1026,35 @@ function Turn({
   if (turn.kind === "plan") {
     return (
       <AssistantTurn turn={turn} isLast={isLastGen}>
-        <TurnRow marker={<JarokuMark />}><PlanCard turn={turn} /></TurnRow>
+        <TurnRow><PlanCard turn={turn} /></TurnRow>
       </AssistantTurn>
     );
   }
   if (turn.kind === "gen") {
     return (
       <AssistantTurn turn={turn} isLast={isLastGen}>
-        <TurnRow marker={<JarokuMark />}><GenTurnView turn={turn} isLive={isLastGen} /></TurnRow>
+        <TurnRow><GenTurnView turn={turn} isLive={isLastGen} /></TurnRow>
       </AssistantTurn>
     );
   }
   if (turn.kind === "proposal") {
     return (
       <AssistantTurn turn={turn} isLast={isLastGen}>
-        <TurnRow marker={<JarokuMark />}><DiffCard turn={turn} /></TurnRow>
+        <TurnRow><DiffCard turn={turn} /></TurnRow>
       </AssistantTurn>
     );
   }
   if (turn.kind === "reply") {
     return (
       <AssistantTurn turn={turn} isLast={isLastGen}>
-        <TurnRow marker={<JarokuMark />}><ReplyTurnView turn={turn} /></TurnRow>
+        <TurnRow><ReplyTurnView turn={turn} /></TurnRow>
       </AssistantTurn>
     );
   }
   if (turn.kind === "work") {
     return (
       <AssistantTurn turn={turn} isLast={isLastGen}>
-        <TurnRow marker={<JarokuMark />}><WorkTurnView turn={turn} /></TurnRow>
+        <TurnRow><WorkTurnView turn={turn} /></TurnRow>
       </AssistantTurn>
     );
   }
