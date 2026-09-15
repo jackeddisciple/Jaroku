@@ -125,7 +125,11 @@ export interface GeneratorEvents {
   file_start: [{ path: string }];
   file_delta: [{ path: string; text: string }];
   file_end: [{ path: string }];
-  done: [{ agentId: string; name: string; files: string[]; usage: UsageSummary; planUsage: UsageSummary }];
+  done: [{
+    agentId: string; name: string; files: string[]; usage: UsageSummary; planUsage: UsageSummary;
+    /** True of the project and worth saying — see `ValidationResult.warnings`. Absent when there is nothing. */
+    warnings?: string[];
+  }];
   error: [{ message: string; problems?: string[] }];
 }
 
@@ -436,6 +440,10 @@ export class Generator extends EventEmitter<GeneratorEvents> {
 
       this.emit("done", {
         agentId: slug, name, files: parser.files, usage, planUsage: opts.planUsage ?? emptyUsage(),
+        // WHAT WAS TRUE OF THE PROJECT AND DID NOT STOP IT. An unused connector grant rides the
+        // success rather than being swallowed by it — the conversation says so in a line, and
+        // nothing about the generation is hidden because it passed.
+        ...(result.warnings.length > 0 ? { warnings: result.warnings } : {}),
       });
     } catch (err) {
       await projects.discardStaging(ctx, agentUuid, stagingId).catch(() => {});

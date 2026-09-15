@@ -11911,6 +11911,8 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
 
   const onDone = (e: {
     agentId: string; name: string; files: string[]; usage: unknown; planUsage: unknown;
+    /** True of the project and not a reason to refuse it — see `ValidationResult.warnings`. */
+    warnings?: string[];
   }) => {
     const usage = e.usage as { cost_usd?: number; output_tokens?: number };
     const planCost = (e.planUsage as { cost_usd?: number })?.cost_usd ?? 0;
@@ -11938,6 +11940,23 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     // needs is the row's and the row is written by that sync.
     const boundThread = genThread;
     const genCtxNow = contextForGen();
+    // WHAT PASSED BUT IS STILL WORTH SAYING, in the conversation the generation happened in.
+    //
+    // The one warning today is an unused connector grant, and it used to be fatal: a tool the
+    // connector brought along and the agent never calls failed rule 6, and a generation somebody
+    // had paid for was discarded whole. It is a note now — the project is correct, the grant is
+    // simply wider than the agent needs — and a note nobody is shown is the same as no note, so it
+    // is written as a turn rather than only logged.
+    if (boundThread && e.warnings && e.warnings.length > 0) {
+      const lines = e.warnings.map((w) => `• ${w}`).join("\n");
+      void threadStore
+        .addItem(genCtxNow, boundThread, {
+          kind: "message",
+          role: null,
+          body: `The agent was written. Worth knowing:\n${lines}`,
+        })
+        .catch((err) => console.error("[gen] could not note the warnings:", (err as Error)?.message ?? err));
+    }
     void syncAgents()
       .then(async () => {
         if (boundThread) {

@@ -19,6 +19,17 @@ const defaultCodeCheckSandbox: CodeCheckSandbox = new LocalCodeCheckSandbox();
 export interface ValidationResult {
   ok: boolean;
   problems: string[];
+  /**
+   * True of the project, worth saying, and not a reason to throw it away.
+   *
+   * ONE KIND OF FINDING LIVES HERE so far, and the day it moved decided what this field is for. A
+   * connector is ticked as a whole and brings every tool it has; rule 6 demanded all of them be
+   * wired into TOOLS, so an agent that read Gmail but never drafted a reply failed validation on
+   * `gmail_create_draft` and a generation somebody paid for was discarded — over a tool the PLAN
+   * had already said was unused. The project was correct. What was wrong was the connector being
+   * attached for a tool nothing calls, which is a thing to tell somebody, not a thing to refuse.
+   */
+  warnings: string[];
 }
 
 // EXPORTED SINCE §B.3, and the export is the point rather than a convenience. `liveDiagnostics.ts`
@@ -99,7 +110,7 @@ function analyzePython(
   /** name -> { schema, server } for every MCP tool this agent's manifest grants. */
   mcpTools: Record<string, { schema: Record<string, unknown>; server: string }>,
   sandbox: CodeCheckSandbox = defaultCodeCheckSandbox,
-): Promise<string[]> {
+): Promise<{ problems: string[]; warnings: string[] }> {
   const script = `
 import ast, json, os, sys
 
@@ -111,6 +122,8 @@ reviewed = set(json.loads(sys.argv[3]))
 # The agent's MCP grant, from its manifest: {name: {"schema": {...}, "server": "..."}}.
 mcp_tools = json.loads(sys.argv[4])
 problems = []
+# Findings that do not make the project wrong — see ValidationResult.warnings.
+warnings = []
 trees = {}
 generated = {}
 
@@ -198,10 +211,17 @@ if reviewed_names:
                 )
 
     if aliases.get("TOOLS"):
+        # A REVIEWED TOOL NOBODY WIRED IS A WARNING, NOT A REFUSAL, and the shadow check above
+        # stays fatal. The two are different failures wearing one rule number: a generated file
+        # that DEFINES a reviewed name substitutes its own code for audited code, which is a
+        # security defect; a reviewed name missing from TOOLS is an unused grant — the connector is
+        # attached and one of its tools is never called. Discarding the project for that threw away
+        # a paid generation and left the user with nothing, and the plan gate had already said so
+        # in its own words ("selected but not used").
         for name in sorted(reviewed_names - wired):
-            problems.append(
-                f"'{name}' is a reviewed connector tool for this agent but is no longer in TOOLS "
-                "— the agent advertises the connector and cannot call it (rule 6)"
+            warnings.append(
+                f"'{name}' came with a connector this agent is attached to and nothing calls it — "
+                "the grant is wider than the agent needs (rule 6)"
             )
 
 # --- MCP: the manifest is the grant, and the schema is the contract ------------------
@@ -315,7 +335,7 @@ for rel, tree in generated.items():
                     "use a static query instead (rule 10)"
                 )
 
-print(json.dumps(problems))
+print(json.dumps({"problems": problems, "warnings": warnings}))
 `.trim();
 
   return sandbox
@@ -328,22 +348,26 @@ print(json.dumps(problems))
       timeoutMs: 30_000,
     })
     .then(({ stdout, stderr, spawnError, timedOut }) => {
-      if (spawnError) return [`could not run the syntax check: ${spawnError}`];
+      const failed = (problem: string): { problems: string[]; warnings: string[] } =>
+        ({ problems: [problem], warnings: [] });
+      if (spawnError) return failed(`could not run the syntax check: ${spawnError}`);
       // Fail CLOSED. This used to read `out.trim() || "[]"`, which turned a crashed analysis
       // into an empty problem list — so a project whose static checks never ran was reported
       // as clean, and the import check then executed it. A check that cannot run is not a
       // check that passed.
       const text = stdout.trim();
       if (!text) {
-        return [
+        return failed(
           `the static analysis did not run${timedOut ? " (timed out)" : ""}` +
             (stderr.trim() ? `: ${stderr.trim().split("\n").slice(-3).join(" ").slice(0, 300)}` : ""),
-        ];
+        );
       }
       try {
-        return JSON.parse(text) as string[];
+        const read = JSON.parse(text) as { problems?: unknown; warnings?: unknown };
+        const list = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : []);
+        return { problems: list(read.problems), warnings: list(read.warnings) };
       } catch {
-        return [`syntax check failed to report: ${stderr.slice(0, 300)}`];
+        return failed(`syntax check failed to report: ${stderr.slice(0, 300)}`);
       }
     });
 }
@@ -472,10 +496,11 @@ export async function validateProject(
   },
 ): Promise<ValidationResult> {
   const problems: string[] = [];
+  const warnings: string[] = [];
 
   const agentPath = join(projectDir, "agent.py");
   if (!existsSync(agentPath)) {
-    return { ok: false, problems: ["agent.py was not generated"] };
+    return { ok: false, problems: ["agent.py was not generated"], warnings };
   }
   const agentSrc = readFileSync(agentPath, "utf8");
 
@@ -528,15 +553,15 @@ export async function validateProject(
   }
 
   // --- parse + AST-level defects -------------------------------------------
-  problems.push(
-    ...(await analyzePython(
-      opts.runtimeDir,
-      projectDir,
-      opts.connectorToolNames ?? [],
-      reviewed,
-      mcpToolMap(opts.mcpTools),
-    )),
+  const analysis = await analyzePython(
+    opts.runtimeDir,
+    projectDir,
+    opts.connectorToolNames ?? [],
+    reviewed,
+    mcpToolMap(opts.mcpTools),
   );
+  problems.push(...analysis.problems);
+  warnings.push(...analysis.warnings);
 
   // --- the project must actually import -------------------------------------
   // Only reached when every cheaper check passed: we never execute code that is
@@ -545,5 +570,5 @@ export async function validateProject(
     problems.push(...(await importCheck(opts.runtimeDir, projectDir)));
   }
 
-  return { ok: problems.length === 0, problems };
+  return { ok: problems.length === 0, problems, warnings };
 }
