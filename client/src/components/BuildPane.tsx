@@ -3178,19 +3178,28 @@ export function BuildPane({
               hint="You’ll get a reviewable diff to apply or discard. Nothing is changed until you apply it."
             />
           ))}
-        {turns.map((t) => (
-          // The id on the wrapper is what §4.5's resume scrolls to. One place, rather than a ref
-          // inside each of the four card components.
-          <div key={t.id} data-turn-id={t.id}>
-            <Turn
-              turn={t}
-              isLastGen={t.id === lastGenId}
-              threadId={activeThreadId}
-              editingTurnId={editingTurnId}
-              setEditingTurnId={setEditingTurnId}
-            />
+        {/* THE CONVERSATION IS A COLUMN, THE COMPOSER'S OWN — the product owner's call on 2026-09-15. It
+            spanned the whole pane, so a question and its answer ran the width of a wide window while
+            the box they were typed into sat centred under them. The same 48rem as the composer, so
+            the edges line up; the scroller itself stays full width, so the scrollbar is at the pane's
+            edge rather than beside the text. */}
+        {turns.length > 0 && (
+          <div className="mx-auto w-full max-w-[48rem] space-y-6">
+            {turns.map((t) => (
+              // The id on the wrapper is what §4.5's resume scrolls to. One place, rather than a ref
+              // inside each of the four card components.
+              <div key={t.id} data-turn-id={t.id}>
+                <Turn
+                  turn={t}
+                  isLastGen={t.id === lastGenId}
+                  threadId={activeThreadId}
+                  editingTurnId={editingTurnId}
+                  setEditingTurnId={setEditingTurnId}
+                />
+              </div>
+            ))}
           </div>
-        ))}
+        )}
       </div>
 
       {/* composer — ONE input; the Chat/Test toggle folds in what used to be the run-bar */}
