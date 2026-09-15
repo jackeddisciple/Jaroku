@@ -65,6 +65,7 @@ import { effortName, effortStops, stopFor, subscriptionEffort } from "../lib/eff
 import { ShieldControl, modeLabel } from "./composer/ShieldControl.tsx";
 import { GreetingEmoji } from "./GreetingEmoji.tsx";
 import { ChatHeader } from "./ChatHeader.tsx";
+import { dayStarts, turnStamp } from "../lib/turnDates.ts";
 import { ConnectorDeck } from "./composer/ConnectorDeck.tsx";
 import { TurnActions } from "./composer/TurnActions.tsx";
 import { PinRail, pinLabel, type PinnedTurn } from "./composer/PinRail.tsx";
@@ -597,6 +598,16 @@ function TurnRow({ marker, children }: { marker?: React.ReactNode; children: Rea
       <div className="min-w-0 flex-1">{children}</div>
     </div>
   );
+}
+
+/**
+ * The date and time above the first message of each day — "Today 11:52", or the date once it is not
+ * today. Faint and centred: it says when, and is never the thing being read. See lib/turnDates.ts.
+ */
+function DayStamp({ at }: { at: string }) {
+  const label = turnStamp(at);
+  if (!label) return null;
+  return <div className="pb-3 text-center text-caption tabular-nums text-faint">{label}</div>;
 }
 
 /**
@@ -3077,6 +3088,8 @@ export function BuildPane({
   // An empty thread on a screen this pane owns. The one case where the composer is not the
   // bottom of a conversation but the middle of a page — see `standalone`.
   const anchored = standalone && turns.length === 0;
+  // Which messages open a day of this conversation, and so carry its date and time above them.
+  const dayStartIds = dayStarts(turns.map((t) => ({ id: t.id, at: t.role === "user" ? t.at : undefined })));
 
   return (
     // The family comes from the body now — every panel is on the prose/code split, and this
@@ -3189,6 +3202,7 @@ export function BuildPane({
               // The id on the wrapper is what §4.5's resume scrolls to. One place, rather than a ref
               // inside each of the four card components.
               <div key={t.id} data-turn-id={t.id}>
+                {t.role === "user" && t.at && dayStartIds.has(t.id) && <DayStamp at={t.at} />}
                 <Turn
                   turn={t}
                   isLastGen={t.id === lastGenId}

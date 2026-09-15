@@ -38,6 +38,11 @@ export interface UserTurn {
   id: string;
   role: "user";
   text: string;
+  /**
+   * When it was sent — the row's `created_at` on a reloaded chat, the moment it was sent on a live one.
+   * What the date and time above each day of a conversation are read from; see lib/turnDates.ts.
+   */
+  at?: string;
   /** See `TurnAnchor`. */
   itemId?: string;
 }
@@ -535,7 +540,7 @@ export const useChatStore = create<ChatState>((set) => ({
 
           if (it.kind === "message" && it.role === "user") {
             return [
-              { id: turnId(), itemId: it.id, role: "user", text: it.body ?? "" },
+              { id: turnId(), itemId: it.id, role: "user", text: it.body ?? "", at: it.created_at },
               // THE AGENT ID IS NOT IN THE ROW AND DOES NOT NEED TO BE. `agentId` on a reply turn
               // is what `findReply` matches a LIVE stream against; a rehydrated turn is finished,
               // so nothing will ever look for it, and "" is the honest value for a column that does
@@ -573,7 +578,7 @@ export const useChatStore = create<ChatState>((set) => ({
         : turns;
       return putTurns(s, threadId, [
         ...base,
-        { id: turnId(), role: "user", text: input },
+        { id: turnId(), role: "user", text: input, at: new Date().toISOString() },
         {
           id: turnId(), role: "jaroku", kind: "plan", status: "streaming",
           planId: null, revision, prompt: input, raw: "", plan: null, warnings: [], usage: null,
@@ -683,7 +688,7 @@ export const useChatStore = create<ChatState>((set) => ({
       const plan = livePlan(turns);
       const base = plan
         ? replaceTurn(turns, plan.id, { ...plan, status: "accepted" as const })
-        : [...turns, { id: turnId(), role: "user" as const, text: prompt }];
+        : [...turns, { id: turnId(), role: "user" as const, text: prompt, at: new Date().toISOString() }];
       return putTurns(s, threadId, [
         ...base,
         {
@@ -723,7 +728,7 @@ export const useChatStore = create<ChatState>((set) => ({
       streamingThreadId: threadId ?? null,
       ...putTurns(s, threadId, [
         ...turnsIn(s, threadId),
-        { id: turnId(), role: "user", text: instruction },
+        { id: turnId(), role: "user", text: instruction, at: new Date().toISOString() },
         {
           id: turnId(), role: "jaroku", kind: "proposal", status: "streaming",
           agentId, proposalId: null, summary: null, files: [], streaming: [], usage: null,
@@ -882,7 +887,7 @@ export const useChatStore = create<ChatState>((set) => ({
         ...putTurns(s, threadId, [
           ...turns,
           {
-            id: turnId(), role: "user", text: question,
+            id: turnId(), role: "user", text: question, at: new Date().toISOString(),
             /**
              * THE USER TURN GETS THE ROW ID TOO, and it is the same id the reply carries.
              *
