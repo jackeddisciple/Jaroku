@@ -198,16 +198,21 @@ const CALLOUT: Record<CalloutTone, { Mark: (p: IconProps) => ReactElement; word:
   caution: { Mark: AlertTriangleIcon, word: "Caution", ink: "text-err" },
 };
 
-// RUNGS, NOT WEIGHTS. Each heading is a step of the type scale and takes that step's own weight — the
-// two 600 rungs for a section and its parts, then the body and label rungs below them — so a reply's
-// hierarchy is size and ink, never a bold class laid over a size.
+// RUNGS, NOT WEIGHTS. Each heading is a step of the type scale and takes that step's own weight, so a
+// reply's hierarchy is size, case and ink rather than a bold class laid over a size.
+//
+// A REPLY'S PROSE IS THE `label` RUNG, at 500 — heavier than `body`'s 400 — which is why the lower
+// headings are NOT the rungs just under it. A 14px/400 heading over 13px/500 text reads as lighter than
+// the paragraph it names, which is the opposite of a heading. So the top two take the 600 rungs, and
+// the ones below them become the small caps this client already uses for a panel's own name: the same
+// weight as the prose, set apart by case and letter-spacing instead.
 const HEADING_CLASS: Record<number, string> = {
-  1: "text-title text-ink",
+  1: "text-page text-ink",
   2: "text-section text-ink",
-  3: "text-body text-ink",
-  4: "text-label text-ink",
-  5: "text-label text-muted",
-  6: "text-label text-muted",
+  3: "text-label uppercase tracking-wider text-ink",
+  4: "text-tiny uppercase tracking-wider text-ink",
+  5: "text-tiny uppercase tracking-wider text-muted",
+  6: "text-tiny uppercase tracking-wider text-muted",
 };
 
 function BlockView({ block }: { block: Block }): ReactNode {
@@ -215,7 +220,7 @@ function BlockView({ block }: { block: Block }): ReactNode {
     case "heading": {
       const Tag = (block.level <= 2 ? "h3" : block.level === 3 ? "h4" : "h5") as "h3" | "h4" | "h5";
       return (
-        <Tag className={`${HEADING_CLASS[block.level]} ${block.level <= 2 ? "pt-2" : "pt-1"}`}>
+        <Tag className={`${HEADING_CLASS[block.level]} ${block.level <= 3 ? "pt-2" : "pt-1"}`}>
           <InlineView pieces={block.inline} />
         </Tag>
       );
