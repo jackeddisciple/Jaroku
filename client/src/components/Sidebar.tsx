@@ -9,6 +9,7 @@ import { orderedRuns, useTraceStore } from "../store/traceStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import type { AgentSummary, ThreadView } from "../types.ts";
 import { openThread } from "../lib/threadNav.ts";
+import { useTypedText } from "../lib/typedText.ts";
 import { useCanRun } from "../lib/useCapability.ts";
 import { ThreadGlyph } from "./ThreadGlyph.tsx";
 import { absTime, relTime } from "../lib/format.ts";
@@ -978,6 +979,8 @@ function FilterMenu({
  */
 function ThreadListRow({ thread, indented = false }: { thread: ThreadView; indented?: boolean }) {
   const active = useThreadStore((s) => s.activeThreadId === thread.id);
+  // The same typing as the header when a topic title arrives — see lib/typedText.ts.
+  const shownTitle = useTypedText(thread.title, !thread.title_is_custom);
   return (
     <button
       type="button"
@@ -993,7 +996,7 @@ function ThreadListRow({ thread, indented = false }: { thread: ThreadView; inden
         <span className="mr-2 shrink-0"><ThreadGlyph status={thread.status} /></span>
       )}
       <Truncate className={`min-w-0 flex-1 text-label ${active ? "text-ink" : "text-muted"}`} title={thread.title}>
-        {thread.title}
+        {shownTitle}
       </Truncate>
     </button>
   );
@@ -1078,6 +1081,7 @@ function ListHeading({
  */
 function PinnedThreadRow({ thread }: { thread: ThreadView }) {
   const active = useThreadStore((s) => s.activeThreadId === thread.id);
+  const shownTitle = useTypedText(thread.title, !thread.title_is_custom);
   return (
     <button
       type="button"
@@ -1091,7 +1095,7 @@ function PinnedThreadRow({ thread }: { thread: ThreadView }) {
         <Icon.chatHeader.pin size={ICON.sm} />
       </span>
       <Truncate className="min-w-0 flex-1 text-label text-ink" title={thread.title}>
-        {thread.title}
+        {shownTitle}
       </Truncate>
     </button>
   );

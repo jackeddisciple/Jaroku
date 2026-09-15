@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { chatMarkdown } from "../lib/chatMarkdown.ts";
+import { useTypedText } from "../lib/typedText.ts";
 import { readMachineName } from "../lib/hostMachine.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { useMenuFocus } from "../lib/menuFocus.ts";
@@ -131,6 +132,8 @@ export function ThreadTitle({
   onEditingChange: (editing: boolean) => void;
 }) {
   const canRename = useCanRun("renameThread");
+  // A NEW NAME TYPES ITSELF OUT — a topic title arriving — unless somebody typed it themselves.
+  const shownTitle = useTypedText(thread.title, !thread.title_is_custom);
   const [draft, setDraft] = useState(thread.title);
   const input = useRef<HTMLInputElement>(null);
   /** Escape ended this edit, so the blur that follows must not save it. */
@@ -177,7 +180,7 @@ export function ThreadTitle({
   if (!canRename || !connected) {
     return (
       <span className="min-w-0 max-w-[360px] px-2">
-        <Truncate className="text-label text-ink" title={thread.title}>{thread.title}</Truncate>
+        <Truncate className="text-label text-ink" title={thread.title}>{shownTitle}</Truncate>
       </span>
     );
   }
@@ -189,7 +192,7 @@ export function ThreadTitle({
       title="Rename this chat"
       className={`${HEADER_BUTTON} min-w-0 max-w-[360px] px-2 text-left`}
     >
-      <Truncate className="text-label text-ink" title={thread.title}>{thread.title}</Truncate>
+      <Truncate className="text-label text-ink" title={thread.title}>{shownTitle}</Truncate>
     </button>
   );
 }

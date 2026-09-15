@@ -69,6 +69,7 @@
     "test:host-machine": "tsx src/lib/hostMachine.test.ts",
     "test:chat-markdown": "tsx src/lib/chatMarkdown.test.ts",
     "test:topic-title": "tsx src/lib/topicTitle.test.ts",
+    "test:typed-text": "tsx src/lib/typedText.test.ts",
     "test:host-backend": "tsx src/lib/hostBackend.test.ts",
     "test:session-vault": "tsx src/lib/sessionVault.test.ts",
     "test:invite": "tsx src/lib/invite.test.ts",
