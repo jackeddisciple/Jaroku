@@ -1344,6 +1344,9 @@ jobs:
           # WHAT SHARE CHAT PUTS ON THE CLIPBOARD: the conversation as Markdown, replies as their source
           # so code fences survive the paste, and nothing a turn has no words for.
           npm run test:chat-markdown
+          # WHEN A CHAT IS GIVEN A TOPIC TITLE: its first finished exchange, never a renamed chat, asked of
+          # the same plan on this machine — and only that turn's lines, never another turn's, make the title.
+          npm run test:topic-title
           # WHICH OF THE TWO WINDOWS THE PAGE ASKS FOR, and the two ways that goes wrong. The
           # welcome screen is a 560px window and the application is 1440, only the bundle knows
           # which of them a launch needs, and a webview cannot resize the frame it is inside — so

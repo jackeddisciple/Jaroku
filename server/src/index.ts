@@ -205,7 +205,7 @@ import {
   type ThreadStatus,
 } from "./threadStore.ts";
 import { sideEffectsAfter } from "./sideEffects.ts";
-import { threadTitle } from "./threadTitle.ts";
+import { threadTitle, topicTitle } from "./threadTitle.ts";
 import { InboxStore } from "./inbox/inboxStore.ts";
 import { InboxReconciler, describeReconcile } from "./inbox/reconciler.ts";
 import { inboxFacts, type FactDeps } from "./inbox/facts.ts";
@@ -7581,7 +7581,7 @@ async function handleInboxCommand(ctx: TenantContext, cmd: InboxCommand): Promis
 const HIGH_COST_SHARE = 0.25;
 
 const THREAD_COMMAND_NAMES = new Set([
-  "createThread", "renameThread", "archiveThread", "restoreThread", "deleteThread",
+  "createThread", "renameThread", "archiveThread", "restoreThread", "deleteThread", "titleThread",
   // §6.3's fork. In the set as well as handled, which is what `test:channels` asserts and why: a
   // command whose refusals answer on `threads` and whose name is not here would fall through to
   // `handleEvalCommand` the day somebody reorders the dispatch chain.
@@ -8240,6 +8240,17 @@ async function handleThreadCommand(ctx: TenantContext, cmd: ThreadCommand): Prom
         return;
       }
       await threadStore.deleteForGood(ctx, cmd.threadId);
+      await broadcastThreads(ctx);
+      return;
+    }
+
+    // A TOPIC TITLE FROM THE APP'S OWN PLAN, for a chat's first exchange — see client/src/lib/topicTitle.ts.
+    // Cleaned and capped here rather than trusted, and applied through `autoTitle`, whose UPDATE leaves a
+    // renamed thread alone. Nothing usable is not an error worth a refusal: the first-line title stands.
+    if (cmd.cmd === "titleThread") {
+      const title = typeof cmd.title === "string" ? topicTitle(cmd.title) : null;
+      if (!title) return;
+      await threadStore.autoTitle(ctx, cmd.threadId, title);
       await broadcastThreads(ctx);
       return;
     }

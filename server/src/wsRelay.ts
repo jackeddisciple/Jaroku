@@ -2523,6 +2523,8 @@ export type ArchiveThreadCommand = { cmd: "archiveThread"; threadId: string };
 export type RestoreThreadCommand = { cmd: "restoreThread"; threadId: string };
 /** A chat removed for good: its messages go with it, its agent, runs and costs stay. */
 export type DeleteThreadCommand = { cmd: "deleteThread"; threadId: string };
+/** A topic title the app's plan suggested for a chat's first exchange. Never overwrites a rename. */
+export type TitleThreadCommand = { cmd: "titleThread"; threadId: string; title: string };
 export type LoadThreadCommand = { cmd: "loadThread"; threadId: string };
 
 /** Thread-channel commands, grouped so the forwarding switch stays readable. */
@@ -2561,6 +2563,7 @@ export type ThreadCommand =
   | ArchiveThreadCommand
   | RestoreThreadCommand
   | DeleteThreadCommand
+  | TitleThreadCommand
   // §6.3'S FORK IS A THREAD COMMAND, and that is where `test:channels` insisted it belong rather
   // than a preference. Its refusals answer on `threads` — a fork produces a ROW, and a row is
   // rendered in the list and in the thread view — and this file's rule is that a command answering
@@ -2572,7 +2575,7 @@ export type ThreadCommand =
 // The five that MUTATE. The two reads are not here because they are answered locally — see the
 // header above, and see `dispatch`, where each has a branch of its own.
 const THREAD_COMMANDS = new Set([
-  "createThread", "renameThread", "archiveThread", "restoreThread", "deleteThread", "editTurn",
+  "createThread", "renameThread", "archiveThread", "restoreThread", "deleteThread", "titleThread", "editTurn",
 ]);
 
 /**
@@ -3767,7 +3770,7 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   // that landed in the status bar instead of the list would leave the row it was about still
   // showing the old name with nothing saying why.
   listThreads: "threads", loadThread: "threads", createThread: "threads",
-  renameThread: "threads", archiveThread: "threads", restoreThread: "threads", deleteThread: "threads",
+  renameThread: "threads", archiveThread: "threads", restoreThread: "threads", deleteThread: "threads", titleThread: "threads",
   // All six on `inbox`, the read included, for the reason the thread commands are all on `threads`:
   // the channel HAS an error shape, so a refusal about a snooze that landed in the status bar would
   // leave the card it was about still sitting there with nothing saying why.

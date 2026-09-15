@@ -55,3 +55,27 @@ export function threadTitle(message: string): string {
   const clipped = lastSpace > 0 ? cut.slice(0, lastSpace) : cut;
   return `${clipped.replace(/[\s,;:.]+$/, "")}…`;
 }
+
+/** The most words a topic title may have. The client asks the model for the same. */
+export const TOPIC_WORDS = 6;
+
+/**
+ * A topic title a provider CLI suggested, made fit to store — or null when nothing usable came back.
+ *
+ * MODELS DECORATE. What arrives can be quoted, bold, prefixed with "Title:", end in a full stop, or run
+ * to a sentence, so this keeps the first line with words on it, strips the wrapping and the label, and
+ * cuts to six words. It is the SERVER's cap rather than the client's, because `titleThread` is a
+ * command anybody's tab can send, and a title is what every member of the workspace reads.
+ */
+export function topicTitle(raw: string): string | null {
+  const line = raw.split("\n").map((l) => l.trim()).find((l) => l.length > 0) ?? "";
+  const cleaned = line
+    .replace(/^(?:#+\s*)?(?:title|topic|name)\s*[:\-–—]\s*/i, "")
+    .replace(/^[\s"'`*_“”‘’«»]+|[\s"'`*_“”‘’«»]+$/g, "")
+    .replace(/[\s.,;:!?]+$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return null;
+  const words = cleaned.split(" ").slice(0, TOPIC_WORDS).join(" ");
+  return words.length > TITLE_CAP ? threadTitle(words) : words;
+}

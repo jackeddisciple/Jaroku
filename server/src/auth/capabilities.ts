@@ -688,6 +688,8 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   // one click, so any member may do it to anybody's chat; deleting is not, so in a Team workspace it
   // belongs to the owner alone rather than to every member who can see somebody else's work.
   deleteThread: "workspace:manage",
+  // The same capability as a rename, because it is one — and it never overrides somebody else's.
+  titleThread: "agent:write",
 
   // inbox
   //

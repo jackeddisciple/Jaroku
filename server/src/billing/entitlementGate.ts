@@ -333,6 +333,7 @@ export const COMMAND_ENTITLEMENT: Record<string, EntitlementKind | typeof NO_ENT
   archiveThread: NO_ENTITLEMENT,
   restoreThread: NO_ENTITLEMENT,
   deleteThread: NO_ENTITLEMENT,
+  titleThread: NO_ENTITLEMENT,
   listInbox: NO_ENTITLEMENT,
   dismissInboxItem: NO_ENTITLEMENT,
   snoozeInboxItem: NO_ENTITLEMENT,

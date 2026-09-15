@@ -1,5 +1,6 @@
 import { hasHost, readHostProviders, reprobeOnReturn } from "./hostProviders.ts";
 import { runLocalTurn, type LocalTurn } from "./providerTurn.ts";
+import { needsTopicTitle, runTitleTurn, titlePrompt } from "./topicTitle.ts";
 // WebSocket client for the Jaroku relay. Mirrors the reconnect pattern of the original
 // debug-client.html (1s backoff) and dispatches each server message into the trace store.
 // The relay only speaks WebSocket, so this is the single channel between UI and pipeline.
@@ -27,7 +28,7 @@ import { useAuditStore } from "../store/auditStore.ts";
 import { useEnforcementStore } from "../store/enforcementStore.ts";
 import { isRefusal, useEntitlementStore } from "../store/entitlementStore.ts";
 import { refusedRole } from "./useCapability.ts";
-import { useThreadStore } from "../store/threadStore.ts";
+import { threadById, useThreadStore } from "../store/threadStore.ts";
 import { useInboxStore } from "../store/inboxStore.ts";
 import { useWorkStore } from "../store/workStore.ts";
 import { useActivityStore } from "../store/activityStore.ts";
@@ -1671,23 +1672,45 @@ function runSubscriptionTurn(run: Extract<ServerMessage, { channel: "reply"; typ
     model: run.model,
     effort: run.effort,
     system: run.system,
-    onSettle: (outcome) => send({
-      cmd: "recordChatTurn",
-      runId: run.runId,
-      status: outcome.status,
-      error: outcome.error,
-      answer: outcome.answer,
-      provider: run.provider,
-      model: run.model,
-      effort: run.effort,
-      inputTokens: outcome.usage?.input_tokens ?? null,
-      outputTokens: outcome.usage?.output_tokens ?? null,
-      agentId: run.agentId || null,
-      ...(run.threadId ? { threadId: run.threadId } : {}),
-    }),
+    onSettle: (outcome) => {
+      const sent = send({
+        cmd: "recordChatTurn",
+        runId: run.runId,
+        status: outcome.status,
+        error: outcome.error,
+        answer: outcome.answer,
+        provider: run.provider,
+        model: run.model,
+        effort: run.effort,
+        inputTokens: outcome.usage?.input_tokens ?? null,
+        outputTokens: outcome.usage?.output_tokens ?? null,
+        agentId: run.agentId || null,
+        ...(run.threadId ? { threadId: run.threadId } : {}),
+      });
+      // A FINISHED FIRST ANSWER GETS ITS TOPIC TITLE, asked of the same plan — see lib/topicTitle.ts.
+      if (sent && outcome.status === "done" && run.threadId) titleOnce(run.threadId, run.provider, run.model);
+      return sent;
+    },
   });
   localTurns.set(run.runId, { threadId: run.threadId, turn });
   void turn.finished.then(() => localTurns.delete(run.runId));
+}
+
+/** Chats this tab has already asked a topic title for, so a second settle cannot ask twice. */
+const titled = new Set<string>();
+
+/** Ask the plan for a topic title, once, when this chat's first exchange has just finished. */
+function titleOnce(threadId: string, provider: string, model: string | null): void {
+  if (titled.has(threadId)) return;
+  const message = needsTopicTitle(
+    threadById(useThreadStore.getState().threads, threadId),
+    useChatStore.getState().threads[threadId] ?? [],
+  );
+  if (!message) return;
+  titled.add(threadId);
+  void runTitleTurn({ provider, model, prompt: titlePrompt(message) }).then((title) => {
+    if (title) sendTitleThread(threadId, title);
+  });
 }
 
 /** The report in flight, shared the way `readHostProviders` shares its probe. */
@@ -2123,6 +2146,11 @@ export function sendRestoreThread(threadId: string): boolean {
 /** Removes a chat and its messages for good. The menu confirms first; the server gates it to the owner. */
 export function sendDeleteThread(threadId: string): boolean {
   return send({ cmd: "deleteThread", threadId });
+}
+
+/** A topic title for a chat's first exchange. The server cleans it and leaves a renamed chat alone. */
+export function sendTitleThread(threadId: string, title: string): boolean {
+  return send({ cmd: "titleThread", threadId, title });
 }
 
 // --- github ----------------------------------------------------------------

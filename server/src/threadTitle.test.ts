@@ -10,7 +10,7 @@
 //
 //   npm run test:thread-title
 
-import { threadTitle, TITLE_CAP } from "./threadTitle.ts";
+import { threadTitle, topicTitle, TITLE_CAP, TOPIC_WORDS } from "./threadTitle.ts";
 import { UNTITLED } from "./threadStore.ts";
 
 let fail = 0;
@@ -18,6 +18,14 @@ const eq = (name: string, got: unknown, want: unknown): void => {
   if (got === want) console.log(`  ok   ${name}`);
   else { fail++; console.log(`  FAIL ${name}\n    got  ${JSON.stringify(got)}\n    want ${JSON.stringify(want)}`); }
 };
+
+// --- a topic title a provider suggested, cleaned before it is stored -------------------------
+eq("a plain title is kept as it came", topicTitle("Greeting"), "Greeting");
+eq("quotes and bold go", topicTitle('**"Support Email Triage"**'), "Support Email Triage");
+eq("a label and a full stop go", topicTitle("Title: Refund policy question."), "Refund policy question");
+eq("only the first line with words on it counts", topicTitle("\n  Webhook retries\nbecause the user asked about"), "Webhook retries");
+eq(`it is cut to ${TOPIC_WORDS} words`, topicTitle("one two three four five six seven eight"), "one two three four five six");
+eq("nothing usable is nothing", topicTitle("  \"\"  "), null);
 
 // --- a short message is a short title, and that is fine (§5) --------------------------------
 eq("a short message is the title, untouched", threadTitle("fix this"), "fix this");

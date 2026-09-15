@@ -187,6 +187,7 @@ export const COMMAND_CAPABILITY: Record<string, string> = {
   archiveThread: "agent:write",
   restoreThread: "agent:write",
   deleteThread: "workspace:manage",
+  titleThread: "agent:write",
 
   // inbox
   listInbox: "agent:read",
