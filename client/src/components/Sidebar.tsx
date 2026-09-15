@@ -445,9 +445,22 @@ function AgentRowMenu({ agent }: { agent: AgentSummary }) {
   );
 }
 
-function AgentTreeRow({ agent, lastRunAt }: { agent: AgentSummary; lastRunAt: string | null }) {
+function AgentTreeRow({
+  agent,
+  lastRunAt,
+  threads,
+}: {
+  agent: AgentSummary;
+  lastRunAt: string | null;
+  /** This agent's chats, most recently active first, archived and pinned ones already left out. */
+  threads: ThreadView[];
+}) {
   const activeAgentId = useBuildStore((s) => s.activeAgentId);
   const selected = activeAgentId === agent.agent_id;
+  // OPEN FOR THE AGENT YOU ARE IN, closed for the rest: the chats under the selected agent are the ones
+  // somebody is most likely reaching for, and every other agent's would be a wall of rows.
+  const [open, setOpen] = useState(selected);
+  const hasThreads = threads.length > 0;
   // When this agent last did anything — and when it has never run, when it was made. THE ROW SHOWED
   // NOTHING for a new agent, which is the one moment the column is most likely to be looked at: the
   // agent you just described, with no time beside it. Two different facts, so the label below says which.
@@ -528,6 +541,19 @@ function AgentTreeRow({ agent, lastRunAt }: { agent: AgentSummary; lastRunAt: st
             </span>
           </span>
         </button>
+        {/* THE CHATS TWISTY, only on an agent that has chats — one with none has nothing under it to
+            open, and a disclosure that discloses nothing is a dead control. */}
+        {hasThreads && (
+          <button
+            onClick={() => setOpen((v) => !v)}
+            title={open ? `Hide ${agent.name}'s chats` : `Show ${agent.name}'s chats`}
+            aria-label={open ? `Hide ${agent.name}'s chats` : `Show ${agent.name}'s chats`}
+            aria-expanded={open}
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-faint transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+          >
+            {open ? <Icon.workspace.switcherOpen size={ICON.lg} /> : <Icon.workspace.switcherClosed size={ICON.lg} />}
+          </button>
+        )}
         {/* THE PULL REQUEST, ON EVERY ROW AND SHOWN ON HOVER. On every row because it is a control
             rather than a badge: "only when there is one" hid it on exactly the agents somebody would
             want to open one FOR. Shown on hover — and on keyboard focus — like the row's menu beside
@@ -577,6 +603,15 @@ function AgentTreeRow({ agent, lastRunAt }: { agent: AgentSummary; lastRunAt: st
         <AgentRowMenu agent={agent} />
       </div>
 
+      {/* ITS CHATS, INDENTED UNDER IT, which is what makes the agent a project: the conversations
+          about it live with it rather than in a list of everything. */}
+      <Collapse open={open && hasThreads}>
+        <div className="flex flex-col">
+          {threads.map((t) => (
+            <ThreadListRow key={t.id} thread={t} indented />
+          ))}
+        </div>
+      </Collapse>
     </>
   );
 }
@@ -942,6 +977,60 @@ function FilterMenu({
 }
 
 /**
+ * A chat in the column: its name, and a press that opens it. Indented when it sits under its agent in
+ * Projects; flush in Recents, where a chat has no agent to sit under.
+ */
+function ThreadListRow({ thread, indented = false }: { thread: ThreadView; indented?: boolean }) {
+  const active = useThreadStore((s) => s.activeThreadId === thread.id);
+  return (
+    <button
+      type="button"
+      onClick={() => openThread(thread)}
+      title={thread.title}
+      className={`flex h-7 w-full shrink-0 items-center rounded-control pr-2 text-left transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+        indented ? "pl-9" : "pl-2.5"
+      } ${active ? "bg-sidebar-active" : "hover:bg-sidebar-hover"}`}
+    >
+      <Truncate className={`min-w-0 flex-1 text-label ${active ? "text-ink" : "text-muted"}`} title={thread.title}>
+        {thread.title}
+      </Truncate>
+    </button>
+  );
+}
+
+/** A list's heading: its fold control and its name, with room for a control of its own at the end. */
+function ListHeading({
+  label,
+  open,
+  onToggle,
+  children,
+}: {
+  label: string;
+  open: boolean;
+  onToggle: () => void;
+  children?: React.ReactNode;
+}) {
+  const lower = label.toLowerCase();
+  return (
+    <div className="flex h-8 shrink-0 items-center gap-1 pl-1.5 pr-2">
+      <button
+        onClick={onToggle}
+        aria-expanded={open}
+        title={open ? `Collapse ${lower}` : `Expand ${lower}`}
+        aria-label={open ? `Collapse ${lower}` : `Expand ${lower}`}
+        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-faint transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+      >
+        {open ? <Icon.workspace.switcherOpen size={ICON.lg} /> : <Icon.workspace.switcherClosed size={ICON.lg} />}
+      </button>
+      {/* NOT `TYPE.panelLabel`, which uppercases. This heading names a place in a column of places, and
+          shouting one of them makes it a different kind of thing from the rows above it. */}
+      <span className="min-w-0 flex-1 text-label font-normal tracking-wide text-faint">{label}</span>
+      {children}
+    </div>
+  );
+}
+
+/**
  * A pinned chat on the Pinned shelf: its name, and a press that opens it.
  *
  * ONE LINE, NOT THE AGENT ROW'S TWO. A chat has no category and no run history to show under its
@@ -976,6 +1065,7 @@ export function Sidebar() {
   // is now only ever empty here. Kept as the one place the filter reads from, so restoring an
   // in-column box later is a change to one component rather than to the filter predicate.
   const query = "";
+  const [projectsOpen, setProjectsOpen] = useState(true);
   const [recentsOpen, setRecentsOpen] = useState(true);
   const [pinnedOpen, setPinnedOpen] = useState(true);
   // Per AGENT rather than per workspace — §4. Different agents legitimately belong in different
@@ -1052,6 +1142,29 @@ export function Sidebar() {
     if (!lastRunByAgent.has(r.agent_id)) lastRunByAgent.set(r.agent_id, r.started_at);
   }
 
+  /**
+   * Every chat, filed under its agent — or in Recents when it has none.
+   *
+   * A CHAT STARTED WITHOUT AN AGENT IS IN RECENTS AND NOWHERE ELSE, and so is one whose agent this
+   * workspace no longer lists: a row filed under a project that is not in the column could not be
+   * found. Archived chats are in neither, and a pinned one is on the shelf instead, for the reason a
+   * pinned agent leaves the list below it. Most recently active first, in both lists.
+   */
+  const agentSlugs = new Set(agents.map((a) => a.agent_id));
+  const pinnedThreadSet = new Set(pinnedThreadIds);
+  const threadsByAgent = new Map<string, ThreadView[]>();
+  const recentThreads: ThreadView[] = [];
+  for (const t of [...threadRows].sort((a, b) => b.last_activity_at.localeCompare(a.last_activity_at))) {
+    if (t.archived_at || pinnedThreadSet.has(t.id)) continue;
+    if (t.agent_id && agentSlugs.has(t.agent_id)) {
+      const bucket = threadsByAgent.get(t.agent_id);
+      if (bucket) bucket.push(t);
+      else threadsByAgent.set(t.agent_id, [t]);
+    } else {
+      recentThreads.push(t);
+    }
+  }
+
   // §2 wanted pinned agents first and no agent appearing twice; a section of their own gives both,
   // and says out loud what "first" only implied.
   const pinnedSet = new Set(pinned.map((a) => a.agent_id));
@@ -1059,7 +1172,7 @@ export function Sidebar() {
   // silent ordering: pinning something moved it a few rows and nothing on screen said why, and the
   // agent still counted as a recent one. A section of its own is what a pin is FOR — a shelf you
   // put things on, above the list they came from.
-  const recents = visible.filter((a) => !pinnedSet.has(a.agent_id));
+  const projectAgents = visible.filter((a) => !pinnedSet.has(a.agent_id));
   // Filtered like everything else. A pinned agent that the current filter excludes — archived, or
   // not running — should not reappear on a shelf above the filter that hid it, which would make
   // the filter look broken on the one row a person is most attached to.
@@ -1109,56 +1222,57 @@ export function Sidebar() {
                 <PinnedThreadRow key={t.id} thread={t} />
               ))}
               {pinnedVisible.map((a) => (
-                <AgentTreeRow key={a.agent_id} agent={a} lastRunAt={lastRunByAgent.get(a.agent_id) ?? null} />
+                <AgentTreeRow
+                  key={a.agent_id}
+                  agent={a}
+                  lastRunAt={lastRunByAgent.get(a.agent_id) ?? null}
+                  threads={threadsByAgent.get(a.agent_id) ?? []}
+                />
               ))}
             </div>
           </Collapse>
         </div>
       )}
 
-      {/* RECENTS — the agents. */}
-      {/* THE GAP IS THE SECTION BREAK. Above it are six places you can go; below it is the contents
-          of one of them. They were four pixels apart, so the column read as ten interchangeable
-          rows and `Recents` looked like a seventh destination rather than a heading over a list. */}
+      {/* PROJECTS, THEN RECENTS. Projects are the agents, each with its chats indented under it; Recents
+          are the chats started without one. THE GAP IS THE SECTION BREAK between the destinations
+          above and the lists below. */}
       <div className="mt-4 flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="flex h-8 shrink-0 items-center gap-1 pl-1.5 pr-2">
-          <button
-            onClick={() => setRecentsOpen((v) => !v)}
-            aria-expanded={recentsOpen}
-            title={recentsOpen ? "Collapse recents" : "Expand recents"}
-            aria-label={recentsOpen ? "Collapse recents" : "Expand recents"}
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-faint transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
-          >
-            {recentsOpen ? <Icon.workspace.switcherOpen size={ICON.lg} /> : <Icon.workspace.switcherClosed size={ICON.lg} />}
-          </button>
-          {/* NOT `TYPE.panelLabel`, which uppercases. This heading names a place in a column of
-              places — `New`, `Threads`, `Agents` — and shouting one of them makes it a
-              different kind of thing from the rows above it. */}
-          <span className="min-w-0 flex-1 text-label font-normal tracking-wide text-faint">Recents</span>
-          {/* THE PLUS LEFT THIS ROW for the `New` destination at the top of the column. A control
-              that creates an agent was filed beside the filter that narrows a list of them, which
-              made "new" read as a thing you do to the list rather than the first thing you do at
-              all. What is left here is what genuinely belongs to Recents: how it is filtered. */}
+        {/* THE PROJECTS HEADING STAYS OUT OF THE SCROLLER, and that is for its filter: the filter's
+            panel hangs below it, and inside an `overflow` it would be clipped by the list it filters. */}
+        <ListHeading label="Projects" open={projectsOpen} onToggle={() => setProjectsOpen((v) => !v)}>
           <FilterMenu filter={filter} setFilter={setFilter} counts={counts} />
-        </div>
+        </ListHeading>
 
-        {/* `overflow-x-hidden` RATHER THAN NOTHING: a row that runs out of room truncates, and a
-            truncation ends in an ellipsis rather than in a horizontal scrollbar nobody looks for. */}
-        {/* THE FLEXIBLE ONE — `flex-1 min-h-0` goes on the Collapse rather than on the scroller, so
-            the track it animates is measured against the height flex handed the section. Closed, the
-            box keeps that height and the row inside goes to nothing, which is what stops the account
-            row walking up the column every time somebody folds the list away. */}
-        <Collapse open={recentsOpen} className="min-h-0 min-w-0 flex-1">
-          <div className="h-full min-h-0 min-w-0 overflow-y-auto overflow-x-hidden px-1.5 pb-2">
-            {/* NOTHING WHEN EMPTY, the product owner's call on 2026-09-11. An empty Recents is left
-                empty: no mark, no "Nothing here", no "No agents yet". What would explain it is
-                already on screen — the filter in the header says what is narrowing the list, and
-                `New` leads the column for a workspace that has no agents at all. */}
-            {recents.map((a) => (
-              <AgentTreeRow key={a.agent_id} agent={a} lastRunAt={lastRunByAgent.get(a.agent_id) ?? null} />
-            ))}
+        {/* ONE SCROLLER FOR BOTH LISTS. `overflow-x-hidden` rather than nothing: a row that runs out of
+            room truncates, and a truncation ends in an ellipsis rather than a scrollbar nobody looks for. */}
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden pb-2">
+          {/* NOTHING WHEN EMPTY, the product owner's call on 2026-09-11 — no mark, no "No agents yet".
+              The filter in the heading says what is narrowing the list, and `New` leads the column. */}
+          <Collapse open={projectsOpen}>
+            <div className="flex min-w-0 flex-col px-1.5">
+              {projectAgents.map((a) => (
+                <AgentTreeRow
+                  key={a.agent_id}
+                  agent={a}
+                  lastRunAt={lastRunByAgent.get(a.agent_id) ?? null}
+                  threads={threadsByAgent.get(a.agent_id) ?? []}
+                />
+              ))}
+            </div>
+          </Collapse>
+
+          <div className="mt-4">
+            <ListHeading label="Recents" open={recentsOpen} onToggle={() => setRecentsOpen((v) => !v)} />
+            <Collapse open={recentsOpen}>
+              <div className="flex min-w-0 flex-col px-1.5">
+                {recentThreads.map((t) => (
+                  <ThreadListRow key={t.id} thread={t} />
+                ))}
+              </div>
+            </Collapse>
           </div>
-        </Collapse>
+        </div>
       </div>
 
       {/* Bottom-anchored: who is signed in. */}
