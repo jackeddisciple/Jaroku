@@ -243,6 +243,8 @@ console.log("\n§04: the mono face is confined to the files that are about code"
     "components/AgentFiles.tsx", "components/AgentTabs.tsx", "components/AgentVersions.tsx",
     "components/CodeViewer.tsx", "components/FileList.tsx", "components/GitHubHistory.tsx",
     "components/GraphView.tsx", "components/ReviewRegion.tsx",
+    // A reply's code and command blocks, which are code a person reads and copies.
+    "components/Markdown.tsx",
     // Diffs and their hunk headers.
     "components/DiffCard.tsx", "components/GitHubStaging.tsx", "components/StateDiff.tsx",
     // Logs, terminal output and stack traces.

@@ -1353,6 +1353,9 @@ jobs:
           # WHEN A CONVERSATION HAPPENED: "Today 11:52" above its first message, a date once that day has
           # passed, and a fresh stamp wherever the conversation picks up on a later day.
           npm run test:turn-dates
+          # HOW A REPLY'S MARKDOWN IS READ: headings, lists and nesting, quotes, code, tables and inline
+          # emphasis — and that half a reply, still streaming, is always some structure rather than an error.
+          npm run test:markdown
           # WHICH OF THE TWO WINDOWS THE PAGE ASKS FOR, and the two ways that goes wrong. The
           # welcome screen is a 560px window and the application is 1440, only the bundle knows
           # which of them a launch needs, and a webview cannot resize the frame it is inside — so

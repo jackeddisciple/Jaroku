@@ -65,6 +65,7 @@ import { effortName, effortStops, stopFor, subscriptionEffort } from "../lib/eff
 import { ShieldControl, modeLabel } from "./composer/ShieldControl.tsx";
 import { GreetingEmoji } from "./GreetingEmoji.tsx";
 import { ChatHeader } from "./ChatHeader.tsx";
+import { Markdown } from "./Markdown.tsx";
 import { dayStarts, turnStamp } from "../lib/turnDates.ts";
 import { ConnectorDeck } from "./composer/ConnectorDeck.tsx";
 import { TurnActions } from "./composer/TurnActions.tsx";
@@ -553,11 +554,14 @@ function ReplyTurnView({ turn }: { turn: ReplyTurn }) {
   // text in front of it, and reads as a cursor rather than as work happening.
   const waiting = turn.status === "streaming" && text.length === 0;
   return (
-    <div className="text-label whitespace-pre-wrap break-words text-ink">
+    <div className="text-label break-words text-ink">
+      {/* A REPLY IS MARKDOWN, DRAWN AS WHAT IT IS — headings, lists, tables, quotes and code where the answer
+          is those things. The one exception is an answer about the record, whose citations are chips
+          inside its sentences and keep the renderer built for them. */}
       {waiting ? <ThinkingIndicator /> : (
         turn.citations && turn.citations.length > 0
-          ? <CitedProse text={text} cites={turn.citations} />
-          : <Prose text={text} />
+          ? <div className="whitespace-pre-wrap"><CitedProse text={text} cites={turn.citations} /></div>
+          : <Markdown text={text} />
       )}
       {turn.status === "streaming" && !waiting && (
         <span className="animate-stream-pulse text-faint motion-reduce:animate-none">▋</span>
