@@ -973,6 +973,15 @@ function FilterMenu({
   );
 }
 
+/** The small circle beside every chat in the sidebar — what marks a row as a conversation. */
+function ChatDot() {
+  return (
+    <span className="mr-2 inline-flex shrink-0 justify-center text-faint" aria-hidden>
+      <Icon.threads.chat size={ICON.sm} />
+    </span>
+  );
+}
+
 /**
  * A chat in the column: its name, and a press that opens it. Indented when it sits under its agent in
  * Projects; flush in Recents, where a chat has no agent to sit under.
@@ -990,14 +999,15 @@ function ThreadListRow({ thread, indented = false }: { thread: ThreadView; inden
         indented ? "pl-9" : "pl-2.5"
       } ${active ? "bg-sidebar-active" : "hover:bg-sidebar-hover"}`}
     >
-      {/* WHAT IS OUTSTANDING, ON THE ROW. The Threads tab's "needs you" count left with the tab; a chat that
-          needs you, is running or has failed says so where it is listed, in the shared glyph. */}
-      {thread.status !== "idle" && thread.status !== "archived" && (
-        <span className="mr-2 shrink-0"><ThreadGlyph status={thread.status} /></span>
-      )}
+      <ChatDot />
       <Truncate className={`min-w-0 flex-1 text-label ${active ? "text-ink" : "text-muted"}`} title={thread.title}>
         {shownTitle}
       </Truncate>
+      {/* WHAT IS OUTSTANDING, AT THE ROW'S END. The circle holds the left for every chat alike; a chat
+          that needs you, is running or has failed says so after its name, in the shared glyph. */}
+      {thread.status !== "idle" && thread.status !== "archived" && (
+        <span className="ml-2 shrink-0"><ThreadGlyph status={thread.status} /></span>
+      )}
     </button>
   );
 }
@@ -1023,6 +1033,7 @@ function ArchivedThreadRow({ thread }: { thread: ThreadView }) {
         title={thread.title}
         className="flex min-w-0 flex-1 items-center pl-2.5 text-left focus-visible:outline-none focus-visible:shadow-focusring"
       >
+        <ChatDot />
         <Truncate className="min-w-0 flex-1 text-label text-muted" title={thread.title}>{thread.title}</Truncate>
       </button>
       {canRestore && (
@@ -1092,7 +1103,7 @@ function PinnedThreadRow({ thread }: { thread: ThreadView }) {
       }`}
     >
       <span className="inline-flex shrink-0 justify-center text-faint" style={{ width: ICON.md }} aria-hidden>
-        <Icon.chatHeader.pin size={ICON.sm} />
+        <Icon.threads.chat size={ICON.sm} />
       </span>
       <Truncate className="min-w-0 flex-1 text-label text-ink" title={thread.title}>
         {shownTitle}

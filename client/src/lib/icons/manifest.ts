@@ -179,6 +179,8 @@ export const MANIFEST = {
 
   // ── §5 Threads ────────────────────────────────────────────────────────────
   threads: {
+    /** The small circle beside every chat in the sidebar. */
+    chat: "CircleSmallIcon",
     archive: "Archive04Icon",
     restore: "RestoreBinIcon",
   },
