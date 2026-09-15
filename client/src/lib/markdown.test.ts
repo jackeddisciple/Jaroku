@@ -101,5 +101,21 @@ console.log("\nhalf a reply is still something");
   check("nothing at all is no blocks", parseMarkdown("").length === 0 && parseMarkdown("\n\n  \n").length === 0);
 }
 
+console.log("\ncallouts");
+{
+  const alert = parseMarkdown("> [!WARNING]\n> Don't expose API keys in client-side code.");
+  const a = alert[0] as Extract<Block, { kind: "callout" }>;
+  check("> [!WARNING] is a warning callout", a?.kind === "callout" && a.tone === "warning", show(alert));
+  check("...holding its sentence", a?.kind === "callout" && kinds(a.blocks) === "paragraph", show(a));
+  const titled = parseMarkdown("> [!TIP] Faster installs\n> Use npm ci in CI.") [0] as Extract<Block, { kind: "callout" }>;
+  check("a title after the marker is kept", titled?.title === "Faster installs", show(titled));
+  const note = parseMarkdown("> **Note:** keep secrets out of the client.")[0] as Extract<Block, { kind: "callout" }>;
+  check("> **Note:** is a note, and the label leaves the text", note?.kind === "callout" && note.tone === "note"
+    && inlineText((note.blocks[0] as Extract<Block, { kind: "paragraph" }>).inline) === "keep secrets out of the client.", show(note));
+  check("> Caution: is a caution", (parseMarkdown("> Caution: this deletes data")[0] as Extract<Block, { kind: "callout" }>)?.tone === "caution");
+  check("an ordinary quote stays a quote", parseMarkdown("> This is an important distinction.")[0]?.kind === "quote");
+  check("\"Note:\" outside a quote is just a sentence", parseMarkdown("Note: this is prose.")[0]?.kind === "paragraph");
+}
+
 console.log(fail === 0 ? "\nall markdown checks passed" : `\n${fail} markdown check(s) FAILED`);
 (globalThis as { process?: { exit(code: number): void } }).process?.exit(fail === 0 ? 0 : 1);

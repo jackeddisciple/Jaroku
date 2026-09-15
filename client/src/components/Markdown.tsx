@@ -5,15 +5,15 @@
 // a table and a code block sit on the panel surface with a hairline, like every other card-like thing
 // in this client. Nothing in a reply introduces a colour, a radius or a size of its own.
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from "react";
 
 import { highlightCode, isCommandBlock, languageLabel } from "../lib/highlight.ts";
 import { Icon } from "../lib/icons/registry.ts";
-import { parseMarkdown, type Block, type Inline } from "../lib/markdown.ts";
+import { parseMarkdown, type Block, type CalloutTone, type Inline } from "../lib/markdown.ts";
 import { ICON } from "../lib/tokens.ts";
 import { iconBtn } from "./buttons.ts";
 import { CHIP_INK } from "./InlineCode.tsx";
-import { CheckIcon } from "./panelIcons.tsx";
+import { AlertTriangleIcon, CheckIcon, InfoIcon, LightbulbIcon, type IconProps } from "./panelIcons.tsx";
 
 /** Text with its line breaks kept: a single newline in a reply is a line the writer broke on purpose. */
 function Lines({ text }: { text: string }) {
@@ -120,6 +120,18 @@ function CodeBlock({ lang, text, closed }: { lang: string; text: string; closed:
   );
 }
 
+/**
+ * What each callout is called and marked with. Neutral, like every other surface in a reply, except a
+ * caution — the one that says something could go wrong for real — whose mark takes the danger ink.
+ */
+const CALLOUT: Record<CalloutTone, { Mark: (p: IconProps) => ReactElement; word: string; ink: string }> = {
+  note: { Mark: InfoIcon, word: "Note", ink: "text-muted" },
+  tip: { Mark: LightbulbIcon, word: "Tip", ink: "text-muted" },
+  important: { Mark: InfoIcon, word: "Important", ink: "text-ink" },
+  warning: { Mark: AlertTriangleIcon, word: "Warning", ink: "text-ink" },
+  caution: { Mark: AlertTriangleIcon, word: "Caution", ink: "text-err" },
+};
+
 // RUNGS, NOT WEIGHTS. Each heading is a step of the type scale and takes that step's own weight — the
 // two 600 rungs for a section and its parts, then the body and label rungs below them — so a reply's
 // hierarchy is size and ink, never a bold class laid over a size.
@@ -192,6 +204,22 @@ function BlockView({ block }: { block: Block }): ReactNode {
           </table>
         </div>
       );
+    case "callout": {
+      const { Mark, word, ink } = CALLOUT[block.tone];
+      return (
+        <div role="note" className="flex gap-2.5 rounded-card border border-hair bg-panel px-3 py-2.5">
+          <span className={`mt-0.5 shrink-0 ${ink}`} aria-hidden>
+            <Mark size={ICON.sm} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className={`text-tiny uppercase tracking-wider ${ink}`}>{block.title || word}</div>
+            <div className="mt-1">
+              <Blocks blocks={block.blocks} tight />
+            </div>
+          </div>
+        </div>
+      );
+    }
     case "rule":
       return <hr className="border-hair" />;
   }

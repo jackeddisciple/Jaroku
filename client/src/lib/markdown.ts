@@ -36,7 +36,12 @@ export type Block =
   | { kind: "quote"; blocks: Block[] }
   | { kind: "code"; lang: string; text: string; closed: boolean }
   | { kind: "table"; align: Align[]; head: Inline[][]; rows: Inline[][][] }
-  | { kind: "rule" };
+  | { kind: "rule" }
+  /** A note, tip or warning set apart from the answer — see `calloutOf`. */
+  | { kind: "callout"; tone: CalloutTone; title: string; blocks: Block[] };
+
+/** The five kinds of callout, named the way GitHub's alerts name them. */
+export type CalloutTone = "note" | "tip" | "important" | "warning" | "caution";
 
 // --- blocks -------------------------------------------------------------------------------------
 
@@ -152,6 +157,32 @@ function parseList(lines: string[], start: number): [Block, number] {
   return [{ kind: "list", ordered: first.ordered, start: first.start, items: items.map((b) => ({ blocks: parseBlocks(b) })) }, i];
 }
 
+const ALERT = /^\s*\[!(note|tip|important|warning|caution)\]\s*(.*)$/i;
+const LABELLED = /^\s*(?:\*\*|__)?(note|tip|important|warning|caution|heads up)(?:\*\*|__)?\s*[:.]\s*(?:\*\*|__)?\s*(.*)$/i;
+
+/**
+ * A quote that is really a callout: GitHub's `> [!WARNING]`, or a quote that opens with its own label —
+ * `> **Note:** …`, `> Tip: …`. Only inside a quote, so a sentence that happens to begin "Note:" in the
+ * middle of an answer stays a sentence.
+ */
+function calloutOf(body: string[]): Block | null {
+  const first = body.findIndex((l) => l.trim() !== "");
+  if (first === -1) return null;
+  const alert = ALERT.exec(body[first]!);
+  if (alert) {
+    const rest = body.slice(first + 1);
+    return { kind: "callout", tone: alert[1]!.toLowerCase() as CalloutTone, title: alert[2]!.trim(), blocks: parseBlocks(rest) };
+  }
+  const labelled = LABELLED.exec(body[first]!);
+  if (labelled) {
+    const word = labelled[1]!.toLowerCase();
+    const tone: CalloutTone = word === "heads up" ? "important" : (word as CalloutTone);
+    const rest = [labelled[2]!, ...body.slice(first + 1)];
+    return { kind: "callout", tone, title: "", blocks: parseBlocks(rest) };
+  }
+  return null;
+}
+
 function parseBlocks(lines: string[]): Block[] {
   const out: Block[] = [];
   let i = 0;
@@ -190,7 +221,7 @@ function parseBlocks(lines: string[]): Block[] {
         body.push(lines[i]!.replace(/^ {0,3}> ?/, ""));
         i++;
       }
-      out.push({ kind: "quote", blocks: parseBlocks(body) });
+      out.push(calloutOf(body) ?? { kind: "quote", blocks: parseBlocks(body) });
       continue;
     }
 
