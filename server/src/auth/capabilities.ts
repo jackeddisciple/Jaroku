@@ -684,6 +684,10 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   renameThread: "agent:write",
   archiveThread: "agent:write",
   restoreThread: "agent:write",
+  // DELETING IS NOT ARCHIVING, and it is gated where deleting an agent is. Archiving is reversible in
+  // one click, so any member may do it to anybody's chat; deleting is not, so in a Team workspace it
+  // belongs to the owner alone rather than to every member who can see somebody else's work.
+  deleteThread: "workspace:manage",
 
   // inbox
   //

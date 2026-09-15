@@ -2111,13 +2111,18 @@ export function sendRenameThread(threadId: string, title: string): boolean {
   return send({ cmd: "renameThread", threadId, title });
 }
 
-/** §3.4. Sets a timestamp; there is no delete command, because there is no delete path. */
+/** §3.4. Sets a timestamp and keeps every byte; one click puts it back. */
 export function sendArchiveThread(threadId: string): boolean {
   return send({ cmd: "archiveThread", threadId });
 }
 
 export function sendRestoreThread(threadId: string): boolean {
   return send({ cmd: "restoreThread", threadId });
+}
+
+/** Removes a chat and its messages for good. The menu confirms first; the server gates it to the owner. */
+export function sendDeleteThread(threadId: string): boolean {
+  return send({ cmd: "deleteThread", threadId });
 }
 
 // --- github ----------------------------------------------------------------

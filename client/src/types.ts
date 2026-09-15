@@ -2184,6 +2184,7 @@ export type ClientCommand =
   | { cmd: "renameThread"; threadId: string; title: string }
   | { cmd: "archiveThread"; threadId: string }
   | { cmd: "restoreThread"; threadId: string }
+  | { cmd: "deleteThread"; threadId: string }
   | { cmd: "listMembers" }
   /**
    * The workspace's audit trail, newest first.

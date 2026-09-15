@@ -191,8 +191,10 @@ async function seedAgent(db: SqliteDb, workspaceId: string, slug: string): Promi
   check("restore clears the timestamp", restored?.archived_at === null);
   check("...and hands the status back to the deriver rather than guessing", restored?.status === "idle");
 
-  check("there is no hard-delete method on the store at all",
-    !("delete" in store) && !("remove" in store) && !("destroy" in store));
+  // One way out, by a name that says it is not undoable — see `test:thread-archive` for the guard on it.
+  check("the only hard-delete method on the store is deleteForGood",
+    typeof (store as unknown as { deleteForGood?: unknown }).deleteForGood === "function"
+      && !("delete" in store) && !("remove" in store) && !("destroy" in store));
 
   // `archived` is a timestamp's consequence, never something a caller sets — a row that read as
   // archived while sitting in the default list is the one inconsistency this refusal prevents.

@@ -50,7 +50,9 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // 166 WITH `chatHeader.machine`, the computer beside its name over the conversation.
   // 172 WITH THE CHAT MENU beside it: `menu`, `pin`, `rename`, `archive`, `share` and `newChat`. Only
   // `share` is a new mark; the other five borrow marks the sidebar and the thread list already draw.
-  check("172 registry keys", entries.length === 172, `${entries.length}`);
+  // 173 WITH `chatHeader.delete`, for deleting a chat for good — `Delete01Icon`, which the sidebar's
+  // agent menu already draws, so the mark count below does not move.
+  check("173 registry keys", entries.length === 173, `${entries.length}`);
   const names = new Set(entries.map((e) => e.export));
   // 104 from icons_integration's appendix, plus D8's 13 — the composer glyphs that had to move
   // here when `@hugeicons/react` came out. See the note at the top of `registry.ts`.

@@ -173,6 +173,7 @@ export const MANIFEST = {
     /** Share Chat: the conversation, copied as Markdown. */
     share: "Share08Icon",
     newChat: "PlusIcon",
+    delete: "Delete01Icon",
   },
 
   // ── §5 Threads ────────────────────────────────────────────────────────────

@@ -10,7 +10,9 @@ import { chatMarkdown } from "../lib/chatMarkdown.ts";
 import { readMachineName } from "../lib/hostMachine.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { useMenuFocus } from "../lib/menuFocus.ts";
-import { sendArchiveThread, sendCreateThread, sendRenameThread, sendRestoreThread } from "../lib/socket.ts";
+import {
+  sendArchiveThread, sendCreateThread, sendDeleteThread, sendRenameThread, sendRestoreThread,
+} from "../lib/socket.ts";
 import { ICON } from "../lib/tokens.ts";
 import { useCanRun } from "../lib/useCapability.ts";
 import { threadFor, useChatStore } from "../store/chatStore.ts";
@@ -207,9 +209,13 @@ const NOTE_MS = 1200;
  *
  * SHARE CHAT COPIES THE CONVERSATION AS MARKDOWN, and says so beside the menu once the clipboard has
  * taken it — or says that it did not.
+ *
+ * DELETE ASKS FIRST, inside the menu, and says what goes and what stays. Archive is the reversible
+ * one and needs no question; this is the one that cannot be undone.
  */
 function ThreadMenu({ thread, connected, onRename }: { thread: ThreadView; connected: boolean; onRename: () => void }) {
   const [open, setOpen] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -219,10 +225,13 @@ function ThreadMenu({ thread, connected, onRename }: { thread: ThreadView; conne
   const canArchive = useCanRun(archived ? "restoreThread" : "archiveThread");
   // Agent-scoped: whether this person may start a chat about THIS chat's agent, or a plain one.
   const canCreate = useCanRun("createThread", thread.agent_id);
+  const canDelete = useCanRun("deleteThread");
 
   // `"mousedown"` and `"Escape"` are handled in `useDismiss`, which this menu shares with the computer's popover.
   useDismiss(open, ref, () => setOpen(false));
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  // A menu reopened on a delete question somebody walked away from would be asking it again unprompted.
+  useEffect(() => { if (!open) setConfirming(false); }, [open]);
   useMenuFocus(open, ref);
 
   const say = (text: string): void => {
@@ -240,6 +249,15 @@ function ThreadMenu({ thread, connected, onRename }: { thread: ThreadView; conne
     } catch {
       say("Couldn't reach the clipboard");
     }
+  };
+
+  const remove = (): void => {
+    if (!sendDeleteThread(thread.id)) return;
+    const ui = useUiStore.getState();
+    if (ui.pinnedThreads.includes(thread.id)) ui.togglePinnedThread(thread.id);
+    // The chat on screen is the one going, so the pane goes back to a new chat rather than to a row
+    // that the next list snapshot will not contain.
+    if (useThreadStore.getState().activeThreadId === thread.id) useThreadStore.getState().selectThread(null);
   };
 
   const choose = (run: () => void) => () => {
@@ -264,55 +282,102 @@ function ThreadMenu({ thread, connected, onRename }: { thread: ThreadView; conne
       <span aria-live="polite" className="text-tiny text-muted">{note ?? ""}</span>
 
       {open && (
-        <div role="menu" aria-label="Chat actions" className={`${POPOVER} min-w-[200px] overflow-hidden p-1`}>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={choose(() => useUiStore.getState().togglePinnedThread(thread.id))}
-            className={MENU_ROW}
-          >
-            <Icon.chatHeader.pin size={ICON.sm} />
-            <span className="min-w-0 flex-1 truncate">{pinned ? "Unpin" : "Pin"}</span>
-          </button>
-          {canRename && (
-            <button type="button" role="menuitem" disabled={!connected} title={offline} onClick={choose(onRename)} className={MENU_ROW}>
-              <Icon.chatHeader.rename size={ICON.sm} />
-              <span className="min-w-0 flex-1 truncate">Rename</span>
-            </button>
-          )}
-          {canArchive && (
-            <button
-              type="button"
-              role="menuitem"
-              disabled={!connected}
-              title={offline}
-              onClick={choose(() => {
-                if (archived) sendRestoreThread(thread.id);
-                else if (sendArchiveThread(thread.id)) useThreadStore.getState().noteArchived(thread);
-              })}
-              className={MENU_ROW}
-            >
-              <Icon.chatHeader.archive size={ICON.sm} />
-              <span className="min-w-0 flex-1 truncate">{archived ? "Restore" : "Archive"}</span>
-            </button>
-          )}
-          <button type="button" role="menuitem" onClick={choose(() => void share())} className={MENU_ROW}>
-            <Icon.chatHeader.share size={ICON.sm} />
-            <span className="min-w-0 flex-1 truncate">Share Chat</span>
-          </button>
-          {canCreate && (
-            <button
-              type="button"
-              role="menuitem"
-              disabled={!connected}
-              title={offline}
-              // In the same project: a new chat about this chat's agent, or a plain one when it has none.
-              onClick={choose(() => sendCreateThread(thread.agent_id))}
-              className={MENU_ROW}
-            >
-              <Icon.chatHeader.newChat size={ICON.sm} />
-              <span className="min-w-0 flex-1 truncate">New Chat</span>
-            </button>
+        <div role="menu" aria-label="Chat actions" className={`${POPOVER} min-w-[220px] overflow-hidden p-1`}>
+          {confirming ? (
+            <div className="flex max-w-[280px] flex-col gap-1.5 p-1.5">
+              <p className="px-1 text-tiny leading-[1.5] text-muted">
+                Delete <span className="text-ink">{thread.title}</span> for good? Its messages go with it. Its
+                agent, runs and costs stay.
+              </p>
+              <div className="flex gap-3 px-1 pb-0.5">
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!connected}
+                  title={offline}
+                  onClick={choose(remove)}
+                  className="text-tiny text-err underline underline-offset-2 focus-visible:outline-none focus-visible:shadow-focusring disabled:cursor-default disabled:text-disabled disabled:no-underline"
+                >
+                  Delete for good
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => setConfirming(false)}
+                  className="text-tiny text-muted underline underline-offset-2 focus-visible:outline-none focus-visible:shadow-focusring"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={choose(() => useUiStore.getState().togglePinnedThread(thread.id))}
+                className={MENU_ROW}
+              >
+                <Icon.chatHeader.pin size={ICON.sm} />
+                <span className="min-w-0 flex-1 truncate">{pinned ? "Unpin" : "Pin"}</span>
+              </button>
+              {canRename && (
+                <button type="button" role="menuitem" disabled={!connected} title={offline} onClick={choose(onRename)} className={MENU_ROW}>
+                  <Icon.chatHeader.rename size={ICON.sm} />
+                  <span className="min-w-0 flex-1 truncate">Rename</span>
+                </button>
+              )}
+              {canArchive && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!connected}
+                  title={offline}
+                  onClick={choose(() => {
+                    if (archived) sendRestoreThread(thread.id);
+                    else if (sendArchiveThread(thread.id)) useThreadStore.getState().noteArchived(thread);
+                  })}
+                  className={MENU_ROW}
+                >
+                  <Icon.chatHeader.archive size={ICON.sm} />
+                  <span className="min-w-0 flex-1 truncate">{archived ? "Restore" : "Archive"}</span>
+                </button>
+              )}
+              <button type="button" role="menuitem" onClick={choose(() => void share())} className={MENU_ROW}>
+                <Icon.chatHeader.share size={ICON.sm} />
+                <span className="min-w-0 flex-1 truncate">Share Chat</span>
+              </button>
+              {canCreate && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!connected}
+                  title={offline}
+                  // In the same project: a new chat about this chat's agent, or a plain one when it has none.
+                  onClick={choose(() => sendCreateThread(thread.agent_id))}
+                  className={MENU_ROW}
+                >
+                  <Icon.chatHeader.newChat size={ICON.sm} />
+                  <span className="min-w-0 flex-1 truncate">New Chat</span>
+                </button>
+              )}
+              {canDelete && (
+                <>
+                  <div className="my-1 h-px bg-hair" role="separator" />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={!connected}
+                    title={offline}
+                    onClick={() => setConfirming(true)}
+                    className={`${MENU_ROW} text-err`}
+                  >
+                    <Icon.chatHeader.delete size={ICON.sm} />
+                    <span className="min-w-0 flex-1 truncate">Delete</span>
+                  </button>
+                </>
+              )}
+            </>
           )}
         </div>
       )}

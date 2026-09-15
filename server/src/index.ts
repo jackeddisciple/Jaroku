@@ -7581,7 +7581,7 @@ async function handleInboxCommand(ctx: TenantContext, cmd: InboxCommand): Promis
 const HIGH_COST_SHARE = 0.25;
 
 const THREAD_COMMAND_NAMES = new Set([
-  "createThread", "renameThread", "archiveThread", "restoreThread",
+  "createThread", "renameThread", "archiveThread", "restoreThread", "deleteThread",
   // §6.3's fork. In the set as well as handled, which is what `test:channels` asserts and why: a
   // command whose refusals answer on `threads` and whose name is not here would fall through to
   // `handleEvalCommand` the day somebody reorders the dispatch chain.
@@ -8224,6 +8224,22 @@ async function handleThreadCommand(ctx: TenantContext, cmd: ThreadCommand): Prom
 
     if (cmd.cmd === "restoreThread") {
       await threadStore.restore(ctx, cmd.threadId);
+      await broadcastThreads(ctx);
+      return;
+    }
+
+    // FOR GOOD, AND ONLY FOR THE OWNER — `COMMAND_CAPABILITY` gates it at `workspace:manage`, where
+    // deleting an agent is, and the menu asks before it sends. The chat's messages go with it; its
+    // agent, the runs it started and what it cost are separate records and stay.
+    //
+    // NOT WHILE IT IS ANSWERING. A turn still running holds this conversation and would settle into a
+    // row that no longer exists, so the delete is refused until it has stopped.
+    if (cmd.cmd === "deleteThread") {
+      if (chatting.has(cmd.threadId)) {
+        refuseThread(ctx, "that chat is still answering — stop it before deleting it", cmd.threadId);
+        return;
+      }
+      await threadStore.deleteForGood(ctx, cmd.threadId);
       await broadcastThreads(ctx);
       return;
     }

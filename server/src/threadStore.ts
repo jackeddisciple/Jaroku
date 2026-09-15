@@ -18,12 +18,12 @@
 // the editor, the run pool and the eval queue, and would be the third place each of those is
 // modelled.
 //
-// ARCHIVE, NEVER DELETE (§3.4). There is deliberately no `deleteThread` on this class. A thread
-// holds what was thought, what was generated and what it cost, and the eval store's own
-// `deleteDataset` comment gives the reason the same way: a past comparison has to stay readable
-// after the artefact it was about is gone. `archive` sets a timestamp, `restore` clears it, and
-// nothing removes a row — which is also why §3.4 says the delete-confirmation dialog specified for
-// this redesign applies to Agents and not here. There is no delete path to confirm.
+// ARCHIVE FIRST, DELETE ONLY ON PURPOSE (§3.4). A thread holds what was thought and what was
+// generated, so the ordinary way to put one away is `archive`, which sets a timestamp that `restore`
+// clears. `deleteForGood` is the one exception and is named so nobody mistakes it for the other: it
+// is reached by a single owner-gated command that the menu confirms first, and it takes the chat and
+// its turns while the agent, its runs and the usage it was billed stay. `test:thread-archive` guards
+// that there is exactly one such path.
 
 import { randomUUID } from "node:crypto";
 
@@ -568,6 +568,27 @@ export class ThreadStore {
         WHERE workspace_id = ? AND id = ? AND archived_at IS NOT NULL`,
       [ctx.workspaceId, id],
     );
+  }
+
+  /**
+   * Remove a chat for good — the one way a thread leaves this table.
+   *
+   * WHAT GOES WITH IT is what hangs off it by a cascading key: its items, and through them the
+   * variants, attachments, notes, pins and feedback on each turn, plus its conversation settings and
+   * connectors. WHAT STAYS is everything that is a record of its own — the agent, the runs it started,
+   * and the usage it was billed — because those were never the chat's to take.
+   *
+   * A FORK KEEPS ITS PLACE. Its link to this chat is cleared first rather than left to the key: SQLite
+   * has no key on that column, and clearing it here means both drivers end in the same state — a
+   * conversation that no longer says what it was branched from.
+   */
+  async deleteForGood(ctx: TenantContext, id: string): Promise<void> {
+    await this.q(ctx).run(
+      `UPDATE threads SET parent_thread_id = NULL, branch_from_turn = NULL
+        WHERE workspace_id = ? AND parent_thread_id = ?`,
+      [ctx.workspaceId, id],
+    );
+    await this.q(ctx).run(`DELETE FROM threads WHERE workspace_id = ? AND id = ?`, [ctx.workspaceId, id]);
   }
 
   // --- what a thread owns (migration 044) ------------------------------------

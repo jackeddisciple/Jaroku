@@ -1,17 +1,16 @@
-// §3.4's lifecycle, and the absence it depends on.
+// §3.4's lifecycle: archiving keeps everything, and deleting is one guarded path.
 //
-// Archiving is easy to test and easy to get right. The part worth a suite is the NOT: this product
-// has no way to destroy a thread, and "has no way" is a claim about every file in the server rather
-// than about one function. So the second half of this file is a structural audit — it reads the
-// source and fails on a statement that would delete one, which is the only kind of check that
-// survives somebody adding a `deleteThread` command in six months without reading §3.4.
+// Archiving is easy to test and easy to get right. The part worth a suite is the GUARD on the other
+// half: a chat can now be removed for good, and "only in one place, and only by the owner" is a claim
+// about every file in the server rather than about one function. So the third section is a structural
+// audit — it reads the source and fails on a second statement that deletes a thread, a second command
+// that asks for it, or a command that any member could send.
 //
-// WHY THAT MATTERS BEYOND TIDINESS. §3.4 spells out the knock-on: the delete-confirmation dialog
-// specified for this redesign — the one naming the creator, as a safety net for Team workspaces where
-// any member can destroy another member's work — applies to Agents and NOT to threads, because there
-// is no delete path to confirm. If a delete path ever appears, that reasoning silently becomes wrong
-// and a Team workspace gets an unguarded destroy. This audit is what makes that impossible to do
-// quietly.
+// WHY THAT MATTERS BEYOND TIDINESS. In a Team workspace every member sees every chat. Archiving somebody
+// else's is reversible in one click, so any member may; deleting it is not, so it is gated where
+// deleting an agent is — `workspace:manage`, the owner — and the menu asks before it sends. A delete
+// path added anywhere else, or at a looser capability, would be an unguarded destroy of another
+// member's work, and this audit is what makes that impossible to do quietly.
 //
 //   npm run test:thread-archive
 
@@ -20,6 +19,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
+import { COMMAND_CAPABILITY } from "./auth/capabilities.ts";
 import { openTestSqlite, testContext } from "./db/testDb.ts";
 import { BillingRepository } from "./db/repositories/billing.ts";
 import { TraceStore } from "./store.ts";
@@ -104,7 +104,7 @@ const billing = new BillingRepository(db);
     (await threads.get(ctx, active.id))?.status === "idle");
 }
 
-// --- 3. the absence: nothing in this server can destroy a thread ---------------------------
+// --- 3. the guard: one statement, one command, and only the owner may send it ---------------
 {
   const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -122,24 +122,18 @@ const billing = new BillingRepository(db);
   walk(HERE);
   check(`read the server's own source (${sources.length} files)`, sources.length > 100);
 
-  // A DELETE naming the THREAD table, anywhere. `lifecycle/deletion.ts` deletes a whole workspace by
-  // iterating a table list, so it contains no such statement and needs no exception here — which is
-  // the right shape: deleting a workspace is deleting everything, and there is no path that reaches
-  // one thread.
-  const deleters = sources.filter((f) => /DELETE\s+FROM\s+threads\b/i.test(f.text));
+  // A DELETE naming the THREAD table, anywhere but the store. `lifecycle/deletion.ts` deletes a whole
+  // workspace by iterating a table list, so it contains no such statement and needs no exception here.
+  const deleters = sources.filter((f) => /DELETE\s+FROM\s+threads\b/i.test(f.text)).map((f) => f.path);
   check(
-    "no statement anywhere deletes a thread",
-    deleters.length === 0,
-    deleters.map((f) => f.path).join(", "),
+    "only the thread store deletes a thread",
+    deleters.length === 1 && deleters[0] === "threadStore.ts",
+    deleters.join(", "),
   );
 
-  // THE ITEMS ARE A DIFFERENT PROMISE, and this is the one exemption. §3.4 is about the SESSION —
-  // what was asked for, what it was called, what it cost — and none of that is in `thread_items`,
-  // which is a join table naming rows in `runs` and `eval_runs` by a plain text ref with no foreign
-  // key. When retention takes the run, the row it points at is gone and the row itself is an orphan
-  // that nothing can render: left in place it made this the one table in the schema that only ever
-  // grows, read in full on every thread snapshot. So exactly one file may sweep it, and only
-  // alongside the runs and evals that orphaned the rows.
+  // THE ITEMS ARE A DIFFERENT PROMISE. A deleted chat's items go by the cascading key, never by a
+  // statement of their own, so exactly one file may still sweep them: retention, and only alongside
+  // the runs and evals that orphaned the rows.
   const itemDeleters = sources
     .filter((f) => /DELETE\s+FROM\s+thread_items\b/i.test(f.text))
     .map((f) => f.path);
@@ -151,28 +145,48 @@ const billing = new BillingRepository(db);
   const retention = sources.find((f) => f.path === "lifecycle/retention.ts")?.text ?? "";
   check(
     "...never a message, a plan, a generation or a proposal",
-    // Both statements are scoped to a kind, so a `message` — the one prose a thread stores, and the
-    // one §4.3's preview and §5's title are read from — can never be caught by either.
     (retention.match(/DELETE\s+FROM\s+thread_items[\s\S]{0,200}?kind\s*=\s*'(run|eval)'/gi) ?? []).length === 2,
   );
 
-  // And no command a client could send. The relay's channel table is the whole command surface, so a
-  // `deleteThread` would have to appear in it to be routed at all.
+  // The relay's channel table is the whole command surface, so a destructive command has to appear in
+  // it to be routed at all — and there is exactly one.
   const destructive = Object.keys(COMMAND_CHANNEL).filter((c) => /^(delete|destroy|purge|remove)Thread/i.test(c));
-  check(
-    "no command on the socket asks to delete one",
-    destructive.length === 0,
-    destructive.join(", "),
-  );
+  check("one command on the socket deletes a chat", destructive.length === 1 && destructive[0] === "deleteThread",
+    destructive.join(", "));
+  check("...and only the owner may send it", COMMAND_CAPABILITY["deleteThread"] === "workspace:manage",
+    String(COMMAND_CAPABILITY["deleteThread"]));
 
-  // And no method on the store, by any of its usual names. `test:threads` asserts this on the
-  // instance; this asserts it on the source, so a method added and not yet called still fails.
+  // And one method on the store, by any of its usual names.
   const storeSource = sources.find((f) => f.path === "threadStore.ts")?.text ?? "";
   check("found the thread store's source", storeSource.length > 0);
-  check(
-    "the store has no method that would remove one",
-    !/\basync (delete|remove|destroy|purge)\w*\s*\(/.test(storeSource),
-  );
+  const removers = [...storeSource.matchAll(/\basync ((?:delete|remove|destroy|purge)\w*)\s*\(/g)].map((m) => m[1]);
+  check("the store has exactly one method that removes one", removers.length === 1 && removers[0] === "deleteForGood",
+    removers.join(", "));
+}
+
+// --- 4. deleting takes the chat and what hangs off it, and nothing else --------------------
+{
+  const t = await threads.create(ctx, { title: "Delete me" });
+  await threads.addItem(ctx, t.id, { kind: "message", role: "user", body: "a message that goes with it" });
+  const runId = randomUUID();
+  await store.upsertRun(ctx, {
+    id: runId, agent_id: "stripe_webhook", provider: "fake", model: "fake-dry-run",
+    status: "completed", started_at: new Date().toISOString(), ended_at: new Date().toISOString(),
+    cost: 0, tokens: 0, error: null,
+  });
+  await threads.addItem(ctx, t.id, { kind: "run", refId: runId });
+  const fork = await threads.create(ctx, { title: "Branched from it" });
+  await db.run(`UPDATE threads SET parent_thread_id = ?, branch_from_turn = 1 WHERE workspace_id = ? AND id = ?`,
+    [t.id, ctx.workspaceId, fork.id]);
+  const itemsBefore = (await threads.allItems(ctx)).length;
+
+  await threads.deleteForGood(ctx, t.id);
+  check("the chat is gone", (await threads.get(ctx, t.id)) === undefined);
+  check("...and its items went with it", (await threads.allItems(ctx)).length === itemsBefore - 2);
+  check("the run it started is still a run", (await store.getRun(ctx, runId)) !== undefined);
+  const branched = await threads.get(ctx, fork.id);
+  check("a fork of it stays", branched !== undefined);
+  check("...no longer pointing at a chat that is gone", branched?.parent_thread_id === null && branched?.branch_from_turn === null);
 }
 
 await store.close();
