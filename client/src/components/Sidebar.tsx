@@ -981,6 +981,30 @@ function ChatDot() {
 }
 
 /**
+ * Whether a chat row is the selected one — and not while a section is on screen.
+ *
+ * Opening the Inbox or Activity is going somewhere else; a chat row still lit under it would be the
+ * second selection this column no longer has.
+ *
+ * BOTH STORES ARE READ UNCONDITIONALLY, AND THE `&&` JOINS THEIR RESULTS RATHER THAN THEIR CALLS.
+ * This was written inline as `useThreadStore(…) && useUiStore(…) === null` in all three chat rows,
+ * and `&&` short-circuits: a row that was not the selected one never reached `useUiStore`, so the
+ * component rendered ONE hook while the selected row rendered TWO. Selecting a chat flipped a row
+ * from the first shape to the second, React lined the new render's hooks up against the old
+ * render's slots, and `useTypedText`'s dependency array landed where a boolean had been —
+ * `prevDeps.join is not a function`, thrown out of `areHookInputsEqual` during render. With no
+ * error boundary in this client that unmounts the entire tree, which is a white window.
+ *
+ * It is a hook rather than three corrected copies because three copies is how the first one got
+ * past review, and the rule it breaks is invisible at the call site.
+ */
+function useThreadRowActive(threadId: string): boolean {
+  const selected = useThreadStore((s) => s.activeThreadId === threadId);
+  const inSection = useUiStore((s) => s.navView) !== null;
+  return selected && !inSection;
+}
+
+/**
  * A chat in the column: its name, and a press that opens it.
  *
  * NO INDENT, UNDER AN AGENT OR NOT — the product owner's call on 2026-09-15. A chat under its agent
@@ -988,10 +1012,7 @@ function ChatDot() {
  * belongs to the agent above it is the order and the circle in the emoji's column, not a step.
  */
 function ThreadListRow({ thread }: { thread: ThreadView }) {
-  // AND NOT WHILE A SECTION IS ON SCREEN. Opening the Inbox or Activity is going somewhere else;
-  // a chat row still lit under it would be the second selection this column no longer has.
-  const active = useThreadStore((s) => s.activeThreadId === thread.id)
-    && useUiStore((s) => s.navView) === null;
+  const active = useThreadRowActive(thread.id);
   // The same typing as the header when a topic title arrives — see lib/typedText.ts.
   const shownTitle = useTypedText(chatTitle(thread.title), !thread.title_is_custom);
   return (
@@ -1022,10 +1043,7 @@ function ThreadListRow({ thread }: { thread: ThreadView }) {
  * RESTORE IS ABSENT FOR SOMEBODY WHO CANNOT RESTORE, and disabled while reconnecting, with the reason.
  */
 function ArchivedThreadRow({ thread }: { thread: ThreadView }) {
-  // AND NOT WHILE A SECTION IS ON SCREEN. Opening the Inbox or Activity is going somewhere else;
-  // a chat row still lit under it would be the second selection this column no longer has.
-  const active = useThreadStore((s) => s.activeThreadId === thread.id)
-    && useUiStore((s) => s.navView) === null;
+  const active = useThreadRowActive(thread.id);
   const connected = useTraceStore((s) => s.connection === "open");
   const canRestore = useCanRun("restoreThread");
   return (
@@ -1083,10 +1101,7 @@ function ListHeading({ label, children }: { label: string; children?: React.Reac
  * name, and the pin mark in the icon column is what says why it is up here rather than in the list.
  */
 function PinnedThreadRow({ thread }: { thread: ThreadView }) {
-  // AND NOT WHILE A SECTION IS ON SCREEN. Opening the Inbox or Activity is going somewhere else;
-  // a chat row still lit under it would be the second selection this column no longer has.
-  const active = useThreadStore((s) => s.activeThreadId === thread.id)
-    && useUiStore((s) => s.navView) === null;
+  const active = useThreadRowActive(thread.id);
   const shownTitle = useTypedText(chatTitle(thread.title), !thread.title_is_custom);
   return (
     <button
