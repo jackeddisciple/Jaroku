@@ -190,7 +190,7 @@ import {
 import { buildFactPack, type FactPack, type PackDeps } from "./work/factPack.ts";
 import { citableFrom, resolveCitations } from "./work/citations.ts";
 import { CHAT_SYSTEM, chatClosing, CONVERSATION_SYSTEM, conversationClosing, renderRecord } from "./prompt.ts";
-import type { AskRecordCommand, ChatCommand, ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCommand, InboxCommand, EditTurnCommand, ProviderSnapshot, SelectVariantCommand, StopChatCommand, RecordChatTurnCommand, RecordBuildTurnCommand, BuildChunkCommand} from "./wsRelay.ts";
+import type { AskRecordCommand, ChatCommand, ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCommand, InboxCommand, EditTurnCommand, ProviderSnapshot, SelectVariantCommand, StopChatCommand, RecordChatTurnCommand, RecordBuildTurnCommand, BuildChunkCommand, EditCommand} from "./wsRelay.ts";
 import type { ListWorkCommand, WorkCommand, WorkSnapshotWire } from "./wsRelay.ts";
 import { loadRuntimeEnv } from "./env.ts";
 import { installLogRedaction, protectEnv, protectSecret } from "./obs/log.ts";
@@ -5215,7 +5215,7 @@ async function dispatchCommand(cmd: ForwardedCommand, ctx: TenantContext): Promi
     else if (cmd.cmd === "planAgent") planAgent(ctx, cmd);
     else if (cmd.cmd === "discardPlan") planner.discard(ctx.workspaceId, cmd.planId);
     else if (cmd.cmd === "edit") {
-      void editAgent(ctx, cmd.agentId, cmd.instruction, cmd.threadId, requestedAttachments(cmd.attachments));
+      void editAgent(ctx, cmd.agentId, cmd.instruction, cmd.threadId, requestedAttachments(cmd.attachments), cmd.subscription);
     }
     else if (cmd.cmd === "applyEdit") void editor.apply(ctx, cmd.proposalId);
     else if (cmd.cmd === "undoEdit") void editor.undo(ctx, cmd.agentId);
@@ -10245,7 +10245,11 @@ async function handleGithubCommand(ctx: TenantContext, cmd: GithubCommand): Prom
           `Files touched:`,
           ...view.changes.map((c) => `- ${c.status} ${c.path} (+${c.additions}/-${c.deletions})`),
         ].join("\n");
-        const key = await providerKeys.platformKey(ctx);
+        // WRITING A COMMIT MESSAGE IS A QUESTION SOMEBODY ASKED, so it runs on their own plan like
+        // explain and askRecord. No CLI connected means no message rather than a silent API call.
+        const msgSub = cmd.subscription ? chatSubscription(cmd.subscription) : null;
+        if (!msgSub) return fail(NO_SUBSCRIPTION, agentId);
+        const key: string | undefined = undefined;
         let text = "";
         await streamExplain(
           context,
@@ -10265,6 +10269,10 @@ async function handleGithubCommand(ctx: TenantContext, cmd: GithubCommand): Prom
             onError: (message) => fail(message, agentId),
           },
           key,
+          undefined,
+          undefined,
+          undefined,
+          askOnSubscription(ctx, msgSub, "explain", ""),
         );
         return;
       }
@@ -12130,7 +12138,16 @@ async function editAgent(
   instruction: string,
   threadId?: string,
   attached: readonly RequestedAttachment[] = [],
+  /** The plan that thinks — an edit runs on the user's own subscription. See askModel.ts. */
+  rawSubscription?: EditCommand["subscription"],
 ): Promise<void> {
+  // CHECKED BEFORE THE SLOT IS CLAIMED, so a workspace with no CLI connected does not hold the
+  // single edit slot while being refused.
+  const editSub = rawSubscription ? chatSubscription(rawSubscription) : null;
+  if (!editSub) {
+    relay.broadcastEdit(ctx, { type: "error", message: NO_SUBSCRIPTION, agentId });
+    return;
+  }
   // Refused here rather than inside `propose`, so the refusal is answered to the asker and the
   // edit scope is left pointing at the workspace whose edit is actually running. The editor
   // refuses a second edit either way; what this adds is that a refused one cannot redirect the
@@ -12165,16 +12182,18 @@ async function editAgent(
     editThread = null;
   }
   editOut({ type: "started", agentId, instruction });
-  void providerKeys
-    .platformKey(ctx)
-    .then(async (apiKey) => {
-      editPayer = apiKey ? "workspace" : "platform";
-      // Resolved against the thread the instruction was written in — see effortForThread.
-      return editor.propose(
-        ctx, agentId, instruction, apiKey,
-        (editEffort = await effortForThread(ctx, editThread, EDIT_MODEL, EDIT_MAX_TOKENS)),
-      );
-    })
+  // AN EDIT THINKS ON THE USER'S OWN SUBSCRIPTION, like the plan and the generation before it. No
+  // key is resolved: an API key pays for agent runs and for evaluating what was built, never for
+  // work somebody asked for and is waiting on.
+  void (async () => {
+    editPayer = "workspace";
+    // Resolved against the thread the instruction was written in — see effortForThread.
+    return editor.propose(
+      ctx, agentId, instruction, undefined,
+      (editEffort = await effortForThread(ctx, editThread, EDIT_MODEL, EDIT_MAX_TOKENS)),
+      askOnSubscription(ctx, editSub, "edit", editThread ?? ""),
+    );
+  })()
     .catch((err) => {
       // The claim never became an edit, so it has to go back — otherwise one failed key lookup
       // refuses every edit in the deployment until the process restarts.
@@ -12898,6 +12917,12 @@ async function buildExplainContext(ctx: TenantContext, cmd: ExplainCommand): Pro
 }
 
 async function explainAgent(ctx: TenantContext, cmd: ExplainCommand): Promise<void> {
+  // AN EXPLANATION IS A QUESTION SOMEBODY ASKED AND IS WAITING ON, so it runs on their own plan.
+  const explainSub = cmd.subscription ? chatSubscription(cmd.subscription) : null;
+  if (!explainSub) {
+    relay.broadcastReply(ctx, { type: "error", agentId: cmd.agentId, message: NO_SUBSCRIPTION });
+    return;
+  }
   if (explaining) {
     // To the asker, not to the scope: the answer still streaming belongs to somebody else, and
     // an explanation quotes the agent's system prompt and tool source back to the reader.
@@ -12950,7 +12975,9 @@ ${attached}`;
       (m) => replyOut({ type: "error", agentId: cmd.agentId, message: `attachments were not sent: ${m}` }),
     );
   }
-  const explainKey = await providerKeys.platformKey(ctx);
+  // No key: see askModel.ts. `explainKey` stays undefined so the payer line below reads as the
+  // workspace's own plan, which is what actually paid.
+  const explainKey: string | undefined = undefined;
   // §5.4's ROW, OPENED AROUND THE RESPONSE. Ordinal 1 for the first answer and 2 for a
   // regeneration of it, each carrying the model and the effort levels that produced THIS one —
   // which is the whole of what the store's header promises and what nothing was writing.
@@ -13006,7 +13033,8 @@ ${attached}`;
       if (explained) settleReply({ body: explained });
       replyOut({ type: "error", agentId: cmd.agentId, message });
     },
-  }, explainKey, replyEffort);
+  }, explainKey, replyEffort, undefined, undefined,
+    askOnSubscription(ctx, explainSub, "explain", replyThread ?? ""));
 }
 
 // --- answering from the record (Part 3 §7) ----------------------------------------------------
@@ -13073,6 +13101,12 @@ async function recordFor(
  * care.
  */
 async function answerFromRecord(ctx: TenantContext, cmd: AskRecordCommand): Promise<void> {
+  // §7.2'S QUESTION, ON THE PLAN THE PERSON ASKING PAYS FOR — the same rule `explain` beside it takes.
+  const askSub = cmd.subscription ? chatSubscription(cmd.subscription) : null;
+  if (!askSub) {
+    relay.broadcastReply(ctx, { type: "error", agentId: cmd.agentId, message: NO_SUBSCRIPTION });
+    return;
+  }
   const question = typeof cmd.question === "string" ? cmd.question.trim() : "";
   if (!question) {
     relay.broadcastReply(ctx, { type: "error", agentId: cmd.agentId, message: "ask something" });
@@ -13121,7 +13155,7 @@ async function answerFromRecord(ctx: TenantContext, cmd: AskRecordCommand): Prom
     // The answer as it accumulates, because a citation marker can be split across two deltas and
     // there is nothing to parse until the whole thing has arrived.
     let answer = "";
-    const askKey = await providerKeys.platformKey(ctx);
+    const askKey: string | undefined = undefined;
     const effort = await effortForThread(ctx, replyThread, EXPLAIN_MODEL, EXPLAIN_MAX_TOKENS);
     // `ask` IS ITS OWN ROUTE: Part 3's "a question never touches the container" answers from the
     // record rather than from the agent's code, and calling it `explain` would put two different
@@ -13178,6 +13212,8 @@ async function answerFromRecord(ctx: TenantContext, cmd: AskRecordCommand): Prom
       // §7.3: THE RULES COME FROM `prompt.ts`, WITH THE OTHER THREE, so they cannot drift. Not one
       // sentence of instruction is written in this file.
       { system: CONVERSATION_SYSTEM, askedBy: "Operator", closing: conversationClosing(agentName) },
+      undefined,
+      askOnSubscription(ctx, askSub, "explain", thread ?? ""),
     );
   } catch (err) {
     const message = (err as Error)?.message ?? String(err);
@@ -14356,7 +14392,7 @@ interface HeldBuildTurn {
   requestId: string;
   threadId: string;
   /** What kind of build asked, so a refusal reaches the right part of the pane. */
-  kind: "plan" | "gen";
+  kind: "plan" | "gen" | "edit" | "explain";
   /** The model whose usage this turn reports, for the figure on the card. */
   model: string;
   settle: (r: AskResult) => void;
@@ -14385,7 +14421,7 @@ const buildTurns = new SubscriptionTurns<HeldBuildTurn>((held) =>
 function askOnSubscription(
   ctx: TenantContext,
   subscription: { provider: string; model: string | null; effort: EffortPlan | null },
-  kind: "plan" | "gen",
+  kind: "plan" | "gen" | "edit" | "explain",
   threadId: string,
 ): AskModel {
   return (req) =>
@@ -14402,8 +14438,9 @@ function askOnSubscription(
         fail: (message) => reject(new Error(message)),
       });
       const delivered = relay.sendGen(ctx, ctx.requestId, {
-        type: kind === "plan" ? "plan_run" : "gen_run",
+        type: "build_run",
         runId: held.runId,
+        kind,
         provider: subscription.provider,
         model: subscription.model,
         effort: subscription.effort?.applied ?? null,

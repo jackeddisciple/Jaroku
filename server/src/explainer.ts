@@ -9,6 +9,8 @@
 
 import { existsSync, readFileSync } from "node:fs";
 
+import type { AskModel } from "./askModel.ts";
+import { subscriptionPrompt } from "./chat.ts";
 import { anthropicClient } from "./claude.ts";
 import { faultError, injectedFault } from "./providerFailure.ts";
 import { isOpenAiCompatible, streamOpenAiChat } from "./openaiChat.ts";
@@ -301,6 +303,17 @@ export async function streamExplain(
    * nothing, which is worse than no control.
    */
   onHandle?: (handle: ExplainHandle) => void,
+  /**
+   * WHO DOES THE THINKING, when it is the user's own subscription rather than an API key.
+   *
+   * Explaining a step, answering from the record and writing a commit message are all questions a
+   * person asked and is waiting on, so they run on the plan that person pays for — see askModel.ts.
+   * Absent is the API path, which the fixtures and the eval judge still take.
+   *
+   * IT REPLACES THE PROVIDER BRANCH BELOW RATHER THAN JOINING IT. A CLI turn has no transport to
+   * choose: the provider was decided when the person picked a model, and the shell runs that CLI.
+   */
+  askOn?: AskModel,
 ): Promise<void> {
   // THE FIXTURE IS CHECKED BEFORE THE KEY, so a recorded answer replays whether or not one is
   // configured — which is the point of having it: the path is exercisable on a laptop with no
@@ -356,6 +369,34 @@ export async function streamExplain(
     // stay." A fault that could only fire before the stream opened would never exercise it.
     const fault = injectedFault();
     if (fault && !fault.mid) throw faultError(fault.class);
+    // THE SUBSCRIPTION ANSWERS HERE. One flattened prompt rather than a turn list, because a CLI
+    // takes one — `subscriptionPrompt` is the same flattening the chat route already uses, so a
+    // question asked here and the same question asked in Chat reach the model in the same shape.
+    if (askOn) {
+      const answered = await askOn({
+        system: ask?.system ?? SYSTEM,
+        user: subscriptionPrompt({
+          context,
+          history: ask?.history ?? [],
+          question,
+          closing: ask?.closing ?? "",
+          askedBy: ask?.askedBy,
+        }),
+        onChunk: (t) => cb.onDelta(t),
+      });
+      // The usage report arrives BEFORE `onDone`, which is the order every caller here relies on.
+      // ExplainUsage's own names, and no cost: the tokens came from a plan the user already pays
+      // for, so `costFor` is never asked and nothing is booked.
+      cb.onUsage?.({
+        model,
+        input: answered.usage.input_tokens,
+        output: answered.usage.output_tokens,
+        cacheRead: 0,
+        cacheWrite: 0,
+      });
+      cb.onDone();
+      return;
+    }
     const stream = anthropicClient(apiKey).messages.stream({
       model,
       max_tokens: EXPLAIN_MAX_TOKENS,

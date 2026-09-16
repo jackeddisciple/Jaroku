@@ -385,6 +385,9 @@ export type LoadAgentVersionCommand = {
 // The fix loop (doc §8 Week 4): every mutation is proposal -> explicit apply/undo.
 export type EditCommand = {
   cmd: "edit";
+  /** The plan that thinks. Everything a person asks for runs on it — see askModel.ts. */
+  subscription?: { provider: string; model?: string | null; effort?: string | null };
+
   agentId: string;
   instruction: string;
   /** The session this edit happens in. See RunCommand.threadId. */
@@ -972,7 +975,12 @@ export type CommitGithubCommand = {
  * — and the default path (§3.4's pre-fill from the version's own instruction and summary) needs no
  * call at all, which is the property worth keeping visible.
  */
-export type GenerateGithubMessageCommand = { cmd: "generateGithubMessage"; agentId: string };
+export type GenerateGithubMessageCommand = {
+  cmd: "generateGithubMessage";
+  agentId: string;
+  /** The plan that thinks. Everything a person asks for runs on it — see askModel.ts. */
+  subscription?: { provider: string; model?: string | null; effort?: string | null };
+};
 
 /**
  * §B.3's live diagnostics: analyse a buffer nobody has saved.
@@ -1602,6 +1610,9 @@ export type GithubAttachment =
  */
 export type AskRecordCommand = {
   cmd: "askRecord";
+  /** The plan that thinks. Everything a person asks for runs on it — see askModel.ts. */
+  subscription?: { provider: string; model?: string | null; effort?: string | null };
+
   /** The agent's uuid. The thread is bound to one; §12's modules are not, but this command is. */
   agentId: string;
   question: string;
@@ -1760,6 +1771,9 @@ export type StopChatCommand = {
 
 export type ExplainCommand = {
   cmd: "explain";
+  /** The plan that thinks. Everything a person asks for runs on it — see askModel.ts. */
+  subscription?: { provider: string; model?: string | null; effort?: string | null };
+
   agentId: string;
   question: string;
   subject: ExplainSubject;
@@ -1937,17 +1951,18 @@ export type GenEvent =
   // They carry what the API call carried: the system prompt in place of the CLI's own, and the one
   // user message. The app adds no instruction of its own and records nothing in the conversation.
   | {
-      type: "plan_run";
+      type: "build_run";
       runId: string;
-      provider: string;
-      model: string | null;
-      effort: string | null;
-      system: string;
-      prompt: string;
-    }
-  | {
-      type: "gen_run";
-      runId: string;
+      /**
+       * WHICH KIND OF THINKING WAS ASKED FOR. The app answers all four identically — run the CLI,
+       * send the text back — so this is for the log and for a refusal that names what failed,
+       * never a branch in the answering path.
+       *
+       * It rides the `gen` channel whatever it is, and an edit or an explanation renders on its own
+       * channel regardless: this is the HAND-OFF, and what comes back is fed to the server's own
+       * callbacks, which broadcast where they always did.
+       */
+      kind: "plan" | "gen" | "edit" | "explain";
       provider: string;
       model: string | null;
       effort: string | null;
@@ -4790,7 +4805,7 @@ export class WsRelay {
             else void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "discardPlan" && typeof msg.planId === "string") {
             void withContext((ctx) => this.onCommand?.(msg, ctx));
-          } else if (msg.cmd === "edit" && typeof msg.agentId === "string" && typeof msg.instruction === "string") {
+          } else if (msg.cmd === "edit" && typeof msg.agentId === "string" && typeof msg.instruction === "string" && validSubscription(msg.subscription)) {
             void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "applyEdit" && typeof msg.proposalId === "string") {
             void withContext((ctx) => this.onCommand?.(msg, ctx));
@@ -4831,13 +4846,13 @@ export class WsRelay {
             void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "branchRun" && typeof msg.fromRunId === "string" && typeof msg.atSeq === "number") {
             void withContext((ctx) => this.onCommand?.(msg, ctx));
-          } else if (msg.cmd === "explain" && typeof msg.agentId === "string" && typeof msg.question === "string") {
+          } else if (msg.cmd === "explain" && typeof msg.agentId === "string" && typeof msg.question === "string" && validSubscription(msg.subscription)) {
             void withContext((ctx) => this.onCommand?.(msg, ctx));
           // BESIDE `explain` AND VALIDATED THE SAME WAY, because it is the same shape of thing —
           // an agent and a sentence — and a different destination. What it must not be is folded
           // INTO `explain`: see `AskRecordCommand` for why a question about what happened and a
           // question about what the code does are two commands.
-          } else if (msg.cmd === "askRecord" && typeof msg.agentId === "string" && typeof msg.question === "string") {
+          } else if (msg.cmd === "askRecord" && typeof msg.agentId === "string" && typeof msg.question === "string" && validSubscription(msg.subscription)) {
             void withContext((ctx) => this.onCommand?.(msg, ctx));
           // AND THE THIRD, WITH ONE FIELD FEWER TO INSIST ON. §8.1: a chat message is the one thing
           // on this channel that is useful with NO agent — a thread with `agent_id` null is the

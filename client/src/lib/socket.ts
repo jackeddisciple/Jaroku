@@ -214,8 +214,7 @@ function dispatch(msg: ServerMessage): void {
         // THE TURN THIS APP WAS HANDED. Answered on the CLI holding the user's sign-in; nothing is
         // rendered from here, because the text goes back to the server and comes out as the plan
         // deltas and file events every tab already renders.
-        case "plan_run":
-        case "gen_run": answerBuildRun(msg); break;
+        case "build_run": answerBuildRun(msg); break;
         default:
           // This switch used to drop anything it didn't know silently, so a server running
           // ahead of the client showed nothing at all rather than saying so.
@@ -1423,7 +1422,7 @@ export function sendEdit(
   instruction: string,
   attachments?: readonly CommandAttachment[],
 ): void {
-  send({ cmd: "edit", agentId, instruction, threadId: activeThread(), ...withAttachments(attachments) });
+  send({ cmd: "edit", agentId, instruction, threadId: activeThread(), subscription: chatSubscriptionFor() ?? undefined, ...withAttachments(attachments) });
 }
 
 export function sendApplyEdit(proposalId: string): void {
@@ -1598,7 +1597,7 @@ export function sendExplain(
   regenerateOf?: string,
 ): void {
   send({
-    cmd: "explain", agentId, question, subject, threadId: activeThread(),
+    cmd: "explain", agentId, question, subject, threadId: activeThread(), subscription: chatSubscriptionFor() ?? undefined,
     ...(github?.length ? { github } : {}), ...withAttachments(attachments),
     ...(regenerateOf ? { regenerateOf } : {}),
   });
@@ -2382,7 +2381,7 @@ export function sendSetAgentCiConfig(
 
 export function sendGenerateGithubMessage(agentId: string): void {
   useGithubStore.getState().startGenerating(agentId);
-  send({ cmd: "generateGithubMessage", agentId });
+  send({ cmd: "generateGithubMessage", agentId, subscription: chatSubscriptionFor() ?? undefined });
 }
 
 /** §3.4's commit box. `push` false is refused server-side — there is no local repository here. */
@@ -2473,7 +2472,7 @@ export function sendDispatchWork(
  * something this product already does exactly one way.
  */
 export function sendAskRecord(agentId: string, question: string, threadId?: string): boolean {
-  return send({ cmd: "askRecord", agentId, question, ...(threadId ? { threadId } : {}) });
+  return send({ cmd: "askRecord", agentId, question, subscription: chatSubscriptionFor() ?? undefined, ...(threadId ? { threadId } : {}) });
 }
 
 export function sendCancelWork(itemId: string): boolean {

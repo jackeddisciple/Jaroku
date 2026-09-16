@@ -34,6 +34,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { structuredPatch } from "diff";
 import type { EffortPlan } from "./effort.ts";
+import type { AskModel } from "./askModel.ts";
 import { anthropicClient, emptyUsage, summarizeUsage, type UsageSummary } from "./claude.ts";
 import { loadConnectors, type Connector } from "./connectors.ts";
 import { FileProtocolParser, type ProtocolEvent } from "./fileProtocol.ts";
@@ -273,6 +274,8 @@ export class Editor extends EventEmitter<EditorEvents> {
      * or nothing asked for one, and the request is then exactly the one that shipped.
      */
     effort?: EffortPlan | null,
+    /** WHO DOES THE THINKING — the user's own subscription. See askModel.ts. */
+    ask?: AskModel,
   ): Promise<void> {
     if (this.busy) {
       this.fail({ message: "an edit is already in progress", agentId });
@@ -405,6 +408,8 @@ export class Editor extends EventEmitter<EditorEvents> {
           (chunk) => parser.push(chunk),
           (u) => (usage = u),
           apiKey,
+          effort,
+          ask,
         );
         if (fixture) (await import("node:fs")).writeFileSync(fixture, raw, "utf8");
       }
@@ -692,8 +697,21 @@ export class Editor extends EventEmitter<EditorEvents> {
     onUsage: (u: UsageSummary) => void,
     apiKey?: string,
     effort?: EffortPlan | null,
+    ask?: AskModel,
   ): Promise<string> {
     let raw = "";
+    // THE SUBSCRIPTION ANSWERS HERE — see the same note in planner.ts. Modifying an agent is a
+    // thing a person asked for and is waiting on, so it runs on the plan that person pays for.
+    if (ask) {
+      const answered = await ask({
+        system: buildEditSystemPrompt(allConnectors),
+        user: buildEditUserPrompt(req),
+        onChunk: (text) => { raw += text; onChunk(text); },
+      });
+      if (!raw && answered.raw) { raw = answered.raw; onChunk(answered.raw); }
+      onUsage(answered.usage);
+      return raw;
+    }
     const stream = anthropicClient(apiKey).messages.stream({
       model: EDIT_MODEL,
       max_tokens: MAX_TOKENS,

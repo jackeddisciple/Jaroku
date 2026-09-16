@@ -309,8 +309,9 @@ export type GenMessage = InThread &
    */
   | {
       channel: "gen";
-      type: "plan_run" | "gen_run";
+      type: "build_run";
       runId: string;
+      kind: "plan" | "gen" | "edit" | "explain";
       provider: string;
       model: string | null;
       effort: string | null;
@@ -2188,7 +2189,7 @@ export type ClientCommand =
   // and the id is what binds the resulting job back into the conversation as a `work` item.
   | { cmd: "dispatchWork"; agentId: string; input: string; clientRef?: string; threadId?: string }
   // A question about what an agent has done, answered from the record. Never touches the container.
-  | { cmd: "askRecord"; agentId: string; question: string; threadId?: string }
+  | { cmd: "askRecord"; subscription?: { provider: string; model?: string | null; effort?: string | null }; agentId: string; question: string; threadId?: string }
   | { cmd: "cancelWork"; itemId: string }
   | { cmd: "retryWork"; itemId: string }
   | { cmd: "reconnectAgent"; deploymentId: string }
@@ -2334,7 +2335,7 @@ export type ClientCommand =
   | { cmd: "listAgentGrid" }
   | { cmd: "loadAgentDetail"; agentId: string }
   | { cmd: "loadAgentVersion"; agentId: string; version?: number }
-  | { cmd: "edit"; agentId: string; instruction: string; threadId?: string }
+  | { cmd: "edit"; subscription?: { provider: string; model?: string | null; effort?: string | null }; agentId: string; instruction: string; threadId?: string }
   | { cmd: "applyEdit"; proposalId: string }
   | { cmd: "undoEdit"; agentId: string }
   | { cmd: "discardEdit"; proposalId: string }
@@ -2348,7 +2349,7 @@ export type ClientCommand =
   // send it left the user reading advice they had no way to take.
   | { cmd: "cancelRun"; runId: string }
   | { cmd: "branchRun"; fromRunId: string; atSeq: number; editNode?: string; editedState?: Record<string, unknown> }
-  | { cmd: "explain"; agentId: string; question: string; subject: ExplainSubject; github?: GithubAttachment[]; threadId?: string }
+  | { cmd: "explain"; subscription?: { provider: string; model?: string | null; effort?: string | null }; agentId: string; question: string; subject: ExplainSubject; github?: GithubAttachment[]; threadId?: string }
   // §2's chat route. `agentId` is OPTIONAL and every other command on the reply channel requires
   // one: §8.1's planning stage is a thread with no agent, and that is exactly when somebody types
   // "hi". Answered on "reply" like `explain` and `askRecord` — see server/src/wsRelay.ts's
@@ -2528,7 +2529,7 @@ export type ClientCommand =
   | { cmd: "commitGithub"; agentId: string; message: string; push?: boolean; ignoreSecrets?: boolean }
   // §3.4's ✨ generate. Its own command because it is the one thing in this family that costs
   // money — the default message needs no model call at all.
-  | { cmd: "generateGithubMessage"; agentId: string }
+  | { cmd: "generateGithubMessage"; subscription?: { provider: string; model?: string | null; effort?: string | null }; agentId: string }
   /**
    * §B.1.2's opt-in: which dataset a pull request runs, and whose money it may spend.
    *
