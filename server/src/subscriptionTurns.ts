@@ -83,6 +83,20 @@ export class SubscriptionTurns<T extends TurnOwner> {
     return held.turn;
   }
 
+  /**
+   * The turn with this id WITHOUT taking it, for the socket it was handed to.
+   *
+   * `take` is for settling and may happen once; text arriving mid-turn must not spend the turn. The
+   * same ownership rule applies — another socket sees nothing — so a stray chunk cannot feed a run
+   * it does not own.
+   */
+  peek(runId: string, by: { workspaceId: string; requestId: string }): OpenTurn<T> | null {
+    const held = this.turns.get(runId);
+    if (!held) return null;
+    if (held.turn.workspaceId !== by.workspaceId || held.turn.requestId !== by.requestId) return null;
+    return held.turn;
+  }
+
   /** The turn answering in this conversation, if one is. The chat route allows one per thread. */
   inThread(workspaceId: string, threadId: string): OpenTurn<T> | null {
     for (const { turn } of this.turns.values()) {

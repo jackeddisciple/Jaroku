@@ -301,6 +301,22 @@ export type GenMessage = InThread &
       revision: number;
     }
   | { channel: "gen"; type: "plan_discarded"; planId: string }
+  /**
+   * A plan or generation turn handed to THIS app to answer on the user's own subscription.
+   *
+   * Sent to one socket, never broadcast. The app runs the CLI, streams what arrives back as
+   * `buildChunk` so every tab sees the build progress, and ends with `recordBuildTurn`.
+   */
+  | {
+      channel: "gen";
+      type: "plan_run" | "gen_run";
+      runId: string;
+      provider: string;
+      model: string | null;
+      effort: string | null;
+      system: string;
+      prompt: string;
+    }
   /** The generation this plan authorised failed and wrote nothing — it is takeable again. */
   | { channel: "gen"; type: "plan_restored"; planId: string }
   | { channel: "gen"; type: "plan_error"; message: string });
@@ -2186,6 +2202,17 @@ export type ClientCommand =
   | { cmd: "restoreThread"; threadId: string }
   | { cmd: "deleteThread"; threadId: string }
   | { cmd: "titleThread"; threadId: string; title: string }
+  // Answering a plan or generation turn on the user's own subscription — see lib/socket.ts.
+  | { cmd: "buildChunk"; runId: string; text: string }
+  | {
+      cmd: "recordBuildTurn";
+      runId: string;
+      status: "done" | "stopped" | "error";
+      raw?: string;
+      error?: string | null;
+      inputTokens?: number | null;
+      outputTokens?: number | null;
+    }
   | { cmd: "listMembers" }
   /**
    * The workspace's audit trail, newest first.
@@ -2244,8 +2271,8 @@ export type ClientCommand =
   // the avatar join it because generation builds what was APPROVED rather than what the form says by
   // the time Generate is pressed. Both optional — an agent planned from the composer has neither,
   // and the server answers that with the neutral category and the hashed avatar.
-  | { cmd: "generate"; prompt: string; connectors?: string[]; mcpTools?: string[]; name?: string; category?: string; avatarId?: string; intoAgentId?: string; planId?: string; threadId?: string }
-  | { cmd: "planAgent"; prompt: string; connectors?: string[]; mcpTools?: string[]; name?: string; category?: string; avatarId?: string; intoAgentId?: string; revisePlanId?: string; threadId?: string }
+  | { cmd: "generate"; subscription?: { provider: string; model?: string | null; effort?: string | null }; prompt: string; connectors?: string[]; mcpTools?: string[]; name?: string; category?: string; avatarId?: string; intoAgentId?: string; planId?: string; threadId?: string }
+  | { cmd: "planAgent"; subscription?: { provider: string; model?: string | null; effort?: string | null }; prompt: string; connectors?: string[]; mcpTools?: string[]; name?: string; category?: string; avatarId?: string; intoAgentId?: string; revisePlanId?: string; threadId?: string }
   | { cmd: "discardPlan"; planId: string }
   | { cmd: "listAgents" }
   /**

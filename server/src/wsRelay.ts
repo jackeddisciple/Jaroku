@@ -95,6 +95,16 @@ export type CommandAttachment = {
 export type GenerateCommand = {
   cmd: "generate";
   prompt: string;
+  /**
+   * THE PLAN THAT THINKS, and for this command it is the only thing that can.
+   *
+   * Planning and generation run on the user's own Claude or Codex subscription — the credential is
+   * a CLI sign-in on their machine, so the server cannot make the call and hands the turn to the
+   * app that asked. An API key pays for agent RUNS and for what an agent does inside itself, and
+   * never for this. Absent is refused rather than quietly billed; see askModel.ts#NO_SUBSCRIPTION.
+   */
+  subscription?: { provider: string; model?: string | null; effort?: string | null };
+
   /** The session this build happens in. See RunCommand.threadId. */
   threadId?: string;
   connectors?: string[];
@@ -151,6 +161,16 @@ export type GenerateCommand = {
 export type PlanAgentCommand = {
   cmd: "planAgent";
   prompt: string;
+  /**
+   * THE PLAN THAT THINKS, and for this command it is the only thing that can.
+   *
+   * Planning and generation run on the user's own Claude or Codex subscription — the credential is
+   * a CLI sign-in on their machine, so the server cannot make the call and hands the turn to the
+   * app that asked. An API key pays for agent RUNS and for what an agent does inside itself, and
+   * never for this. Absent is refused rather than quietly billed; see askModel.ts#NO_SUBSCRIPTION.
+   */
+  subscription?: { provider: string; model?: string | null; effort?: string | null };
+
   /** The session this plan happens in. See RunCommand.threadId. */
   threadId?: string;
   connectors?: string[];
@@ -1800,6 +1820,8 @@ export type ClientCommand =
   | ListProvidersCommand
   | ReportProviderHostCommand
   | RecordChatTurnCommand
+  | RecordBuildTurnCommand
+  | BuildChunkCommand
   | ConnectionCommand
   | BillingCommand
   | DeployChannelCommand
@@ -1843,6 +1865,8 @@ const EVAL_COMMANDS = new Set([
 export type ForwardedCommand =
   | RunCommand
   | RecordChatTurnCommand
+  | RecordBuildTurnCommand
+  | BuildChunkCommand
   | GenerateCommand
   | PlanAgentCommand
   | DiscardPlanCommand
@@ -1906,6 +1930,30 @@ export type GenEvent =
       revision: number;
     }
   | { type: "plan_discarded"; planId: string }
+  // THE TURN, HANDED TO THE APP THAT ASKED FOR IT — the plan and generation twins of the reply
+  // channel's `run`. Sent to ONE socket, never broadcast: a subscription turn runs on the machine
+  // holding the sign-in, and a second app answering the same run would be two CLIs and one slot.
+  //
+  // They carry what the API call carried: the system prompt in place of the CLI's own, and the one
+  // user message. The app adds no instruction of its own and records nothing in the conversation.
+  | {
+      type: "plan_run";
+      runId: string;
+      provider: string;
+      model: string | null;
+      effort: string | null;
+      system: string;
+      prompt: string;
+    }
+  | {
+      type: "gen_run";
+      runId: string;
+      provider: string;
+      model: string | null;
+      effort: string | null;
+      system: string;
+      prompt: string;
+    }
   // THE PLAN CAME BACK, because the generation it authorised failed and never wrote anything.
   // `take()` spends a plan when a build STARTS, which is not when a build succeeds — so without
   // this a validation failure cost the user the whole plan and the card's controls unmounted with
@@ -2525,6 +2573,41 @@ export type RestoreThreadCommand = { cmd: "restoreThread"; threadId: string };
 export type DeleteThreadCommand = { cmd: "deleteThread"; threadId: string };
 /** A topic title the app's plan suggested for a chat's first exchange. Never overwrites a rename. */
 export type TitleThreadCommand = { cmd: "titleThread"; threadId: string; title: string };
+
+/**
+ * An app saying how the plan or generation turn it was handed ended.
+ *
+ * THE SHAPE `recordChatTurn` HAS, and for the same reasons: the run id the server minted, the text
+ * that arrived, how it ended, and the token counts as the user's own account of what their plan
+ * spent. No cost — the tokens came from a subscription they already pay for, and metering them
+ * would charge somebody twice for one answer.
+ *
+ * `raw` rather than `answer` because this text is not a reply anybody reads: it is the plan
+ * protocol or the file protocol, on its way to a parser.
+ */
+/**
+ * Text arriving from the app while it answers a plan or generation turn.
+ *
+ * WHY THE TEXT COMES BACK AT ALL, rather than only at the end: the build pane streams. On the API
+ * path the server watches the model and broadcasts `plan_delta` and the file events to every tab as
+ * they happen; when the CLI does the thinking, the only process that sees the text is the app, and a
+ * generation takes minutes. Without this the pane would sit dead for all of it and then fill in at
+ * once — and the other tabs would see nothing until it finished.
+ *
+ * BATCHED BY THE SENDER, not per token. See client/src/lib/socket.ts: the app accumulates and flushes
+ * on an interval, which is strictly less traffic than the API path's own per-delta broadcast.
+ */
+export type BuildChunkCommand = { cmd: "buildChunk"; runId: string; text: string };
+
+export type RecordBuildTurnCommand = {
+  cmd: "recordBuildTurn";
+  runId: string;
+  status: "done" | "stopped" | "error";
+  raw?: string;
+  error?: string | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+};
 export type LoadThreadCommand = { cmd: "loadThread"; threadId: string };
 
 /** Thread-channel commands, grouped so the forwarding switch stays readable. */
@@ -3752,6 +3835,10 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   listProviders: "providers", setOwnKeyForPlatform: "providers",
   reportProviderHost: "providers",
   recordChatTurn: "reply",
+  // A build turn's refusal belongs where the build pane is watching, for `recordChatTurn`'s reason
+  // one channel over: a refusal on `log` would leave the pane waiting on an answer that had already
+  // come and gone in the status bar.
+  recordBuildTurn: "gen", buildChunk: "gen",
   listConnections: "connections", connectConnector: "connections", disconnectConnector: "connections",
   loadUsage: "billing", setSpendCeiling: "billing", setByok: "billing",
   listMembers: "members", inviteMember: "members", revokeInvite: "members",
@@ -4687,10 +4774,20 @@ export class WsRelay {
       {
           if (msg.cmd === "run") {
             void withContext((ctx) => this.onCommand?.(msg, ctx));
-          } else if (msg.cmd === "generate" && typeof msg.prompt === "string") {
-            void withContext((ctx) => this.onCommand?.(msg, ctx));
-          } else if (msg.cmd === "planAgent" && typeof msg.prompt === "string") {
-            void withContext((ctx) => this.onCommand?.(msg, ctx));
+          } else if (msg.cmd === "generate" && typeof msg.prompt === "string" && validSubscription(msg.subscription)) {
+            // BUILDING RUNS ON THE USER'S OWN PLAN, so the same rule Chat is held to applies here:
+            // only a subscription THIS machine reported connected. Refused on `gen`, which is where
+            // the build pane is watching — a refusal on `reply` would leave the pane spinning.
+            const refusal = msg.subscription ? this.subscriptionRefusal(ws, msg.subscription.provider) : null;
+            if (refusal) this.sendTo(ws, { channel: "gen", type: "error", message: refusal });
+            else void withContext((ctx) => this.onCommand?.(msg, ctx));
+          } else if (msg.cmd === "planAgent" && typeof msg.prompt === "string" && validSubscription(msg.subscription)) {
+            // A PLAN REFUSAL IS `plan_error`, NOT `error` — the GenEvent note says why: `error` is
+            // wired to buildStore.fail() and paints the pane as a failed generation, and no
+            // generation is running when a plan is refused.
+            const refusal = msg.subscription ? this.subscriptionRefusal(ws, msg.subscription.provider) : null;
+            if (refusal) this.sendTo(ws, { channel: "gen", type: "plan_error", message: refusal });
+            else void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "discardPlan" && typeof msg.planId === "string") {
             void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "edit" && typeof msg.agentId === "string" && typeof msg.instruction === "string") {
@@ -4775,6 +4872,15 @@ export class WsRelay {
             if (typeof msg.runId === "string" || !this.subscriptionRefusal(ws, msg.provider)) {
               void withContext((ctx) => this.onCommand?.(msg, ctx));
             }
+          } else if (msg.cmd === "buildChunk" && typeof msg.runId === "string" && typeof msg.text === "string") {
+            void withContext((ctx) => this.onCommand?.(msg, ctx));
+          } else if (
+            msg.cmd === "recordBuildTurn" && typeof msg.runId === "string" && typeof msg.status === "string"
+          ) {
+            // THE PLAN/GENERATION TWIN OF THE SETTLE ABOVE, and it needs no subscription check for
+            // that one's reason: the run it names was handed to THIS socket and the server gives it
+            // to no other, so a settle naming a run is already proof of who it belongs to.
+            void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "stopChat") {
             void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "selectVariant" && typeof msg.turnId === "string" && typeof msg.ordinal === "number") {
@@ -5517,6 +5623,25 @@ export class WsRelay {
       if (session.context.workspaceId !== ctx.workspaceId) continue;
       if (session.context.requestId !== requestId) continue;
       this.sendTo(ws, { channel: "reply", ...event, ...(threadId ? { threadId } : {}) });
+      sent++;
+    }
+    return sent;
+  }
+
+  /**
+   * A `gen` event to the ONE socket that asked, and the count of sockets it reached.
+   *
+   * `sendReply`'s twin, and it exists for the same reason: a subscription turn is handed to the app
+   * holding the sign-in, never broadcast. Two apps answering one run would be two CLIs spending two
+   * plans on one plan slot. The count is what tells the caller a socket that asked has since closed.
+   */
+  sendGen(ctx: TenantContext, requestId: string, event: GenEvent, threadId?: string | null): number {
+    let sent = 0;
+    for (const [ws, session] of this.sessions) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      if (session.context.workspaceId !== ctx.workspaceId) continue;
+      if (session.context.requestId !== requestId) continue;
+      this.sendTo(ws, { channel: "gen", ...event, ...(threadId ? { threadId } : {}) });
       sent++;
     }
     return sent;

@@ -91,6 +91,7 @@ import { ConversationConnectorStore } from "./conversationConnectors.ts";
 import { TurnInteractionStore } from "./turnInteraction.ts";
 import { subscriptionAvailable } from "./providerAuth/capability.ts";
 import { SubscriptionTurns, type OpenTurn } from "./subscriptionTurns.ts";
+import { NO_SUBSCRIPTION, type AskModel, type AskResult } from "./askModel.ts";
 import { TurnVariantStore, type TurnVariant, type VariantOutcome } from "./turnVariants.ts";
 import { classOf, mustConfirm } from "./permissionShield.ts";
 import { attachTurn, turnRoutes, type Attachable, type RequestedAttachment, type TurnRouteDeps } from "./http/turns.ts";
@@ -189,7 +190,7 @@ import {
 import { buildFactPack, type FactPack, type PackDeps } from "./work/factPack.ts";
 import { citableFrom, resolveCitations } from "./work/citations.ts";
 import { CHAT_SYSTEM, chatClosing, CONVERSATION_SYSTEM, conversationClosing, renderRecord } from "./prompt.ts";
-import type { AskRecordCommand, ChatCommand, ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCommand, InboxCommand, EditTurnCommand, ProviderSnapshot, SelectVariantCommand, StopChatCommand, RecordChatTurnCommand} from "./wsRelay.ts";
+import type { AskRecordCommand, ChatCommand, ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCommand, InboxCommand, EditTurnCommand, ProviderSnapshot, SelectVariantCommand, StopChatCommand, RecordChatTurnCommand, RecordBuildTurnCommand, BuildChunkCommand} from "./wsRelay.ts";
 import type { ListWorkCommand, WorkCommand, WorkSnapshotWire } from "./wsRelay.ts";
 import { loadRuntimeEnv } from "./env.ts";
 import { installLogRedaction, protectEnv, protectSecret } from "./obs/log.ts";
@@ -5227,6 +5228,10 @@ async function dispatchCommand(cmd: ForwardedCommand, ctx: TenantContext): Promi
     else if (cmd.cmd === "askRecord") void answerFromRecord(ctx, cmd);
     else if (cmd.cmd === "chat") void chatWithJaroku(ctx, cmd);
     else if (cmd.cmd === "recordChatTurn") void recordChatTurn(ctx, cmd);
+    // The plan/generation twins. `buildChunk` feeds the call that is still awaiting its text;
+    // `recordBuildTurn` ends it. Neither touches the conversation.
+    else if (cmd.cmd === "buildChunk") feedBuildTurn(ctx, cmd);
+    else if (cmd.cmd === "recordBuildTurn") settleBuildTurn(ctx, cmd);
     else if (cmd.cmd === "stopChat") stopChat(ctx, cmd);
     else if (cmd.cmd === "selectVariant") void selectVariant(ctx, cmd);
     else if (AGENT_COMMAND_NAMES.has(cmd.cmd)) void handleAgentCommand(ctx, cmd as AgentCommand);
@@ -11657,6 +11662,15 @@ planner.on("error", (e) => {
 });
 
 async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<void> {
+  // A PLAN RUNS ON THE USER'S OWN SUBSCRIPTION AND ON NOTHING ELSE. Checked before the slot is
+  // claimed, so a workspace with no CLI connected does not hold the single plan slot while being
+  // refused. `plan_error` rather than `error` — see the GenEvent note: `error` paints the pane as a
+  // failed generation, and no generation is running.
+  const planSub = cmd.subscription ? chatSubscription(cmd.subscription) : null;
+  if (!planSub) {
+    relay.broadcastGen(ctx, { type: "plan_error", message: NO_SUBSCRIPTION });
+    return;
+  }
   // A generation in flight owns the pipeline; planning the next agent mid-build would put two
   // plans and one generation on the same single-slot state.
   //
@@ -11703,8 +11717,11 @@ async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<voi
     console.log(
       `[plan] planning${cmd.revisePlanId ? " (revision)" : ""} — "${cmd.prompt.slice(0, 80)}"`,
     );
-    const planKey = await providerKeys.platformKey(ctx);
-    planPayer = planKey ? "workspace" : "platform";
+    // THE PLAN THINKS ON THE USER'S OWN SUBSCRIPTION — see askModel.ts. No key is resolved here any
+    // more: an API key pays for agent RUNS and for what an agent does inside itself, never for this.
+    // `planPayer` stays for the accounting row, and a subscription is neither of the two payers the
+    // platform knows about — nothing is booked, so it reports the workspace's own plan.
+    planPayer = "workspace";
     // Resolved here rather than in the planner, so the planner keeps its single dependency
     // on the connector catalogue. Refs naming a server or tool that has since gone away
     // resolve to nothing rather than to a guess — the same posture as resolveSelected.
@@ -11712,10 +11729,9 @@ async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<voi
     void planner.plan({
       runtimeDir: RUNTIME_DIR,
       workspaceId: ctx.workspaceId,
-      // WHOSE KEY THINKS. Undefined for every workspace that has not opted in, which is all of
-      // them by default and is the whole local path — and undefined means the platform's own key,
-      // exactly as before. See billing/providerKeys.ts.
-      apiKey: planKey,
+      // WHO THINKS. The user's own plan, answered by the app that asked — the server holds no
+      // credential for this and resolves none. See askOnSubscription.
+      ask: askOnSubscription(ctx, planSub, "plan", planThread),
       // APPENDED TO THE BRIEF, which is the same shape §7's GitHub attachments take on the explain
       // path: the thing being asked about comes first and the attached material is evidence about
       // it. Empty when nothing was attached, so a brief with no chips is byte-for-byte the brief
@@ -11747,6 +11763,13 @@ async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<voi
 let generating = false;
 
 async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<void> {
+  // BUILDING RUNS ON THE USER'S OWN SUBSCRIPTION AND ON NOTHING ELSE — the same rule the plan that
+  // authorised it is held to. Checked first, so a refusal costs no slot and no staging directory.
+  const genSub = cmd.subscription ? chatSubscription(cmd.subscription) : null;
+  if (!genSub) {
+    relay.broadcastGen(ctx, { type: "error", message: NO_SUBSCRIPTION });
+    return;
+  }
   if (generating) {
     // On the planned path this must NOT be the plain "error" member: that one paints the
     // build pane as a failed generation, and the pending plan is still perfectly good. The
@@ -12006,8 +12029,9 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
   // `cleanup()` is the one place that undoes both.
   const genCtx = ctx;
   try {
-    const genKey = await providerKeys.platformKey(genCtx);
-    genPayer = genKey ? "workspace" : "platform";
+    // GENERATION THINKS ON THE USER'S OWN SUBSCRIPTION, like the plan that authorised it. No key is
+    // resolved here: see askModel.ts. Nothing is booked, so the payer is the workspace's own plan.
+    genPayer = "workspace";
     const mcpTools = await mcpRegistry.resolve(genCtx, mcpRefs);
     const mcpServers = await mcpRegistry.list(genCtx);
     void generator.generate({
@@ -12025,7 +12049,9 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
       effort: (genEffort = await effortForThread(ctx, genThread, GEN_MODEL_ACTUAL, GEN_MAX_TOKENS)),
       // See planAgent: undefined unless this workspace asked that its own key pay for the
       // platform's calls, and undefined is the platform's key.
-      apiKey: genKey,
+      // WHO THINKS — the user's own plan, answered by the app that asked. The staging directory,
+      // the validator and the atomic swap are all unchanged by it; only the text's origin moved.
+      ask: askOnSubscription(genCtx, genSub, "gen", genThread ?? ""),
     });
   } catch (err) {
     console.error(`[gen] could not start: ${(err as Error)?.message ?? err}`);
@@ -14317,6 +14343,123 @@ interface HeldSubscriptionTurn {
  */
 const subscriptionTurns = new SubscriptionTurns<HeldSubscriptionTurn>((held) =>
   abandonSubscriptionTurn(held, "The app answering this never said how it ended, so Jaroku stopped waiting."));
+
+/**
+ * A plan or generation turn the desktop app is answering on the user's own subscription.
+ *
+ * SEPARATE REGISTRY FROM CHAT'S, because the two settle differently and must not be able to settle
+ * each other: a `recordChatTurn` naming a build run would otherwise write a conversation turn where
+ * a plan belongs. Same class, same ownership rule, same timeout.
+ */
+interface HeldBuildTurn {
+  workspaceId: string;
+  requestId: string;
+  threadId: string;
+  /** What kind of build asked, so a refusal reaches the right part of the pane. */
+  kind: "plan" | "gen";
+  /** The model whose usage this turn reports, for the figure on the card. */
+  model: string;
+  settle: (r: AskResult) => void;
+  fail: (message: string) => void;
+  onChunk: (text: string) => void;
+}
+
+const buildTurns = new SubscriptionTurns<HeldBuildTurn>((held) =>
+  held.fail("The app answering this never said how it ended, so Jaroku stopped waiting."));
+
+/**
+ * Ask the user's own plan to do the thinking, from a server that cannot hold the credential.
+ *
+ * THIS IS THE WHOLE OF "PLANNING RUNS ON YOUR SUBSCRIPTION". A subscription is a CLI sign-in on a
+ * person's machine, not a key that can be sent anywhere, so the server does what it does for Chat:
+ * opens a turn, hands it to the socket that asked, and waits to be told what came back. Everything
+ * it owns it keeps — the single-slot plan state, the thread, the staging directory, the validator.
+ *
+ * ONE SOCKET, NEVER A BROADCAST. Two apps answering one run would be two CLIs spending two plans on
+ * one slot. A socket that has closed between asking and being answered is given up on at once
+ * rather than at the timeout, because nothing else is going to take the run.
+ *
+ * NO COST IS BOOKED. The tokens came from a plan the user already pays for; they are reported as
+ * counts so the card can show what their own plan spent, and the cost column stays null.
+ */
+function askOnSubscription(
+  ctx: TenantContext,
+  subscription: { provider: string; model: string | null; effort: EffortPlan | null },
+  kind: "plan" | "gen",
+  threadId: string,
+): AskModel {
+  return (req) =>
+    new Promise<AskResult>((resolve, reject) => {
+      const model = subscription.model ?? "";
+      const held = buildTurns.open({
+        workspaceId: ctx.workspaceId,
+        requestId: ctx.requestId,
+        threadId,
+        kind,
+        model,
+        onChunk: req.onChunk,
+        settle: resolve,
+        fail: (message) => reject(new Error(message)),
+      });
+      const delivered = relay.sendGen(ctx, ctx.requestId, {
+        type: kind === "plan" ? "plan_run" : "gen_run",
+        runId: held.runId,
+        provider: subscription.provider,
+        model: subscription.model,
+        effort: subscription.effort?.applied ?? null,
+        system: req.system,
+        prompt: req.user,
+      }, threadId);
+      if (delivered === 0) {
+        buildTurns.drop(held.runId);
+        reject(new Error("The app that asked for this closed before it could start."));
+      }
+    });
+}
+
+/**
+ * An app saying how the plan or generation turn it was handed ended.
+ *
+ * FROM THAT APP ALONE — `take` gives the turn only to the socket it was handed to, in the workspace
+ * it was opened in. Resolving hands the text straight back into `planner.plan()` or
+ * `generator.generate()`, which are still sitting in the `await` they started with, so every parser,
+ * every validation and every broadcast below them runs exactly as it does on the API path.
+ */
+function feedBuildTurn(ctx: TenantContext, cmd: BuildChunkCommand): void {
+  if (!cmd.text) return;
+  // PEEK RATHER THAN TAKE: text arriving mid-turn must not spend the turn that is still running.
+  const open = buildTurns.peek(cmd.runId, { workspaceId: ctx.workspaceId, requestId: ctx.requestId });
+  // Straight into the same callback the API stream feeds — `plan_delta` for a plan, the file
+  // protocol parser for a generation — so every tab sees the build progress as it always has.
+  open?.onChunk(cmd.text);
+}
+
+function settleBuildTurn(ctx: TenantContext, cmd: RecordBuildTurnCommand): void {
+  const open = buildTurns.take(cmd.runId, { workspaceId: ctx.workspaceId, requestId: ctx.requestId });
+  if (!open) return;
+  if (cmd.status !== "done") {
+    open.fail(
+      typeof cmd.error === "string" && cmd.error.trim()
+        ? cmd.error.trim().slice(0, 500)
+        : cmd.status === "stopped" ? "Stopped." : "Your provider's CLI did not answer.",
+    );
+    return;
+  }
+  const raw = typeof cmd.raw === "string" ? cmd.raw : "";
+  const count = (n: unknown): number => (typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : 0);
+  open.settle({
+    raw,
+    // COUNTS WITHOUT A PRICE. `summarizeUsage` would attach the API's list price to tokens nobody
+    // was charged for, and that figure reaches the plan card. Zero cost is the true answer.
+    usage: {
+      input_tokens: count(cmd.inputTokens),
+      output_tokens: count(cmd.outputTokens),
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+      cost_usd: 0,
+    },
+  });
+}
 
 /**
  * The subscription a chat command names, checked against the capability table and the catalogue.

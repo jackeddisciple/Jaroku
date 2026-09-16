@@ -24,6 +24,7 @@ import { parsePlan, planProblem, reconcileWithSelection, type AgentPlan } from "
 import { buildPlanSystemPrompt, buildPlanUserPrompt } from "./prompt.ts";
 import type { McpToolView } from "./mcpRegistry.ts";
 import type { EffortPlan } from "./effort.ts";
+import type { AskModel } from "./askModel.ts";
 
 // Falls through JAROKU_GEN_MODEL so that pointing generation at a different model moves the
 // plan with it — the two phases describing the same build should not disagree about who is
@@ -46,6 +47,18 @@ export interface PlanOptions {
    * key on the very next request rather than on the next restart. See billing/providerKeys.ts.
    */
   apiKey?: string;
+
+  /**
+   * WHO DOES THE THINKING, when it is not this server's own API key.
+   *
+   * Planning runs on the user's own subscription (see askModel.ts), which the server cannot use:
+   * the call is handed to the desktop app and answered on the CLI holding their sign-in. Absent
+   * means the API path, which is what `cargo test`, the fixtures and the agent-run path still use.
+   *
+   * Everything below this line is unchanged by which one answered — `parsePlan`, `planProblem`,
+   * the pending-plan record and every broadcast read the same string either way.
+   */
+  ask?: AskModel;
 
   /** The workspace asking. A plan is one workspace's, and only that one may spend it. */
   workspaceId: string;
@@ -336,6 +349,7 @@ export class Planner extends EventEmitter<PlannerEvents> {
           (u) => (usage = u),
           opts.apiKey,
           opts.effort,
+          opts.ask,
         );
         if (fixture) writeFileSync(fixture, raw, "utf8"); // record for future free runs
       }
@@ -379,8 +393,25 @@ export class Planner extends EventEmitter<PlannerEvents> {
     onUsage: (u: UsageSummary) => void,
     apiKey?: string,
     effort?: EffortPlan | null,
+    ask?: AskModel,
   ): Promise<string> {
     let raw = "";
+    // THE SUBSCRIPTION PATH ANSWERS HERE AND RETURNS, before a client is ever built. `ask` carries
+    // its own credential and its own model — the one the person picked in the composer — so none of
+    // the arguments below apply to it: no `max_tokens` (the CLI has its own), no `cache_control`
+    // (there is no prefix to cache across a process that exits), and no API key.
+    if (ask) {
+      const answered = await ask({
+        system: buildPlanSystemPrompt(allConnectors),
+        user: buildPlanUserPrompt(req),
+        onChunk: (text) => { raw += text; onChunk(text); },
+      });
+      // WHAT THE CALL SAYS IT PRODUCED, not what the chunks added up to. A turn that delivered in
+      // one piece never called `onChunk`, and a plan assembled from nothing is a parse failure.
+      raw = answered.raw || raw;
+      onUsage(answered.usage);
+      return raw;
+    }
     const stream = anthropicClient(apiKey).messages.stream({
       model: PLAN_MODEL,
       max_tokens: MAX_TOKENS,

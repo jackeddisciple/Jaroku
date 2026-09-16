@@ -132,7 +132,8 @@
     "test:agent-category": "tsx src/lib/agentCategories.test.ts",
     "test:sidebar-identity": "tsx src/lib/sidebarIdentity.test.ts",
     "test:surface-system": "tsx src/lib/surfaceSystem.test.ts",
-    "test:greeting-emoji": "tsx src/components/greetingEmoji.test.ts"
+    "test:greeting-emoji": "tsx src/components/greetingEmoji.test.ts",
+    "test:build-turn": "tsx src/lib/buildTurn.test.ts"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",

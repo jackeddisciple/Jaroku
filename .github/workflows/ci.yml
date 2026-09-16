@@ -1347,6 +1347,10 @@ jobs:
           # WHEN A CHAT IS GIVEN A TOPIC TITLE: its first finished exchange, never a renamed chat, asked of
           # the same plan on this machine — and only that turn's lines, never another turn's, make the title.
           npm run test:topic-title
+          # ANSWERING A PLAN OR A GENERATION ON THE USER'S OWN SUBSCRIPTION — the app's deadline sits
+          # inside the server's own hold (or the person is told the app never answered while the CLI
+          # was still running), and a tab with no shell reports a failure rather than hanging.
+          npm run test:build-turn
           # AND HOW THAT TITLE ARRIVES ON SCREEN: typed out a character at a time, and never slower than
           # a fixed ceiling however long the name is.
           npm run test:typed-text

@@ -239,6 +239,10 @@ export const COMMAND_ENTITLEMENT: Record<string, EntitlementKind | typeof NO_ENT
   // user's own provider plan before it reached us. Gating it on a Jaroku tier would charge for an
   // answer Jaroku did not produce.
   recordChatTurn: NO_ENTITLEMENT,
+  // Settling a turn the server already authorised. The entitlement was checked when the plan or
+  // the generation was ASKED for; charging it again here would refuse the answer to a build in flight.
+  recordBuildTurn: NO_ENTITLEMENT,
+  buildChunk: NO_ENTITLEMENT,
   listDeployments: NO_ENTITLEMENT,
   loadDeployLogs: NO_ENTITLEMENT,
   setRailwayToken: NO_ENTITLEMENT,

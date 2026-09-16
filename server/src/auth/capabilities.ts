@@ -812,6 +812,15 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   // Writing a turn the user's own machine answered into their own thread. The same capability
   // `chat` needs, because it is the same act with the inference performed elsewhere.
   recordChatTurn: "agent:read",
+  // The plan/generation turn this app was handed, and the text arriving while it answers. The same
+  // capability `planAgent` and `generate` need, because this is the second half of that same act
+  // with the inference performed on the user's own machine — see askModel.ts.
+  //
+  // NO AGENT-LEVEL ENTRY FOR EITHER, and that is not an omission: neither command names an agent.
+  // A plan has no agent yet, and a generation's row is decided by the plan rather than the settle,
+  // so the gate would have nothing to resolve. `capabilities.test.ts` asserts exactly that.
+  recordBuildTurn: "agent:write",
+  buildChunk: "agent:write",
   // `setProviderKey` and `testProviderKey` are not here because they no longer exist. A credential
   // written over the socket could not be gated by elevation — that rides on a request header — so
   // the passcode gate was bypassable by anyone with a session. See wsRelay.ts.

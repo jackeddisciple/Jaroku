@@ -22,6 +22,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, normalize, relative } from "node:path";
 import type { EffortPlan } from "./effort.ts";
+import type { AskModel } from "./askModel.ts";
 import { anthropicClient, emptyUsage, summarizeUsage, type UsageSummary } from "./claude.ts";
 import {
   connectionSuppliedEnv, loadConnectors, optionalEnv, requiredEnv, resolveSelected, templatesDir,
@@ -65,6 +66,18 @@ export interface GenerateOptions {
    * key on the very next request rather than on the next restart. See billing/providerKeys.ts.
    */
   apiKey?: string;
+
+  /**
+   * WHO DOES THE THINKING, when it is not this server's own API key — see askModel.ts.
+   *
+   * Generation runs on the user's own subscription, answered by the desktop app on the CLI holding
+   * their sign-in. Absent means the API path, which the fixtures and the replay tests still take.
+   *
+   * THE STAGING CONTRACT IS UNTOUCHED BY THIS. Whoever produced the text, it arrives as the same
+   * stream of `<<<FILE>>>` blocks, through the same `FileProtocolParser`, into the same staging
+   * directory, past the same validator, and is published by the same atomic swap.
+   */
+  ask?: AskModel;
 
   /** Whose agent this is. Every key the generation writes is built from its workspace id. */
   ctx: TenantContext;
@@ -351,6 +364,8 @@ export class Generator extends EventEmitter<GeneratorEvents> {
           (chunk) => parser.push(chunk),
           (u) => (usage = u),
           opts.apiKey,
+          opts.effort,
+          opts.ask,
         );
         if (fixture) writeFileSync(fixture, raw, "utf8"); // record for future free runs
       }
@@ -463,8 +478,24 @@ export class Generator extends EventEmitter<GeneratorEvents> {
     onUsage: (u: UsageSummary) => void,
     apiKey?: string,
     effort?: EffortPlan | null,
+    ask?: AskModel,
   ): Promise<string> {
     let raw = "";
+    // THE SUBSCRIPTION PATH ANSWERS HERE. See the same note in planner.ts: `ask` brings its own
+    // credential and its own model, so `max_tokens`, the thinking budget and `cache_control` below
+    // are the API path's arguments and none of them applies to a CLI turn.
+    if (ask) {
+      const answered = await ask({
+        system: buildSystemPrompt(allConnectors),
+        user: buildUserPrompt(req),
+        onChunk: (text) => { raw += text; onChunk(text); },
+      });
+      // A turn that delivered in one piece never called `onChunk`, so the parser has seen nothing —
+      // push the whole answer through it before returning, or the staging map comes out empty.
+      if (!raw && answered.raw) { raw = answered.raw; onChunk(answered.raw); }
+      onUsage(answered.usage);
+      return raw;
+    }
     const stream = anthropicClient(apiKey).messages.stream({
       model: GENERATION_MODEL,
       max_tokens: MAX_TOKENS,

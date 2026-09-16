@@ -255,6 +255,11 @@ export const COMMAND_CAPABILITY: Record<string, string> = {
   listProviders: "provider:read",
   reportProviderHost: "provider:read",
   recordChatTurn: "agent:read",
+  // Answering the plan/generation turn this app was handed, and the text arriving while it does.
+  // Mirrors server/src/auth/capabilities.ts — and has no agent-level entry there for the reason
+  // stated there: neither command names an agent.
+  recordBuildTurn: "agent:write",
+  buildChunk: "agent:write",
   setOwnKeyForPlatform: "provider:manage",
 
   // membership, billing, enforcement

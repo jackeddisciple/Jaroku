@@ -1,6 +1,8 @@
 import { hasHost, readHostProviders, reprobeOnReturn } from "./hostProviders.ts";
 import { runLocalTurn, type LocalTurn } from "./providerTurn.ts";
 import { needsTopicTitle, runTitleTurn, titlePrompt } from "./topicTitle.ts";
+import { runBuildTurn } from "./buildTurn.ts";
+import { chatSubscriptionFor } from "./chatSubscription.ts";
 // WebSocket client for the Jaroku relay. Mirrors the reconnect pattern of the original
 // debug-client.html (1s backoff) and dispatches each server message into the trace store.
 // The relay only speaks WebSocket, so this is the single channel between UI and pipeline.
@@ -209,6 +211,11 @@ function dispatch(msg: ServerMessage): void {
         case "plan_discarded": c.planDiscarded(msg); break;
         case "plan_restored": c.planRestored(msg); break;
         case "plan_error": c.planError(msg); break;
+        // THE TURN THIS APP WAS HANDED. Answered on the CLI holding the user's sign-in; nothing is
+        // rendered from here, because the text goes back to the server and comes out as the plan
+        // deltas and file events every tab already renders.
+        case "plan_run":
+        case "gen_run": answerBuildRun(msg); break;
         default:
           // This switch used to drop anything it didn't know silently, so a server running
           // ahead of the client showed nothing at all rather than saying so.
@@ -1184,7 +1191,12 @@ export function sendGenerate(
   planId?: string,
   attachments?: readonly CommandAttachment[],
 ): void {
-  send({ cmd: "generate", prompt, connectors, name, planId, threadId: activeThread(), ...withAttachments(attachments) });
+  // THE PLAN THAT THINKS, RESOLVED HERE RATHER THAN AT EVERY CALL SITE. Building runs on the user's
+  // own subscription; the composer, the plan card, the New agent dialog and onboarding all reach
+  // this one function, and none of them should have to know that. Null when nothing is connected —
+  // the server refuses with a sentence saying so, which is better than five call sites each guessing.
+  const subscription = chatSubscriptionFor() ?? undefined;
+  send({ cmd: "generate", prompt, connectors, name, planId, threadId: activeThread(), subscription, ...withAttachments(attachments) });
 }
 
 /** Ask for a plan. With `revisePlanId`, `prompt` is feedback on that plan, not a fresh brief. */
@@ -1211,8 +1223,10 @@ export function sendPlanAgent(
   // legitimately dropped. §5.1s step 4 is not that: it is a button on an onboarding screen that
   // advances to "You are all set" the moment it returns, so a dropped frame there is a flow that
   // reports success and generated nothing — with an empty app behind it and no way to tell why.
+  // See `sendGenerate` — the same plan does the planning and the building.
+  const subscription = chatSubscriptionFor() ?? undefined;
   return send({
-    cmd: "planAgent", prompt, connectors, mcpTools, name, revisePlanId,
+    cmd: "planAgent", prompt, connectors, mcpTools, name, revisePlanId, subscription,
     ...(identity?.category ? { category: identity.category } : {}),
     ...(identity?.avatarId ? { avatarId: identity.avatarId } : {}),
     // THE ROW THIS BUILD IS FOR, when onboarding already wrote one. It rides the PLAN rather than
@@ -1694,6 +1708,39 @@ function runSubscriptionTurn(run: Extract<ServerMessage, { channel: "reply"; typ
   });
   localTurns.set(run.runId, { threadId: run.threadId, turn });
   void turn.finished.then(() => localTurns.delete(run.runId));
+}
+
+/**
+ * Answer a plan or generation turn on the user's own subscription.
+ *
+ * THE SERVER IS SITTING IN AN `await` FOR THIS. `planner.plan()` and `generator.generate()` are
+ * already running with every one of their parsers, their staging directory and their single-slot
+ * state; the only thing they are missing is the text. So this runs the CLI, sends what arrives back
+ * as it arrives — which is what keeps the build pane alive for the minutes a generation takes —
+ * and ends with an outcome either way. A failure that is never reported would leave the build
+ * pane spinning until the server's twenty-minute timeout.
+ */
+function answerBuildRun(msg: {
+  runId: string; provider: string; model: string | null; effort: string | null; system: string; prompt: string;
+}): void {
+  void runBuildTurn({
+    provider: msg.provider,
+    model: msg.model,
+    effort: msg.effort,
+    system: msg.system,
+    prompt: msg.prompt,
+    onChunk: (text) => { send({ cmd: "buildChunk", runId: msg.runId, text }); },
+  }).then((outcome) => {
+    send({
+      cmd: "recordBuildTurn",
+      runId: msg.runId,
+      status: outcome.status,
+      raw: outcome.raw,
+      error: outcome.error,
+      inputTokens: outcome.inputTokens,
+      outputTokens: outcome.outputTokens,
+    });
+  });
 }
 
 /** Chats this tab has already asked a topic title for, so a second settle cannot ask twice. */
