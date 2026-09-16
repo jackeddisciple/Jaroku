@@ -56,15 +56,20 @@ export function threadTitle(message: string): string {
   return `${clipped.replace(/[\s,;:.]+$/, "")}…`;
 }
 
-/** The most words a topic title may have. The client asks the model for the same. */
-export const TOPIC_WORDS = 6;
+/**
+ * The most words a topic title may have. The client asks the model for the same.
+ *
+ * FIVE, THE PRODUCT OWNER'S CALL ON 2026-09-16: "thread title should be max 4 to 5 words". The cap is
+ * the SERVER's because `titleThread` is a command anybody's tab can send.
+ */
+export const TOPIC_WORDS = 5;
 
 /**
  * A topic title a provider CLI suggested, made fit to store — or null when nothing usable came back.
  *
  * MODELS DECORATE. What arrives can be quoted, bold, prefixed with "Title:", end in a full stop, or run
  * to a sentence, so this keeps the first line with words on it, strips the wrapping and the label, and
- * cuts to six words. It is the SERVER's cap rather than the client's, because `titleThread` is a
+ * cuts to `TOPIC_WORDS`. It is the SERVER's cap rather than the client's, because `titleThread` is a
  * command anybody's tab can send, and a title is what every member of the workspace reads.
  */
 export function topicTitle(raw: string): string | null {

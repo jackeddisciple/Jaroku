@@ -11,7 +11,7 @@
 // a subscription, keeps its first-line title.
 //
 // SILENT. The turn streams into nothing on screen and is never recorded as a message; what comes back
-// is sent as `titleThread`, which the server cleans, caps at six words, and applies only to a thread
+// is sent as `titleThread`, which the server cleans, caps at `TOPIC_WORDS`, and applies only to a thread
 // nobody has renamed.
 //
 //   npm run test:topic-title
@@ -20,8 +20,13 @@ import type { ChatTurn } from "../store/chatStore.ts";
 import type { ThreadView } from "../types.ts";
 import { __parseClaudeLine, __parseCodexLine, type Parsed } from "./providerTurn.ts";
 
-/** The most a title may say. The server enforces the same cap; this is what the model is asked for. */
-export const TOPIC_WORDS = 6;
+/**
+ * The most a title may say. The server enforces the same cap; this is what the model is asked for.
+ *
+ * FIVE, THE PRODUCT OWNER'S CALL ON 2026-09-16: "thread title should be max 4 to 5 words". Six let a
+ * title run to most of a sentence, which is the thing a topic title exists to stop being.
+ */
+export const TOPIC_WORDS = 5;
 
 /** How long a title turn may take before it is abandoned and the first-line title stands. */
 export const TITLE_TIMEOUT_MS = 60_000;
