@@ -137,18 +137,31 @@ console.log("\nthe row's title carries what the cut gave up");
     "identityTitle not found in Sidebar.tsx");
 }
 
-// --- 5. no 3D down here -------------------------------------------------------------------------
+// --- 5. the row's mark is the agent's own face --------------------------------------------------
 
-console.log("\nI4: the sidebar is the emoji's, not the character's");
+console.log("\nthe sidebar draws the picture, at the register the rail shares");
 {
-  // "A glossy 3D character at 16px is a smudge, and running the renderer to produce a smudge is the
-  // worst of both." The sidebar is the surface that argument is about, and the temptation to put the
-  // avatar here is exactly what it is guarding against.
+  // WHAT THIS SECTION USED TO SAY, AND WHY IT SAYS SOMETHING ELSE NOW. It asserted I4 — "a glossy
+  // 3D character at 16px is a smudge, and running the renderer to produce a smudge is the worst of
+  // both" — and guarded the sidebar against the temptation to mount the avatar here. That argument
+  // was true of a renderer and is not an argument about a PICTURE: an illustration at 16px is a disc
+  // of the character's own colour, which costs one `<img>` and is exactly as findable in a column of
+  // forty as the emoji it replaces.
+  //
+  // WHAT IS STILL WORTH ASSERTING IS THE REGISTER. The row's mark has to sit in the same 16px column
+  // the five destinations above it start in, or the agents read as a wider list hanging off the rail
+  // rather than as part of it — and a size written inline is a size nothing can move.
   const sidebar = readSource("src/components/Sidebar.tsx");
-  check("the sidebar mounts no avatar", !sidebar.includes("GlossAvatar"), "GlossAvatar in Sidebar.tsx");
-  const identity = readSource("src/components/AgentIdentityLine.tsx");
-  check("nor does the identity line", !identity.includes("GlossAvatar"));
-  check("it draws the emoji instead", identity.includes("AgentEmoji"));
+  check("the row draws the agent's face", sidebar.includes("<AgentAvatar"), "AgentAvatar not in Sidebar.tsx");
+  check("...at the named register, not a literal",
+    sidebar.includes("AVATAR_SIZE.sidebar"), "AVATAR_SIZE.sidebar not in Sidebar.tsx");
+  check("...and from the agent's own picture column",
+    /picture=\{agent\.picture\}/.test(sidebar));
+
+  // AND NOTHING DOWN HERE MOUNTS THE RENDERER. The 3D system is on its way out of the product
+  // entirely; until it is gone, the surface its own specification told it to stay off is still the
+  // one worth saying so about.
+  check("the sidebar mounts no 3D avatar", !sidebar.includes("GlossAvatar"), "GlossAvatar in Sidebar.tsx");
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

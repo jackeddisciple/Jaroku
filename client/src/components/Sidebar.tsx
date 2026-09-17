@@ -31,7 +31,7 @@ import { useSessionStore } from "../store/sessionStore.ts";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { identityTitle } from "./AgentIdentityLine.tsx";
-import { AgentEmoji, EMOJI_SIZE } from "./AgentEmoji.tsx";
+import { AVATAR_SIZE, AgentAvatar } from "./AgentAvatar.tsx";
 import { Capable } from "./Capable.tsx";
 import { keyHint } from "../lib/modKey.ts";
 import { startNewChat } from "../lib/newChat.ts";
@@ -514,11 +514,21 @@ function AgentTreeRow({
           title={identityTitle(agent.name, agent.category)}
           className="flex min-w-0 flex-1 items-center gap-2.5 py-1 text-left focus-visible:outline-none focus-visible:shadow-focusring"
         >
-          {/* The tab icons' own box, `md`, so the mark is centred under them whatever width its glyph
-              draws — an emoji's is its own, and a bat is wider than a robot. */}
-          <span className="inline-flex shrink-0 justify-center" style={{ width: ICON.md }}>
-            <AgentEmoji emoji={agent.emoji} size={EMOJI_SIZE.sidebar} />
-          </span>
+          {/* THE AGENT'S FACE, IN THE TAB ICONS' OWN COLUMN. It was an emoji, and the box around it
+              existed because an emoji's width is its own — a bat is wider than a robot, so the glyph
+              needed centring inside a fixed column to sit under the destinations above it. A picture
+              is square and is exactly `md` wide, so the box has nothing left to do.
+
+              SIXTEEN, WHICH AT THIS SIZE IS A DISC OF THE CHARACTER'S OWN COLOUR — see
+              `AgentAvatar`'s radius note for why that is the right shape here rather than a
+              compromise. What a column of forty agents needs from this mark is that the eye finds
+              one row faster than it reads forty truncated names, and eleven hues do that on the same
+              terms the emoji did, while being the same picture as the one on the agent's card. */}
+          <AgentAvatar
+            picture={agent.picture}
+            name={agent.name}
+            size={AVATAR_SIZE.sidebar}
+          />
           {/* TWO LINES: who it is, then what it is and when it last ran. The category and the
               timestamp are both qualifiers on the name, so they share the second line and the
               name gets the first to itself — at 13px medium, the product owner's call on
