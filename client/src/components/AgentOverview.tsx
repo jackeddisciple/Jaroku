@@ -111,29 +111,6 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
 
       <div className="relative space-y-3 p-4">
         <div className="flex min-w-0 items-start gap-3">
-          {/* THE PORTRAIT, STRADDLING THE BANNER'S BOTTOM EDGE ON THE LEFT — and the left is the one
-              place this surface deliberately differs from the card. On a 320px card a portrait at the
-              right is still beside the name; on a pane three times that width it would be half a foot
-              away from the word it identifies, with the whole description between them. The name and
-              the face stay adjacent, which is what both surfaces are actually doing.
-
-              HIDDEN WHILE RENAMING, as the character it replaces was: the field takes the full width
-              of the header and a 96px picture beside a text input somebody is typing in is a picture
-              in the way. */}
-          {!renaming && (
-            <AgentFace
-              picture={a.picture}
-              name={a.name}
-              size={FACE_SIZE.header}
-              // `canvas`, not `elevated` — the detail pane's ground is §01's canvas, and a ring in
-              // any colour but the one behind the picture is a halo. See `AgentFace`.
-              ring={hasFace ? "canvas" : undefined}
-              // HALF OF IT ABOVE THE BAND. The card lifts three-fifths of a 56px portrait; here the
-              // portrait is 96px and the band is 112px, and half is what leaves air above its head
-              // rather than pushing it against the top of the strip.
-              className={hasFace ? "-mt-16" : "-mt-0.5"}
-            />
-          )}
           <div className="min-w-0 flex-1">
             {renaming ? (
               <input
@@ -190,6 +167,39 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
               )}
             </div>
           </div>
+          {/* THE PORTRAIT, STRADDLING THE BANNER'S BOTTOM EDGE, AT THE RIGHT END OF THE ROW — the
+              same corner the card puts it in, and the same corner for the same reason: two surfaces
+              showing one agent should not disagree about where its face is. It sat on the LEFT for
+              one commit, on the argument that a pane three times a card's width would put a
+              right-hand portrait a long way from the name it identifies — which is true and is not
+              the trade worth making. Somebody clicks a card and the detail opens; a face that jumps
+              across the pane in that moment is the two surfaces looking like two products.
+
+              THE NAME IS STILL THE FIRST THING READ on both, at the left, which is what §03's
+              hierarchy actually asks for — the picture supports the name rather than sharing its
+              column.
+
+              IN THE FLOW RATHER THAN POSITIONED, unlike the card's. It is lifted out of the band by
+              a negative margin, so `items-start` on the row is what holds it against the top and
+              `shrink-0` — `AgentFace`'s own — is what stops a long name squeezing it.
+
+              HIDDEN WHILE RENAMING, as the character it replaces was: the field takes the full width
+              of the header and a 96px picture beside a text input somebody is typing in is a picture
+              in the way. */}
+          {!renaming && (
+            <AgentFace
+              picture={a.picture}
+              name={a.name}
+              size={FACE_SIZE.header}
+              // `canvas`, not `elevated` — the detail pane's ground is §01's canvas, and a ring in
+              // any colour but the one behind the picture is a halo. See `AgentFace`.
+              ring={hasFace ? "canvas" : undefined}
+              // HALF OF IT ABOVE THE BAND. The card lifts three-fifths of a 56px portrait; here the
+              // portrait is 96px and the band is 112px, and half is what leaves air above its head
+              // rather than pushing it against the top of the strip.
+              className={hasFace ? "-mt-16" : "-mt-0.5"}
+            />
+          )}
         </div>
 
         {/* WHAT IS LEFT OF §6'S IDENTITY SECTION, WHICH IS THE CATEGORY AND NOTHING ELSE. It held
