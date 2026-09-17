@@ -78,15 +78,20 @@ interface AccountOnboardingState {
    * setting themselves up, not about a tenant's data. It survives the switch into the application
    * and is consumed by the first plan that goes out.
    *
-   * IN MEMORY, NOT PERSISTED. It lives exactly as long as the tab that chose it. A name and a face
-   * restored from storage a week later would be applied to an agent nobody was thinking about when
-   * they picked them, which is worse than asking again — and the composer shows what it is holding
-   * rather than applying it silently.
+   * IN MEMORY, NOT PERSISTED. It lives exactly as long as the tab that chose it. A choice restored
+   * from storage a week later would be applied to an agent nobody was thinking about when they made
+   * it, which is worse than asking again — and the composer shows what it is holding rather than
+   * applying it silently.
+   *
+   * IT IS THE CATEGORY AND NOTHING ELSE NOW. It carried a name and an avatar id too, because the
+   * step asked for both; the step asks for neither, and the two are decided by the SERVER from the
+   * agent's position in its workspace's creation order. Holding a copy of either here would be a
+   * second answer to a question only one side can count.
    */
-  firstAgentIdentity: { name: string; category: string; avatarId: string } | null;
-  setFirstAgentIdentity: (identity: { name: string; category: string; avatarId: string }) => void;
+  firstAgentIdentity: { category: string } | null;
+  setFirstAgentIdentity: (identity: { category: string }) => void;
   /** Read it and clear it, so one choice reaches one agent. */
-  takeFirstAgentIdentity: () => { name: string; category: string; avatarId: string } | null;
+  takeFirstAgentIdentity: () => { category: string } | null;
 }
 
 export const useAccountOnboardingStore = create<AccountOnboardingState>((set, get) => ({
@@ -146,9 +151,8 @@ export const useAccountOnboardingStore = create<AccountOnboardingState>((set, ge
   markWorkspaceNamed: () => set({ workspaceNamed: true }),
   firstAgentIdentity: null,
   setFirstAgentIdentity: (identity) => set({ firstAgentIdentity: identity }),
-  // TAKEN, NOT READ. One choice belongs to one agent: leaving it in place would put the same name
-  // and the same face on the second agent somebody describes, which is a duplicate nobody asked for
-  // and — for the name — a slug collision they would have to resolve.
+  // TAKEN, NOT READ. One choice belongs to one agent: leaving it in place would put the onboarding
+  // category on the second agent somebody describes, which is a fact about the wrong agent.
   takeFirstAgentIdentity: () => {
     const held = get().firstAgentIdentity;
     if (held) set({ firstAgentIdentity: null });

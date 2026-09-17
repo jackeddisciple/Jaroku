@@ -265,18 +265,19 @@ export type SetAgentEmojiCommand = { cmd: "setAgentEmoji"; agentId: string; emoj
 /** §6's category, edited afterwards. Any string — the presets are a vocabulary, not a constraint. */
 export type SetAgentCategoryCommand = { cmd: "setAgentCategory"; agentId: string; category: string };
 /**
- * An agent that exists before any of it has been built — §6's three inputs and nothing else.
+ * An agent that exists before any of it has been built — one input, and it is optional.
  *
  * The onboarding step sends this so the agent is in the Agents tab from the moment somebody finishes
- * setting up, rather than appearing later out of a generation they had to sit through. Every field
- * is optional: §6 makes all three skippable, and an unnamed agent is better than a screen that
- * refuses to move on.
+ * setting up, rather than appearing later out of a generation they had to sit through.
+ *
+ * IT CARRIED A NAME AND AN AVATAR ID AND NOW CARRIES NEITHER. Both are decided by the server, from
+ * the agent's position in its workspace's creation order — see `createDraftAgent` for why a browser
+ * cannot count that. Leaving the fields on the wire "in case" would be an interface offering to
+ * decide something it must not.
  */
 export type CreateDraftAgentCommand = {
   cmd: "createDraftAgent";
-  name?: string;
   category?: string;
-  avatarId?: string;
   /**
    * An agent that already exists to build INTO, rather than creating one.
    *

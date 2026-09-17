@@ -179,31 +179,35 @@ console.log("\nI2: the roster is data, never a render");
   check("nothing under client/src calls newGRecipe", callers.length === 0, callers.join(", "));
 }
 
-// --- 5. the default assignment ------------------------------------------------------------------
+// --- 5. nothing chooses one any more -------------------------------------------------------------
 
-console.log("\nthe carousel is the only place an avatar is chosen");
+console.log("\nno screen offers this roster to anybody");
 {
-  // ONE SURFACE, ASSERTED. Choosing a face is a thing somebody does once, while they are being
-  // introduced to the product; a picker on the New agent dialog and another in the agent detail were
-  // two more controls competing with the work those screens are actually for. A rule like this is
-  // worth what it can be broken by, which is somebody adding a third picker in six months.
-  const carousel = readFileSync("src/components/AvatarCarousel.tsx", "utf8");
-  check("the carousel offers the whole roster", carousel.includes("GLOSS_ROSTER.map"));
-  check("...and the size is the selection", /scale\(/.test(carousel));
-  check("...with both ends faded", /maskImage/.test(carousel));
-
+  // WHAT THIS SECTION USED TO ASSERT, AND WHY IT ASSERTS THE OPPOSITE. It said the carousel on the
+  // onboarding step was the ONE place a face is chosen, and guarded against a second picker being
+  // added on the New agent dialog or in the agent detail. The onboarding step no longer asks: an
+  // agent is given one of eleven illustrated faces, and the name paired with it, by its position in
+  // its workspace's creation order.
+  //
+  // SO THE RULE IS NOW AN ABSENCE, which is the stronger form of the same rule. A picker for a
+  // decision the product makes is a control that exists to be ignored, and this is what stops one
+  // being added back by somebody who thinks the screen is missing something.
   const mounts = readdirRecursive("src")
     .filter((f) => /\.tsx$/.test(f) && !f.endsWith("AvatarCarousel.tsx"))
     .filter((f) => readFileSync(f, "utf8").includes("<AvatarCarousel"));
-  check("exactly one screen mounts it", mounts.length === 1, mounts.join(", "));
-  check("...and it is the onboarding step",
-    mounts[0]?.endsWith("onboarding/account/AgentStep.tsx") === true, mounts[0] ?? "none");
+  check("no screen mounts the carousel", mounts.length === 0, mounts.join(", "));
 
-  // AND NOTHING SENDS A LATE AVATAR CHANGE, because there is no command to send. A relay command
-  // nothing can reach is a control nothing can reach, which this repository tests against everywhere
-  // else and should not make an exception for here.
+  // AND NOTHING SENDS A LATE CHANGE, because there is no command to send. A relay command nothing
+  // can reach is a control nothing can reach, which this repository tests against everywhere else
+  // and should not make an exception for here.
   check("there is no setAgentAvatar sender",
     !readFileSync("src/lib/socket.ts", "utf8").includes("setAgentAvatar"));
+  // NOR DOES THE ONBOARDING STEP ASK FOR A NAME, which is the other half of the same change: both
+  // halves of an identity come from one entry, and a name typed on screen four beside a face chosen
+  // for you would be the two coming apart at the one moment they must not.
+  const step = readFileSync("src/components/onboarding/account/AgentStep.tsx", "utf8");
+  check("...and the onboarding step asks for neither a face nor a name",
+    !step.includes("<AvatarCarousel") && !/aria-label="Name your agent"/.test(step));
 }
 
 console.log("\nthe hash lands somewhere, and lands there every time");

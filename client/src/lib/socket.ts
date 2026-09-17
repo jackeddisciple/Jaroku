@@ -1243,9 +1243,15 @@ export function sendPlanAgent(
  * the card honestly absent rather than zero. The first description then builds INTO that row.
  */
 export function sendCreateDraftAgent(input: {
-  name?: string;
+  /**
+   * What sort of work the agent is for, or absent for the neutral value.
+   *
+   * THE ONLY FIELD, AND THE OTHER TWO ARE NOT MISSING BY OVERSIGHT. The name and the picture come
+   * from the agent's position in its workspace's creation order, which only the server can count —
+   * `listAgents` excludes archived rows, so a browser counting what it holds would hand the eleventh
+   * agent the fourth face.
+   */
   category?: string;
-  avatarId?: string;
 }): void {
   send({ cmd: "createDraftAgent", ...input });
 }

@@ -1486,27 +1486,30 @@ export function BuildPane({
   const text = composerMode === "test" ? testDraft : chatDraft;
   const setText = composerMode === "test" ? setTestDraft : setChatDraft;
 
-  const [name, setName] = useState("");
+  /**
+   * THE COMPOSER HOLDS NO NAME ANY MORE, AND IT HAD NOT HELD ONE FOR A WHILE. There was a `name`
+   * state here, read by all four `sendPlanAgent` calls below as `undefined` — and the
+   * only thing that ever WROTE it was the onboarding prefill, which is gone because the name is the
+   * server's now. So every one of those reads was already answering `undefined`, in four places,
+   * through a piece of state nothing could change. They pass `undefined` outright, which is what
+   * they meant: the generator takes a name from the brief when nobody supplies one.
+   */
   /**
    * What the onboarding step chose, waiting for an agent to belong to.
    *
-   * THE STEP NO LONGER GENERATES ANYTHING — it asks for a name, a face and a kind of work, and the
+   * THE STEP NO LONGER GENERATES ANYTHING — it asks what sort of work the agent is for, and the
    * description is asked here, where descriptions belong. So the answer waits in
    * `accountOnboardingStore` and the first plan that goes out carries it.
    *
-   * IT IS SHOWN, NOT APPLIED SILENTLY. The name lands in the field below where somebody can see and
-   * change it, and the line under the composer says what else is being carried. An identity applied
-   * invisibly is a name and a face arriving on an agent for reasons nobody watching could explain.
+   * IT IS THE CATEGORY ALONE, AND THERE IS NOTHING LEFT TO PREFILL. It used to carry a name too,
+   * which landed in the field below so that an identity was never applied invisibly — and the name
+   * is now the SERVER's, taken from the agent's position in its workspace's creation order, so
+   * there is nothing this side could put in that field that would be true. What is carried is shown
+   * by the line under the composer, as it always was.
    */
   const pendingIdentity = useAccountOnboardingStore((s) => s.firstAgentIdentity);
   // Who the new-agent screen greets: a first name, or nobody — never an email address.
   const firstName = useSessionStore((s) => firstNameOf(s.user?.displayName ?? null));
-  const [prefilled, setPrefilled] = useState(false);
-  useEffect(() => {
-    if (prefilled || !pendingIdentity) return;
-    setPrefilled(true);
-    if (pendingIdentity.name) setName(pendingIdentity.name);
-  }, [pendingIdentity, prefilled]);
   /**
    * §14: WHICH TURN THE KEYBOARD HAS SELECTED, and it is local rather than a store.
    *
@@ -1753,11 +1756,16 @@ export function BuildPane({
    * usually already on the list — but not always: the create broadcasts, and a broadcast is a frame
    * that may land after the first render. So this watches `agents` rather than firing once on mount.
    *
-   * MATCHED ON NAME AND DRAFTNESS, because the step has no id to remember: it sends a name and the
-   * server mints the slug, and a `createDraftAgent` that answered with one would be a second reply
-   * shape on a channel whose whole contract is "the broadcast is the answer". Two drafts called the
-   * same thing is the one ambiguous case, and taking the first is right there too — they are
-   * indistinguishable, so either is the one somebody meant.
+   * MATCHED ON THE NEWEST DRAFT, because the step has no id to remember: it sends a category and the
+   * server mints the id, the slug and the name, and a `createDraftAgent` that answered with any of
+   * them would be a second reply shape on a channel whose whole contract is "the broadcast is the
+   * answer".
+   *
+   * IT USED TO MATCH ON THE NAME, and the newest draft is a better key rather than a worse one. The
+   * name was the step's own input, so two drafts called the same thing was a real ambiguity the old
+   * comment had to wave at; what this is looking for is a row THIS SESSION created seconds ago, and
+   * "the most recently created draft" says that exactly. `created_at` is on the row, and the list is
+   * already sorted newest-first — the `find` takes the first match, which is the newest.
    *
    * IT DOES NOT CONSUME THE IDENTITY. Selecting is not building; the identity is spent by the send
    * path below, which is the point at which it has actually been applied to something.
@@ -1765,7 +1773,7 @@ export function BuildPane({
   const selectedDraft = useRef(false);
   useEffect(() => {
     if (selectedDraft.current || !pendingIdentity || activeAgentId) return;
-    const row = agents.find((a) => a.draft && a.name === pendingIdentity.name);
+    const row = agents.find((a) => a.draft);
     if (!row) return;
     selectedDraft.current = true;
     useBuildStore.getState().selectAgent(row.agent_id);
@@ -2675,14 +2683,14 @@ export function BuildPane({
         // producing a SECOND agent beside the one onboarding just put in the grid. With it, the
         // planner's build adopts that row: same id, same name, same slug, same face, everything
         // else written in.
-        sendPlanAgent(trimmed, selected, name.trim() || undefined, undefined, selectedMcp, attachRefs,
+        sendPlanAgent(trimmed, selected, undefined, undefined, selectedMcp, attachRefs,
           { ...(identity ?? {}), ...(intent.into ? { intoAgentId: intent.into } : {}) });
         break;
       }
       case "replan":
         // A revision is planned against the CURRENT selection, so that becomes the new baseline.
         plannedConnectors.current = connectorKey;
-        sendPlanAgent(trimmed, selected, name.trim() || undefined, intent.planId, selectedMcp, attachRefs);
+        sendPlanAgent(trimmed, selected, undefined, intent.planId, selectedMcp, attachRefs);
         break;
       case "edit":
         if (activeAgentId) sendEdit(activeAgentId, trimmed, attachRefs);
@@ -2739,7 +2747,7 @@ export function BuildPane({
     plannedConnectors.current = connectorKey;
     const identity = useAccountOnboardingStore.getState().takeFirstAgentIdentity();
     const attachRefs = attachments.map((a) => ({ kind: a.kind, ref: a.ref, agent_id: activeAgentId ?? "" }));
-    sendPlanAgent(trimmed, selected, name.trim() || undefined, undefined, selectedMcp, attachRefs,
+    sendPlanAgent(trimmed, selected, undefined, undefined, selectedMcp, attachRefs,
       { ...(identity ?? {}), ...(agentIsDraft && activeAgentId ? { intoAgentId: activeAgentId } : {}) });
     setChatDraft("");
     setAttachments([]);
@@ -2954,7 +2962,7 @@ export function BuildPane({
             plannedConnectors.current = connectorKey;
             const identity = useAccountOnboardingStore.getState().takeFirstAgentIdentity();
             sendPlanAgent(
-              original, selected, name.trim() || undefined, undefined, selectedMcp, [],
+              original, selected, undefined, undefined, selectedMcp, [],
               { ...(identity ?? {}), ...(agentIsDraft && activeAgentId ? { intoAgentId: activeAgentId } : {}) },
             );
           },

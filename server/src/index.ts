@@ -11,7 +11,6 @@
 
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { EMOJI_PALETTE } from "./agents/emojiPalette.ts";
-import { AVATAR_IDS } from "./agents/avatarRoster.ts";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -2309,11 +2308,20 @@ async function setAgentEmoji(ctx: TenantContext, agentId: string, emoji: unknown
 /**
  * An agent that exists before any of it has been built.
  *
- * §6's THREE INPUTS AND NOTHING ELSE. The onboarding step asks for a name, a face and what sort of
- * agent it is, and this is what it writes: a row with those three and every other column at its
- * default. It is in the Agents tab from that moment — the card renders it as `DRAFT`, because the
- * tag already means exactly this ("nothing has been published for this agent yet"), and every other
- * figure on the card is honestly absent rather than zero.
+ * ONE INPUT NOW, AND THE OTHER TWO ARE THIS FUNCTION'S OWN ANSWER. §6 asked the onboarding step for
+ * three things — a name, a face and what sort of agent it is — and the step asks for the third
+ * alone. The first two come from `nextFace`: the agent's POSITION in its workspace's creation order
+ * picks one of the eleven illustrated faces, and each face carries the name it is paired with.
+ *
+ * WHICH IS WHY THE NAME IS DECIDED HERE AND NOT IN THE BROWSER. The position is a `COUNT(*)` over
+ * every row this workspace has ever had, including archived and swept ones; a client counting the
+ * list it holds would be counting a filtered view — `listAgents` excludes archived rows — and would
+ * hand the eleventh agent the fourth face. One side can count, so one side decides.
+ *
+ * `Untitled agent` IS GONE WITH THE NAME FIELD, and that is the point of the change rather than a
+ * side effect. An optional name field is answered with nothing often enough that the placeholder was
+ * a real state people finished setup in; "Iris" is a name somebody can keep or rename in two clicks,
+ * and it is never the same as the name the agent beside it got.
  *
  * NO VERSION, NO OBJECTS, NO CODE. Nothing is staged and nothing is published, so there is nothing
  * to clean up if the person never describes it — an empty agent is a row somebody can rename, put
@@ -2324,28 +2332,26 @@ async function setAgentEmoji(ctx: TenantContext, agentId: string, emoji: unknown
  */
 async function createDraftAgent(
   ctx: TenantContext,
-  input: { name?: unknown; category?: unknown; avatarId?: unknown },
+  input: { category?: unknown },
 ): Promise<void> {
-  const name = (typeof input.name === "string" ? input.name.trim() : "").slice(0, 60);
-  // A NAME NOBODY TYPED IS STILL AN AGENT. §6 makes all three optional, and an unnamed one is
-  // better than a screen that refuses to move on — `Untitled agent` is a placeholder somebody can
-  // rename in two clicks from either the sidebar or the detail header.
-  const display = name || "Untitled agent";
-  const slug = await uniqueAgentSlug(agentRepo, ctx, RUNTIME_DIR, slugify(display));
+  // BOTH HALVES FROM ONE CALL, so the portrait and the name under it cannot be two draws that
+  // disagree. See `agents/faces.ts`.
+  const face = await agentRepo.nextFace(ctx);
+  const slug = await uniqueAgentSlug(agentRepo, ctx, RUNTIME_DIR, slugify(face.name));
   if (!slug) {
-    refuseAgent(ctx, "there are already too many agents with that name — try another", display);
+    // A WORKSPACE THAT HAS EXHAUSTED THE SUFFIXES ON ONE OF ELEVEN NAMES. Reachable — the twelfth
+    // agent is Iris again — and it is not a refusal anybody can act on by "trying another", because
+    // nobody chose this name. So it says what happened and the person renames the row.
+    refuseAgent(ctx, "could not find a free id for a new agent — rename one and try again", face.name);
     return;
   }
-  const avatarId = typeof input.avatarId === "string" && AVATAR_IDS.includes(input.avatarId)
-    ? input.avatarId
-    : undefined;
   await agentRepo.create(ctx, {
     id: randomUUID(),
     slug,
-    display_name: display,
+    display_name: face.name,
     hand_written: false,
     category: typeof input.category === "string" ? input.category.trim().slice(0, 80) : undefined,
-    avatarId,
+    picture: face.id,
   });
   await relay.broadcastAgents();
   await relay.broadcastAgentGrid();
