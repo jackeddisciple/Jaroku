@@ -128,10 +128,20 @@ console.log("\nthe three decisions that contradict the source document are the o
   check("D2 · inbox.dismiss is XIcon, not Cancel01Icon", mark("inbox.dismiss") === "XIcon");
   check("D2 · evals.cancel is Cancel01Icon, not XIcon", mark("evals.cancel") === "Cancel01Icon");
   check("D2 · the gate still aborts with Cancel01Icon", mark("cockpitGate.cancel") === "Cancel01Icon");
-  // D4: the mark follows the object. A square-plus creates an agent; a bare plus creates a thread.
-  check("D4 · agents.newThread is PlusIcon, not PlusSignSquareIcon",
-    mark("agents.newThread") === "PlusIcon");
+  // D4: the mark follows the object. A square-plus creates an agent; a plus creates a thread — and
+  // the point of the decision is the CONTRAST between the two, not which plus the thread one is.
+  //
+  // IT IS `Add01Icon` NOW, the product owner's call, because the thread control changed shape: it
+  // was a bare icon button in a row of them at the top of an agent card, and it is a labelled pill
+  // at the foot of one. Add01's squarer bars hold their weight beside text where the thinner plus
+  // reads as a control on its own. D4's rule survives intact — a square-plus still creates an agent
+  // and a plain plus still creates a thread — so what is asserted is the contrast, plus the fact
+  // that the thread mark is one of the plain pluses rather than the square one.
+  check("D4 · agents.newThread is a plain plus, not PlusSignSquareIcon",
+    ["Add01Icon", "PlusIcon"].includes(mark("agents.newThread") ?? ""));
   check("D4 · agents.new keeps PlusSignSquareIcon", mark("agents.new") === "PlusSignSquareIcon");
+  check("D4 · ...and the two are different marks",
+    mark("agents.newThread") !== mark("agents.new"));
   // D3: three refresh marks, each meaning something different.
   check("D3 · a list re-fetch is Refresh03Icon", mark("cockpit.refresh") === "Refresh03Icon");
   check("D3 · a failed operation retries with ReloadIcon", mark("cockpitWork.retry") === "ReloadIcon");

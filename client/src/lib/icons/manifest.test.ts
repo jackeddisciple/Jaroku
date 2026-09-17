@@ -79,7 +79,9 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // 124 STILL, WITHOUT `ShuffleIcon`: it left with the emoji picker, and `CircleSmallIcon` arrived
   // in the same release — the count is unchanged and the set is not, which is exactly the case a
   // count alone cannot see and the file list in `test:icon-generated` can.
-  check("124 distinct marks", names.size === 124, `${names.size}`);
+  // 125 WITH `Add01Icon`, for the agent card's New Thread pill. `PlusIcon` stays: two other keys
+  // still draw it, so this is an addition rather than a swap.
+  check("125 distinct marks", names.size === 125, `${names.size}`);
   check("no key is declared twice", new Set(entries.map((e) => e.key)).size === entries.length);
 }
 

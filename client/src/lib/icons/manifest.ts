@@ -100,7 +100,11 @@ export const MANIFEST = {
     // object being created is a THREAD, not an agent, so it takes the bare plus that every other
     // "new thread" in the product takes. The document's version put two different marks on one
     // verb a user meets twice in a session.
-    newThread: "PlusIcon",
+    // ADD01 RATHER THAN THE BARE PLUS THE OTHER TWO "NEW" KEYS USE — the product owner's call. This
+    // one sits inside a labelled pill at the foot of an agent card ("New Thread"), not alone in a
+    // row of icon buttons, and Add01's squarer bars read as a button's mark beside text where the
+    // thinner plus reads as a control on its own.
+    newThread: "Add01Icon",
     fork: "GitForkIcon",
     more: "MoreHorizontalIcon",
     restore: "RestoreBinIcon",
