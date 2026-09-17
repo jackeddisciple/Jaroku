@@ -72,7 +72,7 @@ console.log("\nthe seven sites §8.4 names");
     // illustrated portrait over the banner cut from the same picture's palette, and no mark at all —
     // which is what retires §5.2's split on those surfaces rather than moving it: there is one
     // picture of an agent on each of them now, and a mark beside it would be the "blue one here,
-    // tractor there" D6 warned about arriving from the other direction. `AgentAvatar`'s own
+    // tractor there" D6 warned about arriving from the other direction. `AgentFace`'s own
     // placement is asserted below and in `test:surface-system`.
     ["components/GlossAvatar.tsx", "AgentEmoji"],           // and the one component that draws it
     ["components/FleetStrip.tsx", "AgentEmoji"],            // 14
@@ -125,11 +125,11 @@ console.log("\nit is identity, so it never enters the tag row");
 
   // AND ON THE CARD THE IDENTITY SITS ABOVE THE TAG ROW rather than in it. Read positionally,
   // because "not in the tag row" is a claim about ORDER that no import check can see. What is read
-  // for is `<AgentAvatar` now — the card's identity is the agent's own portrait — and the claim is
+  // for is `<AgentFace` now — the card's identity is the agent's own portrait — and the claim is
   // the same claim about the same pixels: whatever identifies an agent is above the row that trims.
   const card = read("src/components/AgentCard.tsx");
   check("on the card the identity comes before the tag row",
-    card.indexOf("<AgentAvatar") < card.indexOf("<AgentTagRow"), `${card.indexOf("<AgentAvatar")}`);
+    card.indexOf("<AgentFace") < card.indexOf("<AgentTagRow"), `${card.indexOf("<AgentFace")}`);
   check("...and the card draws no mark of its own",
     !card.includes("<AgentEmoji"), "AgentEmoji in AgentCard.tsx");
 }

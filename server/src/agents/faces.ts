@@ -15,7 +15,7 @@
 // ── WHY THE ASSIGNMENT IS A POSITION AND NOT A HASH ────────────────────────────────────────────
 //
 // THE THREE IDENTITY FEATURES THIS REPLACES ALL HASHED THE AGENT'S UUID — the gradient, the emoji,
-// the avatar — and the argument for it was stability: the same agent shows the same picture on every
+// the 3D character — and the argument for it was stability: the same agent shows the same picture on every
 // replica, for ever. That argument is satisfied here by a different mechanism. The choice is WRITTEN
 // to `agents.picture` at creation and never recomputed, so nothing about it can drift, which frees
 // the assignment to answer the question a hash over eleven buckets cannot.
@@ -45,21 +45,21 @@
  * sequence on every platform — directory iteration order is not stable across them, and this project
  * has already been bitten once by a platform-dependent path.
  *
- * THE NAMES ARE PAIRED AND FIXED. `avatar-06` is Stacey wherever it appears, which is what makes one
+ * THE NAMES ARE PAIRED AND FIXED. `agent-06` is Stacey wherever it appears, which is what makes one
  * entry one identity rather than two independent draws that can disagree.
  */
 export const AGENT_FACES: readonly { id: string; name: string }[] = [
-  { id: "avatar-01", name: "Iris" },
-  { id: "avatar-02", name: "Bruno" },
-  { id: "avatar-03", name: "Margot" },
-  { id: "avatar-04", name: "Kai" },
-  { id: "avatar-05", name: "Marisol" },
-  { id: "avatar-06", name: "Stacey" },
-  { id: "avatar-07", name: "Otis" },
-  { id: "avatar-08", name: "Amara" },
-  { id: "avatar-09", name: "Hugo" },
-  { id: "avatar-10", name: "Dante" },
-  { id: "avatar-11", name: "Theo" },
+  { id: "agent-01", name: "Iris" },
+  { id: "agent-02", name: "Bruno" },
+  { id: "agent-03", name: "Margot" },
+  { id: "agent-04", name: "Kai" },
+  { id: "agent-05", name: "Marisol" },
+  { id: "agent-06", name: "Stacey" },
+  { id: "agent-07", name: "Otis" },
+  { id: "agent-08", name: "Amara" },
+  { id: "agent-09", name: "Hugo" },
+  { id: "agent-10", name: "Dante" },
+  { id: "agent-11", name: "Theo" },
 ];
 
 /** Just the ids, for the guard that checks a client-supplied value is one of them. */

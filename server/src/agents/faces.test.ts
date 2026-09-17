@@ -66,7 +66,7 @@ console.log("\nthe client's faces and the server's are the same eleven, in the s
     AGENT_FACES.map((f) => f.name).join(","));
   check("there are eleven of them", AGENT_FACES.length === 11, String(AGENT_FACES.length));
 
-  // AND NO HASH IS LEFT IN THIS FEATURE. The gradient, the emoji and the avatar all hashed the uuid
+  // AND NO HASH IS LEFT IN THIS FEATURE. The gradient, the emoji and the 3D character all hashed the uuid
   // and this deliberately does not — see `faces.ts` for the birthday-bound argument. An FNV-1a
   // constant appearing in here again would be that decision being quietly undone.
   check("the assignment does not hash",

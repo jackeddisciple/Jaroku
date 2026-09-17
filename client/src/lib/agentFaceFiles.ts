@@ -23,15 +23,15 @@ export interface AgentFaceFiles {
 }
 
 export const AGENT_FACE_FILES: readonly AgentFaceFiles[] = [
-  { id: "avatar-01", portrait: "avatar-01.png", banner: "avatar-01-bg.jpg" },
-  { id: "avatar-02", portrait: "avatar-02.png", banner: "avatar-02-bg.jpg" },
-  { id: "avatar-03", portrait: "avatar-03.png", banner: "avatar-03-bg.jpg" },
-  { id: "avatar-04", portrait: "avatar-04.png", banner: "avatar-04-bg.jpg" },
-  { id: "avatar-05", portrait: "avatar-05.png", banner: "avatar-05-bg.jpg" },
-  { id: "avatar-06", portrait: "avatar-06.png", banner: "avatar-06-bg.jpg" },
-  { id: "avatar-07", portrait: "avatar-07.png", banner: "avatar-07-bg.jpg" },
-  { id: "avatar-08", portrait: "avatar-08.png", banner: "avatar-08-bg.jpg" },
-  { id: "avatar-09", portrait: "avatar-09.png", banner: "avatar-09-bg.jpg" },
-  { id: "avatar-10", portrait: "avatar-10.png", banner: "avatar-10-bg.jpg" },
-  { id: "avatar-11", portrait: "avatar-11.png", banner: "avatar-11-bg.jpg" },
+  { id: "agent-01", portrait: "agent-01.png", banner: "agent-01-bg.jpg" },
+  { id: "agent-02", portrait: "agent-02.png", banner: "agent-02-bg.jpg" },
+  { id: "agent-03", portrait: "agent-03.png", banner: "agent-03-bg.jpg" },
+  { id: "agent-04", portrait: "agent-04.png", banner: "agent-04-bg.jpg" },
+  { id: "agent-05", portrait: "agent-05.png", banner: "agent-05-bg.jpg" },
+  { id: "agent-06", portrait: "agent-06.png", banner: "agent-06-bg.jpg" },
+  { id: "agent-07", portrait: "agent-07.png", banner: "agent-07-bg.jpg" },
+  { id: "agent-08", portrait: "agent-08.png", banner: "agent-08-bg.jpg" },
+  { id: "agent-09", portrait: "agent-09.png", banner: "agent-09-bg.jpg" },
+  { id: "agent-10", portrait: "agent-10.png", banner: "agent-10-bg.jpg" },
+  { id: "agent-11", portrait: "agent-11.png", banner: "agent-11-bg.jpg" },
 ];

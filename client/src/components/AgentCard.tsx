@@ -23,7 +23,7 @@ import { Truncate } from "./Truncate.tsx";
 import { AgentTagRow } from "./AgentTagRow.tsx";
 import { AgentSparkline } from "./AgentSparkline.tsx";
 import { StatusGlyph, GLYPH_SIZE } from "./StatusGlyph.tsx";
-import { AVATAR_SIZE, AgentAvatar, AgentBanner } from "./AgentAvatar.tsx";
+import { FACE_SIZE, AgentFace, AgentBanner } from "./AgentFace.tsx";
 import { agentPhase } from "../lib/domainPhase.ts";
 import { stateBorder } from "../lib/stateBorder.ts";
 import { AlertTriangleIcon, GitForkIcon } from "./panelIcons.tsx";
@@ -50,7 +50,7 @@ const ACTIVITY_LABEL = { quiet: "Quiet", steady: "Steady", high: "High" } as con
  *
  * A NUMBER RATHER THAN A HEIGHT CLASS, because it is the one dimension on this card that the
  * portrait's size dictates. Written as `h-20` it would be a class that has to be changed in step
- * with `AVATAR_SIZE.card` with nothing to say so; here the two sit in the same file and the comment
+ * with `FACE_SIZE.card` with nothing to say so; here the two sit in the same file and the comment
  * is between them.
  *
  * COMPACT SHRINKS IT, which is the third thing compact does after dropping the current-work line and
@@ -150,7 +150,7 @@ export interface AgentCardProps {
   density: AgentDensity;
   /** True while the keyboard cursor is on this card. §5.5: focus must be visible. */
   focused: boolean;
-  /** Names, for §5.2's creator avatar. Team workspaces only — see `AgentGridSnapshot.team`. */
+  /** Names, for §5.2's creator initial. Team workspaces only — see `AgentGridSnapshot.team`. */
   creatorInitial: string | null;
   onOpen: () => void;
   onNewThread: () => void;
@@ -316,10 +316,10 @@ export function AgentCard({
               IT IS NOT IN THE FLOW, so it costs the sheet no height and the text below starts where
               it always did. What it does cost is the width of the identity block's first two lines,
               which is what the `pr-` below pays for. */}
-          <AgentAvatar
+          <AgentFace
             picture={agent.picture}
             name={agent.name}
-            size={compact ? AVATAR_SIZE.compact : AVATAR_SIZE.card}
+            size={compact ? FACE_SIZE.compact : FACE_SIZE.card}
             // THE RING IS THE BANNER'S, NOT THE PICTURE'S. It exists to separate the portrait from
             // the band behind it; with no band there is nothing to separate it from, and a white
             // ring on a #FAFAF9 sheet is a halo round a grey square. `elevated` because that is the
@@ -348,12 +348,12 @@ export function AgentCard({
               {/* THE PHASE GLYPH, ON THE NAME'S LINE. It answers "what is it doing right now" —
                   Running, Idle, Never run, Archived — and D1 keeps that separate from the HEALTH
                   axis the tag row carries below. It leads the name rather than taking a column of
-                  its own, which the avatar now owns. */}
+                  its own. */}
               <span className="shrink-0">
                 <StatusGlyph phase={agentPhase(agent)} size={GLYPH_SIZE.card} title={RUNTIME_WORD(agent)} />
               </span>
               {/* THE NAME IS THE PRIMARY ELEMENT ON THIS CARD, and everything around it is sized
-                  against that: the avatar supports it, the slug is secondary under it, the tags
+                  against that: the picture supports it, the slug is secondary under it, the tags
                   below are metadata and the footer is tertiary. */}
               <Truncate className={TYPE.title} title={agent.name}>
                 {agent.name}
@@ -368,7 +368,7 @@ export function AgentCard({
                 THE CATEGORY SHARES THE SLUG'S LINE, which is the sidebar's arrangement one surface
                 over: the name is the identity and never gives way, and what an agent is FOR sits
                 under it with the identifier. Two lines rather than three keeps the card's hierarchy
-                at avatar, name, then everything else — and the pair reads as one subtitle rather
+                at picture, name, then everything else — and the pair reads as one subtitle rather
                 than as two competing facts.
 
                 `Uncategorized` IS ABSENT rather than shown, on §7's rule: an agent nobody has
@@ -560,7 +560,7 @@ export function AgentCard({
             <span
               // THE ACCOUNT ROW'S TREATMENT. This was a 16px circle with a 9px muted initial
               // against the sidebar's 20px rounded square with an 11px ink one — two
-              // initial-avatars in one app at two shapes, two sizes and two ink levels. And it
+              // initial badges in one app at two shapes, two sizes and two ink levels. And it
               // was `aria-hidden` while carrying a `title`, so the tooltip sat on an element
               // removed from the accessibility tree and reached nobody.
               className="ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-control bg-active text-tiny text-ink"

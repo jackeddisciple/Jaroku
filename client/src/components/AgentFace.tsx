@@ -26,7 +26,7 @@
 // NULL DRAWS THE INITIAL, NOT A GREY SQUARE. `picture` is nullable and always written — but a row
 // from before migration 079's backfill is a real possibility during a rolling deploy, and so is an
 // id naming a picture somebody removed from the set. The initial is the same treatment the creator
-// avatar on the card's own footer already uses, so a card in that state reads as the product minus
+// initial on the card's own footer already uses, so a card in that state reads as the product minus
 // one picture rather than as a card with a hole in it.
 //
 // `aria-hidden`, AT EVERY SIZE, exactly as the mark it replaces was. The agent's name is beside the
@@ -45,7 +45,7 @@ import { RADIUS } from "../lib/tokens.ts";
  * such cost: at 16px it is a coloured disc, which is exactly as findable in a column of forty as the
  * emoji it replaces and is the same picture as the one on the card.
  */
-export const AVATAR_SIZE = {
+export const FACE_SIZE = {
   /**
    * The sidebar's agent list.
    *
@@ -66,7 +66,8 @@ export const AVATAR_SIZE = {
 /**
  * The radius, per size, and both values are §04's.
  *
- * "Agent avatars: 20–24px container radius; artwork may have its own silhouette" — the one row of
+ * §04's row for an agent's own picture reads "20–24px container radius; artwork may have its own
+ * silhouette" — the one row of
  * that table given as a RANGE rather than a rung, and the range is what lets a 56px portrait and a
  * 96px one both read as the same shape. 20px on 56 is a soft squircle; 20px on 96 would be nearly
  * square, so the header takes the top of the range.
@@ -75,12 +76,12 @@ export const AVATAR_SIZE = {
  * browser to half the box, so 20px on a 16px picture IS a circle. Which is the right shape there —
  * a squircle at 16px is a rounded rectangle nobody can see the corners of.
  */
-const RADIUS_FOR = (size: number): number => (size >= AVATAR_SIZE.header ? RADIUS.hero : RADIUS.xl);
+const RADIUS_FOR = (size: number): number => (size >= FACE_SIZE.header ? RADIUS.hero : RADIUS.xl);
 
-export function AgentAvatar({
+export function AgentFace({
   picture,
   name,
-  size = AVATAR_SIZE.card,
+  size = FACE_SIZE.card,
   ring,
   className = "",
 }: {
@@ -122,7 +123,7 @@ export function AgentAvatar({
     return (
       <div
         style={style}
-        // THE CREATOR AVATAR'S TREATMENT, one size up. `bg-active` with ink on it is what this app
+        // THE CREATOR INITIAL'S TREATMENT, one size up. `bg-active` with ink on it is what this app
         // already draws an initial on, in the card's footer and the sidebar's account row, and a
         // second spelling of the same fallback would be a second thing to keep in step.
         className={`flex shrink-0 items-center justify-center bg-active font-medium text-ink ${className}`}

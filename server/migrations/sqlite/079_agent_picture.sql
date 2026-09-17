@@ -10,7 +10,7 @@
 -- checks rather than remembers (`db/expandContract.ts`), and repurposing a column is a rename with
 -- the rename left out: for the window of a rolling deploy the old version is still SELECTing
 -- `avatar_id` and handing it to a renderer that knows twenty-eight names, none of which is
--- `avatar-04`. That renders nothing, on the one feature whose entire purpose is that something is
+-- `agent-04`. That renders nothing, on the one feature whose entire purpose is that something is
 -- drawn. A new column is invisible to the version still serving, which is the whole point of adding
 -- one.
 --
@@ -22,7 +22,7 @@
 -- every row an older version inserted during a rolling deploy would silently be Iris — a WRONG
 -- identity rather than a missing one, on a feature whose point is that a face identifies an agent.
 -- NULL renders the agent's initial instead, which is the honest answer and the fallback
--- `AgentAvatar` already has. Every INSERT path in `db/repositories/agents.ts` writes one, and
+-- `AgentFace` already has. Every INSERT path in `db/repositories/agents.ts` writes one, and
 -- `test:agent-faces` reads that file and fails on one that does not. Tightening to NOT NULL is a
 -- contract step for a later release.
 --
@@ -60,17 +60,17 @@ UPDATE agents
                            AND (earlier.created_at < agents.created_at
                                 OR (earlier.created_at = agents.created_at AND earlier.id < agents.id))
                        ) % 11)
-           WHEN 0 THEN 'avatar-01'
-           WHEN 1 THEN 'avatar-02'
-           WHEN 2 THEN 'avatar-03'
-           WHEN 3 THEN 'avatar-04'
-           WHEN 4 THEN 'avatar-05'
-           WHEN 5 THEN 'avatar-06'
-           WHEN 6 THEN 'avatar-07'
-           WHEN 7 THEN 'avatar-08'
-           WHEN 8 THEN 'avatar-09'
-           WHEN 9 THEN 'avatar-10'
-           WHEN 10 THEN 'avatar-11'
-           ELSE 'avatar-01'
+           WHEN 0 THEN 'agent-01'
+           WHEN 1 THEN 'agent-02'
+           WHEN 2 THEN 'agent-03'
+           WHEN 3 THEN 'agent-04'
+           WHEN 4 THEN 'agent-05'
+           WHEN 5 THEN 'agent-06'
+           WHEN 6 THEN 'agent-07'
+           WHEN 7 THEN 'agent-08'
+           WHEN 8 THEN 'agent-09'
+           WHEN 9 THEN 'agent-10'
+           WHEN 10 THEN 'agent-11'
+           ELSE 'agent-01'
          END
  WHERE picture IS NULL;

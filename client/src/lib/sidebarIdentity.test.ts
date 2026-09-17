@@ -152,9 +152,9 @@ console.log("\nthe sidebar draws the picture, at the register the rail shares");
   // the five destinations above it start in, or the agents read as a wider list hanging off the rail
   // rather than as part of it — and a size written inline is a size nothing can move.
   const sidebar = readSource("src/components/Sidebar.tsx");
-  check("the row draws the agent's face", sidebar.includes("<AgentAvatar"), "AgentAvatar not in Sidebar.tsx");
+  check("the row draws the agent's face", sidebar.includes("<AgentFace"), "AgentFace not in Sidebar.tsx");
   check("...at the named register, not a literal",
-    sidebar.includes("AVATAR_SIZE.sidebar"), "AVATAR_SIZE.sidebar not in Sidebar.tsx");
+    sidebar.includes("FACE_SIZE.sidebar"), "FACE_SIZE.sidebar not in Sidebar.tsx");
   check("...and from the agent's own picture column",
     /picture=\{agent\.picture\}/.test(sidebar));
 

@@ -31,7 +31,7 @@ import { useSessionStore } from "../store/sessionStore.ts";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { identityTitle } from "./AgentIdentityLine.tsx";
-import { AVATAR_SIZE, AgentAvatar } from "./AgentAvatar.tsx";
+import { FACE_SIZE, AgentFace } from "./AgentFace.tsx";
 import { Capable } from "./Capable.tsx";
 import { keyHint } from "../lib/modKey.ts";
 import { startNewChat } from "../lib/newChat.ts";
@@ -520,14 +520,14 @@ function AgentTreeRow({
               is square and is exactly `md` wide, so the box has nothing left to do.
 
               SIXTEEN, WHICH AT THIS SIZE IS A DISC OF THE CHARACTER'S OWN COLOUR — see
-              `AgentAvatar`'s radius note for why that is the right shape here rather than a
+              `AgentFace`'s radius note for why that is the right shape here rather than a
               compromise. What a column of forty agents needs from this mark is that the eye finds
               one row faster than it reads forty truncated names, and eleven hues do that on the same
               terms the emoji did, while being the same picture as the one on the agent's card. */}
-          <AgentAvatar
+          <AgentFace
             picture={agent.picture}
             name={agent.name}
-            size={AVATAR_SIZE.sidebar}
+            size={FACE_SIZE.sidebar}
           />
           {/* TWO LINES: who it is, then what it is and when it last ran. The category and the
               timestamp are both qualifiers on the name, so they share the second line and the

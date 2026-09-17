@@ -377,8 +377,8 @@ console.log("\nand the components themselves stand on it");
   // be chosen against that size — 20px on a 56px card portrait is a soft squircle, on a 16px sidebar
   // one it is a circle, and on the 96px detail header it needs the top of the range.
   check("the agent avatar takes its radius from §04's expressive range",
-    /RADIUS\.(?:xl|hero)\b/.test(src("components/AgentAvatar.tsx")) &&
-    !/borderRadius: \d/.test(src("components/AgentAvatar.tsx")));
+    /RADIUS\.(?:xl|hero)\b/.test(src("components/AgentFace.tsx")) &&
+    !/borderRadius: \d/.test(src("components/AgentFace.tsx")));
 }
 
 console.log("\n§02's four levels of attention");
@@ -438,7 +438,7 @@ console.log("\n§03: each surface's first read, and what it keeps quiet");
   // holds it — `AgentDetail` is a panel group and owns no type of its own.
   const overview = src("components/AgentOverview.tsx");
   check("an agent detail leads with the agent's face beside the name",
-    /<AgentAvatar/.test(overview) && /<Truncate className=\{TYPE\.title\} title=\{a\.name\}>/.test(overview));
+    /<AgentFace/.test(overview) && /<Truncate className=\{TYPE\.title\} title=\{a\.name\}>/.test(overview));
 }
 
 console.log("\n§12: the rules that are checkable across every file");

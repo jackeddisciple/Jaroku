@@ -62,17 +62,17 @@ export interface AgentFace {
 
 /** The names, by the id they belong to. See `AgentFace.name` for how they were chosen. */
 const NAMES: Readonly<Record<string, string>> = {
-  "avatar-01": "Iris",
-  "avatar-02": "Bruno",
-  "avatar-03": "Margot",
-  "avatar-04": "Kai",
-  "avatar-05": "Marisol",
-  "avatar-06": "Stacey",
-  "avatar-07": "Otis",
-  "avatar-08": "Amara",
-  "avatar-09": "Hugo",
-  "avatar-10": "Dante",
-  "avatar-11": "Theo",
+  "agent-01": "Iris",
+  "agent-02": "Bruno",
+  "agent-03": "Margot",
+  "agent-04": "Kai",
+  "agent-05": "Marisol",
+  "agent-06": "Stacey",
+  "agent-07": "Otis",
+  "agent-08": "Amara",
+  "agent-09": "Hugo",
+  "agent-10": "Dante",
+  "agent-11": "Theo",
 };
 
 /**
@@ -104,7 +104,7 @@ const BY_ID: ReadonlyMap<string, AgentFace> = new Map(AGENT_FACES.map((f) => [f.
  * backfills every row and every insert path writes one, but a row written by a version that predates
  * either is a real possibility during a rolling deploy, and so is a row carrying the id of a pair
  * somebody removed from the set. Neither is worth a fabricated face: a card with no picture is a
- * card with no picture, and `AgentAvatar` draws the agent's initial instead.
+ * card with no picture, and `AgentFace` draws the agent's initial instead.
  */
 export function faceFor(pictureId: string | null | undefined): AgentFace | null {
   return pictureId ? BY_ID.get(pictureId) ?? null : null;

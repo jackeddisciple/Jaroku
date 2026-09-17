@@ -37,7 +37,7 @@ const card = (over: Partial<AgentCardView> & { slug: string }): AgentCardView =>
   emoji: "🐢",
   category: "Uncategorized",
   avatar_id: "alder",
-  picture: "avatar-01",
+  picture: "agent-01",
   current_version: 3,
   version_source: "edit",
   creation_cost: null,

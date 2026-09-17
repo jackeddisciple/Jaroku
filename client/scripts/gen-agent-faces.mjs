@@ -216,7 +216,7 @@ def squared(im):
 
 for n in range(1, count + 1):
     # --- the portrait: the circle bled out to a full-bleed square ------------------------------
-    im = Image.open(source('avatar%d' % n)).convert('RGB')
+    im = Image.open(source('agent%d' % n)).convert('RGB')
     cx, cy, r = circle(im)
     # CROPPED TO THE CIRCLE'S OWN BOUNDS, not to the source's square: the white margin around the
     # circle is uneven, and cropping to the circle is what centres the face in the card's box.
@@ -224,16 +224,16 @@ for n in range(1, count + 1):
     square = im.crop((int(cx - r), int(cy - r), int(cx - r) + side, int(cy - r) + side))
     squared(square.resize((WORK, WORK), Image.LANCZOS)).resize(
         (portrait, portrait), Image.LANCZOS).save(
-        os.path.join(dst, 'avatar-%02d.png' % n), 'PNG', optimize=True)
+        os.path.join(dst, 'agent-%02d.png' % n), 'PNG', optimize=True)
 
     # --- the banner: the centre 2:1 band ------------------------------------------------------
-    bg = Image.open(source('avatar%d_bg' % n)).convert('RGB')
+    bg = Image.open(source('agent%d_bg' % n)).convert('RGB')
     w, h = bg.size
     band = min(h, int(w / 2))
     top = (h - band) // 2
     bg.crop((0, top, w, top + band)).filter(
         ImageFilter.GaussianBlur(SCREEN)).resize((bw, bh), Image.LANCZOS).save(
-        os.path.join(dst, 'avatar-%02d-bg.jpg' % n), 'JPEG',
+        os.path.join(dst, 'agent-%02d-bg.jpg' % n), 'JPEG',
         quality=quality, optimize=True, progressive=True)
 
 print('wrote %d portraits and %d banners' % (count, count))
@@ -246,7 +246,7 @@ execFileSync(
 );
 
 const entries = Array.from({ length: COUNT }, (_, i) => {
-  const id = `avatar-${String(i + 1).padStart(2, "0")}`;
+  const id = `agent-${String(i + 1).padStart(2, "0")}`;
   return `  { id: "${id}", portrait: "${id}.png", banner: "${id}-bg.jpg" },`;
 }).join("\n");
 

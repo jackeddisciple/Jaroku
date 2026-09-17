@@ -23,7 +23,7 @@
 //
 // AND IT IS STILL SKIPPABLE AND STILL PRE-ANSWERED. The category defaults to nothing, so Continue
 // is available from the first frame and somebody who does not care passes through in one click. §6
-// asked for exactly that of the avatar; it is now true of the only question left.
+// asked for exactly that of the face; it is now true of the only question left.
 
 import { useState } from "react";
 

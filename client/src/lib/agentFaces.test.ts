@@ -75,7 +75,7 @@ console.log("\nthe pairs are real files, and the module and the directory agree"
 console.log("\nevery face is named, and no two share a name");
 {
   // THE FALLBACK IS THE ID, and this is the assertion that keeps it from being seen. `agentFaces.ts`
-  // resolves a missing name to the id so a card still renders; a card reading "avatar-04" is not a
+  // resolves a missing name to the id so a card still renders; a card reading "agent-04" is not a
   // state worth shipping, so the quiet fallback is paid for here.
   const unnamed = AGENT_FACES.filter((f) => f.name === f.id).map((f) => f.id);
   check("no face fell back to its id for a name", unnamed.length === 0, unnamed.join(","));
@@ -93,7 +93,7 @@ console.log("\nthe lookup answers the id it was given, and null for anything els
   }
   // NULL IS A REAL ANSWER — a row written before migration 079, or one naming a pair that has been
   // removed. Every render site handles it, and a fabricated face would be worse than none.
-  check("an unknown id is null", faceFor("avatar-99") === null);
+  check("an unknown id is null", faceFor("agent-99") === null);
   check("null is null", faceFor(null) === null);
   check("undefined is null", faceFor(undefined) === null);
   check("the empty string is null", faceFor("") === null);

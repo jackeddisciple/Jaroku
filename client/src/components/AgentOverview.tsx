@@ -21,7 +21,7 @@ import { AgentTagRow } from "./AgentTagRow.tsx";
 import { AgentSparkline } from "./AgentSparkline.tsx";
 import { PencilIcon } from "./panelIcons.tsx";
 import { ChevronDownIcon } from "./panelIcons.tsx";
-import { AVATAR_SIZE, AgentAvatar, AgentBanner } from "./AgentAvatar.tsx";
+import { FACE_SIZE, AgentFace, AgentBanner } from "./AgentFace.tsx";
 import { AGENT_CATEGORIES, normalizeCategory, showsCategory } from "../lib/agentCategories.ts";
 import { faceFor } from "../lib/agentFaces.ts";
 import { sendSetAgentCategory } from "../lib/socket.ts";
@@ -121,12 +121,12 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
               of the header and a 96px picture beside a text input somebody is typing in is a picture
               in the way. */}
           {!renaming && (
-            <AgentAvatar
+            <AgentFace
               picture={a.picture}
               name={a.name}
-              size={AVATAR_SIZE.header}
+              size={FACE_SIZE.header}
               // `canvas`, not `elevated` — the detail pane's ground is §01's canvas, and a ring in
-              // any colour but the one behind the picture is a halo. See `AgentAvatar`.
+              // any colour but the one behind the picture is a halo. See `AgentFace`.
               ring={hasFace ? "canvas" : undefined}
               // HALF OF IT ABOVE THE BAND. The card lifts three-fifths of a 56px portrait; here the
               // portrait is 96px and the band is 112px, and half is what leaves air above its head
@@ -193,7 +193,7 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
         </div>
 
         {/* WHAT IS LEFT OF §6'S IDENTITY SECTION, WHICH IS THE CATEGORY AND NOTHING ELSE. It held
-            three controls: the name, the emoji mark, and — briefly — an avatar grid. The name is the
+            three controls: the name, the emoji mark, and — briefly — a grid of 3D characters. The name is the
             pencil above, the mark is gone with the emoji, and the picture is not chosen at all any
             more: an agent is given one at creation, from the eleven, by its position in the
             workspace's creation order. So there is nothing here to pick it with, deliberately —
