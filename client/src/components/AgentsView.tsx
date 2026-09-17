@@ -574,7 +574,19 @@ export function AgentsView() {
           />
         ) : (
           <div
-            className={`grid gap-4 ${
+            // `auto-rows-fr` IS WHAT MAKES EVERY CARD THE SAME SIZE — the product owner's call, and
+            // it was the grid's job rather than the card's. A CSS grid row sizes to its tallest
+            // item and every other item sizes to its own content, so a card with no current-work
+            // line and no credential warning came out visibly shorter than the one beside it. `fr`
+            // rows are equal-height instead, and `AgentCard`'s root is already `h-full` by virtue
+            // of being a grid item that stretches — so the slack lands below its footer, which
+            // `mt-auto` was always there to handle.
+            //
+            // NOTHING IS TRUNCATED TO ACHIEVE IT. The alternative was one fixed height for every
+            // card everywhere, which clips whichever card has the most to say — and the cards with
+            // the most to say are the ones in trouble: a credential warning, a drift arrow, a
+            // failing sparkline.
+            className={`grid auto-rows-fr gap-4 ${
               // BOTH DENSITIES ARE REAL LAYOUTS (§4): comfortable targets three per row at desktop
               // width, compact four or five with a shorter card. `auto-fill` with a minimum rather
               // than a fixed column count, so the grid reflows honestly when somebody drags the
