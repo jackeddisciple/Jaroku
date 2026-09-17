@@ -75,11 +75,10 @@ export interface PlanOptions {
    * §6's category and avatar, carried and never read here.
    *
    * The planner does not show them to the model: a category is not a design constraint on the code
-   * and an avatar is not a fact about it. They are on the RECORD so that generation builds what was
-   * approved, which is the same reason the connector list is.
+   * They are on the RECORD so that generation builds what was approved, which is the same reason
+   * the connector list is.
    */
   category?: string;
-  avatarId?: string;
   /** The row this build is for, when the onboarding step already wrote one. Carried, never read. */
   intoAgentId?: string;
   /** Present when the user asked for a change to the plan they were shown. */
@@ -122,11 +121,10 @@ export interface PendingPlan {
   name?: string;
   /**
    * §6's category and avatar, recorded for the same reason `connectors` and `mcpTools` are:
-   * generation builds what was APPROVED. Absent means the neutral category and the hashed avatar,
-   * which is what an agent planned from the composer gets and is why the avatar step is skippable.
+   * generation builds what was APPROVED. Absent means the neutral category, which is what an agent
+   * planned from the composer gets.
    */
   category?: string;
-  avatarId?: string;
   intoAgentId?: string;
   plan: AgentPlan;
   warnings: string[];
@@ -365,11 +363,10 @@ export class Planner extends EventEmitter<PlannerEvents> {
         connectors: selected.map((c) => c.id),
         mcpTools: mcpTools.map((t) => `${t.server_id}/${t.name}`),
         name,
-        // CARRIED, NOT USED. Neither reaches the model — a category is not a design constraint and
-        // an avatar is not a fact about the code — so they sit on the record and are read again at
-        // generation, which is what makes the gate the single source of what gets built.
+        // CARRIED, NOT USED. It does not reach the model — a category is not a design constraint —
+        // so it sits on the record and is read again at generation, which is what makes the gate the
+        // single source of what gets built.
         category: opts.category,
-        avatarId: opts.avatarId,
         intoAgentId: opts.intoAgentId,
         plan,
         warnings: reconcileWithSelection(plan, selected, mcpTools),

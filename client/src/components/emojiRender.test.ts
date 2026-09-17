@@ -57,7 +57,7 @@ console.log("\nno circle, no box, no tint, no backdrop, no border");
 
 // --- 2. the seven sites --------------------------------------------------------------------------
 
-console.log("\nthe seven sites §8.4 names");
+console.log("\nthe four sites §8.4 still names");
 {
   // WRITTEN OUT, WITH THE REGISTER EACH ONE USES. A site that quietly went back to no mark leaves no
   // trace but a screenshot, and a site that wrote its own pixel count is off the ladder.
@@ -74,26 +74,22 @@ console.log("\nthe seven sites §8.4 names");
     // picture of an agent on each of them now, and a mark beside it would be the "blue one here,
     // tractor there" D6 warned about arriving from the other direction. `AgentFace`'s own
     // placement is asserted below and in `test:surface-system`.
-    ["components/GlossAvatar.tsx", "AgentEmoji"],           // and the one component that draws it
     ["components/FleetStrip.tsx", "AgentEmoji"],            // 14
     ["components/WorkList.tsx", "AgentEmoji"],              // 14
     ["components/CommandPalette.tsx", "AgentEmoji"],        // 14
   ];
-  // THE MARK REACHES A SURFACE ONE OF TWO WAYS, and both count. Six sites mount `<AgentEmoji`
-  // directly at a named register; the two that draw 3D mount `<GlossAvatar`, which holds the emoji
-  // inside it as the placeholder and as the no-WebGL fallback. Requiring `<AgentEmoji` in all eight
-  // would have failed the card and the detail for doing exactly what §5.2 asks of them.
+  // EVERY REMAINING SITE MOUNTS `<AgentEmoji` DIRECTLY, which it did not use to. Two of the seven
+  // reached the mark through `GlossAvatar` — the card and the detail header wore a 3D character with
+  // the emoji inside it as a placeholder — and both now draw the agent's own portrait instead, so
+  // the indirection and the component that provided it are gone.
   for (const [path, needle] of SITES) {
     const text = read(`src/${path}`);
     check(`${path} draws the mark`, text.includes(`<${needle}`), needle);
   }
-  // AND THE FOUR REGISTERS ARE STILL NAMED, which is the half the needle above stopped covering
-  // when two sites moved behind `GlossAvatar`. A size written against the card it looked right on
-  // is a size nothing can move.
+  // AND THE REGISTER IS STILL NAMED. A size written against the card it looked right on is a size
+  // nothing can move.
   check("the sidebar's register is named",
     read("src/components/AgentIdentityLine.tsx").includes("EMOJI_SIZE.sidebar"));
-  check("the avatar box sizes its placeholder off its own box, not a literal",
-    read("src/components/GlossAvatar.tsx").includes("Math.round(size *"));
   // THE PICKER IS NO LONGER A SITE AT ALL. It was the eighth, in the detail header's identity
   // section, and the section no longer offers it: an agent's picture and the name that goes with it
   // are given at creation by position, so there is nothing for a picker to pick. Asserted as an

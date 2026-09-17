@@ -156,11 +156,12 @@ console.log("\n§05's two rules that are not a number");
   check("the sidebar plane has no outer radius",
     root !== "" && !/rounded-/.test(root) && SHAPE.sidebarOuterRadius === 0, root || "root not found");
 
-  // §04: "Agent avatars: 20–24px container radius; artwork may have its own silhouette." A range
-  // rather than a rung, which is the one place the scale is deliberately not a single answer.
-  check("the avatar range is §04's two expressive rungs",
-    SHAPE.avatarRadius.min === RADIUS_SCALE.xl && SHAPE.avatarRadius.max === RADIUS_SCALE.hero,
-    `${SHAPE.avatarRadius.min}–${SHAPE.avatarRadius.max}`);
+  // §04's row for an agent's own picture gives "20–24px container radius; artwork may have its own
+  // silhouette" — a range rather than a rung, which is the one place the scale is deliberately not a
+  // single answer.
+  check("the picture range is §04's two expressive rungs",
+    SHAPE.facePictureRadius.min === RADIUS_SCALE.xl && SHAPE.facePictureRadius.max === RADIUS_SCALE.hero,
+    `${SHAPE.facePictureRadius.min}–${SHAPE.facePictureRadius.max}`);
 }
 
 console.log("\n§06's four levels, transcribed from the PDF");
@@ -330,8 +331,8 @@ console.log("\n§11's component defaults, transcribed from the PDF");
   // is the reason the Inbox's severity ladder had to give its three levels back.
   check("an inbox card and an agent card both lift to E1",
     COMPONENT.inboxCard.hover === "E1" && COMPONENT.agentCard.hover === "E1");
-  check("an agent avatar is §04's expressive range",
-    COMPONENT.agentAvatar.radius === SHAPE.avatarRadius);
+  check("an agent's picture is §04's expressive range",
+    COMPONENT.agentFace.radius === SHAPE.facePictureRadius);
 }
 
 console.log("\nand the components themselves stand on it");
@@ -371,12 +372,12 @@ console.log("\nand the components themselves stand on it");
     !/(?:^|[^:])\bshadow-(?:raised|floating|overlay)\b/.test(surface) && /shadow-glow/.test(surface),
     surface.slice(0, 160));
 
-  // THE AVATAR, whose radius is a value rather than a class for a reason that changed and did not
-  // go away. It was a number because the picture was drawn to a canvas and a class could not reach
+  // AN AGENT'S PICTURE, whose radius is a value rather than a class for a reason that changed and
+  // did not go away. It was a number because the picture was drawn to a canvas and a class could not reach
   // it; it is a number now because the box is sized in pixels by its call site and the radius has to
   // be chosen against that size — 20px on a 56px card portrait is a soft squircle, on a 16px sidebar
   // one it is a circle, and on the 96px detail header it needs the top of the range.
-  check("the agent avatar takes its radius from §04's expressive range",
+  check("an agent's picture takes its radius from §04's expressive range",
     /RADIUS\.(?:xl|hero)\b/.test(src("components/AgentFace.tsx")) &&
     !/borderRadius: \d/.test(src("components/AgentFace.tsx")));
 }

@@ -28,8 +28,8 @@ interface AgentGridState {
   /**
    * Whether this workspace has a members list at all.
    *
-   * §4's `created_by` filter and §5.2's creator avatar are Team-only. Decided on the server, because
-   * a personal workspace has one member — so the filter is a control with one option and the avatar
+   * §4's `created_by` filter and §5.2's creator initial are Team-only. Decided on the server, because
+   * a personal workspace has one member — so the filter is a control with one option and the badge
    * is a picture of the only person who could have made it.
    */
   team: boolean;

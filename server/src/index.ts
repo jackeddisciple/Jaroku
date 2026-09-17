@@ -4683,9 +4683,8 @@ const relay = new WsRelay({
         // nothing, and both have to travel rather than be derived — a browser cannot know what a
         // deterministic assignment probed against.
         category: a.category,
-        avatar_id: a.avatar_id,
-        // AND THE ONE THAT REPLACES BOTH OF THEM. `picture` names a portrait and the banner cut
-        // from its own palette, so it is the only identity value the sidebar and the card need.
+        // `picture` names a portrait and the banner cut from its own palette, so it is the only
+        // identity value the sidebar and the card need.
         picture: a.picture,
         /**
          * NOTHING PUBLISHED AND NOTHING ON DISK — an agent that has an identity and no code.
@@ -6479,13 +6478,10 @@ async function agentGridSnapshot(ctx: TenantContext): Promise<AgentGridSnapshot>
       // than re-derived in the browser, because the assignment probes against what the workspace
       // holds and a client cannot know that.
       emoji: a.emoji,
-      // §5.1'S TWO. `avatar_id` is what the card renders and what the picker warns about; `category`
-      // is what §14's filter reads and what the detail header edits. Both are columns on the row
-      // already assembled here, so neither costs a query.
+      // §5.1'S CATEGORY, which is what §14's filter reads and what the detail header edits, and the
+      // picture the card's banner and portrait are both cut from. Columns on the row already
+      // assembled here, so neither costs a query.
       category: a.category,
-      avatar_id: a.avatar_id,
-      // AND THE ONE THAT REPLACES BOTH OF THEM — a column on the row already assembled here, so it
-      // costs no query, and the only identity the card's banner and portrait need.
       picture: a.picture,
       current_version: a.current_version,
       version_source: versionSource,
@@ -6821,13 +6817,16 @@ async function forkAgent(ctx: TenantContext, slug: string): Promise<void> {
     // the same thing for a person to read, and it is not what anything reads: a tag driven by parsing
     // that string would break silently the first time somebody reworded it.
     forkedFrom: source.id,
-    // §5.1: "A fork gets a fresh avatar and INHERITS the category." The two halves are opposite on
-    // purpose. A category is a fact about the WORK — a copy of the billing agent is still a billing
-    // agent, and making somebody re-pick it would be a form asking a question it already knows the
-    // answer to. An avatar is the thing that tells them apart, and fork and parent sit adjacent in
-    // the grid: they are exactly the pair that must not look identical.
+    // §5.1: "A fork INHERITS the category." A category is a fact about the WORK — a copy of the
+    // billing agent is still a billing agent, and making somebody re-pick it would be a form asking
+    // a question it already knows the answer to.
+    //
+    // THE OTHER HALF OF THAT SENTENCE IS GONE WITH THE FEATURE IT WAS ABOUT. It said a fork gets a
+    // FRESH face, because fork and parent sit adjacent in the grid and are exactly the pair that
+    // must not look identical — and it was enforced by passing the parent's character as one to
+    // avoid. A fork takes the workspace's next face now, by position, which differs from its
+    // parent's for the same reason every consecutive pair does.
     category: source.category,
-    avoidAvatar: source.avatar_id,
   });
   // `publish`, NOT `addVersion`, AND THE DIFFERENCE IS THE WHOLE BUG. `addVersion` writes the row
   // and nothing else, which is correct for `restoreAgentVersion` — that names objects living under
@@ -11762,7 +11761,6 @@ async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<voi
       name: cmd.name,
       // §6'S OTHER TWO INPUTS, carried on the record with the name. Neither reaches the model.
       category: cmd.category,
-      avatarId: cmd.avatarId,
       // The row this build is for, when the onboarding step already wrote one.
       intoAgentId: cmd.intoAgentId,
       revisePlanId: cmd.revisePlanId,
@@ -11823,7 +11821,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
   let plan: string | undefined;
   let planUsage: UsageSummary | undefined;
   let mcpRefs: string[] = cmd.mcpTools ?? [];
-  let { prompt, connectors, name, category, avatarId, intoAgentId } = cmd;
+  let { prompt, connectors, name, category, intoAgentId } = cmd;
   // THE RECORD `take()` REMOVED, held for as long as this build can still fail. A plan is spent
   // when a generation STARTS; if that generation never produces an agent, the approval it carried
   // was spent on nothing and belongs back in the workspace's slot. Null on the unplanned path,
@@ -11908,7 +11906,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     // THE RECORD WINS OVER THE COMMAND, for §6's identity exactly as for the brief and the
     // connectors: the dialog and the plan card are separate entry points that can disagree, and
     // building what was approved is the whole point of the gate.
-    ({ prompt, connectors, name, category, avatarId, intoAgentId } = rec);
+    ({ prompt, connectors, name, category, intoAgentId } = rec);
     mcpRefs = approvedRefs;
     plan = rec.plan.raw;
     planUsage = rec.usage;
@@ -12058,7 +12056,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
       runtimeDir: RUNTIME_DIR, ctx: genCtx, prompt, connectors, mcpTools, mcpServers, name, plan, planUsage,
       // §6, ARRIVING AT THE ROW. Both are undefined on every path but the New agent dialog, and
       // `agents.create` answers undefined with the neutral category and the hashed avatar.
-      category, avatarId,
+      category,
       // And the row to build INTO, when onboarding already wrote one.
       intoAgentId,
       // §11.2 REACHES THE EFFORT ADAPTER TOO, and this is the fourth site. `planEffort` clamps a

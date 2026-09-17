@@ -39,7 +39,7 @@
 /**
  * The eleven, in the order the assignment walks them.
  *
- * THE ORDER IS THE MAPPING, exactly as `EMOJI_PALETTE`'s and the old roster's were: an agent takes
+ * THE ORDER IS THE MAPPING, exactly as `EMOJI_PALETTE`'s is: an agent takes
  * the entry at its own position, so a list in a different order hands every agent in the workspace a
  * different face. The ids are zero-padded so that "source order" and "sorted order" are one
  * sequence on every platform — directory iteration order is not stable across them, and this project

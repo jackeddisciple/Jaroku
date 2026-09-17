@@ -451,7 +451,7 @@ export const TYPE = {
 // 999px on the argument that something whose radius is half its height is a shape rather than a
 // corner treatment, and that argument is why `pill` is worth naming: §05 reserves 999px for
 // "statuses, counts and filters", and a scale that does not contain the pill cannot say where the
-// pill is allowed to appear. A circle stays `rounded-full`. An avatar is round because it is round.
+// pill is allowed to appear. A circle stays `rounded-full`, because it is round.
 
 export const RADIUS = RADIUS_SCALE;
 

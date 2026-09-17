@@ -116,10 +116,9 @@ export interface GenerateOptions {
    *
    * BOTH OPTIONAL, AND ABSENT IS THE ORDINARY CASE. Every entry point but the New agent dialog
    * plans an agent from a brief alone, and `agents.create` answers undefined with the neutral
-   * category and the avatar the uuid hashes to — which is what makes §6's avatar step skippable.
+   * category and the workspace's next face.
    */
   category?: string;
-  avatarId?: string;
   /** The plan the user confirmed at the pre-generation gate, verbatim (planner.ts). Absent =
    *  an unplanned generation, whose prompt stays byte-identical to the pre-gate one. */
   plan?: string;
@@ -439,7 +438,6 @@ export class Generator extends EventEmitter<GeneratorEvents> {
           display_name: name,
           default_provider: "fake",
           category: opts.category,
-          avatarId: opts.avatarId,
           ...built,
         });
       }

@@ -16,7 +16,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentCard } from "./AgentCard.tsx";
 import { NewAgentDialog } from "./NewAgentDialog.tsx";
-import { GlossStageProvider } from "./GlossAvatar.tsx";
 import { Segmented } from "./Segmented.tsx";
 import { IconButton } from "./IconButton.tsx";
 import { Chip } from "./Chip.tsx";
@@ -276,14 +275,12 @@ export function AgentsView() {
    */
   const [creating, setCreating] = useState(false);
   /**
-   * Is this surface the one on screen? The loop parks whenever it is not.
-   *
-   * `navView`, NOT `navSection`, AND THAT IS THE OPPOSITE OF THE SIDEBAR'S RULE. The sidebar item
-   * stays lit through the collapse to three panes — §2's fourth rule — because it is still where
-   * you are. The GRID is not still on screen: opening a card collapses the full-width view, and a
-   * mounted-but-hidden view animating twenty characters is exactly the case I5 exists to stop.
+   * THERE IS NO "IS THIS SURFACE ON SCREEN" FLAG ANY MORE. It read `navView` — not `navSection`,
+   * deliberately the opposite of the sidebar's rule — so that a grid collapsed behind an open card
+   * would stop animating its twenty characters, which is the case I5 existed to stop. Nothing
+   * animates on this surface now, so there is nothing to park: an `<img>` costs the same whether the
+   * column it is in is on screen or not.
    */
-  const agentsSurfaceActive = useUiStore((s) => s.navView === "agents");
   const [cursor, setCursor] = useState<string | null>(null);
   const searchInput = useRef<HTMLInputElement | null>(null);
 
@@ -530,7 +527,12 @@ export function AgentsView() {
           the flag is true for as long as it exists — but a full-width view that has collapsed to a
           three-pane one is still mounted and no longer the thing being looked at, which is what
           `navSection` answers. */}
-      <GlossStageProvider active={agentsSurfaceActive} className="relative isolate flex h-full min-h-0 flex-col">
+      {/* THE GRID IS AN ORDINARY COLUMN AGAIN. It was wrapped in a provider that owned one
+          WebGL context, a frame budget and a canvas floating above the cards, because every
+          card drew a 3D character into a slot on it. The cards draw an `<img>` now, so there
+          is no context to own, nothing to park on blur and no canvas to keep out of the way
+          of an overflow menu. */}
+      <div className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 overflow-auto p-5">
         {!loaded ? (
           // NOT A SPINNER (§9). Skeleton cards at the card's own geometry, so the grid does not jump
@@ -627,7 +629,7 @@ export function AgentsView() {
         )}
       </div>
 
-      </GlossStageProvider>
+      </div>
 
       {/* §6. Rendered here rather than at the app root because this is where it is opened from, and
           its avatar picker holds a stage of its own — a modal that is never open costs nothing, and

@@ -1,7 +1,7 @@
 // The eleven faces are the same eleven on both sides, and every agent is written with one.
 //
 // THE LIST IS WRITTEN TWICE AND THE DRIFT IS WHAT GETS TESTED — the arrangement `test:agent-emoji`
-// and `test:agent-avatar` use beside it, and for the same reason: the client cannot import from the
+// uses beside it, and for the same reason: the client cannot import from the
 // server and the server cannot import from the client. A drift here is an agent whose row names a
 // picture the client has never heard of, which draws the agent's initial instead, on the one feature
 // whose entire purpose is that a face is drawn.
@@ -22,7 +22,7 @@ import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 
 import { AGENT_FACE_IDS, AGENT_FACES, faceAt } from "./faces.ts";
-import { UNCATEGORIZED } from "./avatarRoster.ts";
+import { UNCATEGORIZED } from "./category.ts";
 import { openTestSqlite, testContext } from "../db/testDb.ts";
 import { AgentRepository } from "../db/repositories/agents.ts";
 

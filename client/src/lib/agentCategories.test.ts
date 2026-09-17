@@ -9,7 +9,7 @@
 // somebody typed becomes unsaveable.
 //
 // THE OTHER HALF IS THE COUNT AND THE SORT, and neither indexes anything: unlike the emoji palette
-// and the avatar roster, nothing hashes into this list, so reordering it is harmless. It is asserted
+// and the agent faces, nothing hashes into this list, so reordering it is harmless. It is asserted
 // because a hand-maintained list of twenty-five drifts into the order things were thought of in, and
 // twenty-five items in no order is a list you read all of to find one.
 //
@@ -19,7 +19,6 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 
 import { NewAgentDialog } from "../components/NewAgentDialog.tsx";
-import { GLOSS_ROSTER } from "./gloss/roster.ts";
 import { markup } from "./testRender.ts";
 
 import {
@@ -116,7 +115,7 @@ console.log("\nthe column is TEXT, and stays TEXT");
   // AND THERE IS NO SECOND COPY OF THE LIST. The server neither validates nor knows these words —
   // it stores a string — so a preset added here is a preset available immediately, with no deploy
   // ordering to think about and no drift test to keep two lists honest.
-  const serverSources = ["../server/src/db/repositories/agents.ts", "../server/src/agents/avatarRoster.ts"];
+  const serverSources = ["../server/src/db/repositories/agents.ts", "../server/src/agents/category.ts"];
   const leaked = serverSources.filter((f) => readFileSync(f, "utf8").includes("Email Triage"));
   check("the server holds no copy of the presets", leaked.length === 0, leaked.join(", "));
 }
@@ -140,12 +139,12 @@ console.log("\n§6's dialog offers all of them, in this order");
   check("name comes before category", at(">Name<") >= 0 && at(">Name<") < at(">Category<"),
     `${at(">Name<")} / ${at(">Category<")}`);
 
-  // AND THERE IS NO AVATAR STEP HERE. Choosing a face is asked once, on the onboarding screen, by
-  // the carousel — a picker here would be a third surface competing for the same decision on a form
-  // whose job is to get a brief written. An agent made from this dialog takes the avatar its uuid
-  // hashes to, which is the answer the server has always given when nobody chose.
-  check("the dialog offers no avatar picker",
-    !html.includes(">Avatar<") && !GLOSS_ROSTER.some((r) => html.includes(`aria-label="${r.label}"`)));
+  // AND THERE IS NO STEP HERE FOR WHAT AN AGENT LOOKS LIKE, which is now true of every surface in
+  // the product rather than just this one. An agent is given one of the eleven faces, and the name
+  // paired with it, by its position in its workspace's creation order — so a picker here would be a
+  // control for a decision nothing can make, on a form whose job is to get a brief written.
+  check("the dialog offers no picture picker",
+    !/>(?:Avatar|Face|Picture)</.test(html));
 
   // AND IT IS A DIALOG, not a div drawn on top of the application — `useDialog`'s whole argument.
   check("it announces itself as a dialog",

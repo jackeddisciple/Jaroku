@@ -448,14 +448,7 @@ jobs:
           # Linux box with no colour-emoji font, and the drift check between the two copies of the
           # list — the client cannot import from the server, so it is written twice on purpose.
           npm run test:agent-emoji
-          # AND THE SECOND HALF OF THE SAME IDEA, one fidelity up. The roster's ids are written twice
-          # for the same reason the emoji palette is — the client cannot import from the server —
-          # and a drift here is an agent whose row names an avatar the renderer has never heard of,
-          # which draws NOTHING, on the one feature whose whole point is that something is drawn.
-          # Beside it the pair §5.1 names: a fork must not look like its parent, because the two sit
-          # adjacent in the grid and are exactly the ones you need to tell apart.
-          npm run test:agent-avatar
-          # AND WHAT REPLACES BOTH OF THEM, which deliberately does NOT hash. Over eleven pictures
+          # AND WHAT REPLACED IT, which deliberately does NOT hash. Over eleven pictures
           # the birthday bound the two suites above manage around becomes unmanageable — a hash
           # collides on the fourth or fifth agent more often than not, and where twenty-eight
           # characters had a picker that warned, these are handed out silently. So the assignment is
@@ -1893,49 +1886,6 @@ jobs:
           npm run test:icon-a11y
           # I3, and it runs LAST because it rewrites the working tree. It runs the generator for
           # real and compares byte for byte, which catches a hand-edited mark.
-          # THE VENDORED GLOSS RUNTIME, and three of its four sections assert an ABSENCE, which is the
-          # shape this failure actually takes. Nothing goes red when a vendored file quietly imports
-          # out of the scratch checkout — it builds on the machine that has that directory and fails
-          # on every other one, which is this runner, the desktop bundle, and everybody else. Same
-          # for `three` arriving from npm: the app runs, and every avatar in every workspace is drawn
-          # by a version of Three.js nobody chose, with nothing in the diff to say so.
-          #
-          # ITS FOURTH IS THE IMPORT CLOSURE, and that is the mistake this extraction was one step
-          # from making. The specification names seven gloss files; those seven need eighteen more to
-          # resolve. A missing one is not a type error — `allowJs` is off, so `tsc` never opens them —
-          # and not a lint error. It is a module-resolution failure in a browser on the first card
-          # that tries to draw.
-          npm run test:gloss-vendor
-          # AND THE ROSTER'S SHAPE, whose load-bearing assertion is the SORT. Migration 068's backfill
-          # hashes an agent's uuid into that array by index, so a reordering moves every backfilled
-          # agent to a different face with nothing in the diff to say so — the same property
-          # `test:agent-emoji` asserts of `EMOJI_PALETTE`, one package over, for the same reason.
-          # Beside it §3.3's amber rule applied at the grain that matters: not "is this palette
-          # orange" but "is the one colour this character is actually poured in orange", resolved
-          # through the runtime's own dealer, because amber means running everywhere else in the
-          # product and a permanently-orange agent is a colour lying about state.
-          npm run test:gloss-roster
-          # I1, AND THE ONE INVARIANT THAT CANNOT BE CAUGHT BY LOOKING. Browsers cap live WebGL
-          # contexts at roughly eight to sixteen and silently kill the OLDEST past that — no
-          # exception, no console message, just a canvas that stops painting. A per-card build is
-          # therefore perfect on the four-agent workspace a developer has open and produces cards
-          # that go blank at random on a customer's twenty-agent one. Half this suite counts what
-          # the stage constructs; the other half SCANS THE CLIENT, because the counter proves the
-          # stage behaves and says nothing about the thumbnail renderer somebody adds next year.
-          #
-          # It also watches the animation reach the meshes. A stage that builds characters and never
-          # animates them renders a perfectly correct STILL grid, which reads as a design decision
-          # rather than as a bug — so gaze, the head following it, breath and sway are each asserted
-          # to move, over a window long enough that a stochastic gaze cannot make it flaky.
-          npm run test:gloss-stage
-          # I5, AND EVERY RULE IN IT IS INVISIBLE IN A SCREENSHOT. A grid that keeps animating behind
-          # another window looks exactly like one that does not; what tells them apart is a fan, a
-          # battery and a laptop somebody closes the app on. Same for the cap — twelve animating
-          # slots and forty are the same picture, and the machine that can tell is not the one this
-          # was built on. The reduced-motion case is the pedantic one on purpose: "stops" has to mean
-          # one frame and then nothing, which is neither a slower animation nor a blank card, and
-          # both of those are easy to ship by accident.
-          npm run test:gloss-budget
           # I6, AND THE ASSERTION THAT MATTERS READS THE MIGRATION RATHER THAN THE LIST. "The column
           # is TEXT, never an enum — the list will change, and a migration to add 'Compliance' to a
           # preset list would be absurd." That rule does not get broken by editing twenty-five words;

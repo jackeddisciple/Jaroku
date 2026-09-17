@@ -1,11 +1,10 @@
 // §6's three inputs, in §6's order, as the one place an agent is deliberately created.
 //
-// WHY A DIALOG AND NOT THREE MORE FIELDS IN THE COMPOSER. The composer can already start an agent —
+// WHY A DIALOG AND NOT TWO MORE FIELDS IN THE COMPOSER. The composer can already start an agent —
 // type a brief, get a plan, press Generate — and that path stays exactly as it was. What it cannot
-// do is ask three questions in an order, because it is one text field with chips around it, and §6's
-// order is load-bearing: a name is what you know first, a category is a choice from a list, and an
-// avatar is a picture you look at. Strung along a chip row those become three controls competing
-// with the brief for the same glance.
+// do is ask two questions in an order, because it is one text field with chips around it, and §6's
+// order is load-bearing: a name is what you know first and a category is a choice from a list.
+// Strung along a chip row those become two controls competing with the brief for the same glance.
 //
 // IT DOES NOT SEND A GENERATION. It sends a PLAN, exactly as the composer's first move does — "the
 // plan gate is the only way in, so nothing gets built that the user hasn't seen described first" —
@@ -13,12 +12,10 @@
 // A dialog that generated directly would be a second entry point with its own promises about the
 // gate, the connectors and the provider, and the two would drift.
 //
-// THE AVATAR STEP IS SKIPPABLE AND IS PRE-ANSWERED, which is the same thing said twice. One is
-// preselected by hash before the dialog opens, so the grid is never empty and somebody who does not
-// care can press Create having read three words and typed one line. §6 asks for exactly that.
-//
-// A DUPLICATE IS ALLOWED AND WARNED. "Also used by Stacey" under the grid, and Create stays enabled:
-// it is their workspace, and a hard block on a cosmetic choice is worse than a duplicate.
+// NOTHING HERE ASKS WHAT AN AGENT LOOKS LIKE, and §6's third input is gone rather than moved. An
+// agent is given one of eleven faces, and the name paired with it, by its position in its
+// workspace's creation order — see `lib/agentFaces.ts` — so there is no picture to pick and no
+// duplicate to warn about.
 
 import { useEffect, useId, useRef, useState } from "react";
 

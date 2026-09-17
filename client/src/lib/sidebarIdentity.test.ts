@@ -157,11 +157,6 @@ console.log("\nthe sidebar draws the picture, at the register the rail shares");
     sidebar.includes("FACE_SIZE.sidebar"), "FACE_SIZE.sidebar not in Sidebar.tsx");
   check("...and from the agent's own picture column",
     /picture=\{agent\.picture\}/.test(sidebar));
-
-  // AND NOTHING DOWN HERE MOUNTS THE RENDERER. The 3D system is on its way out of the product
-  // entirely; until it is gone, the surface its own specification told it to stay off is still the
-  // one worth saying so about.
-  check("the sidebar mounts no 3D avatar", !sidebar.includes("GlossAvatar"), "GlossAvatar in Sidebar.tsx");
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

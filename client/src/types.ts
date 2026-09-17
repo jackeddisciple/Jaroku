@@ -87,20 +87,15 @@ export interface AgentSummary {
    */
   emoji?: string | null;
   /**
-   * §5.1's two identity columns, on the list every surface already receives.
+   * §5.1's category, on the list every surface already receives.
    *
-   * `category` IS HERE FOR §7'S SIDEBAR LINE, which is the surface it was designed for: emoji, name,
-   * an em dash, category, on one line, with the category taking whatever width is left.
+   * IT IS HERE FOR §7'S SIDEBAR LINE, which is the surface it was designed for: the name, an em
+   * dash, the category, on one line, with the category taking whatever width is left.
    *
-   * `avatar_id` IS HERE FOR THE DUPLICATE WARNING as much as for the card. §6's picker says "also
-   * used by X", and X is a name off this list — deriving it from anywhere else would be a second
-   * fetch for a fact the sidebar already holds.
-   *
-   * Both optional on the type and always present on the wire, for the same reason `emoji` is: a
-   * rolling deploy can put a client in front of a server that predates them.
+   * Optional on the type and always present on the wire, for the same reason `picture` is: a rolling
+   * deploy can put a client in front of a server that predates it.
    */
   category?: string;
-  avatar_id?: string | null;
   /**
    * Which of the eleven illustrated faces this agent wears (migration 079).
    *
@@ -1442,18 +1437,10 @@ export interface AgentCardView {
    */
   emoji: string | null;
   /**
-   * §5.1's two identity columns.
-   *
-   * `avatar_id` IS A ROSTER ID, NOT A RECIPE. The frozen recipe lives on the client beside the
-   * renderer that draws it; what travels is which of the twenty-eight, so an agent's face is a fact
-   * about the agent rather than an accident of whichever version of the code drew it last. Null only
-   * for a row written before migration 068's backfill, which is why every render site treats it as
-   * optional rather than assuming.
-   *
-   * `category` is free text and never an enum (I6). `Uncategorized` is a real value, not an absence.
+   * §5.1's category. Free text and never an enum (I6); `Uncategorized` is a real value, not an
+   * absence.
    */
   category: string;
-  avatar_id: string | null;
   /**
    * Which of the eleven illustrated faces this agent wears (migration 079).
    *
@@ -2297,8 +2284,8 @@ export type ClientCommand =
   // the avatar join it because generation builds what was APPROVED rather than what the form says by
   // the time Generate is pressed. Both optional — an agent planned from the composer has neither,
   // and the server answers that with the neutral category and the hashed avatar.
-  | { cmd: "generate"; subscription?: { provider: string; model?: string | null; effort?: string | null }; prompt: string; connectors?: string[]; mcpTools?: string[]; name?: string; category?: string; avatarId?: string; intoAgentId?: string; planId?: string; threadId?: string }
-  | { cmd: "planAgent"; subscription?: { provider: string; model?: string | null; effort?: string | null }; prompt: string; connectors?: string[]; mcpTools?: string[]; name?: string; category?: string; avatarId?: string; intoAgentId?: string; revisePlanId?: string; threadId?: string }
+  | { cmd: "generate"; subscription?: { provider: string; model?: string | null; effort?: string | null }; prompt: string; connectors?: string[]; mcpTools?: string[]; name?: string; category?: string; intoAgentId?: string; planId?: string; threadId?: string }
+  | { cmd: "planAgent"; subscription?: { provider: string; model?: string | null; effort?: string | null }; prompt: string; connectors?: string[]; mcpTools?: string[]; name?: string; category?: string; intoAgentId?: string; revisePlanId?: string; threadId?: string }
   | { cmd: "discardPlan"; planId: string }
   | { cmd: "listAgents" }
   /**

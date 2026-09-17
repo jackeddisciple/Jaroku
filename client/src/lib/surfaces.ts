@@ -43,7 +43,7 @@ import { TEXT as INK } from "./palette.ts";
  * SHAPE rather than a corner treatment. §04 lists it as a token anyway, and §05 says why: "Pills
  * are semantic: reserve 999px for statuses, counts and filters." Naming it is what lets that rule
  * be a rule — a scale that does not contain the pill cannot say where the pill is allowed. A circle
- * is still `rounded-full`: an avatar is round because it is round, not because it is a status.
+ * is still `rounded-full`: a circle is round because it is round, not because it is a status.
  */
 export const RADIUS_SCALE = {
   /** Tiny technical elements and compact surfaces. */
@@ -98,8 +98,8 @@ export const RADIUS_TOKENS: Readonly<Record<string, string>> = Object.fromEntrie
 export const SHAPE = {
   /** The sidebar is structural: no outer radius, and see `ELEVATION_SPEC` for no outer shadow. */
   sidebarOuterRadius: 0,
-  /** Agent avatar containers. A range, because §04 gives the artwork its own silhouette inside. */
-  avatarRadius: { min: RADIUS_SCALE.xl, max: RADIUS_SCALE.hero },
+  /** An agent's own picture. A range, because §04 gives the artwork its own silhouette inside. */
+  facePictureRadius: { min: RADIUS_SCALE.xl, max: RADIUS_SCALE.hero },
 } as const;
 
 /**
@@ -179,8 +179,8 @@ export const COMPONENT = {
   agentCard: { radius: RADIUS_SCALE.lg, elevation: "E0", hover: "E1" },
   dropdown: { radius: RADIUS_SCALE.card, elevation: "E2" },
   dialog: { radius: RADIUS_SCALE.lg, elevation: "E3" },
-  /** The one row given as a range; see `SHAPE.avatarRadius`. */
-  agentAvatar: { radius: SHAPE.avatarRadius, elevation: "E0" },
+  /** The one row given as a range; see `SHAPE.facePictureRadius`. */
+  agentFace: { radius: SHAPE.facePictureRadius, elevation: "E0" },
 } as const;
 
 /**
@@ -232,7 +232,7 @@ export type TierName = keyof typeof TIER;
  * then a count, and then an ID — each defensible alone, and together the failure §03 names.
  */
 export const SURFACE_HIERARCHY = {
-  agentList: { primary: "avatar + agent name", secondary: "status, current thread", quiet: "IDs, timestamps, counts" },
+  agentList: { primary: "face + agent name", secondary: "status, current thread", quiet: "IDs, timestamps, counts" },
   agentDetail: { primary: "agent identity + state", secondary: "stats, tabs, recent runs", quiet: "version/files metadata" },
   threads: { primary: "thread title + active state", secondary: "agent context, activity", quiet: "IDs / low-value metadata" },
   inbox: { primary: "blocking / attention item", secondary: "evidence + resolution action", quiet: "age, counts, secondary metadata" },
