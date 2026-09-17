@@ -77,16 +77,6 @@ export interface AgentSummary {
   hand_written: boolean;
   runnable: boolean;
   /**
-   * The agent's identity mark — one emoji, assigned at creation.
-   *
-   * ON THIS LIST BECAUSE THE SIDEBAR IS BUILT FROM IT, and the sidebar is the reason the feature
-   * exists: twenty agents each carrying the same robot glyph is a list nobody can scan. It is also
-   * what every OTHER surface resolves against — a thread row, a work row and a fleet card all name
-   * an agent by slug and none of their payloads carries a mark, so `emojiFor` looks it up here
-   * rather than four payloads growing a column each.
-   */
-  emoji?: string | null;
-  /**
    * §5.1's category, on the list every surface already receives.
    *
    * IT IS HERE FOR §7'S SIDEBAR LINE, which is the surface it was designed for: the name, an em
@@ -1429,14 +1419,6 @@ export interface AgentCardView {
   /** The SLUG this one was copied from, or null. What §5.4's `Forked` tag renders. */
   forked_from: string | null;
   /**
-   * The agent's identity mark — one emoji, assigned at creation and overwritable by the user.
-   *
-   * IDENTITY, NOT STATE. It never changes because of something the agent did, and it is the same
-   * mark on every surface. Null only for a row written before migration 067's backfill, which is
-   * why every render site treats it as optional rather than assuming.
-   */
-  emoji: string | null;
-  /**
    * §5.1's category. Free text and never an enum (I6); `Uncategorized` is a real value, not an
    * absence.
    */
@@ -2308,7 +2290,6 @@ export type ClientCommand =
    */
   | { cmd: "deleteAgent"; agentId: string; confirm: string }
   /** §8.5's picker. On the existing agent channel under the existing capability. */
-  | { cmd: "setAgentEmoji"; agentId: string; emoji: string }
   // §6's category, edited afterwards. Any string — the presets are a vocabulary and the column is
   // TEXT (I6). There is no `setAgentAvatar` beside it: an avatar is chosen once, on the onboarding
   // screen, and a command nothing sends is a control nothing can reach.

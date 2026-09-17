@@ -10,7 +10,6 @@
 // Then open http://localhost:4317 to watch traces live.
 
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { EMOJI_PALETTE } from "./agents/emojiPalette.ts";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -2262,47 +2261,6 @@ async function renameAgent(ctx: TenantContext, agentId: string, name: unknown): 
   // Every thread of this agent renders the name. BUG-17 was exactly this going stale: a rename left
   // every thread row showing the old name beside a sidebar showing the new one.
   scheduleListRefresh(ctx);
-}
-
-/**
- * §8.5's picker, applied.
- *
- * ALLOWED BUT WARNED. Taking a mark another agent in the workspace already has is permitted — it is
- * their workspace, and a hard block on a cosmetic choice feels worse than a duplicate — so this
- * writes the value and says so on the channel rather than refusing. The refusals below are about
- * what the column may CONTAIN, which is a different question: an emoji outside the palette is not a
- * preference, it is a value the picker could not have produced and a font might not have.
- */
-async function setAgentEmoji(ctx: TenantContext, agentId: string, emoji: unknown): Promise<void> {
-  const slug = String(agentId ?? "");
-  const next = typeof emoji === "string" ? emoji : "";
-  // FROM THE PALETTE, OR NOT AT ALL. The palette is what D7 restricts to marks a Linux box without
-  // Noto Color Emoji can still draw, and an arbitrary string here would be a stored tofu box — or a
-  // multi-codepoint sequence, which §8.3 excludes because storage, comparison and font coverage all
-  // get harder for no gain. A membership test is the whole validation and it needs no regex.
-  if (!EMOJI_PALETTE.includes(next)) {
-    refuseAgent(ctx, "that is not one of the marks an agent can wear", slug);
-    return;
-  }
-  const agent = (await agentRepo.list(ctx, { includeArchived: true })).find((a) => a.slug === slug);
-  if (!agent) {
-    refuseAgent(ctx, `no agent called ${slug} in this workspace`, slug);
-    return;
-  }
-  await agentRepo.setEmoji(ctx, agent.id, next);
-  const clash = (await agentRepo.list(ctx, { includeArchived: true }))
-    .filter((a) => a.id !== agent.id && a.emoji === next);
-  if (clash.length > 0) {
-    // A NOTICE, NOT A REFUSAL — §8.5. It names the agent it collides with, because "this is already
-    // taken" without saying by what is a warning somebody cannot act on.
-    relay.sendAgents(ctx, ctx.requestId, {
-      type: "notice",
-      message: `${clash[0]!.display_name ?? clash[0]!.slug} already wears that mark`,
-      agentId: slug,
-    });
-  }
-  await relay.broadcastAgents();
-  await relay.broadcastAgentGrid();
 }
 
 /**
@@ -4674,14 +4632,10 @@ const relay = new WsRelay({
         hand_written: a.hand_written,
         runnable: published.has(a.slug) || (onDisk.get(a.slug)?.runnable ?? false),
         edit_count: edits.get(a.id) ?? 0,
-        // THE IDENTITY MARK, ON THE LIST THE SIDEBAR IS BUILT FROM — which is the surface the whole
-        // feature exists for. It is a column on the row, so this costs nothing, and it has to travel
-        // rather than be derived: the assignment probes against what the workspace already holds,
-        // and a browser cannot know that.
-        emoji: a.emoji,
-        // §5.1'S TWO, BESIDE IT AND FOR THE SAME REASON: both are columns on the row, so this costs
-        // nothing, and both have to travel rather than be derived — a browser cannot know what a
-        // deterministic assignment probed against.
+        // IDENTITY, ON THE LIST THE SIDEBAR IS BUILT FROM. Both are columns on the row, so this
+        // costs nothing, and both have to TRAVEL rather than be derived: the picture comes from the
+        // agent's position in its workspace's creation order, and a browser holding a list that
+        // excludes archived rows cannot count that.
         category: a.category,
         // `picture` names a portrait and the banner cut from its own palette, so it is the only
         // identity value the sidebar and the card need.
@@ -6361,7 +6315,7 @@ const GRID_WINDOW_30_MS = 30 * 24 * 60 * 60 * 1000;
 
 const AGENT_COMMAND_NAMES = new Set([
   "archiveAgent", "restoreAgent", "renameAgent", "forkAgent", "restoreAgentVersion",
-  "setAgentEmoji", "setAgentCategory", "createDraftAgent",
+  "setAgentCategory", "createDraftAgent",
 ]);
 
 /** A refusal on the agents channel, to the socket that earned it and nobody else. */
@@ -6473,11 +6427,6 @@ async function agentGridSnapshot(ctx: TenantContext): Promise<AgentGridSnapshot>
       // Null when the source has since been swept, which is the honest answer: the copy is still a
       // fork, and there is no longer a name to point at.
       forked_from: a.forked_from ? (slugByUuid.get(a.forked_from) ?? null) : null,
-      // IDENTITY, ON THE PAYLOAD THE SIDEBAR AND THE GRID ALREADY RECEIVE. It is a column on the row
-      // rather than something derived, so it costs nothing here — and it must be on the WIRE rather
-      // than re-derived in the browser, because the assignment probes against what the workspace
-      // holds and a client cannot know that.
-      emoji: a.emoji,
       // §5.1'S CATEGORY, which is what §14's filter reads and what the detail header edits, and the
       // picture the card's banner and portrait are both cut from. Columns on the row already
       // assembled here, so neither costs a query.
@@ -6953,7 +6902,6 @@ async function handleAgentCommand(ctx: TenantContext, cmd: AgentCommand): Promis
     else if (cmd.cmd === "restoreAgent") await setAgentArchived(ctx, cmd.agentId, false);
     else if (cmd.cmd === "renameAgent") await renameAgent(ctx, cmd.agentId, cmd.name);
     else if (cmd.cmd === "deleteAgent") await deleteAgent(ctx, cmd.agentId, cmd.confirm);
-    else if (cmd.cmd === "setAgentEmoji") await setAgentEmoji(ctx, cmd.agentId, cmd.emoji);
     else if (cmd.cmd === "setAgentCategory") await setAgentCategory(ctx, cmd.agentId, cmd.category);
     else if (cmd.cmd === "forkAgent") await forkAgent(ctx, cmd.agentId);
     else if (cmd.cmd === "restoreAgentVersion") await restoreAgentVersion(ctx, cmd.agentId, cmd.version);

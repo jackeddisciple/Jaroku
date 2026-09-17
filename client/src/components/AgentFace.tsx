@@ -47,6 +47,18 @@ import { RADIUS } from "../lib/tokens.ts";
  */
 export const FACE_SIZE = {
   /**
+   * A dense row — a Cockpit work row, a fleet card, the command palette.
+   *
+   * THE REGISTER THE EMOJI HELD, AT THE SAME NUMBER. Those three surfaces name an agent by slug and
+   * carry no identity of their own, so they resolved a mark out of the agent list; they resolve a
+   * picture out of it now, at the size the mark was drawn at, so nothing about those rows moves.
+   *
+   * SIXTEEN RATHER THAN THE EMOJI'S FOURTEEN, and the two pixels are not a change of register. A
+   * colour emoji at 14px inks about 13px because a filled glyph carries its own margin; a square
+   * picture inks all sixteen, so 16 is where it reads at the weight the glyph did.
+   */
+  row: 16,
+  /**
    * The sidebar's agent list.
    *
    * SIXTEEN, IN THE TAB ICONS' OWN COLUMN — the product owner's call, and it is the size the emoji

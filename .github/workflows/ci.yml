@@ -439,24 +439,17 @@ jobs:
           # one: the manifest read costs one statement for the whole workspace, or the Agents grid
           # gains a per-agent query that is invisible in review.
           npm run test:agent-files
-          # §8'S ASSIGNMENT, WHICH LOOKS OBVIOUSLY RIGHT AND IS NOT. A hash into a sixty-four entry
-          # palette is deterministic, testable and stable — and with twenty agents the birthday
-          # paradox puts a duplicate at better than ninety-five percent. Two agents both showing the
-          # tractor defeats the only purpose the feature has, so the hash gives a starting index and
-          # the assignment probes forward, which is why the value is written at creation rather than
-          # derived at read. Beside it D7's palette rules, which are what makes the feature safe on a
-          # Linux box with no colour-emoji font, and the drift check between the two copies of the
-          # list — the client cannot import from the server, so it is written twice on purpose.
-          npm run test:agent-emoji
-          # AND WHAT REPLACED IT, which deliberately does NOT hash. Over eleven pictures
-          # the birthday bound the two suites above manage around becomes unmanageable — a hash
-          # collides on the fourth or fifth agent more often than not, and where twenty-eight
-          # characters had a picker that warned, these are handed out silently. So the assignment is
-          # the agent's POSITION in its workspace's creation order, and this is the suite that
-          # asserts the property that buys: eleven agents made one after another in one workspace
-          # wear eleven different faces. Beside it the drift check, which has two halves rather than
-          # one — a face is a portrait AND a name, so the copies can disagree by handing out a
-          # picture the client cannot draw, or by putting the wrong name under one it can.
+          # WHICH OF ELEVEN FACES AN AGENT WEARS, AND IT DELIBERATELY DOES NOT HASH. The three identity
+          # features this replaced all hashed the agent's uuid, and over eleven pictures the birthday
+          # bound they managed around becomes unmanageable: a hash collides on the fourth or fifth
+          # agent more often than not, and where the emoji palette had sixty-four entries and a
+          # probe, and the character roster had twenty-eight and a picker that warned, these are
+          # handed out silently. So the assignment is the agent's POSITION in its workspace's
+          # creation order, and this is the suite that asserts the property that buys: eleven agents
+          # made one after another in one workspace wear eleven different faces. Beside it the drift
+          # check, which has two halves rather than one — a face is a portrait AND a name, so the two
+          # copies of the list can disagree by handing out a picture the client cannot draw, or by
+          # putting the wrong name under one it can.
           npm run test:agent-picture
           # `test:edit-versions` IS DELIBERATELY NOT HERE, and it is the one suite in this file's
           # history whose absence is a reason rather than an oversight. It replays recorded model
@@ -1838,14 +1831,6 @@ jobs:
           # spellings of a timestamp, including a raw `toLocaleString` in the secrets rotation
           # history, which is the one view where somebody is comparing dates to each other.
           npm run test:date-chip
-          # §8.4'S NO-CONTAINER RULE, WHICH IS THE ONE A SUITE HAS TO HOLD because a box is the
-          # most natural thing in the world to add: a circle, a rounded square, a tinted cell, a
-          # gradient backdrop — every one looks tidier in isolation and every one would be the first
-          # filled container in a product that draws structure in hairlines. At 16px the container is
-          # larger and louder than the thing inside it, which is how "tidier" becomes worse. Beside
-          # it the rule that keeps the mark out of the tag row: that row trims to three plus a `+n`
-          # chip, so an identity mark in it would vanish exactly when the card is busiest.
-          npm run test:emoji-render
           # THE GREETING'S EMOJIS: the product owner's twenty-five, in their order, by code point; a
           # new one every second, popping in; only the ones this machine draws as colour emoji, so no
           # desktop shows a box mid-question; still under prefers-reduced-motion, paused while hidden.

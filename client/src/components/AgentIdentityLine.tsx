@@ -1,4 +1,4 @@
-// §7's sidebar line: `[emoji] Stacey — Billing`, on one line, with one rule about what may be cut.
+// §7's sidebar line: `Stacey — Billing`, on one line, with one rule about what may be cut.
 //
 // THE NAME NEVER TRUNCATES. It is the identity, and a cut name is a different agent — `invoice_par…`
 // and `invoice_parser_v2` are two agents that read as one, in the list whose whole job is telling
@@ -24,7 +24,6 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { AgentEmoji, EMOJI_SIZE } from "./AgentEmoji.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { showsCategory } from "../lib/agentCategories.ts";
 
@@ -56,12 +55,10 @@ export function identityTitle(name: string, category: string | null | undefined)
 const CATEGORY_FLOOR = 44;
 
 export function AgentIdentityLine({
-  emoji,
   name,
   category,
   nameClassName = "",
 }: {
-  emoji: string | null | undefined;
   name: string;
   category: string | null | undefined;
   /** The row's own colour for the name — active rows draw it in the accent. */
@@ -93,11 +90,12 @@ export function AgentIdentityLine({
 
   return (
     <>
-      {/* §8.4'S EXPLICIT ASK, AND THE REASON THE EMOJI FEATURE EXISTS. Twenty agents each carrying
-          the same robot mark is a list nobody can scan, and the eye finds a shape far faster than it
-          reads a name. Bare, on the baseline — no box, because at 16px the box would be larger and
-          louder than the glyph in it. I4: no 3D here; this size is the emoji's. */}
-      <AgentEmoji emoji={emoji} size={EMOJI_SIZE.sidebar} />
+      {/* THE MARK IS NOT DRAWN HERE ANY MORE. This line carried the agent's emoji, on §8.4's ask
+          that twenty agents each wearing the same robot glyph is a list nobody can scan — and the
+          answer to that is now the agent's own picture, which the sidebar row draws in the tab
+          icons' column so that it lines up with the five destinations above it. A second copy in
+          here would be two pictures of one agent on one row. What is left is §7's two rules: the
+          name that never truncates, and the category that does. */}
       {/* `shrink-0`, WHICH IS THE WHOLE RULE. Without it the flex row shrinks the name first,
           because it is the longest item — exactly backwards. */}
       <span className={`shrink-0 whitespace-nowrap ${nameClassName}`}>{name}</span>

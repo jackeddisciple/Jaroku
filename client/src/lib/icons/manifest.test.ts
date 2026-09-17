@@ -56,7 +56,9 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // 166 WITHOUT THE THREADS TAB: `nav.threads`, `threads.refresh`, `threads.new` and the five
   // `threadsFilter` chips left with the view that drew them.
   // 168 WITH `plan.generate`, the send the plan gate's own verb carries.
-  check("168 registry keys", entries.length === 168, `${entries.length}`);
+  // 167 WITHOUT `agents.shuffleEmoji`: the emoji an agent wore is gone, and so is the picker whose
+  // shuffle button was the only thing that drew this.
+  check("167 registry keys", entries.length === 167, `${entries.length}`);
   const names = new Set(entries.map((e) => e.export));
   // 104 from icons_integration's appendix, plus D8's 13 — the composer glyphs that had to move
   // here when `@hugeicons/react` came out. See the note at the top of `registry.ts`.
@@ -74,7 +76,10 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // 127 WITH `Share08Icon`, for Share Chat.
   // 123 WITHOUT THE MARKS ONLY THE THREADS TAB DREW.
   // 124 WITH `CircleSmallIcon`, for that circle.
-  check("125 distinct marks", names.size === 125, `${names.size}`);
+  // 124 STILL, WITHOUT `ShuffleIcon`: it left with the emoji picker, and `CircleSmallIcon` arrived
+  // in the same release — the count is unchanged and the set is not, which is exactly the case a
+  // count alone cannot see and the file list in `test:icon-generated` can.
+  check("124 distinct marks", names.size === 124, `${names.size}`);
   check("no key is declared twice", new Set(entries.map((e) => e.key)).size === entries.length);
 }
 

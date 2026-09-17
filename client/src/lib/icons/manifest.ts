@@ -115,11 +115,6 @@ export const MANIFEST = {
     rename: "Edit03Icon",
     configure: "Settings05Icon",
     delete: "Delete01Icon",
-    // §8.5's shuffle, and it is a SHUFFLE rather than one of the three refresh marks. D3 separated
-    // those three by what they do — sync with an external system, re-fetch a local list, retry a
-    // failed operation — and this is none of them: it re-runs the collision-avoiding assignment and
-    // proposes a different mark, which is a change rather than a repeat.
-    shuffleEmoji: "ShuffleIcon",
     /**
      * The runs capsule's mark, on an agent's sidebar row. A count of runs is a count of times this
      * agent has been STARTED, so the mark is a play button rather than a clock or a list.

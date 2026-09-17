@@ -259,7 +259,6 @@ export type DeleteAgentCommand = { cmd: "deleteAgent"; agentId: string; confirm:
  *
  * `agentId` IS THE SLUG, like every other agent-addressed command on this socket.
  */
-export type SetAgentEmojiCommand = { cmd: "setAgentEmoji"; agentId: string; emoji: string };
 /** §6's category, edited afterwards. Any string — the presets are a vocabulary, not a constraint. */
 export type SetAgentCategoryCommand = { cmd: "setAgentCategory"; agentId: string; category: string };
 /**
@@ -348,13 +347,12 @@ export type AgentCommand =
   | ForkAgentCommand
   | RestoreAgentVersionCommand
   | SetAgentToolsCommand
-  | SetAgentEmojiCommand
   | SetAgentCategoryCommand
   | CreateDraftAgentCommand;
 
 const AGENT_COMMANDS = new Set([
   "archiveAgent", "restoreAgent", "renameAgent", "forkAgent", "restoreAgentVersion",
-  "setAgentTools", "setAgentEmoji", "setAgentCategory", "createDraftAgent",
+  "setAgentTools", "setAgentCategory", "createDraftAgent",
   "deleteAgent",
 ]);
 
@@ -3469,8 +3467,6 @@ export interface AgentCardView {
    * because nothing about the screen looks wrong.
    */
   forked_from: string | null;
-  /** The agent's identity mark. Null only for a row written before migration 067's backfill. */
-  emoji: string | null;
   /**
    * §5.1's category. Free text and never an enum (I6); `Uncategorized` is a real value, not an
    * absence.
@@ -3814,7 +3810,6 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   // exactly this, the same reason the thread and github commands are classified here.
   archiveAgent: "agents", restoreAgent: "agents", renameAgent: "agents", setAgentTools: "agents",
   deleteAgent: "agents",
-  setAgentEmoji: "agents",
   setAgentCategory: "agents",
   createDraftAgent: "agents",
   forkAgent: "agents", restoreAgentVersion: "agents",

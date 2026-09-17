@@ -12,7 +12,6 @@
 // becomes a materialisation of the row rather than the other way round.
 
 import { randomUUID } from "node:crypto";
-import { assignEmoji } from "../../agents/emojiPalette.ts";
 import { UNCATEGORIZED } from "../../agents/category.ts";
 import { faceAt } from "../../agents/faces.ts";
 import { asInt, asBool, jsonFromColumn, type Db, type Queryable } from "../db.ts";
@@ -121,23 +120,6 @@ export interface Agent {
    */
   forked_from: string | null;
   /**
-   * The mark this agent wears in the sidebar, and everywhere else it appears.
-   *
-   * IDENTITY, NOT STATE. It never changes because of something the agent did, and it is the same
-   * mark on every surface — which is the whole reason it exists: twenty agents each carrying the
-   * same robot glyph is a list nobody can scan, and the eye finds a shape far faster than it reads
-   * a truncated name.
-   *
-   * WRITTEN AT CREATION, NEVER DERIVED AT READ. The assignment probes forward from a hash until it
-   * finds a mark this workspace is not already using, so it depends on what the workspace holds —
-   * which means deriving it on read would change an agent's mark when an unrelated agent appeared.
-   *
-   * NULLABLE IN THE SCHEMA AND NEVER NULL IN PRACTICE. Migration 067 explains at length why the
-   * column is not `NOT NULL`; every insert path below writes one, and `test:agent-emoji` reads this
-   * file and fails on one that does not.
-   */
-  emoji: string | null;
-  /**
    * What kind of work this agent is for. Free text, never an enum (migration 068, I6).
    *
    * A VOCABULARY IN THE INTERFACE AND A STRING IN THE DATABASE. The picker offers twenty-five
@@ -153,7 +135,8 @@ export interface Agent {
    * Which of the eleven illustrated faces this agent wears (migration 079), or null.
    *
    * ONE COLUMN FOR THE WHOLE IDENTITY, which is what makes it worth a new one rather than a third
-   * beside `emoji` and `avatar_id`. The id names a PAIR — a square portrait and the banner cut from
+   * beside the two identity columns it replaces. The id names a PAIR — a square portrait and the
+   * banner cut from
    * its own palette — and the name the agent was given at creation came from the same entry, so a
    * row carrying this carries everything the card draws above its own text.
    *
@@ -223,7 +206,7 @@ export interface AgentOnDisk {
 
 const COLUMNS = `id, slug, display_name, display_name_is_custom, description, connectors,
                  mcp_tools, required_env, default_provider, hand_written, current_version,
-                 creation_cost, created_by, forked_from, emoji, category, picture,
+                 creation_cost, created_by, forked_from, category, picture,
                  archived_at, created_at`;
 
 export class AgentRepository {
@@ -232,23 +215,6 @@ export class AgentRepository {
   /** The database, scoped to the request's workspace. See TraceStore's note. */
   private q(ctx: TenantContext): Queryable {
     return this.db.forWorkspace(ctx.workspaceId);
-  }
-
-  /**
-   * The marks this workspace has already spent, INCLUDING archived agents'.
-   *
-   * §8.2: "Archived agents keep theirs. Restoring must not shuffle identity." So an archived agent's
-   * mark stays out of the pool — a restore that found its mark taken would have to re-probe, and an
-   * agent whose identity changed while it was put away is an agent nobody recognises when it comes
-   * back. That costs one entry of a sixty-four entry palette per archived agent, which is the
-   * cheaper of the two mistakes.
-   */
-  private async takenEmoji(ctx: TenantContext): Promise<string[]> {
-    const rows = await this.q(ctx).all<{ emoji: string | null }>(
-      `SELECT emoji FROM agents WHERE workspace_id = ? AND emoji IS NOT NULL`,
-      [ctx.workspaceId],
-    );
-    return rows.map((r) => r.emoji!).filter(Boolean);
   }
 
   /**
@@ -292,7 +258,6 @@ export class AgentRepository {
       current_version: asInt(row["current_version"], 1),
       created_by: (row["created_by"] as string | null) ?? null,
       forked_from: (row["forked_from"] as string | null) ?? null,
-      emoji: (row["emoji"] as string | null) ?? null,
       // A ROW FROM BEFORE 068'S DEFAULT LANDED reads as null and answers `Uncategorized`, which is
       // the same value the column's default writes. One meaning, whichever side of the migration a
       // row was written on.
@@ -518,13 +483,12 @@ export class AgentRepository {
     },
   ): Promise<Agent> {
     if (!SAFE_SLUG.test(a.slug)) throw new Error(`not a usable agent id: ${a.slug}`);
-    const taken = await this.takenEmoji(ctx);
     const picture = a.picture ?? (await this.nextFace(ctx)).id;
     await this.q(ctx).run(
       `INSERT INTO agents (id, workspace_id, slug, display_name, description, connectors,
          mcp_tools, required_env, default_provider, hand_written, creation_cost, created_by,
-         forked_from, emoji, category, picture, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         forked_from, category, picture, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         a.id,
         ctx.workspaceId,
@@ -542,11 +506,6 @@ export class AgentRepository {
         // and a reconciliation that cleared it would lose the fact on the next boot — the trap
         // `display_name` was in before `display_name_is_custom` closed it.
         a.forkedFrom ?? null,
-        // A FORK GETS A FRESH MARK, NEVER ITS PARENT'S — §8.2, and it falls out of this line rather
-        // than needing a branch: the parent's emoji is already in `taken`, so the probe walks past
-        // it. Fork and parent are the two agents you most need to tell apart and they sit adjacent
-        // in the sidebar, which is exactly where a shared mark would cost the most.
-        assignEmoji(a.id, taken),
         // NEVER GUESSED FROM THE NAME. §5.1 rules that out explicitly, and the reason is the one
         // every inferred field has: right often enough to be trusted, wrong often enough to
         // mislead, with nothing on screen to say which.
@@ -559,21 +518,6 @@ export class AgentRepository {
       ],
     );
     return (await this.byId(ctx, a.id))!;
-  }
-
-  /**
-   * Set the agent's identity mark.
-   *
-   * ONE COLUMN, WORKSPACE-SCOPED like every other write on this table. It does NOT check for a
-   * collision: §8.5 says taking a mark another agent has is allowed and warned, and the warning is
-   * the caller's — a store that refused would make a cosmetic choice a failure, and a store that
-   * warned would be a store writing to a socket.
-   */
-  async setEmoji(ctx: TenantContext, id: string, emoji: string): Promise<void> {
-    await this.q(ctx).run(
-      `UPDATE agents SET emoji = ? WHERE id = ? AND workspace_id = ?`,
-      [emoji, id, ctx.workspaceId],
-    );
   }
 
   /**
@@ -650,13 +594,12 @@ export class AgentRepository {
     // in the argument list. A disk sync that hashed one uuid and stored another would assign a mark
     // nothing could ever reproduce.
     const id = randomUUID();
-    const taken = await this.takenEmoji(ctx);
     const picture = (await this.nextFace(ctx)).id;
     await this.q(ctx).run(
       `INSERT INTO agents (id, workspace_id, slug, display_name, description, connectors,
-         mcp_tools, required_env, default_provider, hand_written, creation_cost, emoji,
+         mcp_tools, required_env, default_provider, hand_written, creation_cost,
          category, picture, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (workspace_id, slug) DO UPDATE SET
          -- A NAME A PERSON CHOSE SURVIVES THE SYNC. Without the CASE this column is overwritten
          -- from jaroku.json on every reconciliation, so a rename lasts until the next boot that
@@ -671,7 +614,7 @@ export class AgentRepository {
          default_provider = excluded.default_provider,
          hand_written = excluded.hand_written,
          creation_cost = excluded.creation_cost,
-         -- emoji, category AND picture ARE NOT IN THE UPDATE LIST, deliberately. A reconciliation
+         -- category AND picture ARE NOT IN THE UPDATE LIST, deliberately. A reconciliation
          -- runs on every boot, and all three are things nobody re-decides on a boot: an identity
          -- that a boot rewrote would be an identity that changed for a reason nobody could see --
          -- the same trap display_name was in before display_name_is_custom closed it, one column
@@ -690,7 +633,6 @@ export class AgentRepository {
         a.default_provider ?? "fake",
         a.hand_written ? 1 : 0,
         a.creation_cost ?? null,
-        assignEmoji(id, taken),
         // A DIRECTORY HAS NO CATEGORY TO DECLARE, so a synced agent takes the neutral value and a
         // person sets it from the identity section afterwards.
         UNCATEGORIZED,

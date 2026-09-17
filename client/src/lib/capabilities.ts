@@ -155,7 +155,6 @@ export const COMMAND_CAPABILITY: Record<string, string> = {
   // rather than let somebody type an agent's slug and then be refused.
   deleteAgent: "workspace:manage",
   // §8.2: the EXISTING capability. Re-marking an agent is a smaller act than renaming one.
-  setAgentEmoji: "agent:write",
   // §6's category, on the same rung: what an agent is called and what it is for is one authority,
   // not two. It reaches nothing outside the row.
   setAgentCategory: "agent:write",
@@ -559,7 +558,6 @@ export const COMMAND_AGENT_CAPABILITY: Record<string, AgentCapability> = {
   // `admin`, the top of this vocabulary — the only rung that fits an act with nothing on the other
   // side of it. Both gates apply on the server, so this is a floor rather than an alternative.
   deleteAgent: "admin",
-  setAgentEmoji: "edit",
   setAgentCategory: "edit",
   setAgentTools: "edit",
   restoreAgentVersion: "edit",

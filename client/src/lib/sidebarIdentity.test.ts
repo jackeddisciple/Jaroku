@@ -35,8 +35,8 @@ const check = (name: string, ok: boolean, detail = ""): void => {
   else { fail++; console.log(`  FAIL ${name}${detail ? ` — ${detail}` : ""}`); }
 };
 
-const line = (name: string, category: string | null, emoji: string | null = "🐢"): string =>
-  markup(createElement(AgentIdentityLine, { emoji, name, category }));
+const line = (name: string, category: string | null): string =>
+  markup(createElement(AgentIdentityLine, { name, category }));
 
 const LONG = "invoice_reconciliation_and_vendor_chasing_agent";
 

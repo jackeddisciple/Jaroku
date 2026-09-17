@@ -607,7 +607,6 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
    */
   deleteAgent: "workspace:manage",
   // §8.2: the EXISTING capability. Re-marking an agent is a smaller act than renaming one.
-  setAgentEmoji: "agent:write",
   // §6's category, on the same rung and for the same reason: changing what an agent is called and
   // what kind of work it is for is one authority, not two. It reaches nothing outside the row.
   setAgentCategory: "agent:write",
@@ -1162,7 +1161,6 @@ export const COMMAND_AGENT_CAPABILITY: Record<string, AgentCapability> = {
   // same command at `workspace:manage`. Both apply: the relay checks the workspace capability and
   // then resolves the agent-level one, so this is the floor rather than an alternative to it.
   deleteAgent: "admin",
-  setAgentEmoji: "edit",
   // The same narrowing the three above take: what an agent is called and what it is for are both
   // facts about the agent, and deciding them is what editing is.
   setAgentCategory: "edit",

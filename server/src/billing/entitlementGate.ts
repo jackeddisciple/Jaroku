@@ -196,7 +196,6 @@ export const COMMAND_ENTITLEMENT: Record<string, EntitlementKind | typeof NO_ENT
   // contradiction: who may do it and what it costs are different questions.
   deleteAgent: NO_ENTITLEMENT,
   // Cosmetic, and bounded by the palette. Nothing to meter.
-  setAgentEmoji: NO_ENTITLEMENT,
   // Cosmetic too, and bounded the same way: a category is a label on the row. Nothing to count, so
   // nothing here a plan could sell.
   setAgentCategory: NO_ENTITLEMENT,

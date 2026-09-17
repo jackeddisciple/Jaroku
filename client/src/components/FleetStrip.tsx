@@ -41,8 +41,8 @@ import { StatusDot } from "./StatusBadge.tsx";
 import { SectionHeader } from "./SectionHeader.tsx";
 import { GlobeIcon, KeyIcon, PlugIcon } from "./panelIcons.tsx";
 import { Truncate } from "./Truncate.tsx";
-import { AgentEmoji } from "./AgentEmoji.tsx";
-import { emojiBySlug } from "../lib/agentEmoji.ts";
+import { AgentFace, FACE_SIZE } from "./AgentFace.tsx";
+import { pictureBySlug } from "../lib/agentPicture.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { IconButton } from "./IconButton.tsx";
 
@@ -292,10 +292,10 @@ function CardMenu({ card }: { card: FleetCardView }) {
  * is absolutely positioned to fill the card behind the content, so the whole surface is the target
  * and the sparkline sits above it in the stacking order with its own clicks intact.
  */
-function FleetCard({ card, emoji, tabIndex, onArrow }: {
+function FleetCard({ card, picture, tabIndex, onArrow }: {
   card: FleetCardView;
-  /** The agent's identity mark, resolved by the strip so forty cards do one lookup rather than forty. */
-  emoji: string | undefined;
+  /** The agent's picture, resolved by the strip so forty cards do one lookup rather than forty. */
+  picture: string | undefined;
   /** §12's roving tabindex. Exactly one card in the strip is `0`; see `FleetStrip`. */
   tabIndex: number;
   onArrow: (delta: 1 | -1, track: HTMLElement | null) => void;
@@ -358,10 +358,10 @@ function FleetCard({ card, emoji, tabIndex, onArrow }: {
           the same size as the version chip beside it. */}
       <div className="pointer-events-none relative z-10 flex items-center gap-2">
         <ConnectionDot card={card} />
-        {/* §8.4: 14px, left of the agent name. Resolved out of the agent list rather than off this
-            payload — a fleet card names its agent by slug, and a fifth copy of a mark that changes
-            on one table is four ways for it to go stale. */}
-        <AgentEmoji emoji={emoji} />
+        {/* §8.4's row register, left of the agent name. Resolved out of the agent list rather than
+            off this payload — a fleet card names its agent by slug, and a fourth copy of an identity
+            that changes on one table is three ways for it to go stale. */}
+        <AgentFace picture={picture} name={card.agent_name} size={FACE_SIZE.row} />
         <Truncate className="min-w-0 text-title text-ink" title={card.agent_name}>
           {card.agent_name}
         </Truncate>
@@ -530,7 +530,7 @@ export function FleetStrip() {
   // never shows up in review and is instantly visible in a real workspace — the same rule
   // `test:agent-grid` holds the server's statement count to.
   const agents = useBuildStore((s) => s.agents);
-  const marks = useMemo(() => emojiBySlug(agents), [agents]);
+  const marks = useMemo(() => pictureBySlug(agents), [agents]);
   const notice = useWorkStore((s) => s.notice);
   const connected = useTraceStore((s) => s.connection === "open");
   const { ref, fade } = useEdgeFade();
@@ -570,7 +570,7 @@ export function FleetStrip() {
           <FleetCard
             key={card.deployment_id}
             card={card}
-            emoji={marks.get(card.agent_slug)}
+            picture={marks.get(card.agent_slug)}
             // THE FIRST CARD IS THE ENTRY POINT, unlike the sparkline's, whose entry is its LAST
             // bar. The two differ because the questions differ: a sparkline is asked about its most
             // recent run, and a strip is read left to right from its first agent.

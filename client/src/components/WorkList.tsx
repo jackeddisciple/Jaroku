@@ -22,9 +22,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useBuildStore } from "../store/buildStore.ts";
-import { emojiBySlug } from "../lib/agentEmoji.ts";
+import { pictureBySlug } from "../lib/agentPicture.ts";
 import { categoryBySlug } from "../lib/agentCategory.ts";
-import { AgentEmoji } from "./AgentEmoji.tsx";
+import { AgentFace, FACE_SIZE } from "./AgentFace.tsx";
 
 import { DESTRUCTIVE, EMPTY, FAILURE_SENTENCE, FILTERS, HEADER, LIVE, STATUS_WORD } from "../lib/cockpitCopy.ts";
 import { cockpitCost, cockpitTime } from "../lib/cockpitFormat.ts";
@@ -82,7 +82,7 @@ const FIRST_PAINT_ROWS = 20;
 function Row({ item, columns, marks, categories }: {
   item: WorkItemView;
   columns: RowColumns;
-  /** slug -> identity mark, built once by the list. See `lib/agentEmoji.ts` for why not per row. */
+  /** slug -> picture id, built once by the list. See `lib/agentPicture.ts` for why not per row. */
   marks: ReadonlyMap<string, string>;
   /** §14's category, by agent slug. Absent for an agent nobody has categorised — §7's rule. */
   categories: ReadonlyMap<string, string>;
@@ -165,11 +165,15 @@ function Row({ item, columns, marks, categories }: {
                  `Truncate` is what handles it, and a ceiling is what makes it reachable. */}
           {columns.agent && (
             <span className="flex min-w-0 shrink-0 items-baseline gap-1">
-              {/* §8.4: 14px, left of the agent name. It rides INSIDE the agent column rather than
-                  beside it, so §13's shedding order is untouched — when the row narrows and the
-                  agent column goes, its mark goes with it rather than leaving a glyph attached to
-                  nothing. */}
-              <AgentEmoji emoji={marks.get(item.agent_id)} />
+              {/* §8.4's row register, left of the agent name. It rides INSIDE the agent column
+                  rather than beside it, so §13's shedding order is untouched — when the row narrows
+                  and the agent column goes, its picture goes with it rather than leaving a mark
+                  attached to nothing. */}
+              <AgentFace
+                picture={marks.get(item.agent_id)}
+                name={item.agent_name ?? item.agent_id}
+                size={FACE_SIZE.row}
+              />
               <Truncate
                 variant="prose"
                 className="max-w-[20ch] shrink-0 text-caption text-muted"
@@ -545,7 +549,7 @@ export function WorkList() {
   // would run on every scroll frame — which is exactly the N+1 shape §16 holds the server's
   // statement counts to, one layer up.
   const agents = useBuildStore((s) => s.agents);
-  const marks = useMemo(() => emojiBySlug(agents), [agents]);
+  const marks = useMemo(() => pictureBySlug(agents), [agents]);
   // §14, and built once per render pass rather than once per row: this list is virtualised at ten
   // thousand rows, where a scan per row over forty agents is an N+1 nobody sees in review.
   const categories = useMemo(() => categoryBySlug(agents), [agents]);
