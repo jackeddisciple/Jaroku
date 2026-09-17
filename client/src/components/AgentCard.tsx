@@ -129,21 +129,24 @@ function Overflow({
               : [
                   item("Fork", GitForkIcon, onFork),
                   item("Rename", Icon.agentDetail.rename, onRename),
-                  // EXPORT IS ONLY OFFERED WHEN THERE IS A VERSION TO EXPORT, and the absence of
-                  // this check was a control that looked like it worked and did nothing.
+                  // EXPORT IS ONLY OFFERED WHEN THERE IS A VERSION TO EXPORT.
                   //
-                  // WHAT IT DID. The entry sets a one-shot intent and asks the server for the
-                  // agent's current version; `AgentsView` saves the file payload when it arrives.
-                  // For an agent with nothing published — every agent the New agent dialog and
-                  // onboarding create — `agentVersionFiles` finds no version row and returns
-                  // `undefined`, so no payload ever arrives: no download, no error, no message.
-                  // Found by pressing it on a draft and watching `URL.createObjectURL` never be
-                  // called.
+                  // WHAT IT DID ON A DRAFT. The entry sets a one-shot intent and asks the server
+                  // for the agent's current version; `AgentsView` saves the file payload when it
+                  // arrives. An agent with nothing published — every agent the New agent dialog and
+                  // onboarding create — has no version row, so `agentVersionFiles` returns
+                  // `undefined` and the relay answers `no such agent version in this workspace`,
+                  // which lands in the grid's error strip. So it was never silent; it was a menu
+                  // entry whose only possible outcome on a draft was an error written in the
+                  // product's internal vocabulary, for a state that is completely ordinary.
                   //
-                  // AND THE INTENT WAS LEFT SET, which is the half that could surprise somebody
-                  // later: it clears only when a matching payload lands, so the next time anybody
-                  // loaded a version OF THAT AGENT — after building it, from the detail's version
-                  // list — the stale intent would fire and download a file nobody asked for.
+                  // AND THE INTENT IS LEFT SET, which is the part that could surprise somebody
+                  // later. `exportRequest` clears only when a MATCHING version payload lands —
+                  // `setError` does not clear it — so a failed export arms a download indefinitely,
+                  // and the next time anybody loads a version OF THAT AGENT, after building it,
+                  // from the detail's version list, the stale intent fires and saves a file nobody
+                  // asked for. Verified by reading every writer of `exportRequest`: the effect in
+                  // `AgentsView` is the only one that clears it.
                   //
                   // REMOVED RATHER THAN DISABLED WITH A TOOLTIP. This codebase's own rule, from the
                   // commit that took out a greyed control with an explanatory tooltip: "a greyed
