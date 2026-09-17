@@ -23,11 +23,12 @@ import { Truncate } from "./Truncate.tsx";
 import { AgentTagRow } from "./AgentTagRow.tsx";
 import { AgentSparkline } from "./AgentSparkline.tsx";
 import { StatusGlyph, GLYPH_SIZE } from "./StatusGlyph.tsx";
-import { AVATAR_SIZE, GlossAvatar } from "./GlossAvatar.tsx";
+import { AVATAR_SIZE, AgentAvatar, AgentBanner } from "./AgentAvatar.tsx";
 import { agentPhase } from "../lib/domainPhase.ts";
 import { stateBorder } from "../lib/stateBorder.ts";
 import { AlertTriangleIcon, GitForkIcon } from "./panelIcons.tsx";
 import { agentContextMarkdown } from "../lib/agentContext.ts";
+import { faceFor } from "../lib/agentFaces.ts";
 import { showsCategory } from "../lib/agentCategories.ts";
 import { absTime, fmtCost } from "../lib/format.ts";
 import { Icon } from "../lib/icons/registry.ts";
@@ -38,6 +39,25 @@ import type { AgentDensity } from "../lib/agentFilter.ts";
 
 /** §5.2's footer word, from the bucket the server already resolved. */
 const ACTIVITY_LABEL = { quiet: "Quiet", steady: "Steady", high: "High" } as const;
+
+/**
+ * How tall the banner is, per density.
+ *
+ * SET AGAINST THE PORTRAIT RATHER THAN AGAINST THE CARD. The picture straddles the seam, so the band
+ * has to be tall enough to hold the three-fifths of it that sits above — 32px of a 56px portrait,
+ * plus air above the portrait's own top edge, or the picture reads as hanging off the top of the
+ * band rather than resting in it.
+ *
+ * A NUMBER RATHER THAN A HEIGHT CLASS, because it is the one dimension on this card that the
+ * portrait's size dictates. Written as `h-20` it would be a class that has to be changed in step
+ * with `AVATAR_SIZE.card` with nothing to say so; here the two sit in the same file and the comment
+ * is between them.
+ *
+ * COMPACT SHRINKS IT, which is the third thing compact does after dropping the current-work line and
+ * shrinking the portrait — and it shrinks in the same proportion as the portrait, so the overlap
+ * reads the same at both densities.
+ */
+const BANNER_HEIGHT = { card: 80, compact: 56 } as const;
 
 /** §5.2's overflow menu: Fork · Rename · Export current version · Archive. */
 function Overflow({
@@ -163,6 +183,20 @@ export function AgentCard({
   const [copied, setCopied] = useState(false);
   const compact = density === "compact";
   const spend = spendFor(agent, liveSpend);
+  /**
+   * Does this agent have a picture at all?
+   *
+   * THE WHOLE BANNER ARRANGEMENT DEPENDS ON IT AND THE FIRST VERSION DID NOT ASK. With no picture
+   * `AgentBanner` renders nothing — correctly — and the sheet's negative margin then pulled it up
+   * over the frame's own top padding, while the portrait's `-top-8` hung its fallback initial off
+   * the top of the card, where `overflow-hidden` sliced it in half. Two bugs from one assumption,
+   * both invisible on any agent created since migration 079 and both waiting on the first row
+   * written by an older version mid-deploy.
+   *
+   * SO THERE ARE TWO LAYOUTS AND THE SECOND ONE IS THE OLD CARD. No band, no overlap, and the
+   * initial sits inside the sheet's top right rather than over a seam that is not there.
+   */
+  const hasFace = faceFor(agent.picture) !== null;
   // THE THREE FACTS §9's LADDER TAKES, read off the card rather than derived twice. `failed` is the
   // HEALTH axis and not the runtime one — D1 keeps them separate, and what a rose edge answers is
   // "is this agent well", which is exactly what the `Failing` tag beside it says in a word.
@@ -199,10 +233,6 @@ export function AgentCard({
         }
       }}
       data-agent-card={agent.slug}
-      // THE CHARACTER LOOKS AT THE POINTER WHILE IT IS ANYWHERE ON THIS CARD. The whole card rather
-      // than the avatar box, because a 64px target inside a 320px card is a behaviour nobody finds —
-      // and by the time the cursor is on the character's face you are already looking at it.
-      data-gloss-gaze
       aria-label={agent.name}
       // THE HOVER IS A CLASS, NOT AN IMPERATIVE STYLE, and the difference is not tidiness. Writing
       // `element.style.boxShadow` from a pointer handler on an element whose `style` prop React also
@@ -230,44 +260,89 @@ export function AgentCard({
       // ROSE HERE DUPLICATES THE `Failing` TAG DELIBERATELY (§6.2): the colour is the glance and the
       // tag is the word, which is also what keeps I8 true — no border on this card travels alone.
       style={{ borderColor: stateBorder(cardState) }}
-      className={`group flex cursor-pointer flex-col overflow-hidden rounded-lg border bg-panel text-left transition-[box-shadow,border-color] duration-fast ${
+      // THE CARD IS THE FRAME NOW, AND `bg-elevated` IS WHAT MAKES THAT READ. It was `bg-panel` and
+      // held the content directly; it holds a banner and a sheet, and the few pixels of card left
+      // showing around them are what the design puts a white margin there for. Both values are
+      // already in the palette and they are ADJACENT in it — #FFFFFF around #FAFAF9 — so the frame
+      // is a boundary rather than a second colour: the sheet reads as inset, at the quietest
+      // contrast step the palette has.
+      className={`group flex cursor-pointer flex-col overflow-hidden rounded-lg border bg-elevated text-left transition-[box-shadow,border-color] duration-fast ${
         focused ? "shadow-glow" : "hover:shadow-glow"
       } ${agent.archived_at ? "opacity-70" : ""}`}
     >
-      <div className={`flex min-w-0 flex-1 flex-col ${compact ? "gap-1.5 p-2.5" : "gap-2 p-3"}`}>
-        {/* THE IDENTITY HEADER: avatar, name, slug, and the card's own actions in the top right.
-            §5.2's split still holds — the emoji is the small sizes, the character is the card — and
-            what changed is the WEIGHT it is given. A 112px character centred above the text made
-            the picture the hero and left a band of empty space between it and the name; the name is
-            the primary element on this card and the avatar is what supports it, so the avatar comes
-            back down beside the name at identity size.
+      {/* THE FRAME'S OWN PADDING, AND IT IS THE ONLY THING THIS ELEMENT DOES. Six pixels, the same
+          on all four sides, so the banner and the sheet sit inside the card's border rather than
+          bleeding to it — which is what turns the card's edge into a mount for the picture instead
+          of a crop of it. */}
+      <div className="flex min-w-0 flex-1 flex-col p-1.5">
+        {/* THE BANNER: the wide band cut from this agent's own portrait, and the reason the top of
+            the card now says which agent it is before any text is read. It is the picture's pair
+            rather than a generated gradient — D6 retired the gradient band on the detail header for
+            exactly this reason, that a generated colour above a picture is a second identity
+            agreeing with nothing, and the band here agrees with the face over it because it was cut
+            from the same artwork.
 
-            SIXTY-FOUR PIXELS, AND IT IS THE LARGEST ELEMENT ON THE CARD — larger than the name,
-            which is the next thing the eye lands on. The hierarchy is picture, name, slug, tags,
-            current work, footer, and each step down is a real step: 64px of character, 14px of
-            title, 11px of faint mono-ish slug, 10px caps tags, 12px prose, 10px faint figures.
+            ITS TOP CORNERS FOLLOW THE FRAME AND ITS BOTTOM ONES DO NOT EXIST — the sheet below
+            overlaps them. `rounded-t-card` inside the card's `rounded-lg` is the inner rung of the
+            same ladder, which is what keeps a radius inside a radius from reading as two.
 
-            It is the size the curation pass judged these characters at, near enough — they were
-            chosen at 96px for being tellable apart, and 64 is where that still holds. Below about
-            forty the haircut and the glasses that separate two of them stop separating anything,
-            which is I4's floor argument arriving from the other end.
+            NOTHING IS DRAWN WHEN AN AGENT HAS NO PICTURE. `AgentBanner` returns null, the sheet's
+            negative margin pulls it against the frame's padding, and the card is its own text on
+            its own surface — the state every card was in before this feature. */}
+        <AgentBanner
+          picture={agent.picture}
+          className="shrink-0 rounded-t-card"
+          style={{ height: compact ? BANNER_HEIGHT.compact : BANNER_HEIGHT.card }}
+        />
 
-            NO BOX AROUND IT — no ring, no tint, no rounded container. The card already has a radius
-            and an elevation; a second one around a 36px character is the box-around-the-glyph the
-            emoji work spent a whole commit removing one size down. */}
-        <div className="flex min-w-0 items-start gap-3">
-          <GlossAvatar
-            agentKey={agent.slug}
-            avatarId={agent.avatar_id}
-            emoji={agent.emoji}
+        {/* THE SHEET, PULLED UP OVER THE BANNER'S BOTTOM EDGE. The overlap is what the design's one
+            structural idea is: the content is a page laid on top of the picture, not a panel under
+            it, and the fourteen pixels are what make the sheet's own rounded corners cut into the
+            band rather than meet it. `flex-1` so the footer's `mt-auto` still reaches the bottom.
+
+            `relative`, because the portrait is positioned against THIS box rather than the banner.
+            The seam is the sheet's top edge, and anchoring the picture to the thing it straddles is
+            what keeps the two in step when the banner's height changes with density. */}
+        <div
+          className={`relative flex min-w-0 flex-1 flex-col rounded-card bg-panel ${
+            compact ? "gap-1.5 p-2.5" : "gap-2 p-3"
+          } ${hasFace ? (compact ? "-mt-3" : "-mt-3.5") : ""}`}
+        >
+          {/* THE PORTRAIT, OVER THE SEAM, TOP RIGHT. Roughly three-fifths of it above the sheet's
+              edge and two-fifths below, which is the proportion that makes it read as resting on the
+              card rather than as inset into either half. The ring is the frame's own colour, so what
+              separates the picture from the banner behind it is the card showing through.
+
+              IT IS NOT IN THE FLOW, so it costs the sheet no height and the text below starts where
+              it always did. What it does cost is the width of the identity block's first two lines,
+              which is what the `pr-` below pays for. */}
+          <AgentAvatar
+            picture={agent.picture}
+            name={agent.name}
             size={compact ? AVATAR_SIZE.compact : AVATAR_SIZE.card}
-            // Against the two lines beside it rather than against the row's top edge: the character
-            // is drawn with air above its head, so aligned flush it reads as sitting high.
-            // Flush with the top of the title block, so the picture and the two lines beside it
-            // read as one unit rather than as a picture with text floating next to it.
-            className="mt-px"
+            // THE RING IS THE BANNER'S, NOT THE PICTURE'S. It exists to separate the portrait from
+            // the band behind it; with no band there is nothing to separate it from, and a white
+            // ring on a #FAFAF9 sheet is a halo round a grey square.
+            ring={hasFace}
+            className={
+              hasFace
+                ? `absolute ${compact ? "-top-6 right-2.5" : "-top-8 right-3"}`
+                : `absolute ${compact ? "right-2.5 top-2.5" : "right-3 top-3"}`
+            }
           />
-          <div className="min-w-0 flex-1">
+          {/* THE HIERARCHY ON THIS CARD IS PICTURE, NAME, SLUG, TAGS, CURRENT WORK, FOOTER, and each
+              step down is a real step: a 56px portrait over a banner, 14px of title, 11px of faint
+              slug, 10px caps tags, 12px prose, 10px faint figures. The picture is the largest
+              element and the name is the next thing the eye lands on, which is the order §5.2 asks
+              for — what changed is that the picture is no longer competing for a column beside the
+              name and is instead the thing the name is written under.
+
+              THE IDENTITY BLOCK, WHICH IS NOW THE WHOLE LEFT SIDE OF THIS ROW. It was a picture and
+              two lines beside it; the picture moved to the seam, so what is left is the two lines —
+              and the right padding is the picture's footprint, because a name that ran under a
+              portrait would truncate against nothing visible. */}
+          <div className={`flex min-w-0 items-start ${compact ? "pr-16" : "pr-20"}`}>
+            <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-1.5">
               {/* THE PHASE GLYPH, ON THE NAME'S LINE. It answers "what is it doing right now" —
                   Running, Idle, Never run, Archived — and D1 keeps that separate from the HEALTH
@@ -311,16 +386,28 @@ export function AgentCard({
                 </>
               )}
             </div>
+            </div>
           </div>
-          {/* THE ACTIONS, AS ONE CLUSTER IN THE TOP RIGHT, and deliberately the quietest thing in
-              this row. They were three separately-spaced glyphs at full faint weight competing with
-              the name for the first glance; grouped and held back to seventy percent until the
-              pointer is on the card, they are present, findable and no longer arguing with the one
-              piece of text the card exists to show.
 
-              NOT HIDDEN UNTIL HOVER. A control that does not exist until you move the mouse is a
-              control nobody finds and nobody can reach on a touch screen — and `focus-within` puts
-              them back at full weight for the keyboard, which hover alone would strand. */}
+        {/* §5.4's TAG ROW AND THE CARD'S OWN ACTIONS, SHARING A LINE — and the sharing is what the
+            portrait's arrival forced. The actions were the top right of the identity row, which is
+            where the picture now sits; a control under a portrait is a control nobody can press.
+
+            THIS LINE RATHER THAN THE BANNER, which was the other candidate and is worse on both
+            counts that matter: a faint glyph over a saturated band fails contrast at every one of
+            the eleven hues, and giving the controls their own scrim to sit on would be the first
+            filled container in a product that draws structure in hairlines.
+
+            SO THEY MOVED DOWN ONE ROW AND NOTHING ELSE CHANGED about them. Same cluster, same
+            spacing, same held-back weight — the tag row takes the width it needs and the controls
+            keep the right end, which is where they have always been. The tags trim to three plus a
+            `+n` chip, so there is no width at which the two fight.
+
+            NOT HIDDEN UNTIL HOVER. A control that does not exist until you move the mouse is a
+            control nobody finds and nobody can reach on a touch screen — and `focus-within` puts
+            them back at full weight for the keyboard, which hover alone would strand. */}
+        <div className="flex min-w-0 items-center gap-2">
+          <AgentTagRow agent={agent} className="min-w-0 flex-1" />
           <div className="-mr-1 flex shrink-0 items-center gap-0.5 opacity-70 transition-opacity duration-fast focus-within:opacity-100 group-hover:opacity-100">
             {/* §5.2's primary action, ON THE CARD, and a glyph rather than a full-width outlined
                 button under everything: three cards across meant three outlined bars of equal
@@ -362,9 +449,6 @@ export function AgentCard({
             />
           </div>
         </div>
-
-        {/* §5.4's tag row, beside the title, because these are properties of the AGENT. */}
-        <AgentTagRow agent={agent} />
 
         {/* §5.2's current work. Dropped entirely at compact density — that is what makes the two
             densities different layouts rather than one at two scales. */}
@@ -488,6 +572,7 @@ export function AgentCard({
           )}
         </div>
 
+        </div>
       </div>
     </div>
   );

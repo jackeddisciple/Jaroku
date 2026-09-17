@@ -68,13 +68,11 @@ console.log("\nthe seven sites §8.4 names");
     // level with the tab icons — it is drawn one component down, beside the two rules it shares a
     // line with.
     ["components/AgentIdentityLine.tsx", "AgentEmoji"],     // 14 — the reason this exists
-    // THE TWO 3D SURFACES REACH THE MARK THROUGH `GlossAvatar`, which is where §5.2's split lands:
-    // small sizes wear the emoji directly, and the card and the detail header wear the character
-    // with the emoji inside it — as the placeholder while it builds, and for ever on a machine with
-    // no WebGL. "Not two systems, one identity at two fidelities." A surface drawing BOTH would be
-    // exactly the "blue one here, tractor there" D6 warned about, on one card, at once — which is
-    // what the detail header did until the gradient band was retired.
-    ["components/AgentCard.tsx", "GlossAvatar"],            // the grid card, at avatar size
+    // THE AGENT CARD IS NO LONGER ON THIS LIST. It draws the agent's illustrated portrait over the
+    // banner cut from the same picture's palette, and no mark at all — which is what retires §5.2's
+    // split on that surface rather than moving it: there is one picture of an agent on a card now,
+    // and a mark beside it would be the "blue one here, tractor there" D6 warned about arriving from
+    // the other direction. `AgentAvatar`'s own placement is asserted below.
     ["components/AgentOverview.tsx", "GlossAvatar"],        // the detail header, at avatar size
     ["components/GlossAvatar.tsx", "AgentEmoji"],           // and the one component that draws it
     ["components/FleetStrip.tsx", "AgentEmoji"],            // 14
@@ -121,11 +119,13 @@ console.log("\nit is identity, so it never enters the tag row");
 
   // AND ON THE CARD THE IDENTITY SITS ABOVE THE TAG ROW rather than in it. Read positionally,
   // because "not in the tag row" is a claim about ORDER that no import check can see. What is read
-  // for is `<GlossAvatar` now: the card's identity is the character, and the emoji is inside it as
-  // the placeholder — the same claim about the same pixels, one component down.
+  // for is `<AgentAvatar` now — the card's identity is the agent's own portrait — and the claim is
+  // the same claim about the same pixels: whatever identifies an agent is above the row that trims.
   const card = read("src/components/AgentCard.tsx");
   check("on the card the identity comes before the tag row",
-    card.indexOf("<GlossAvatar") < card.indexOf("<AgentTagRow"), `${card.indexOf("<GlossAvatar")}`);
+    card.indexOf("<AgentAvatar") < card.indexOf("<AgentTagRow"), `${card.indexOf("<AgentAvatar")}`);
+  check("...and the card draws no mark of its own",
+    !card.includes("<AgentEmoji"), "AgentEmoji in AgentCard.tsx");
 }
 
 // --- 4. the picker ---------------------------------------------------------------------------------
