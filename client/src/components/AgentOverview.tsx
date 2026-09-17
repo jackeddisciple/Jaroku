@@ -14,18 +14,17 @@
 // zero and §6 restates it for this line specifically, which is why the check is `=== null` rather
 // than falsy — a generation that genuinely cost nothing is a different fact from one nobody priced.
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useBuildStore } from "../store/buildStore.ts";
+import { useEffect, useRef, useState } from "react";
 import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { AgentTagRow } from "./AgentTagRow.tsx";
 import { AgentSparkline } from "./AgentSparkline.tsx";
 import { PencilIcon } from "./panelIcons.tsx";
 import { ChevronDownIcon } from "./panelIcons.tsx";
-import { AVATAR_SIZE, GlossAvatar, GlossStageProvider } from "./GlossAvatar.tsx";
-import { EmojiPicker } from "./EmojiPicker.tsx";
+import { AVATAR_SIZE, AgentAvatar, AgentBanner } from "./AgentAvatar.tsx";
 import { AGENT_CATEGORIES, normalizeCategory, showsCategory } from "../lib/agentCategories.ts";
-import { sendSetAgentCategory, sendSetAgentEmoji } from "../lib/socket.ts";
+import { faceFor } from "../lib/agentFaces.ts";
+import { sendSetAgentCategory } from "../lib/socket.ts";
 import { sendRenameAgent } from "../lib/socket.ts";
 import { fmtCost, relTime } from "../lib/format.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
@@ -43,20 +42,15 @@ function Fact({ label, value, title }: { label: string; value: React.ReactNode; 
 
 export function AgentOverview({ detail }: { detail: AgentDetailView }) {
   const a = detail.card;
-  // WHO ELSE WEARS WHAT, so the picker can say "already worn by X" before somebody chooses it —
-  // §8.5's warning. Off the agent list the sidebar is already built from, so it costs no request,
-  // and this agent's own mark is excluded because it is not a collision with itself.
-  const agents = useBuildStore((s) => s.agents);
   /** §6's "name your own", for an agent that already exists. Cleared once it has been sent. */
   const [customCategory, setCustomCategory] = useState("");
-
-  const takenBy = useMemo(() => {
-    const out = new Map<string, string>();
-    for (const other of agents) {
-      if (other.agent_id !== a.slug && other.emoji) out.set(other.emoji, other.name);
-    }
-    return out;
-  }, [agents, a.slug]);
+  /**
+   * Does this agent have a picture? The banner and the overlap both depend on it.
+   *
+   * SAME TWO LAYOUTS AS THE CARD, for the same reason: with no picture there is no band, so there
+   * is no seam to straddle and nothing for the portrait to rise into. See `AgentCard`.
+   */
+  const hasFace = faceFor(a.picture) !== null;
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(a.name);
   const input = useRef<HTMLInputElement | null>(null);
@@ -101,36 +95,43 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
   };
 
   return (
-    // ONE STAGE FOR THE WHOLE HEADER, so the character beside the name and the twenty-eight tiles in
-    // the identity picker share a context rather than opening two. `active` is unconditional: this
-    // header only exists while the agent detail is on screen, and the loop parks itself on blur and
-    // under reduced motion regardless.
-    <GlossStageProvider active className="relative isolate shrink-0">
-    {/* The header is this character's gaze region too, so it follows the pointer while somebody is
-        reading the agent it belongs to — the same behaviour the card has, on the other 3D surface. */}
-    <div className="border-b border-hair" data-gloss-gaze>
-      {/* THE GRADIENT BAND IS GONE, AND D6 IS WHAT RETIRED IT. That decision recorded a live
-          consequence on exactly this surface: the band above said "the blue one" and the mark beside
-          the name said "the tractor", two facts about one agent that do not reinforce each other —
-          "recorded rather than solved: the fix, if it turns out to matter in use, is to retire the
-          gradient, never to put a box around the emoji". It matters now, because a third identity
-          arrived. The character IS the agent's face; a generated gradient above it is a second
-          picture of the same agent that agrees with nothing.
+    <div className="shrink-0 border-b border-hair">
+      {/* THE BANNER, AND IT IS THE SECOND TIME A BAND HAS SAT HERE. The first was a generated
+          gradient, and D6 retired it with a live consequence recorded: the band said "the blue one"
+          and the mark beside the name said "the tractor", two facts about one agent that reinforced
+          nothing. This band is not that. It is cut from the same artwork as the portrait over it, so
+          the two are one picture at two crops — which is the condition D6's objection was about, and
+          it is met rather than argued around.
 
-          Nothing else used the band, and `artFor` is still what the thumbnail path uses elsewhere. */}
-      <div className="space-y-3 p-4">
+          EDGE TO EDGE, UNLIKE THE CARD'S. A card is a frame and holds its band inside a margin; this
+          header IS the top of the pane, and a band inset from the pane's edges would read as a card
+          that had lost its own border. Taller than the card's for the same reason — the pane is
+          three times as wide, and a 80px strip across it is a line rather than a banner. */}
+      <AgentBanner picture={a.picture} className="h-28" />
+
+      <div className="relative space-y-3 p-4">
         <div className="flex min-w-0 items-start gap-3">
-          {/* §I4'S SECOND SURFACE, and the only other one that draws 3D: "the avatar renders in the
-              Agents grid card and the agent detail header." Larger than the card's identity mark
-              because there is room to look at it here, and still beside the name rather than above
-              it — the name is the primary element on this header exactly as it is on the card. */}
+          {/* THE PORTRAIT, STRADDLING THE BANNER'S BOTTOM EDGE ON THE LEFT — and the left is the one
+              place this surface deliberately differs from the card. On a 320px card a portrait at the
+              right is still beside the name; on a pane three times that width it would be half a foot
+              away from the word it identifies, with the whole description between them. The name and
+              the face stay adjacent, which is what both surfaces are actually doing.
+
+              HIDDEN WHILE RENAMING, as the character it replaces was: the field takes the full width
+              of the header and a 96px picture beside a text input somebody is typing in is a picture
+              in the way. */}
           {!renaming && (
-            <GlossAvatar
-              agentKey={`detail:${a.slug}`}
-              avatarId={a.avatar_id}
-              emoji={a.emoji}
+            <AgentAvatar
+              picture={a.picture}
+              name={a.name}
               size={AVATAR_SIZE.header}
-              className="-mt-0.5"
+              // `canvas`, not `elevated` — the detail pane's ground is §01's canvas, and a ring in
+              // any colour but the one behind the picture is a halo. See `AgentAvatar`.
+              ring={hasFace ? "canvas" : undefined}
+              // HALF OF IT ABOVE THE BAND. The card lifts three-fifths of a 56px portrait; here the
+              // portrait is 96px and the band is 112px, and half is what leaves air above its head
+              // rather than pushing it against the top of the strip.
+              className={hasFace ? "-mt-16" : "-mt-0.5"}
             />
           )}
           <div className="min-w-0 flex-1">
@@ -181,7 +182,7 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
               {/* §6'S CATEGORY, WHERE THE OTHER TWO IDENTIFIERS ARE. `Uncategorized` is left out on
                   the same rule §7 gives the sidebar: an agent nobody has categorised should read as
                   a name, not as a name and a placeholder. The control that SETS it is in the
-                  identity section below, with the emoji and the avatar. */}
+                  identity section below. */}
               {showsCategory(a.category) && (
                 <Chip size="sm" tone="faint" title="What this agent is for">
                   {a.category}
@@ -191,16 +192,17 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
           </div>
         </div>
 
-        {/* §6: "All three are editable afterwards from the agent identity section. None is editable
-            from the grid." The name is the pencil above; the other two are here, with the mark that
-            was already here — one region, three controls, and it is where somebody looks when they
-            want to change what an agent looks like.
+        {/* WHAT IS LEFT OF §6'S IDENTITY SECTION, WHICH IS THE CATEGORY AND NOTHING ELSE. It held
+            three controls: the name, the emoji mark, and — briefly — an avatar grid. The name is the
+            pencil above, the mark is gone with the emoji, and the picture is not chosen at all any
+            more: an agent is given one at creation, from the eleven, by its position in the
+            workspace's creation order. So there is nothing here to pick it with, deliberately —
+            a picker for a decision the product makes is a control that exists to be ignored.
 
-            BEHIND A DISCLOSURE, CLOSED. The emoji picker alone is fifty-nine cells; a category list
-            is twenty-five and an avatar grid is twenty-eight. Open by default that is a hundred and
-            twelve controls above the description, the tag row and every fact on the header — a page
-            about changing an agent's appearance rather than about the agent. Editing identity is
-            something somebody does once; reading the header is what they do every time. */}
+            STILL BEHIND A DISCLOSURE, CLOSED, even at one control. Forty category pills open by
+            default would be forty controls above the description, the tag row and every fact on the
+            header — a page about categorising an agent rather than about the agent. Setting a
+            category is something somebody does once; reading the header is what they do every time. */}
         <details className="group/identity rounded-control border border-hair">
           <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2.5 py-1.5 text-tiny text-muted transition-colors duration-fast hover:text-ink">
             {/* A CHEVRON, NOT A WORD — the app's one disclosure vocabulary. Down when open, ninety
@@ -209,23 +211,10 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
               <ChevronDownIcon size={ICON.xs} />
             </span>
             Identity
-            <span className="ml-auto text-faint">mark, category</span>
+            <span className="ml-auto text-faint">category</span>
           </summary>
 
           <div className="space-y-3 border-t border-hair p-2.5">
-            {/* §8.5'S PICKER, unchanged and first, because it is the mark six of the seven surfaces
-                actually show. */}
-            <div>
-              <span className={TYPE.sectionLabel}>Mark</span>
-              <div className="mt-1.5">
-                <EmojiPicker
-                  current={a.emoji}
-                  takenBy={takenBy}
-                  onChoose={(e) => sendSetAgentEmoji(a.slug, e)}
-                />
-              </div>
-            </div>
-
             {/* §6'S CATEGORY. The same twenty-five presets the create dialog offers plus a typed
                 one, because they are the same question and a second vocabulary here would be a
                 second list to keep in step. Stored identically either way (I6). */}
@@ -260,12 +249,12 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
               />
             </div>
 
-            {/* THERE IS NO AVATAR PICKER HERE. It is chosen once, on the onboarding screen, by the
-                carousel — the one place in the product that asks. A picker on this panel would be a
-                control for a decision nobody comes here to make, sitting above the description, the
-                tag row and every fact on the header. What this section still owns is the mark and
-                the category, both of which change with how an agent is USED rather than with what it
-                looks like. */}
+            {/* AND THERE IS NO PICTURE PICKER HERE, WHICH IS NOW TRUE OF THE WHOLE PRODUCT. It used
+                to be true only of this panel — a carousel on the onboarding screen was the one place
+                that asked — and the carousel is gone too: a picture and the name that goes with it
+                are given at creation, from the eleven, by position. What this section owns is the
+                category, which changes with how an agent is USED rather than with what it looks
+                like, and that is the only half of identity anybody has a reason to revisit. */}
           </div>
         </details>
 
@@ -315,6 +304,5 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
         )}
       </div>
     </div>
-    </GlossStageProvider>
   );
 }

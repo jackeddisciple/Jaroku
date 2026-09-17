@@ -322,8 +322,9 @@ export function AgentCard({
             size={compact ? AVATAR_SIZE.compact : AVATAR_SIZE.card}
             // THE RING IS THE BANNER'S, NOT THE PICTURE'S. It exists to separate the portrait from
             // the band behind it; with no band there is nothing to separate it from, and a white
-            // ring on a #FAFAF9 sheet is a halo round a grey square.
-            ring={hasFace}
+            // ring on a #FAFAF9 sheet is a halo round a grey square. `elevated` because that is the
+            // colour of the frame this card is — the ring is the card showing through.
+            ring={hasFace ? "elevated" : undefined}
             className={
               hasFace
                 ? `absolute ${compact ? "-top-6 right-2.5" : "-top-8 right-3"}`

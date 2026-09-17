@@ -68,12 +68,12 @@ console.log("\nthe seven sites §8.4 names");
     // level with the tab icons — it is drawn one component down, beside the two rules it shares a
     // line with.
     ["components/AgentIdentityLine.tsx", "AgentEmoji"],     // 14 — the reason this exists
-    // THE AGENT CARD IS NO LONGER ON THIS LIST. It draws the agent's illustrated portrait over the
-    // banner cut from the same picture's palette, and no mark at all — which is what retires §5.2's
-    // split on that surface rather than moving it: there is one picture of an agent on a card now,
-    // and a mark beside it would be the "blue one here, tractor there" D6 warned about arriving from
-    // the other direction. `AgentAvatar`'s own placement is asserted below.
-    ["components/AgentOverview.tsx", "GlossAvatar"],        // the detail header, at avatar size
+    // NEITHER THE AGENT CARD NOR THE DETAIL HEADER IS ON THIS LIST ANY MORE. Both draw the agent's
+    // illustrated portrait over the banner cut from the same picture's palette, and no mark at all —
+    // which is what retires §5.2's split on those surfaces rather than moving it: there is one
+    // picture of an agent on each of them now, and a mark beside it would be the "blue one here,
+    // tractor there" D6 warned about arriving from the other direction. `AgentAvatar`'s own
+    // placement is asserted below and in `test:surface-system`.
     ["components/GlossAvatar.tsx", "AgentEmoji"],           // and the one component that draws it
     ["components/FleetStrip.tsx", "AgentEmoji"],            // 14
     ["components/WorkList.tsx", "AgentEmoji"],              // 14
@@ -94,7 +94,13 @@ console.log("\nthe seven sites §8.4 names");
     read("src/components/AgentIdentityLine.tsx").includes("EMOJI_SIZE.sidebar"));
   check("the avatar box sizes its placeholder off its own box, not a literal",
     read("src/components/GlossAvatar.tsx").includes("Math.round(size *"));
-  check("the picker is the eighth site", read("src/components/AgentOverview.tsx").includes("<EmojiPicker"));
+  // THE PICKER IS NO LONGER A SITE AT ALL. It was the eighth, in the detail header's identity
+  // section, and the section no longer offers it: an agent's picture and the name that goes with it
+  // are given at creation by position, so there is nothing for a picker to pick. Asserted as an
+  // ABSENCE, because a control for a decision the product makes is the thing most likely to be
+  // added back by somebody who thinks it is missing.
+  check("the detail header offers no mark picker",
+    !read("src/components/AgentOverview.tsx").includes("<EmojiPicker"));
 
   // NO CALL SITE WRITES A PIXEL COUNT. The four registers are named for the same reason the icon
   // ladder's are: a size written against the card it looked right on is a size nothing can move.

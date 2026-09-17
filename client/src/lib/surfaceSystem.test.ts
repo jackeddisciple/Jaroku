@@ -371,9 +371,14 @@ console.log("\nand the components themselves stand on it");
     !/(?:^|[^:])\bshadow-(?:raised|floating|overlay)\b/.test(surface) && /shadow-glow/.test(surface),
     surface.slice(0, 160));
 
-  // THE AVATAR, whose radius is a value rather than a class because it is drawn to a canvas.
+  // THE AVATAR, whose radius is a value rather than a class for a reason that changed and did not
+  // go away. It was a number because the picture was drawn to a canvas and a class could not reach
+  // it; it is a number now because the box is sized in pixels by its call site and the radius has to
+  // be chosen against that size — 20px on a 56px card portrait is a soft squircle, on a 16px sidebar
+  // one it is a circle, and on the 96px detail header it needs the top of the range.
   check("the agent avatar takes its radius from §04's expressive range",
-    /borderRadius: RADIUS\.(?:xl|hero)\b/.test(src("components/GlossAvatar.tsx")));
+    /RADIUS\.(?:xl|hero)\b/.test(src("components/AgentAvatar.tsx")) &&
+    !/borderRadius: \d/.test(src("components/AgentAvatar.tsx")));
 }
 
 console.log("\n§02's four levels of attention");
@@ -432,8 +437,8 @@ console.log("\n§03: each surface's first read, and what it keeps quiet");
   // AGENT DETAIL: identity and state first, which is the detail HEADER rather than the pane that
   // holds it — `AgentDetail` is a panel group and owns no type of its own.
   const overview = src("components/AgentOverview.tsx");
-  check("an agent detail leads with the character beside the name",
-    /<GlossAvatar/.test(overview) && /<Truncate className=\{TYPE\.title\} title=\{a\.name\}>/.test(overview));
+  check("an agent detail leads with the agent's face beside the name",
+    /<AgentAvatar/.test(overview) && /<Truncate className=\{TYPE\.title\} title=\{a\.name\}>/.test(overview));
 }
 
 console.log("\n§12: the rules that are checkable across every file");

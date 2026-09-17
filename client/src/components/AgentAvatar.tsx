@@ -81,7 +81,7 @@ export function AgentAvatar({
   picture,
   name,
   size = AVATAR_SIZE.card,
-  ring = false,
+  ring,
   className = "",
 }: {
   /** The stored id — `agents.picture`. Null draws the initial. */
@@ -90,14 +90,18 @@ export function AgentAvatar({
   name: string;
   size?: number;
   /**
-   * A band of the card's own frame colour around the picture.
+   * A band of the surface's own colour around the picture, naming which surface.
    *
-   * FOR THE ONE PLACE THE PICTURE OVERLAPS SOMETHING — the card, where it straddles the seam
-   * between the banner and the sheet below it. The ring is what makes it read as sitting ON the
-   * card rather than as a hole cut through both, and it is the frame's colour rather than a border
-   * colour precisely so that it reads as the card showing through.
+   * FOR THE PLACES THE PICTURE OVERLAPS SOMETHING — the card, where it straddles the seam between
+   * the banner and the sheet, and the detail header, where it straddles the banner and the pane.
+   * The ring is what makes it read as sitting ON the surface rather than as a hole cut through both.
+   *
+   * IT NAMES A SURFACE RATHER THAN TAKING A COLOUR, because a ring in any colour other than the one
+   * directly behind the picture is a halo. Both values are §01 tokens, so there is no call site at
+   * which an off-palette value can be passed: `elevated` is the card's white frame, `canvas` is the
+   * detail pane's ground.
    */
-  ring?: boolean;
+  ring?: "elevated" | "canvas";
   className?: string;
 }) {
   const face = faceFor(picture);
@@ -111,7 +115,7 @@ export function AgentAvatar({
     width: size,
     height: size,
     borderRadius: radius,
-    ...(ring ? { boxShadow: "0 0 0 3px var(--color-bg-elevated)" } : {}),
+    ...(ring ? { boxShadow: `0 0 0 3px var(--color-bg-${ring === "canvas" ? "canvas" : "elevated"})` } : {}),
   };
 
   if (!face) {
