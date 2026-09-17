@@ -58,6 +58,18 @@
 // banner actually draws, because `cover` should have something to work with when the card is wider
 // than it is today and when the agent detail header draws the same picture at a different shape.
 //
+// AND IT IS BLURRED FIRST, WHICH IS NOT A STYLE CHOICE. The sources are printed through a HALFTONE
+// SCREEN — a regular grid of dots about six pixels apart — and the delivered band is 800px wide
+// against a 941px source, so the resize barely resamples and every dot survives it. A regular grid
+// of dots drawn at a scale the browser then scales again is the textbook recipe for moiré, and on
+// screen it does not read as texture: it reads as a banner that shimmers when the grid scrolls.
+//
+// A GAUSSIAN AT FIVE PIXELS, MEASURED RATHER THAN GUESSED. The dot pitch is the thing being removed,
+// so the radius is set against it: three still leaves a visible grid and five closes it completely
+// while keeping every brushstroke the artwork actually has. It is applied BEFORE the resize, at the
+// source's own resolution, which is the only place the pitch is known — and it costs nothing to
+// deliver, because a smooth field is also a far smaller JPEG than a dithered one.
+//
 //   node scripts/gen-agent-faces.mjs        # needs Pillow: python3 -m pip install Pillow
 //
 // The image work itself is Python's, because that is what is on this machine and because a Node
@@ -86,7 +98,7 @@ mkdirSync(OUT, { recursive: true });
 
 const script = `
 import math, os, sys
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
 src, dst, count, portrait, bw, bh, quality = (
     sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4]),
@@ -113,6 +125,9 @@ BACKDROP = 70
 # where an interpolated run meets a measured one, so a wide collar cannot leave a corner with a
 # visible crease in it.
 SMOOTH = 12
+# The banner's blur, in source pixels, against a halftone pitch of about six. See the header: this is
+# a moiré fix rather than a soft-focus effect, and the radius is set by the dot grid it removes.
+SCREEN = 5
 
 def source(stem):
     """The source file for a stem, whichever extension it came with."""
@@ -216,7 +231,8 @@ for n in range(1, count + 1):
     w, h = bg.size
     band = min(h, int(w / 2))
     top = (h - band) // 2
-    bg.crop((0, top, w, top + band)).resize((bw, bh), Image.LANCZOS).save(
+    bg.crop((0, top, w, top + band)).filter(
+        ImageFilter.GaussianBlur(SCREEN)).resize((bw, bh), Image.LANCZOS).save(
         os.path.join(dst, 'avatar-%02d-bg.jpg' % n), 'JPEG',
         quality=quality, optimize=True, progressive=True)
 
