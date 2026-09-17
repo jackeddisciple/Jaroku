@@ -199,7 +199,7 @@ function NavList() {
             row with two words on it; one that appears when the pointer arrives is there exactly
             when somebody is deciding whether to click or to type. `group-focus-within` as well, so
             the keyboard is told what the pointer is told. */}
-        <kbd className="shrink-0 text-tiny leading-none text-faint opacity-0 transition-opacity duration-fast group-hover/new:opacity-100 group-focus-within/new:opacity-100">
+        <kbd className="shrink-0 text-body font-medium leading-none text-faint opacity-0 transition-opacity duration-fast group-hover/new:opacity-100 group-focus-within/new:opacity-100">
           {keyHint("⌘N")}
         </kbd>
       </button>
@@ -228,7 +228,7 @@ function NavList() {
                 // A CLASS RATHER THAN AN INLINE STYLE, so the material can reach it. An inline
                 // `background` wins over every stylesheet rule there is, which left this badge the
                 // one opaque patch in the column that could not be softened with the rest.
-                className="shrink-0 rounded-xs bg-chrome px-1 text-caption leading-[16px] tabular-nums text-ink"
+                className="shrink-0 rounded-xs bg-chrome px-1 text-body leading-[16px] tabular-nums text-ink"
               >
                 {badge}
               </span>
@@ -361,11 +361,11 @@ function AgentRowMenu({ agent }: { agent: AgentSummary }) {
                 onChange={(e) => setName(e.target.value)}
                 autoFocus
                 aria-label="Agent name"
-                className="w-full rounded-input border border-edge bg-panel px-2 py-1 text-caption text-ink outline-none focus-visible:shadow-focusring"
+                className="w-full rounded-input border border-edge bg-panel px-2 py-1 text-body text-ink outline-none focus-visible:shadow-focusring"
               />
               <div className="flex gap-2 px-1 pb-0.5">
-                <button type="submit" className="text-tiny text-ink underline underline-offset-2">Rename</button>
-                <button type="button" onClick={() => setRenaming(false)} className="text-tiny text-muted underline underline-offset-2">Cancel</button>
+                <button type="submit" className="text-body font-medium text-ink underline underline-offset-2">Rename</button>
+                <button type="button" onClick={() => setRenaming(false)} className="text-body font-medium text-muted underline underline-offset-2">Cancel</button>
               </div>
             </form>
           ) : confirming ? (
@@ -381,7 +381,7 @@ function AgentRowMenu({ agent }: { agent: AgentSummary }) {
               {/* THE SLUG, NOT THE NAME, and not a yes/no. A name can be anything including another
                   agent's; the slug is what identifies this one, and typing it is the only part of
                   this flow that requires having read which agent is about to go. */}
-              <p className="px-1 py-0.5 text-tiny leading-[1.5] text-muted">
+              <p className="px-1 py-0.5 text-body font-medium leading-[1.5] text-muted">
                 This removes {agent.name}, its runs and its history. Type <span className="text-ink">{agent.agent_id}</span> to confirm.
               </p>
               <input
@@ -389,17 +389,17 @@ function AgentRowMenu({ agent }: { agent: AgentSummary }) {
                 onChange={(e) => setTyped(e.target.value)}
                 autoFocus
                 aria-label={`Type ${agent.agent_id} to confirm deletion`}
-                className="w-full rounded-input border border-edge bg-panel px-2 py-1 text-caption text-ink outline-none focus-visible:shadow-focusring"
+                className="w-full rounded-input border border-edge bg-panel px-2 py-1 text-body text-ink outline-none focus-visible:shadow-focusring"
               />
               <div className="flex gap-2 px-1 pb-0.5">
                 <button
                   type="submit"
                   disabled={typed.trim() !== agent.agent_id}
-                  className="text-tiny text-err underline underline-offset-2 disabled:cursor-default disabled:text-disabled disabled:no-underline"
+                  className="text-body font-medium text-err underline underline-offset-2 disabled:cursor-default disabled:text-disabled disabled:no-underline"
                 >
                   Delete for good
                 </button>
-                <button type="button" onClick={() => setConfirming(false)} className="text-tiny text-muted underline underline-offset-2">Cancel</button>
+                <button type="button" onClick={() => setConfirming(false)} className="text-body font-medium text-muted underline underline-offset-2">Cancel</button>
               </div>
             </form>
           ) : (
@@ -531,10 +531,16 @@ function AgentTreeRow({
               hand-rolled copy of half its behaviour here. Mounting it is what deletes the copy.
 
               THE SIZE IS SET HERE AND THE COMPONENT INHERITS IT, which is what puts the category at
-              the NAME'S weight rather than a rung under it — the product owner's call. `text-label`
-              is 13px medium; what separates the two is colour, the category being `text-faint`
-              inside the component, so the name still leads without being a different kind of text. */}
-          <span className="flex min-w-0 flex-1 items-center gap-1.5 text-label">
+              the NAME'S size and weight rather than a rung under it — the product owner's call.
+              What separates the two is colour, the category being `text-faint` inside the component,
+              so the name still leads without being a different kind of text.
+
+              `text-body font-medium` IS THE DESTINATIONS' OWN PAIR, and that is the whole of why it
+              is this and not something chosen for this row. The product owner's call: the tab
+              options above — New, Agents, Cockpit — are the size the column should read at, so every
+              string in this sidebar takes it. The one exception is `ListHeading`, which names a
+              group rather than being content in it. */}
+          <span className="flex min-w-0 flex-1 items-center gap-1.5 text-body font-medium">
             {/* Ink whether or not it is the selected one — see the run row above for why the
                 ternary that used to be here had the same value on both arms, and why the fill and
                 the bar are what say "this one". A name is content; content does not dim. */}
@@ -643,7 +649,7 @@ function Avatar({ name }: { name: string | null | undefined }) {
   return (
     <span
       aria-hidden
-      className="flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded-control bg-sidebar-active text-tiny text-ink"
+      className="flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded-control bg-sidebar-active text-body font-medium text-ink"
     >
       {/* THE INITIAL IS NOT A SPINNER. While the picture is being fetched — and forever, for
           somebody who has none — this is what shows, and it is the same mark the member list
@@ -760,7 +766,7 @@ function AccountRow() {
       >
         <Avatar name={label} />
         {/* THE USERNAME IF THEY CHOSE ONE, and their name if they did not. See `label` above. */}
-        <Truncate className="min-w-0 flex-1 text-label text-ink" title={label}>{label}</Truncate>
+        <Truncate className="min-w-0 flex-1 text-body font-medium text-ink" title={label}>{label}</Truncate>
         <span className="shrink-0 text-faint">
           {open ? <Icon.workspace.switcherOpen size={ICON.sm} /> : <Icon.workspace.switcherClosed size={ICON.sm} />}
         </span>
@@ -771,7 +777,7 @@ function AccountRow() {
 
 /** One row of the account menu. Spelled once so the three cannot drift apart. */
 const ACCOUNT_MENU_ROW =
-  "flex w-full items-center gap-2.5 px-2.5 py-1.5 text-left text-caption text-muted transition-colors hover:bg-sidebar-hover hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring";
+  "flex w-full items-center gap-2.5 px-2.5 py-1.5 text-left text-body text-muted transition-colors hover:bg-sidebar-hover hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring";
 
 function AdminModeToggle() {
   const user = useSessionStore((s) => s.user);
@@ -796,7 +802,7 @@ function AdminModeToggle() {
     return (
       <button
         onClick={() => void apply(false)}
-        className="mt-0.5 flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-tiny text-err transition-colors hover:bg-sidebar-hover"
+        className="mt-0.5 flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-body font-medium text-err transition-colors hover:bg-sidebar-hover"
       >
         <span className="shrink-0"><AlertTriangleIcon size={ICON.badge} /></span>
         <span>Admin mode on — turn off</span>
@@ -807,7 +813,7 @@ function AdminModeToggle() {
   if (confirming) {
     return (
       <div className="mt-0.5 rounded-control border border-run/40 bg-run/[0.06] px-2 py-1.5">
-        <p className="text-tiny leading-[1.5] text-ink">
+        <p className="text-body font-medium leading-[1.5] text-ink">
           Enable admin mode? This bypasses every tier limit and feature gate. Everything you do
           while it is on is logged as admin-privileged.
         </p>
@@ -817,7 +823,7 @@ function AdminModeToggle() {
             Cancel
           </button>
         </div>
-        {error && <p className="mt-1 text-tiny text-err">{error}</p>}
+        {error && <p className="mt-1 text-body font-medium text-err">{error}</p>}
       </div>
     );
   }
@@ -825,7 +831,7 @@ function AdminModeToggle() {
   return (
     <button
       onClick={() => setConfirming(true)}
-      className="mt-0.5 flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-tiny text-faint transition-colors hover:bg-sidebar-hover hover:text-muted"
+      className="mt-0.5 flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-body font-medium text-faint transition-colors hover:bg-sidebar-hover hover:text-muted"
     >
       <span>Admin mode</span>
       <span className="ml-auto shrink-0">off</span>
@@ -921,7 +927,7 @@ function FilterMenu({
             read as big as the tabs themselves. */}
         <Icon.agents.filter size={ICON.sm} />
         {filtering && current?.count != null && (
-          <span className="text-caption tabular-nums">{current.count}</span>
+          <span className="text-body tabular-nums">{current.count}</span>
         )}
       </button>
       {open && (
@@ -947,13 +953,13 @@ function FilterMenu({
                 setFilter(e.id);
                 setOpen(false);
               }}
-              className={`flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-caption transition-colors duration-fast ${
+              className={`flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-body transition-colors duration-fast ${
                 filter === e.id ? "bg-sidebar-active text-ink" : "text-muted hover:bg-sidebar-hover hover:text-ink"
               }`}
             >
               {e.label}
               {e.count != null && e.count > 0 && (
-                <span className="ml-auto text-tiny tabular-nums text-faint">{e.count}</span>
+                <span className="ml-auto text-body font-medium tabular-nums text-faint">{e.count}</span>
               )}
             </button>
           ))}
@@ -1024,7 +1030,7 @@ function ThreadListRow({ thread }: { thread: ThreadView }) {
       }`}
     >
       <ChatDot />
-      <Truncate className={`min-w-0 flex-1 text-label ${active ? "text-ink" : "text-muted"}`} title={chatTitle(thread.title)}>
+      <Truncate className={`min-w-0 flex-1 text-body font-medium ${active ? "text-ink" : "text-muted"}`} title={chatTitle(thread.title)}>
         {shownTitle}
       </Truncate>
       {/* WHAT IS OUTSTANDING, AT THE ROW'S END. The circle holds the left for every chat alike; a chat
@@ -1058,7 +1064,7 @@ function ArchivedThreadRow({ thread }: { thread: ThreadView }) {
         className="flex min-w-0 flex-1 items-center pl-2.5 text-left focus-visible:outline-none focus-visible:shadow-focusring"
       >
         <ChatDot />
-        <Truncate className="min-w-0 flex-1 text-label text-muted" title={chatTitle(thread.title)}>{chatTitle(thread.title)}</Truncate>
+        <Truncate className="min-w-0 flex-1 text-body font-medium text-muted" title={chatTitle(thread.title)}>{chatTitle(thread.title)}</Truncate>
       </button>
       {canRestore && (
         <button
@@ -1114,7 +1120,7 @@ function PinnedThreadRow({ thread }: { thread: ThreadView }) {
       <span className="inline-flex shrink-0 justify-center text-faint" style={{ width: ICON.md }} aria-hidden>
         <Icon.threads.chat size={ICON.sm} />
       </span>
-      <Truncate className="min-w-0 flex-1 text-label text-ink" title={chatTitle(thread.title)}>
+      <Truncate className="min-w-0 flex-1 text-body font-medium text-ink" title={chatTitle(thread.title)}>
         {shownTitle}
       </Truncate>
     </button>
