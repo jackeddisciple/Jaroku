@@ -1,0 +1,49 @@
+-- 080_drop_agent_emoji_avatar — the CONTRACT step for the two identity columns 079 replaced.
+--
+-- THIS IS THE DEPLOY THAT IS ALLOWED TO REMOVE SOMETHING, which is the whole of why it is its own
+-- migration. `db/expandContract.ts` refuses a `DROP COLUMN` by default, because for a window during
+-- every rolling deploy the OLD code is running against the NEW schema — and a version still
+-- SELECTing a column that has gone starts failing mid-deploy, in the way that looks like the new
+-- release broke and is "fixed" by rolling back to code that no longer matches the database.
+--
+-- SO: EXPAND, MIGRATE, CONTRACT, and this is the third one.
+--
+--   EXPAND    079 added `picture`, nullable, and backfilled it. Old code ignored it.
+--   MIGRATE   the release before this one stopped reading `emoji` and `avatar_id` ANYWHERE: the
+--             columns left `AgentRepository`'s row shape, its SELECT list and both of its INSERTs,
+--             both wire payloads, every render site, and the `setAgentEmoji` command with all five
+--             of its registrations. `test:agent-picture` reads the repository's source and fails on
+--             an INSERT that does not name `picture`.
+--   CONTRACT  this. Nothing running reads either column, so removing them is safe.
+--
+-- WHY THE OVERRIDE MARKER IS HERE AND NOT A FLAG ON A COMMAND. The gate's own header says it: "an
+-- override exists for the deploy that genuinely IS the contract step, and it is a comment in the
+-- migration file rather than a flag on a command, so the decision lives beside the statement and
+-- shows up in the diff somebody reviews." This is that comment, and this is that deploy.
+--
+-- THE MARKER IS REPEATED ON EACH STATEMENT BELOW rather than declared once up here, and that is the
+-- gate's shape rather than belt and braces: it splits a file into statements and looks for the
+-- marker in EACH one, so a marker in the header belongs to the first statement alone — which is
+-- exactly the half-overridden file this migration was on the first run of `migrate:check`.
+--
+-- WHAT IS BEING THROWN AWAY, STATED PLAINLY, BECAUSE IT CANNOT BE GOT BACK. `emoji` held one glyph
+-- per agent, assigned by a hash with a forward probe; `avatar_id` named one of twenty-eight
+-- procedurally-generated 3D characters. Neither is recoverable from `picture` and neither is worth
+-- recovering: an agent's identity is its portrait, its banner and the name they came with, all three
+-- from one entry in `agents/faces.ts`. Nothing in the product can draw either old value, so keeping
+-- the columns would preserve data whose only readers have been deleted.
+--
+-- `agents` IS A SMALL TABLE — one row per agent, tens per workspace — so neither statement is the
+-- lock-length problem a DROP on a large table would be. On Postgres a `DROP COLUMN` is a
+-- catalogue-only change that does not rewrite the table at all; it takes ACCESS EXCLUSIVE for the
+-- statement and no longer.
+--
+-- TWO STATEMENTS RATHER THAN ONE, and they are separate for the reason SQLite forces: its
+-- `ALTER TABLE` takes one action per statement. Postgres would accept a combined form and does not
+-- need to, and the two dialects running the same SQL is worth more than one fewer line.
+
+-- jaroku:contract-step
+ALTER TABLE agents DROP COLUMN emoji;
+
+-- jaroku:contract-step
+ALTER TABLE agents DROP COLUMN avatar_id;
