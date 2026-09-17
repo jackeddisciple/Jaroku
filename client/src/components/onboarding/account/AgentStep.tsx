@@ -15,15 +15,22 @@
 // carousel of twenty-eight characters is a decision somebody makes for thirty seconds and never
 // revisits, and a name field on screen four is answered with "Agent 1" as often as with "Stacey".
 //
-// NOW IT ASKS FOR ONE. WHAT SORT OF AGENT IS IT — the only one of the three the product cannot
-// answer for itself, and the only one that later does any work: §14's filter reads the category, the
-// sidebar's second line shows it, and a fork inherits it. The name and the face are GIVEN, paired,
-// from the eleven — see `lib/agentFaces.ts` — so the agent that appears in the Agents tab is Iris
-// with Iris's picture rather than "Untitled agent" with whatever the person clicked past.
+// NOW IT ASKS TWO THINGS, AND NEITHER IS A NAME OR A FACE. What sort of agent it is, and what it
+// should help with — the product owner's call. Those are the two a person CAN answer on their
+// fourth screen, and the two the product cannot answer for itself: §14's filter reads the category,
+// the sidebar's line shows it, a fork inherits it, and the sentence is what the card has to say
+// about an agent nobody has built yet. The name and the face are GIVEN, paired, from the eleven —
+// see `lib/agentFaces.ts` — so the agent in the Agents tab is Iris with Iris's picture rather than
+// "Untitled agent" with whatever the person clicked past.
 //
-// AND IT IS STILL SKIPPABLE AND STILL PRE-ANSWERED. The category defaults to nothing, so Continue
-// is available from the first frame and somebody who does not care passes through in one click. §6
-// asked for exactly that of the face; it is now true of the only question left.
+// WHAT IT DOES NOT DO IS BUILD ANYTHING. This screen used to generate, and the plan card appearing
+// mid-onboarding was the "wow" moment §5.1 was designed around. It is not allowed to any more: an
+// agent may only be generated from the composer, by somebody who went there and wrote it. So the
+// sentence typed here is STORED — it becomes the row's description — and the first build is a
+// deliberate act on a surface built for it.
+//
+// AND BOTH ARE STILL SKIPPABLE. Neither is required, so Continue is available from the first frame
+// and somebody who does not care passes through in one click.
 
 import { useState } from "react";
 
@@ -45,6 +52,8 @@ export function AgentStep() {
   const [category, setCategory] = useState<string | null>(null);
   /** "Or type your own", which stores identically — the column is TEXT and the presets are a list. */
   const [custom, setCustom] = useState("");
+  /** What it should help with. Stored as the row's description; nothing is generated from it. */
+  const [helpWith, setHelpWith] = useState("");
 
   const chosen = custom.trim() ? normalizeCategory(custom) : category ?? UNCATEGORIZED;
 
@@ -57,7 +66,7 @@ export function AgentStep() {
     // the agent's POSITION in its workspace's creation order, and only the server can count that:
     // `listAgents` excludes archived rows, so a browser counting what it holds would hand the
     // eleventh agent the fourth face. See `server/src/agents/faces.ts`.
-    sendCreateDraftAgent({ category: chosen });
+    sendCreateDraftAgent({ category: chosen, description: helpWith.trim() || undefined });
     // AND THE CATEGORY IS REMEMBERED, because the composer needs to know which row the first
     // description belongs to and what was chosen for it. The list arrives over the socket a moment
     // after this, so the answer cannot be read out of it yet.
@@ -69,7 +78,7 @@ export function AgentStep() {
     <StepShell
       step={4}
       title="Your first agent"
-      subtitle="Tell us what sort of work it is for. It appears in Agents right away, with a name and a face of its own; you describe what it does next."
+      subtitle="Tell us what sort of work it is for and what it should help with. It appears in Agents right away, with a name and a face of its own — you build it when you are ready."
       skip={{ label: "Skip for now", onSkip: advance }}
     >
       <form
@@ -140,12 +149,36 @@ export function AgentStep() {
             }}
             placeholder="…or type your own"
             aria-label="Type your own category"
-            autoFocus
             className="w-full rounded-input border border-edge bg-elevated px-3.5 py-2 text-caption
               text-ink outline-none transition-colors duration-fast placeholder:text-faint
               focus-visible:shadow-focusring focus:border-chrome"
           />
         </div>
+
+        {/* WHAT IT SHOULD HELP WITH — the second and last question, and the one this screen did not
+            ask for several versions. It is a DESCRIPTION and not a brief: it is stored on the row so
+            the card has something to say about an agent nobody has built, and nothing is generated
+            from it. The composer is the only place a build may start.
+
+            A TEXTAREA RATHER THAN AN INPUT, because the honest answer is a sentence and a
+            single-line field that scrolls sideways invites three words. Three rows is enough to see
+            what you wrote without turning the screen into a document editor.
+
+            AUTOFOCUSED, because the category above is a list somebody clicks and this is the only
+            thing on the screen that wants a keyboard. */}
+        <label className="flex flex-col gap-2">
+          <span className="text-caption text-muted">What should it help you with?</span>
+          <textarea
+            value={helpWith}
+            onChange={(e) => setHelpWith(e.target.value)}
+            rows={3}
+            autoFocus
+            placeholder="Chase unpaid invoices over email and tell me what came back."
+            className="w-full resize-y rounded-input border border-edge bg-elevated px-3.5 py-2.5
+              text-caption text-ink outline-none transition-colors duration-fast
+              placeholder:text-faint focus-visible:shadow-focusring focus:border-chrome"
+          />
+        </label>
 
         <PrimaryButton type="submit">Continue</PrimaryButton>
       </form>
