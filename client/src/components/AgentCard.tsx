@@ -129,7 +129,29 @@ function Overflow({
               : [
                   item("Fork", GitForkIcon, onFork),
                   item("Rename", Icon.agentDetail.rename, onRename),
-                  item("Export current version", Icon.agentDetail.export, onExport),
+                  // EXPORT IS ONLY OFFERED WHEN THERE IS A VERSION TO EXPORT, and the absence of
+                  // this check was a control that looked like it worked and did nothing.
+                  //
+                  // WHAT IT DID. The entry sets a one-shot intent and asks the server for the
+                  // agent's current version; `AgentsView` saves the file payload when it arrives.
+                  // For an agent with nothing published — every agent the New agent dialog and
+                  // onboarding create — `agentVersionFiles` finds no version row and returns
+                  // `undefined`, so no payload ever arrives: no download, no error, no message.
+                  // Found by pressing it on a draft and watching `URL.createObjectURL` never be
+                  // called.
+                  //
+                  // AND THE INTENT WAS LEFT SET, which is the half that could surprise somebody
+                  // later: it clears only when a matching payload lands, so the next time anybody
+                  // loaded a version OF THAT AGENT — after building it, from the detail's version
+                  // list — the stale intent would fire and download a file nobody asked for.
+                  //
+                  // REMOVED RATHER THAN DISABLED WITH A TOOLTIP. This codebase's own rule, from the
+                  // commit that took out a greyed control with an explanatory tooltip: "a greyed
+                  // control with 'only an owner can do this' beside it has decided somebody should
+                  // keep looking at it". There is nothing to export yet and nothing to explain.
+                  ...(agent.version_source === null
+                    ? []
+                    : [item("Export current version", Icon.agentDetail.export, onExport)]),
                   // ARCHIVE, AND THERE IS NO DELETE HERE. §5.2 lists both and this product has no
                   // delete path for an agent, deliberately: its versions, runs, traces and costs are
                   // the record every past comparison points at. The confirmation §7.5 asks for —
