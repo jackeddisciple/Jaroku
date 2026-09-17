@@ -61,12 +61,24 @@ export const FACE_SIZE = {
   /**
    * The sidebar's agent list.
    *
-   * SIXTEEN, IN THE TAB ICONS' OWN COLUMN — the product owner's call, and it is the size the emoji
-   * that used to sit here was given a box of. The row's 10px of left padding lands a 16px picture on
-   * the same 16px the five destinations above it start at, so the agents read as part of one rail
-   * rather than as a wider list hanging off it.
+   * TWENTY-EIGHT, SIZED AGAINST THE TEXT BESIDE IT RATHER THAN THE ICONS ABOVE IT. It was 16 — the
+   * emoji's own register, chosen so the mark landed on the same column the five nav destinations
+   * start at. That argument was about an EMOJI, which inks about 13px at 16 and reads as a glyph on
+   * a baseline; a portrait at 16px is a coloured dot with a face implied in it, and on the real
+   * app it just looked small.
+   *
+   * THE MEASURE IS THE ROW'S TWO-LINE BLOCK. An agent row is 44px and carries a 13px name over a
+   * 12px category-and-timestamp line — about 31px of text at `leading-tight`. A picture the same
+   * height as that block reads as the row's portrait; anything much under it reads as a mark stuck
+   * beside the text. 28 matches the block and leaves 8px of air top and bottom in the 44px row.
+   *
+   * IT NO LONGER LINES UP WITH THE NAV ICONS, AND THAT IS THE TRADE. The agent names now start
+   * about ten pixels right of the tab labels above them. Worth it: the destinations are chrome and
+   * the agents are the content of this column, so the agents being the heavier of the two is the
+   * right way round — and at 16 the alignment was bought by making the one thing somebody scans
+   * for unreadable.
    */
-  sidebar: 16,
+  sidebar: 28,
   /** The portrait on an agent card, straddling its banner. */
   card: 56,
   /** The compact density's, which is the one thing compact shrinks besides dropping a line. */

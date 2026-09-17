@@ -514,16 +514,16 @@ function AgentTreeRow({
           title={identityTitle(agent.name, agent.category)}
           className="flex min-w-0 flex-1 items-center gap-2.5 py-1 text-left focus-visible:outline-none focus-visible:shadow-focusring"
         >
-          {/* THE AGENT'S FACE, IN THE TAB ICONS' OWN COLUMN. It was an emoji, and the box around it
-              existed because an emoji's width is its own — a bat is wider than a robot, so the glyph
-              needed centring inside a fixed column to sit under the destinations above it. A picture
-              is square and is exactly `md` wide, so the box has nothing left to do.
+          {/* THE AGENT'S FACE. It was an emoji in a fixed 16px box, and the box existed because an
+              emoji's width is its own — a bat is wider than a robot, so the glyph needed centring
+              inside a column to sit under the destinations above it. A picture is square, so the box
+              has nothing left to do.
 
-              SIXTEEN, WHICH AT THIS SIZE IS A DISC OF THE CHARACTER'S OWN COLOUR — see
-              `AgentFace`'s radius note for why that is the right shape here rather than a
-              compromise. What a column of forty agents needs from this mark is that the eye finds
-              one row faster than it reads forty truncated names, and eleven hues do that on the same
-              terms the emoji did, while being the same picture as the one on the agent's card. */}
+              SIZED AGAINST THE TWO LINES BESIDE IT — see `FACE_SIZE.sidebar`. At the emoji's old
+              register this was a coloured dot with a face implied in it; at the height of the row's
+              own text block it is the face, which is what a column of forty agents actually needs
+              from it: the eye finds one row faster than it reads forty truncated names. It is the
+              same picture the agent's card draws, so what is matched here was matched there. */}
           <AgentFace
             picture={agent.picture}
             name={agent.name}
