@@ -1270,6 +1270,15 @@ jobs:
           # from there into an issue tracker, so it asserts by the same pattern the log-sink suite uses
           # that no secret value can reach the output.
           npm run test:agent-art
+          # THE ELEVEN FACES, whose load-bearing assertion is the one a screenshot cannot make. The
+          # assignment is a POSITION in the workspace's creation order rather than a hash of the
+          # uuid, and the whole reason is the birthday bound: over eleven buckets a hash collides on
+          # the fourth or fifth agent more often than not, so a hashed workspace looks broken on its
+          # second afternoon while looking perfect in the screenshot somebody took of their first
+          # three agents. Beside it, the pairing — a portrait and the banner cut from its own palette
+          # are two crops of one picture, and a pair that has come apart is the one failure mode of
+          # this feature that looks deliberate.
+          npm run test:agent-faces
           npm run test:agent-tags
           npm run test:agent-filter
           npm run test:agent-context

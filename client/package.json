@@ -112,6 +112,7 @@
     "test:secrets-store": "tsx src/store/secretsStore.test.ts",
     "test:entitlement-store": "tsx src/store/entitlementStore.test.ts",
     "test:agent-art": "tsx src/lib/agentArt.test.ts",
+    "test:agent-faces": "tsx src/lib/agentFaces.test.ts",
     "test:agent-tags": "tsx src/lib/agentTags.test.ts",
     "test:agent-filter": "tsx src/lib/agentFilter.test.ts",
     "test:agent-context": "tsx src/lib/agentContext.test.ts",
