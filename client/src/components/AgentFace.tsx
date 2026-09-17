@@ -61,24 +61,18 @@ export const FACE_SIZE = {
   /**
    * The sidebar's agent list.
    *
-   * TWENTY-EIGHT, SIZED AGAINST THE TEXT BESIDE IT RATHER THAN THE ICONS ABOVE IT. It was 16 — the
-   * emoji's own register, chosen so the mark landed on the same column the five nav destinations
-   * start at. That argument was about an EMOJI, which inks about 13px at 16 and reads as a glyph on
-   * a baseline; a portrait at 16px is a coloured dot with a face implied in it, and on the real
-   * app it just looked small.
+   * TWENTY-TWO — the product owner's call, and it has moved twice for a reason each time. It was
+   * 16, the emoji's own register, chosen so the mark landed on the same column the five nav
+   * destinations start at; that was right for a glyph on a baseline and left a portrait as a
+   * coloured dot with a face implied in it. It went to 28, sized against a two-line row.
    *
-   * THE MEASURE IS THE ROW'S TWO-LINE BLOCK. An agent row is 44px and carries a 13px name over a
-   * 12px category-and-timestamp line — about 31px of text at `leading-tight`. A picture the same
-   * height as that block reads as the row's portrait; anything much under it reads as a mark stuck
-   * beside the text. 28 matches the block and leaves 8px of air top and bottom in the 44px row.
-   *
-   * IT NO LONGER LINES UP WITH THE NAV ICONS, AND THAT IS THE TRADE. The agent names now start
-   * about ten pixels right of the tab labels above them. Worth it: the destinations are chrome and
-   * the agents are the content of this column, so the agents being the heavier of the two is the
-   * right way round — and at 16 the alignment was bought by making the one thing somebody scans
-   * for unreadable.
+   * THE ROW IS ONE LINE NOW, which is what brought it back down. The date is gone and the category
+   * sits beside the name rather than under it, so there is no two-line block to match — the
+   * measure is a single 13px line, and 22 is a picture that reads as a face while still being the
+   * row's mark rather than its subject. It leaves 5px of air in the 32px row, which is the same air
+   * the 18px nav icons have in their 28px ones.
    */
-  sidebar: 28,
+  sidebar: 22,
   /** The portrait on an agent card, straddling its banner. */
   card: 56,
   /** The compact density's, which is the one thing compact shrinks besides dropping a line. */

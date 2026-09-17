@@ -1,4 +1,4 @@
-// §7's sidebar line: `Stacey — Billing`, on one line, with one rule about what may be cut.
+// §7's sidebar line: `Stacey · Billing`, on one line, with one rule about what may be cut.
 //
 // THE NAME NEVER TRUNCATES. It is the identity, and a cut name is a different agent — `invoice_par…`
 // and `invoice_parser_v2` are two agents that read as one, in the list whose whole job is telling
@@ -41,10 +41,10 @@ export function identityTitle(name: string, category: string | null | undefined)
 /**
  * How narrow the category's slot has to get before it is dropped entirely.
  *
- * FORTY-FOUR PIXELS IS AN EM DASH PLUS ABOUT THREE CHARACTERS at the row's 12px type. Below it,
- * `text-overflow: ellipsis` renders whatever fits — and what fits at fourteen pixels is the em dash
- * on its own, because the dash is narrower than the ellipsis that would have replaced it. `Doc
- * Indexer —` is the dangling separator §7 warns about, arriving through the layout instead of
+ * FORTY-FOUR PIXELS IS A SEPARATOR PLUS ABOUT THREE CHARACTERS at the row's type size. Below it,
+ * `text-overflow: ellipsis` renders whatever fits — and what fits at fourteen pixels is the
+ * separator on its own, because it is narrower than the ellipsis that would have replaced it. `Doc
+ * Indexer ·` is the dangling separator §7 warns about, arriving through the layout instead of
  * through the markup.
  *
  * THIS IS NOT A SECOND TRUNCATION RULE, which §7 forbids and is right to. It decides whether the
@@ -104,9 +104,15 @@ export function AgentIdentityLine({
         // that appeared only when there was room could never be measured, because it would have no
         // width until it existed.
         <span ref={slotRef} className="flex min-w-0 flex-1 basis-0 items-center">
-          {/* AN EM DASH, AND IT IS PART OF THE CATEGORY'S BOX rather than a sibling of it. Outside,
-              a row too narrow for any category at all renders a name, a dash and nothing — the
-              artefact §7 is avoiding one case earlier.
+          {/* A MIDDLE DOT, AND IT IS PART OF THE CATEGORY'S BOX rather than a sibling of it.
+              Outside, a row too narrow for any category at all renders a name, a separator and
+              nothing — the artefact §7 is avoiding one case earlier.
+
+              THE DOT REPLACED AN EM DASH — the product owner's call. A dash reads as a clause
+              joining two phrases, which is what this line was when the category sat on its own row
+              under the name; on one line with the name it is a list of two facts about one agent,
+              and a dot is the separator this product already uses for exactly that everywhere else
+              (the card's `slug · category`, the footer's counts).
 
               `flex-1 basis-0`, WHICH IS WHAT MAKES THAT TRUE. Found by looking at a real sidebar:
               with `min-w-0` alone the box sizes to its CONTENT and is then clipped by the row, so a
@@ -115,7 +121,7 @@ export function AgentIdentityLine({
               instead lets the box reach zero, and at zero it draws nothing at all. */}
           {roomForCategory && (
             <Truncate className="min-w-0 flex-1 basis-0 text-faint" title={category}>
-              {`— ${category}`}
+              {`· ${category}`}
             </Truncate>
           )}
         </span>

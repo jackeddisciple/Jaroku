@@ -64,13 +64,17 @@ console.log("\nthe category is what gives");
 {
   const html = line("Stacey", "Personal Assistant");
   check("the category is on the line", html.includes("Personal Assistant"), html.slice(0, 240));
-  check("...with §7's em dash", html.includes("— Personal Assistant"), html.slice(0, 240));
+  // A MIDDLE DOT RATHER THAN §7's EM DASH — the product owner's call when the category came up
+  // beside the name. A dash joins two clauses, which is what this was while the category sat on
+  // its own line; on one line it is two facts about one agent, and a dot is what this product
+  // already separates those with everywhere else.
+  check("...with a middle dot", html.includes("· Personal Assistant"), html.slice(0, 240));
 
   // THROUGH THE EXISTING `Truncate`, which is §7's other instruction: "no new truncation logic, and
   // no character-count rule, because the correct cut depends on rendered width, not on letters."
   // `Truncate`'s prose variant is `overflow-hidden` + `text-ellipsis` + `min-w-0`, and `min-w-0` is
   // the one that actually lets a flex child shrink at all.
-  const cat = /<span class="([^"]*)"[^>]*>— Personal Assistant/.exec(html)
+  const cat = /<span class="([^"]*)"[^>]*>· Personal Assistant/.exec(html)
     ?? /class="([^"]*)"[^>]*title="Personal Assistant"/.exec(html);
   const cls = cat?.[1] ?? html;
   check("the category truncates", cls.includes("text-ellipsis"), cls.slice(0, 160));
@@ -81,11 +85,11 @@ console.log("\nthe category is what gives");
     cls.includes("flex-1") && cls.includes("basis-0"), cls.slice(0, 160));
 
   // AND BELOW A FLOOR IT IS NOT DRAWN AT ALL, which was found by looking at a real sidebar rather
-  // than by reading §7. At fourteen pixels `text-overflow: ellipsis` renders the em dash alone —
-  // the dash is narrower than the ellipsis that would have replaced it — so a long-named agent
-  // came out as `Doc Indexer —`: the dangling separator §7 warns about, arriving through the
-  // layout instead of through the markup. Asserted on the source, because the floor is a
-  // measurement at runtime and this suite has no layout engine.
+  // than by reading §7. At fourteen pixels `text-overflow: ellipsis` renders the separator alone —
+  // it is narrower than the ellipsis that would have replaced it — so a long-named agent came out
+  // as `Doc Indexer ·`: the dangling separator §7 warns about, arriving through the layout instead
+  // of through the markup. Asserted on the source, because the floor is a measurement at runtime
+  // and this suite has no layout engine.
   const source = readSource("src/components/AgentIdentityLine.tsx");
   check("there is a measured floor below which the category is dropped",
     /CATEGORY_FLOOR/.test(source) && /clientWidth\s*>=\s*CATEGORY_FLOOR/.test(source), "no floor found");
@@ -108,14 +112,14 @@ console.log("\nUncategorized renders as the name alone");
 {
   const html = line("Stacey", UNCATEGORIZED);
   check("the placeholder is not shown", !html.includes(UNCATEGORIZED), html);
-  // AND THE EM DASH GOES WITH IT. A separator with nothing after it is a worse artefact than the
+  // AND THE SEPARATOR GOES WITH IT. One with nothing after it is a worse artefact than the
   // placeholder it was separating.
-  check("...and neither is a dangling em dash", !html.includes("—"), html);
+  check("...and neither is a dangling dot", !html.includes("·"), html);
   check("the name is still there", html.includes("Stacey"));
 
   for (const [label, value] of [["null", null], ["empty", ""]] as const) {
     const h = line("Stacey", value);
-    check(`a ${label} category renders the name alone`, !h.includes("—"), h);
+    check(`a ${label} category renders the name alone`, !h.includes("·"), h);
   }
 }
 

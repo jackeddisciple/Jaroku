@@ -5,7 +5,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { orderedRuns, useTraceStore } from "../store/traceStore.ts";
+import { useTraceStore } from "../store/traceStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import type { AgentSummary, ThreadView } from "../types.ts";
 import { openThread } from "../lib/threadNav.ts";
@@ -13,7 +13,6 @@ import { useTypedText } from "../lib/typedText.ts";
 import { chatTitle } from "../lib/chatTitle.ts";
 import { useCanRun } from "../lib/useCapability.ts";
 import { ThreadGlyph } from "./ThreadGlyph.tsx";
-import { absTime, relTime } from "../lib/format.ts";
 import { agentStatus } from "../lib/agentStatus.ts";
 import { selectAgent } from "../lib/selection.ts";
 import {
@@ -30,7 +29,7 @@ import { useWorkStore, workBadgeCount } from "../store/workStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher.tsx";
 import { Truncate } from "./Truncate.tsx";
-import { identityTitle } from "./AgentIdentityLine.tsx";
+import { AgentIdentityLine, identityTitle } from "./AgentIdentityLine.tsx";
 import { FACE_SIZE, AgentFace } from "./AgentFace.tsx";
 import { Capable } from "./Capable.tsx";
 import { keyHint } from "../lib/modKey.ts";
@@ -447,11 +446,9 @@ function AgentRowMenu({ agent }: { agent: AgentSummary }) {
 
 function AgentTreeRow({
   agent,
-  lastRunAt,
   threads,
 }: {
   agent: AgentSummary;
-  lastRunAt: string | null;
   /** This agent's chats, most recently active first, archived and pinned ones already left out. */
   threads: ThreadView[];
 }) {
@@ -462,11 +459,12 @@ function AgentTreeRow({
   // rows lit, and the column said you were in two places. The agent row is lit while the agent is
   // where you are and no chat of its own is open; the chat's own row takes it from there.
   const selected = activeAgentId === agent.agent_id && activeThreadId === null && navView === null;
-  // When this agent last did anything — and when it has never run, when it was made. THE ROW SHOWED
-  // NOTHING for a new agent, which is the one moment the column is most likely to be looked at: the
-  // agent you just described, with no time beside it. Two different facts, so the label below says which.
-  const stamp = lastRunAt ?? agent.created_at ?? null;
-  const stampWord = lastRunAt ? "last run" : "created";
+  // THERE IS NO TIME ON THIS ROW ANY MORE — the product owner's call. It showed when the agent last
+  // ran, falling back to when it was made so that a brand-new agent was not the one row with a gap
+  // where every other row had a figure. What it cost was the row's second line, and with it the
+  // whole two-line layout: a relative timestamp on forty rows is forty figures nobody is scanning
+  // for, in the column whose job is telling forty agents apart. The Agents grid carries `last
+  // active` on every card, where somebody is actually comparing agents.
   // Null until this agent has a pull request open — see the marker below.
   const pr = useGithubStore((st) => st.views[agent.agent_id]?.pr ?? null);
   // Whether this agent has a repository behind it at all — which decides whether the control below
@@ -482,10 +480,11 @@ function AgentTreeRow({
   return (
     <>
       <div
-        // ELEVEN, NOT SEVEN. This row carries two lines now — a name over a category and a time —
-        // and 28px was the height of the single-line row it replaced: the two lines met in the
-        // middle with nothing between them and nothing above or below. 44px is the pair plus the
-        // air that makes them read as one row rather than as two cramped ones.
+        // EIGHT, BACK DOWN FROM ELEVEN. It was 44px to hold two lines — a name over a category and
+        // a time — and it is one line again, so 44px would be a row with 28px of nothing in it. 32px
+        // is the 22px picture plus 5px of air either side, which is the same air the 18px nav icons
+        // have in their 28px rows; the agents are a half-step taller than the destinations because
+        // their mark is, and no taller than that.
         //
         // AND IT SAYS WHICH AGENT IS SELECTED THE WAY EVERY OTHER ROW IN THIS COLUMN DOES. It did
         // not: the only mark was the name in `text-accent`, which worked while the accent was a
@@ -493,11 +492,9 @@ function AgentTreeRow({
         // same value the name already had. A fill and a 2px bar are what the run rows under this
         // one and the five destinations above it use, so this is the pattern arriving somewhere it
         // was missing rather than a new one, and it survives an accent that is a neutral.
-        // AND ITS EMOJI SITS IN THE TABS' ICON COLUMN — the product owner's call on 2026-09-11. The
-        // row's 10px of left padding lands its 16px mark box on the same 16px the tab icons start at,
-        // and the 10px gap after it starts the name where the tab labels start. The runs twisty that
-        // used to hold this column moved to the row's right end, before the pull request.
-        className={`group relative flex h-11 w-full items-center gap-1 rounded-control pl-2.5 pr-1 transition-colors duration-fast ${
+        // THE RUNS TWISTY THAT USED TO HOLD THE LEFT COLUMN moved to the row's right end, before the
+        // pull request, which is what leaves the picture at the start of the row.
+        className={`group relative flex h-8 w-full items-center gap-1 rounded-control pl-2.5 pr-1 transition-colors duration-fast ${
           selected ? "bg-sidebar-active" : "hover:bg-sidebar-hover"
         }`}
       >
@@ -517,39 +514,31 @@ function AgentTreeRow({
           {/* THE AGENT'S FACE. It was an emoji in a fixed 16px box, and the box existed because an
               emoji's width is its own — a bat is wider than a robot, so the glyph needed centring
               inside a column to sit under the destinations above it. A picture is square, so the box
-              has nothing left to do.
-
-              SIZED AGAINST THE TWO LINES BESIDE IT — see `FACE_SIZE.sidebar`. At the emoji's old
-              register this was a coloured dot with a face implied in it; at the height of the row's
-              own text block it is the face, which is what a column of forty agents actually needs
-              from it: the eye finds one row faster than it reads forty truncated names. It is the
-              same picture the agent's card draws, so what is matched here was matched there. */}
+              has nothing left to do. See `FACE_SIZE.sidebar` for the size and why it has moved. */}
           <AgentFace
             picture={agent.picture}
             name={agent.name}
             size={FACE_SIZE.sidebar}
           />
-          {/* TWO LINES: who it is, then what it is and when it last ran. The category and the
-              timestamp are both qualifiers on the name, so they share the second line and the
-              name gets the first to itself — at 13px medium, the product owner's call on
-              2026-09-11: a rung under the 14px tab labels, and still one over the 12px line it
-              heads, so the name stays the thing the eye lands on in a column of agents. */}
-          <span className="flex min-w-0 flex-1 flex-col leading-tight">
+          {/* ONE LINE: WHO IT IS, THEN WHAT IT IS FOR — `Iris · Recruiting`. It was a name over a
+              category and a time, and both halves of that changed: the time is gone, and the
+              category came up beside the name.
+
+              AND THIS IS `AgentIdentityLine`, WHICH ALREADY WAS THIS RULE. The component was
+              written for §7's row — the name that never truncates, the category that does, and no
+              dangling separator when the column is too narrow for either — and then the row grew a
+              second line and stopped using it, leaving a tested component with no call site and a
+              hand-rolled copy of half its behaviour here. Mounting it is what deletes the copy.
+
+              THE SIZE IS SET HERE AND THE COMPONENT INHERITS IT, which is what puts the category at
+              the NAME'S weight rather than a rung under it — the product owner's call. `text-label`
+              is 13px medium; what separates the two is colour, the category being `text-faint`
+              inside the component, so the name still leads without being a different kind of text. */}
+          <span className="flex min-w-0 flex-1 items-center gap-1.5 text-label">
             {/* Ink whether or not it is the selected one — see the run row above for why the
                 ternary that used to be here had the same value on both arms, and why the fill and
                 the bar are what say "this one". A name is content; content does not dim. */}
-            <Truncate className="text-label text-ink" title={agent.name}>
-              {agent.name}
-            </Truncate>
-            <span className="flex min-w-0 items-center gap-1.5 text-caption text-faint">
-              {agent.category && <Truncate className="min-w-0" title={agent.category}>{agent.category}</Truncate>}
-              {agent.category && stamp && <span aria-hidden>·</span>}
-              {stamp && (
-                <span className="shrink-0 tabular-nums" title={`${stampWord} ${absTime(stamp)}`}>
-                  {relTime(stamp)}
-                </span>
-              )}
-            </span>
+            <AgentIdentityLine name={agent.name} category={agent.category} nameClassName="text-ink" />
           </span>
         </button>
         {/* THE PULL REQUEST, ON EVERY ROW AND SHOWN ON HOVER. On every row because it is a control
@@ -1209,16 +1198,6 @@ export function Sidebar() {
     // top of the column it was just removed from, which is the one place it must not be.
     .filter((a): a is AgentSummary => a !== undefined && !a.archived_at);
 
-  /**
-   * When each agent last ran, for the time on its row.
-   *
-   * BUILT ONCE PER RENDER RATHER THAN FILTERED PER ROW — this column redraws on every trace event,
-   * and the list is newest-first, so the first run seen for an agent is its latest.
-   */
-  const lastRunByAgent = new Map<string, string>();
-  for (const r of orderedRuns(runs)) {
-    if (!lastRunByAgent.has(r.agent_id)) lastRunByAgent.set(r.agent_id, r.started_at);
-  }
 
   /**
    * Every chat, filed under its agent — or in Recents when it has none.
@@ -1291,7 +1270,6 @@ export function Sidebar() {
                 <AgentTreeRow
                   key={a.agent_id}
                   agent={a}
-                  lastRunAt={lastRunByAgent.get(a.agent_id) ?? null}
                   threads={threadsByAgent.get(a.agent_id) ?? []}
                 />
               ))}
@@ -1319,7 +1297,6 @@ export function Sidebar() {
                 <AgentTreeRow
                   key={a.agent_id}
                   agent={a}
-                  lastRunAt={lastRunByAgent.get(a.agent_id) ?? null}
                   threads={threadsByAgent.get(a.agent_id) ?? []}
                 />
               ))}
