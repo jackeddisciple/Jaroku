@@ -133,11 +133,17 @@ console.log("\n§6's dialog offers all of them, in this order");
   check("every preset is on screen", missing.length === 0, missing.join(", "));
   check("...and so is the custom fallback", html.includes("Name your own"));
 
-  // §6's ORDER, for the two inputs this dialog still asks. Name, then category — and the order is
-  // the part a chip row cannot carry, which is the whole reason this is a dialog.
+  // THE ORDER, FOR THE TWO INPUTS THIS DIALOG NOW ASKS. Category, then what it should help with —
+  // and the order is the part a chip row cannot carry, which is the whole reason this is a dialog.
+  //
+  // THE NAME FIELD IS GONE AND ITS ABSENCE IS ASSERTED. It used to be first; the name is paired
+  // with the face and given at creation, so a field for it was a question whose answer the product
+  // already held. A form that asks for something it will then ignore is the failure this checks for.
   const at = (needle: string): number => html.indexOf(needle);
-  check("name comes before category", at(">Name<") >= 0 && at(">Name<") < at(">Category<"),
-    `${at(">Name<")} / ${at(">Category<")}`);
+  check("the dialog asks for no name", at(">Name<") === -1, String(at(">Name<")));
+  check("category comes before what it should help with",
+    at(">Category<") >= 0 && at(">Category<") < at(">What should it help you with?<"),
+    `${at(">Category<")} / ${at(">What should it help you with?<")}`);
 
   // AND THERE IS NO STEP HERE FOR WHAT AN AGENT LOOKS LIKE, which is now true of every surface in
   // the product rather than just this one. An agent is given one of the eleven faces, and the name

@@ -1,23 +1,23 @@
-// §6's three inputs, in §6's order, as the one place an agent is deliberately created.
+// Two questions, and the agent exists when they are answered. The one place an agent is
+// deliberately created outside onboarding — and it creates a DRAFT, never a build.
 //
-// WHY A DIALOG AND NOT TWO MORE FIELDS IN THE COMPOSER. The composer can already start an agent —
-// type a brief, get a plan, press Generate — and that path stays exactly as it was. What it cannot
-// do is ask two questions in an order, because it is one text field with chips around it, and §6's
-// order is load-bearing: a name is what you know first and a category is a choice from a list.
-// Strung along a chip row those become two controls competing with the brief for the same glance.
+// IT DOES NOT PLAN AND IT DOES NOT GENERATE, WHICH IS A HARD RULE RATHER THAN A PREFERENCE. The
+// product owner's words: there must be no place to generate an agent until the user comes into the
+// composer himself and writes it. This dialog used to send a PLAN — one step short of a build, with
+// its own gate — and a plan raised from a dialog is a build somebody started by filling in a form,
+// which is the thing the rule forbids. It writes a row and closes.
 //
-// IT DOES NOT SEND A GENERATION. It sends a PLAN, exactly as the composer's first move does — "the
-// plan gate is the only way in, so nothing gets built that the user hasn't seen described first" —
-// and the three identity fields ride the plan record so that generation builds what was approved.
-// A dialog that generated directly would be a second entry point with its own promises about the
-// gate, the connectors and the provider, and the two would drift.
+// SO IT SENDS THE SAME COMMAND ONBOARDING DOES, `createDraftAgent`, and the two screens ask the
+// same two things in the same order for the same reason: the category is a choice from a list, and
+// what it should help with is a sentence. What comes back is an agent in the Agents tab with a
+// name, a face, a category and a description, and no code — which the card already has a word for:
+// `DRAFT`.
 //
-// NOTHING HERE ASKS WHAT AN AGENT LOOKS LIKE, and §6's third input is gone rather than moved. An
-// agent is given one of eleven faces, and the name paired with it, by its position in its
-// workspace's creation order — see `lib/agentFaces.ts` — so there is no picture to pick and no
-// duplicate to warn about.
+// NOTHING HERE ASKS FOR A NAME OR A FACE. Both are given, paired, from the eleven — see
+// `lib/agentFaces.ts` — by the agent's position in its workspace's creation order, which is a count
+// only the server can take.
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useState } from "react";
 
 import { Chip } from "./Chip.tsx";
 import { outlineBtn, primaryBtn, quietBtn } from "./buttons.ts";
@@ -25,7 +25,7 @@ import {
   AGENT_CATEGORIES, CATEGORY_GROUPS, normalizeCategory, UNCATEGORIZED,
 } from "../lib/agentCategories.ts";
 import { useDialog } from "../lib/dialog.ts";
-import { sendPlanAgent } from "../lib/socket.ts";
+import { sendCreateDraftAgent } from "../lib/socket.ts";
 import { LAYER, TYPE } from "../lib/tokens.ts";
 
 export function NewAgentDialog({
@@ -39,20 +39,17 @@ export function NewAgentDialog({
   const session = useId();
   const { ref, dialogProps } = useDialog(open, labelId);
 
-  const [name, setName] = useState("");
-  const [brief, setBrief] = useState("");
+  const [helpWith, setHelpWith] = useState("");
   const [category, setCategory] = useState<string>(UNCATEGORIZED);
   const [custom, setCustom] = useState("");
   const [naming, setNaming] = useState(false);
-  const briefRef = useRef<HTMLTextAreaElement>(null);
 
   // A FRESH DIALOG EVERY TIME IT OPENS. Left as it was, somebody who cancelled halfway through
   // reopens onto half of a decision they abandoned — and the avatar in particular would be the one
   // they were considering for a different agent.
   useEffect(() => {
     if (!open) return;
-    setName("");
-    setBrief("");
+    setHelpWith("");
     setCategory(UNCATEGORIZED);
     setCustom("");
     setNaming(false);
@@ -60,15 +57,19 @@ export function NewAgentDialog({
 
 
   const chosenCategory = naming ? normalizeCategory(custom) : category;
-  const canCreate = brief.trim().length > 0;
-
+  /**
+   * BOTH ANSWERS ARE OPTIONAL, so this is always available.
+   *
+   * It required a brief when it sent a plan, because there is nothing to plan from without one.
+   * There is nothing to plan at all now: the row is an identity and a sentence, and an agent with
+   * neither a category nor a description is still a real row somebody can build into — the same
+   * thing onboarding's Skip produces.
+   */
   const create = (): void => {
-    if (!canCreate) return;
-    // A PLAN, NOT A GENERATION. See the header: one gate, one entry point to it.
-    sendPlanAgent(brief.trim(), [], name.trim() || undefined, undefined, undefined, undefined, {
-      // The neutral value is what the server would write anyway; sending it says the same thing and
-      // keeps the wire shape honest about what was on screen.
+    // A DRAFT, NOT A PLAN AND NOT A GENERATION. See the header.
+    sendCreateDraftAgent({
       category: chosenCategory,
+      description: helpWith.trim() || undefined,
     });
     onClose();
   };
@@ -91,31 +92,19 @@ export function NewAgentDialog({
         <div className="border-b border-hair px-4 py-3">
           <h2 id={labelId} className="text-label text-ink">New agent</h2>
           <p className="mt-0.5 text-tiny text-faint">
-            You will see a plan before anything is built.
+            It appears in Agents straight away. You build it from the composer when you are ready.
           </p>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-          {/* ── 1. Name ──────────────────────────────────────────────────────────────────
-              FREE TEXT, NO PRESET LIST, NO UNIQUENESS CONSTRAINT beyond whatever exists today.
-              Optional, because the generator already takes a name from the brief when none is
-              given, and a required field here would be a question with a right answer nobody has
-              yet. */}
-          <label className="block">
-            <span className={TYPE.sectionLabel}>Name</span>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Stacey"
-              className="mt-1 w-full rounded-input border border-edge bg-elevated px-2.5 py-1.5 text-caption text-ink outline-none placeholder:text-faint focus:shadow-focusring"
-            />
-            <span className="mt-1 block text-tiny text-faint">
-              Optional — otherwise it is taken from what you describe below.
-            </span>
-          </label>
+          {/* THERE IS NO NAME FIELD. It was the first thing this dialog asked and it is given now,
+              paired with the face, from the eleven — so the question had one honest answer the
+              product already knew and a field for it was a question with a right answer nobody has.
+              Rename is a pencil on the agent's own detail header, where somebody who has met the
+              agent can change its name having seen it. */}
 
-          {/* ── 2. Category ────────────────────────────────────────────────────────────── */}
-          <div className="mt-4">
+          {/* ── 1. Category ────────────────────────────────────────────────────────────── */}
+          <div>
             <span className={TYPE.sectionLabel}>Category</span>
             <div className="mt-1.5 space-y-2">
               {CATEGORY_GROUPS.map((group) => (
@@ -166,18 +155,22 @@ export function NewAgentDialog({
               agent made from this dialog takes the avatar its uuid hashes to, which is the same
               answer the server has always given when nobody chose. */}
 
-          {/* THE BRIEF, LAST AND REQUIRED, and it is not one of §6's three. §6 describes a form for
-              a product where an agent is a row somebody fills in; here an agent is generated from a
-              description, and there is nothing to create without one. Putting it after the three
-              keeps §6's order intact and puts the one required field next to the button. */}
+          {/* ── 2. WHAT IT SHOULD HELP WITH, and it is a DESCRIPTION rather than a brief. It read
+              "What should it do?" and was required, because the dialog generated from it and there
+              is nothing to generate from nothing. It generates nothing now: this is stored on the
+              row so the card and the detail header have something to say about an agent that has
+              not been built, and it is optional like everything else here.
+
+              THE SAME WORDING AS THE ONBOARDING SCREEN, deliberately. Two surfaces asking the same
+              question in two different ways is two questions as far as anybody answering is
+              concerned. */}
           <label className="mt-4 block">
-            <span className={TYPE.sectionLabel}>What should it do?</span>
+            <span className={TYPE.sectionLabel}>What should it help you with?</span>
             <textarea
-              ref={briefRef}
-              value={brief}
-              onChange={(e) => setBrief(e.target.value)}
+              value={helpWith}
+              onChange={(e) => setHelpWith(e.target.value)}
               rows={3}
-              placeholder="Chase unpaid invoices over email and summarise what came back."
+              placeholder="Chase unpaid invoices over email and tell me what came back."
               className="mt-1 w-full resize-y rounded-input border border-edge bg-elevated px-2.5 py-1.5 text-caption text-ink outline-none placeholder:text-faint focus:shadow-focusring"
             />
           </label>
@@ -186,17 +179,23 @@ export function NewAgentDialog({
         {/* Cancel first in the DOM and first on screen — `useDialog` focuses the first focusable
             element, and the destructive-adjacent control should not be the one it lands on. */}
         <div className="flex items-center justify-between gap-2 border-t border-hair px-4 py-3">
+          {/* WHAT IS ABOUT TO BE WRITTEN, and the name is not in it because this side does not know
+              it — the server pairs it with the face at creation. So the line says the category, or
+              says that nothing has been chosen, which is a real state and a fine one. */}
           <span className="min-w-0 text-tiny text-faint">
-            {name.trim() || "Unnamed"}
-            {chosenCategory !== UNCATEGORIZED && ` — ${chosenCategory}`}
+            {chosenCategory === UNCATEGORIZED ? "No category" : chosenCategory}
           </span>
           <div className="flex items-center gap-2">
             <button type="button" onClick={onClose} className={outlineBtn}>Cancel</button>
+            {/* NEVER DISABLED. It was, on an empty brief, because the dialog planned from it. Both
+                answers are optional now and the row is worth writing either way — an agent with a
+                face and a name and nothing else is what onboarding's Skip produces, and it is a
+                thing somebody can build into. A primary button that is dead on arrival is the
+                dead control this pass is hunting elsewhere. */}
             <button
               type="button"
               onClick={create}
-              disabled={!canCreate}
-              title={canCreate ? "Write a plan for this agent" : "Describe what the agent should do"}
+              title="Add this agent to the Agents tab"
               className={primaryBtn}
             >
               Create
