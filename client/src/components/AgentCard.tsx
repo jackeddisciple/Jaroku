@@ -18,13 +18,11 @@
 // border instead of brightening it, which is the same treatment arriving from the other direction.
 
 import { useState } from "react";
-import { Chip, DateChip } from "./Chip.tsx";
+import { DateChip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { AgentTagRow } from "./AgentTagRow.tsx";
 import { AgentSparkline } from "./AgentSparkline.tsx";
-import { StatusGlyph, GLYPH_SIZE } from "./StatusGlyph.tsx";
 import { FACE_SIZE, AgentFace, AgentBanner } from "./AgentFace.tsx";
-import { agentPhase } from "../lib/domainPhase.ts";
 import { stateBorder } from "../lib/stateBorder.ts";
 import { AlertTriangleIcon, GitForkIcon } from "./panelIcons.tsx";
 import { agentContextMarkdown } from "../lib/agentContext.ts";
@@ -32,7 +30,8 @@ import { faceFor } from "../lib/agentFaces.ts";
 import { showsCategory } from "../lib/agentCategories.ts";
 import { absTime, fmtCost } from "../lib/format.ts";
 import { Icon } from "../lib/icons/registry.ts";
-import { ICON, STATUS, TYPE } from "../lib/tokens.ts";
+import { ProviderMark } from "../lib/icons.tsx";
+import { ICON, STATUS } from "../lib/tokens.ts";
 import { spendFor, useAgentGridStore } from "../store/agentGridStore.ts";
 import type { AgentCardView } from "../types.ts";
 import type { AgentDensity } from "../lib/agentFilter.ts";
@@ -57,7 +56,7 @@ const ACTIVITY_LABEL = { quiet: "Quiet", steady: "Steady", high: "High" } as con
  * shrinking the portrait — and it shrinks in the same proportion as the portrait, so the overlap
  * reads the same at both densities.
  */
-const BANNER_HEIGHT = { card: 80, compact: 56 } as const;
+const BANNER_HEIGHT = { card: 104, compact: 72 } as const;
 
 /** §5.2's overflow menu: Fork · Rename · Export current version · Archive. */
 function Overflow({
@@ -162,18 +161,13 @@ export interface AgentCardProps {
 }
 
 /**
- * The card's own word for the runtime axis, which is not the phase's word.
+ * THE CARD'S OWN WORD FOR THE RUNTIME AXIS HAS GONE WITH THE GLYPH IT LABELLED.
  *
- * §5.2's vocabulary is what the tag row already prints — "generating" and "deploying" are both
- * `active` and both amber, and a tooltip that said "running" over a card that says "generating"
- * would be the panel disagreeing with itself. The two states the runtime union cannot express get
- * theirs from the same place `agentPhase` reads them: an archived card, and one that has never run.
+ * It existed to title the phase dot before the agent's name — "generating" and "deploying" are both
+ * `active` and both amber, so a tooltip saying "running" over a card whose tag says "generating"
+ * would be the panel disagreeing with itself. There is no dot now, and the tag row says the word
+ * outright instead of hiding it in a tooltip, so there is nothing left for this to caption.
  */
-const RUNTIME_WORD = (a: Pick<AgentCardView, "runtime" | "archived_at" | "last_run_at">): string => {
-  if (a.archived_at) return "archived";
-  if (a.runtime === "idle") return a.last_run_at === null ? "never run" : "idle";
-  return a.runtime;
-};
 
 export function AgentCard({
   agent, density, focused, creatorInitial,
@@ -260,12 +254,12 @@ export function AgentCard({
       // ROSE HERE DUPLICATES THE `Failing` TAG DELIBERATELY (§6.2): the colour is the glance and the
       // tag is the word, which is also what keeps I8 true — no border on this card travels alone.
       style={{ borderColor: stateBorder(cardState) }}
-      // THE CARD IS THE FRAME NOW, AND `bg-elevated` IS WHAT MAKES THAT READ. It was `bg-panel` and
-      // held the content directly; it holds a banner and a sheet, and the few pixels of card left
-      // showing around them are what the design puts a white margin there for. Both values are
-      // already in the palette and they are ADJACENT in it — #FFFFFF around #FAFAF9 — so the frame
-      // is a boundary rather than a second colour: the sheet reads as inset, at the quietest
-      // contrast step the palette has.
+      // THREE SURFACES, AND THEY ARE MEANT TO BE TELLABLE APART — the product owner's call. The page
+      // is §01's canvas #F6F6F4, this frame is `elevated` #FFFFFF, and the content block inside it is
+      // `void` #F0F0EE. Adjacent values were tried first and the card read as one flat shape: frame
+      // and block were #FFFFFF and #FAFAF9, one percent apart, which §01 itself warns is "the same
+      // surface". Stepping the block DOWN past the page instead makes it read as inset into a white
+      // mount, and every value is still one the palette already has.
       className={`group flex cursor-pointer flex-col overflow-hidden rounded-lg border bg-elevated text-left transition-[box-shadow,border-color] duration-fast ${
         focused ? "shadow-glow" : "hover:shadow-glow"
       } ${agent.archived_at ? "opacity-70" : ""}`}
@@ -304,7 +298,7 @@ export function AgentCard({
             The seam is the sheet's top edge, and anchoring the picture to the thing it straddles is
             what keeps the two in step when the banner's height changes with density. */}
         <div
-          className={`relative flex min-w-0 flex-1 flex-col rounded-card bg-panel ${
+          className={`relative flex min-w-0 flex-1 flex-col rounded-card bg-void ${
             compact ? "gap-1.5 p-2.5" : "gap-2 p-3"
           } ${hasFace ? (compact ? "-mt-3" : "-mt-3.5") : ""}`}
         >
@@ -344,21 +338,24 @@ export function AgentCard({
               portrait would truncate against nothing visible. */}
           <div className={`flex min-w-0 items-start ${compact ? "pr-16" : "pr-20"}`}>
             <div className="min-w-0 flex-1">
-            <div className="flex min-w-0 items-center gap-1.5">
-              {/* THE PHASE GLYPH, ON THE NAME'S LINE. It answers "what is it doing right now" —
-                  Running, Idle, Never run, Archived — and D1 keeps that separate from the HEALTH
-                  axis the tag row carries below. It leads the name rather than taking a column of
-                  its own. */}
-              <span className="shrink-0">
-                <StatusGlyph phase={agentPhase(agent)} size={GLYPH_SIZE.card} title={RUNTIME_WORD(agent)} />
-              </span>
-              {/* THE NAME IS THE PRIMARY ELEMENT ON THIS CARD, and everything around it is sized
-                  against that: the picture supports it, the slug is secondary under it, the tags
-                  below are metadata and the footer is tertiary. */}
-              <Truncate className={TYPE.title} title={agent.name}>
-                {agent.name}
-              </Truncate>
-            </div>
+            {/* THE PHASE GLYPH IS GONE FROM THIS LINE — the product owner's call. It was a small
+                circle before the name answering "what is it doing right now", and D1's separation of
+                that from HEALTH is still honoured: the tag row under this says `Running`, `Failing`,
+                `Draft`, `Archived` in words. A coloured dot before a name is the kind of mark that
+                reads as decoration until somebody explains it, and the words never need explaining.
+
+                WHICH IS ALSO WHAT KEEPS I8 TRUE. "No border travels alone": the card's edge is
+                recoloured by `stateBorder`, and what says the same thing in language is the tag row
+                — see `test:state-border`, which now looks for it there.
+
+                THE NAME IS THE LOUDEST THING ON THE CARD, at `text-title` — 16px/600 rather than the
+                13px/500 of `TYPE.title`, which is a label rung and was never meant to carry the
+                primary object of the product's primary surface. The ladder under it is real and each
+                step is a step: 16/600 name, 11px faint slug and category, 10px caps tags, 12px prose
+                for the current work, 10px faint figures in the footer. */}
+            <Truncate className="text-title text-ink" title={agent.name}>
+              {agent.name}
+            </Truncate>
             {/* The slug at the smaller size — §5.2. It was also in the mono face, on the argument
                 that it is an identifier and the prose/code split tells a reader which of the two
                 lines they can type. typography.pdf §04 names "agent IDs/slugs" in its Sans list
@@ -410,24 +407,12 @@ export function AgentCard({
         <div className="flex min-w-0 items-center gap-2">
           <AgentTagRow agent={agent} className="min-w-0 flex-1" />
           <div className="-mr-1 flex shrink-0 items-center gap-0.5 opacity-70 transition-opacity duration-fast focus-within:opacity-100 group-hover:opacity-100">
-            {/* §5.2's primary action, ON THE CARD, and a glyph rather than a full-width outlined
-                button under everything: three cards across meant three outlined bars of equal
-                weight competing with the three agent names above them. Absent for an archived
-                agent, which §4 requires — an agent that has been put away should not offer work. */}
-            {!agent.archived_at && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onNewThread();
-                }}
-                title={`Start a new thread on ${agent.name}`}
-                aria-label={`Start a new thread on ${agent.name}`}
-                className="rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active active:bg-chrome hover:text-ink"
-              >
-                <Icon.agents.newThread size={ICON.sm} />
-              </button>
-            )}
+            {/* §5.2'S PRIMARY ACTION IS NOT HERE ANY MORE. It was a bare `+` in this cluster, on the
+                argument that three cards across would otherwise mean three outlined bars competing
+                with three agent names. The product owner's call is the other way: it is the one
+                thing on the card somebody came to DO, and a plus indistinguishable in weight from
+                copy-context and the overflow menu is a primary action disguised as a third icon. It
+                is a labelled pill at the foot of the card now — see the end of this component. */}
             <button
               type="button"
               onClick={(e) => {
@@ -468,9 +453,28 @@ export function AgentCard({
                   ) : (
                     <span className="flex-1 text-tiny text-faint">Nothing said in it yet</span>
                   )}
-                  <Chip size="sm" mono tone="faint" className="shrink-0" title="The model this agent runs on">
-                    {agent.default_provider}
-                  </Chip>
+                  {/* WHAT IT LAST RAN ON: the provider's own mark, then the model's name — the
+                      product owner's call, and it replaces a mono chip that printed the PROVIDER
+                      string ("anthropic") and called itself the model.
+
+                      ONLY WHEN IT HAS RUN. `agents` has no model column, so there is no such thing
+                      as this agent's model to print; what exists is what the last run used, and an
+                      agent nobody has run has nothing here rather than a guess. See
+                      `AgentCardView.last_model`.
+
+                      THE MARK IS THE BRAND'S AND THE NAME IS THE CATALOGUE'S. `ProviderMark` draws
+                      the provider in its own colour — the one saturated thing on this line, which
+                      is the whole reason it is legible at 10px — and `last_model` arrives already
+                      resolved from `pricing.json`, so "Opus 5" rather than `claude-opus-5`. */}
+                  {agent.last_model && (
+                    <span
+                      className="flex shrink-0 items-center gap-1 text-tiny text-muted"
+                      title={`Last ran on ${agent.last_model}`}
+                    >
+                      <ProviderMark provider={agent.last_provider ?? "unknown"} size={ICON.xs} />
+                      {agent.last_model}
+                    </span>
+                  )}
                 </div>
               </>
             ) : (
@@ -572,6 +576,40 @@ export function AgentCard({
             </span>
           )}
         </div>
+
+        {/* §5.2'S PRIMARY ACTION, AS A BUTTON THAT LOOKS LIKE ONE — the product owner's call, and it
+            moved here from the icon cluster at the top of the card. Inside the content block rather
+            than on the frame, because it acts on the agent the block describes.
+
+            A CYLINDER: `rounded-pill`, which is the one rung §04 reserves for a shape whose corners
+            are its full height. That is the rung's stated use — "status tags, badges and semantic
+            pills only" — and this is the exception the product owner asked for by name; it earns it
+            by being the only control on the card with a label, so nothing else can be confused for
+            it.
+
+            FULL WIDTH, AND THAT WAS THE OLD OBJECTION. A glyph was chosen over "a full-width
+            outlined button under everything" because three cards across meant three outlined bars
+            competing with three agent names. The names are 16px/600 now and the bar is a filled
+            pill at the bottom of a recessed block — the hierarchy the objection was about runs the
+            other way, so the bar reads as the card's floor rather than as a rival to its title.
+
+            ABSENT FOR AN ARCHIVED AGENT, which §4 requires: an agent that has been put away should
+            not offer work. The footer above is then the last thing in the card, which is what it
+            always was. */}
+        {!agent.archived_at && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onNewThread();
+            }}
+            title={`Start a new thread on ${agent.name}`}
+            className="mt-0.5 flex w-full items-center justify-center gap-1.5 rounded-pill bg-chrome py-2 text-caption text-ink transition-colors duration-fast hover:bg-active active:bg-chrome focus-visible:outline-none focus-visible:shadow-focusring"
+          >
+            <Icon.agents.newThread size={ICON.sm} />
+            New Thread
+          </button>
+        )}
 
         </div>
       </div>

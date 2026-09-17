@@ -135,7 +135,11 @@ console.log("\nno border travels alone");
   // pixels to the right of the edge; the deploy rail's rows are `ActionRow`s, whose whole content is
   // a verb.
   const COMPANION: [string, string][] = [
-    ["components/AgentCard.tsx", "StatusGlyph"],
+    // THE AGENT CARD'S COMPANION IS THE TAG ROW, NOT A GLYPH. It carried the phase dot before the
+    // agent's name and the dot is gone — a coloured circle before a name reads as decoration until
+    // somebody explains it, and `AgentTagRow` says `Running`, `Failing`, `Draft` and `Archived`
+    // outright. I8 asks for "a shape or a WORD"; this is the word.
+    ["components/AgentCard.tsx", "AgentTagRow"],
     ["components/DeployPanel.tsx", "ActionRow"],
   ];
   for (const [path, companion] of COMPANION) {

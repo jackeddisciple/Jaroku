@@ -206,8 +206,16 @@ console.log("\n...and the nine it does go on");
     ["components/GitHubSync.tsx", "syncPhase"],
     ["components/McpPanel.tsx", "MCP_PHASE"],
     ["components/EvalsPanel.tsx", "EVAL_PHASE"],
-    ["components/AgentCard.tsx", "agentPhase"],
   ];
+  // THE AGENT CARD IS NOT ON THIS LIST ANY MORE, and its absence is asserted rather than left to
+  // the list shrinking quietly. It drew `agentPhase` through the shared glyph before the agent's
+  // name; the product owner took the dot off the card, and the tag row under the name carries the
+  // same four states in words. `agentPhase` itself is untouched and still used by the grid's filter.
+  {
+    const card = readFileSync("src/components/AgentCard.tsx", "utf8");
+    check("the agent card draws no phase glyph",
+      !/from "[^"]*StatusGlyph/.test(card) && !card.includes("<StatusGlyph"));
+  }
   for (const [path, mapping] of AT) {
     const text = readFileSync(`src/${path}`, "utf8");
     check(`${path} draws the shared glyph`,

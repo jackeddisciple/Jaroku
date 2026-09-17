@@ -419,9 +419,16 @@ console.log("\n§03: each surface's first read, and what it keeps quiet");
   check("the table still has all five surfaces", Object.keys(SURFACE_HIERARCHY).length === 5);
 
   // AGENT LIST: the name is the first read; the slug, the counts and the footer are background.
+  //
+  // `text-title` RATHER THAN `TYPE.title`, WHICH IS NOT THE SAME THING and is why this assertion
+  // moved. `TYPE.title` is `text-label text-ink` — the 13px/500 LABEL rung — so the primary object
+  // of the product's primary surface was set one step above its own slug. The card asks for the
+  // 16px/600 rung by name now; §03's hierarchy comes from size, and this is the size.
   const agentCard = src("components/AgentCard.tsx");
   check("an agent card's name is the first read on it",
-    /<Truncate className=\{TYPE\.title\} title=\{agent\.name\}>/.test(agentCard));
+    /<Truncate className="text-title text-ink" title=\{agent\.name\}>/.test(agentCard));
+  check("...and it is the largest type on the card",
+    !/text-(display|page|section)\b/.test(agentCard), agentCard.match(/text-(display|page|section)\b/)?.[0] ?? "");
   check("...and its slug and footer stay at tertiary",
     /text-tiny text-faint" title=\{agent\.slug\}/.test(agentCard) && /border-t border-hair pt-2 text-tiny text-faint/.test(agentCard));
 
