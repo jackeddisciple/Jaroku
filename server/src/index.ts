@@ -2290,7 +2290,7 @@ async function renameAgent(ctx: TenantContext, agentId: string, name: unknown): 
  */
 async function createDraftAgent(
   ctx: TenantContext,
-  input: { category?: unknown },
+  input: { category?: unknown; description?: unknown },
 ): Promise<void> {
   // BOTH HALVES FROM ONE CALL, so the portrait and the name under it cannot be two draws that
   // disagree. See `agents/faces.ts`.
@@ -2309,6 +2309,11 @@ async function createDraftAgent(
     display_name: face.name,
     hand_written: false,
     category: typeof input.category === "string" ? input.category.trim().slice(0, 80) : undefined,
+    // WHAT IT IS FOR, IN THEIR WORDS, AND NOTHING IS BUILT FROM IT. Capped because it is a label on
+    // a card rather than a document — the composer is where a brief of any length belongs.
+    description: typeof input.description === "string"
+      ? (input.description.trim().slice(0, 2000) || undefined)
+      : undefined,
     picture: face.id,
   });
   await relay.broadcastAgents();

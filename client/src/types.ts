@@ -2313,7 +2313,7 @@ export type ClientCommand =
   // finishes rather than appearing later out of a generation somebody had to sit through. Every
   // field is optional — all three are skippable, and an unnamed agent beats a screen that refuses
   // to move on.
-  | { cmd: "createDraftAgent"; category?: string }
+  | { cmd: "createDraftAgent"; category?: string; description?: string }
   /** §7.5: the WHOLE grant set for an agent that already exists. See sendSetAgentTools. */
   | { cmd: "setAgentTools"; agentId: string; mcpTools: string[] }
   /**

@@ -1251,6 +1251,14 @@ export function sendCreateDraftAgent(input: {
    * agent the fourth face.
    */
   category?: string;
+  /**
+   * What the person said the agent should help them with.
+   *
+   * STORED, NOT BUILT FROM. It becomes the row's description, so the card and the detail header
+   * have something to say about an agent that has not been generated yet — and generation stays in
+   * the composer, which is the only place it may start.
+   */
+  description?: string;
 }): void {
   send({ cmd: "createDraftAgent", ...input });
 }

@@ -276,6 +276,15 @@ export type CreateDraftAgentCommand = {
   cmd: "createDraftAgent";
   category?: string;
   /**
+   * What the person said the agent should help them with, in their own words.
+   *
+   * IT IS A DESCRIPTION, NOT A BRIEF, and the difference is what this command does with it: it is
+   * stored on the row and nothing is built from it. Generation happens in the composer and only
+   * there — see `createDraftAgent` — so this is the sentence the card and the detail header show
+   * while the agent is still a draft, not an instruction to a model.
+   */
+  description?: string;
+  /**
    * An agent that already exists to build INTO, rather than creating one.
    *
    * The onboarding step writes a row with an identity and no code; the first description finds that
