@@ -3486,6 +3486,22 @@ export interface AgentCardView {
    */
   picture: string | null;
 
+  /**
+   * What this agent last ran on — the provider, and the model's display name.
+   *
+   * BOTH NULL UNTIL IT HAS RUN, which is the point rather than a gap. There is no model column on
+   * `agents`; `default_provider` is a provider and nothing names a model, so "this agent's model" is
+   * not a fact the product holds. What it does hold is what the LAST RUN used, and a card for an
+   * agent nobody has run yet has nothing truthful to put there — so it puts nothing.
+   *
+   * THE NAME IS RESOLVED HERE, NOT IN THE BROWSER. `pricing.json` is the catalogue, and it maps
+   * `claude-opus-5` to "Opus 5". A client that mapped it would be the second copy of model facts
+   * this codebase has already been bitten by — the one that put a selector four models behind the
+   * price sheet. Falls back to the raw id, so an unpriced model still reads as something.
+   */
+  last_provider: string | null;
+  last_model: string | null;
+
   current_version: number;
   /** What made the live version. Null when nothing has been published — see `agentHealth`. */
   version_source: "generation" | "edit" | "import" | "deploy" | null;

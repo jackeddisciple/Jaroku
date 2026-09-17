@@ -1436,6 +1436,21 @@ export interface AgentCardView {
    */
   picture: string | null;
 
+  /**
+   * What this agent last ran on — the provider, and the model's display name.
+   *
+   * BOTH NULL UNTIL IT HAS RUN. There is no model column on `agents` — `default_provider` is a
+   * provider and nothing names a model — so "this agent's model" is not a fact the product holds.
+   * What it holds is what the LAST RUN used, which is why the card shows this only for an agent
+   * somebody has actually run.
+   *
+   * THE NAME ARRIVES RESOLVED. The server maps `claude-opus-5` to "Opus 5" out of `pricing.json`;
+   * this side must not keep a second copy of that mapping, which is the drift that once put a model
+   * selector four models behind the price sheet.
+   */
+  last_provider: string | null;
+  last_model: string | null;
+
   current_version: number;
   version_source: "generation" | "edit" | "import" | "deploy" | null;
   /** Null renders as unknown, never as `$0` — v0.1.9's rule, restated by §6. */

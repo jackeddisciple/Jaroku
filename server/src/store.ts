@@ -548,8 +548,8 @@ export class TraceStore {
     // `workspace_id` is a storage column and the one documented exception to the frozen event
     // schema, and a `*` here would put it into a payload that is broadcast.
     const recent = await this.q(ctx).all<Record<string, unknown>>(
-      `SELECT id, agent_id, status, started_at, ended_at, error FROM (
-         SELECT id, agent_id, status, started_at, ended_at, error,
+      `SELECT id, agent_id, status, started_at, ended_at, error, provider, model FROM (
+         SELECT id, agent_id, status, started_at, ended_at, error, provider, model,
                 ROW_NUMBER() OVER (PARTITION BY agent_id ORDER BY started_at DESC, id DESC) AS rn
            FROM runs
           WHERE workspace_id = ?
@@ -574,6 +574,8 @@ export class TraceStore {
             : "ok",
         startedAt: String(row["started_at"]),
         endedAt: (row["ended_at"] as string | null) ?? null,
+        provider: String(row["provider"] ?? ""),
+        model: String(row["model"] ?? ""),
       });
       // The newest error in the window, which is what "last error" means on a card. Assigned as the
       // ascending scan goes, so the last one written is the most recent.
@@ -748,6 +750,20 @@ export interface RecentRun {
   startedAt: string;
   /** Null while a run is still going, which is what makes its duration unknown rather than zero. */
   endedAt: string | null;
+  /**
+   * What this run actually ran on.
+   *
+   * ON THE RUN RATHER THAN ON THE AGENT, and that is the whole reason the card can show a model at
+   * all. `agents` has a `default_provider` and no model column — there is no such thing as "this
+   * agent's model" to read — so the honest answer to "what does this agent run on" is what its last
+   * run used, which is a fact that exists only here.
+   *
+   * THEY COME FREE. The query that selects these rows is already one window function over the
+   * workspace's runs, for the sparkline; two more columns on it is no extra statement and no extra
+   * round trip, which is what `test:agent-grid`'s N+1 assertion is about.
+   */
+  provider: string;
+  model: string;
 }
 
 /** What one agent's runs say about it. See `TraceStore.agentRunFacts`. */

@@ -45,6 +45,8 @@ const card = (over: Partial<AgentCardView> & { slug: string }): AgentCardView =>
   missing_env: [],
   high_impact_tools: 0,
   default_provider: "fake",
+  last_provider: "anthropic",
+  last_model: "Opus 5",
   thread_count: 1,
   latest_thread: null,
   runtime: "idle",

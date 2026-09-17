@@ -45,6 +45,8 @@ const card = (over: Partial<AgentCardView> = {}): AgentCardView => ({
   missing_env: ["STRIPE_KEY"],
   high_impact_tools: 1,
   default_provider: "anthropic",
+  last_provider: "anthropic",
+  last_model: "Opus 5",
   thread_count: 3,
   latest_thread: null,
   runtime: "idle",

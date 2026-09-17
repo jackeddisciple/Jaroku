@@ -304,7 +304,7 @@ import {
   PROVIDER_ENV_KEY, isProviderId, isRealProvider, providerLabel, providerStatus, verifyProviderKey,
   type ProviderId,
 } from "./providers.ts";
-import { allPrices, capabilityFor, costFor, effortLabelsFor, isPriced } from "./pricing.ts";
+import { allPrices, capabilityFor, costFor, effortLabelsFor, isPriced, priceFor } from "./pricing.ts";
 import { DeployStore, isInFlight as isDeployInFlight, type Deployment } from "./deployStore.ts";
 import { DeployOps } from "./deployOps.ts";
 import { DeployDispatcher } from "./deployDispatch.ts";
@@ -6411,6 +6411,9 @@ async function agentGridSnapshot(ctx: TenantContext): Promise<AgentGridSnapshot>
     const money = spendBySlug.get(a.slug);
     const versionSource = versionSources.get(a.id) ?? null;
     const outcomes = runs?.recent ?? [];
+    // THE NEWEST OF THEM, WHICH IS THE LAST. `agentRunFacts` returns the window oldest-first — the
+    // order the sparkline is read in — so the most recent run is at the end rather than the front.
+    const latestRun = outcomes.length > 0 ? outcomes[outcomes.length - 1]! : null;
 
     return {
       agent_id: a.slug,
@@ -6435,6 +6438,10 @@ async function agentGridSnapshot(ctx: TenantContext): Promise<AgentGridSnapshot>
       current_version: a.current_version,
       version_source: versionSource,
       creation_cost: a.creation_cost,
+      // WHAT IT LAST RAN ON, or nothing at all. See the field's own note on the wire shape for why
+      // this is the last run's rather than the agent's, and why the name is resolved on this side.
+      last_provider: latestRun?.provider || null,
+      last_model: latestRun?.model ? (priceFor(latestRun.model)?.name ?? latestRun.model) : null,
       connectors: a.connectors,
       mcp_tools: a.mcp_tools,
       required_env: a.required_env,
