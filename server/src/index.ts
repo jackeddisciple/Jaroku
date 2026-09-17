@@ -4678,6 +4678,9 @@ const relay = new WsRelay({
         // deterministic assignment probed against.
         category: a.category,
         avatar_id: a.avatar_id,
+        // AND THE ONE THAT REPLACES BOTH OF THEM. `picture` names a portrait and the banner cut
+        // from its own palette, so it is the only identity value the sidebar and the card need.
+        picture: a.picture,
         /**
          * NOTHING PUBLISHED AND NOTHING ON DISK — an agent that has an identity and no code.
          *
@@ -6475,6 +6478,9 @@ async function agentGridSnapshot(ctx: TenantContext): Promise<AgentGridSnapshot>
       // already assembled here, so neither costs a query.
       category: a.category,
       avatar_id: a.avatar_id,
+      // AND THE ONE THAT REPLACES BOTH OF THEM — a column on the row already assembled here, so it
+      // costs no query, and the only identity the card's banner and portrait need.
+      picture: a.picture,
       current_version: a.current_version,
       version_source: versionSource,
       creation_cost: a.creation_cost,

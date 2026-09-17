@@ -3485,6 +3485,19 @@ export interface AgentCardView {
    */
   category: string;
   avatar_id: string | null;
+  /**
+   * Which of the eleven illustrated faces this agent wears (migration 079).
+   *
+   * THE WHOLE IDENTITY IN ONE STRING. The id names a PAIR — the square portrait the card draws over
+   * its banner, and the banner itself, cut from the portrait's own palette — so a client that has
+   * this needs nothing else to draw the top of a card. It travels rather than being derived because
+   * the assignment is the agent's POSITION in its workspace's creation order, which a browser
+   * cannot know and which must not change when an unrelated agent appears.
+   *
+   * Null only for a row written before migration 079's backfill, which is why every render site
+   * treats it as optional rather than assuming.
+   */
+  picture: string | null;
 
   current_version: number;
   /** What made the live version. Null when nothing has been published — see `agentHealth`. */

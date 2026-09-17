@@ -102,6 +102,19 @@ export interface AgentSummary {
   category?: string;
   avatar_id?: string | null;
   /**
+   * Which of the eleven illustrated faces this agent wears (migration 079).
+   *
+   * ON THIS LIST FOR THE REASON `emoji` WAS, AND IT REPLACES IT. The sidebar is built from this
+   * list and draws the portrait on every agent row; every other surface that names an agent by slug
+   * resolves against this list rather than growing an identity column of its own.
+   *
+   * THE ID NAMES A PAIR — the square portrait and the banner cut from its own palette — so this one
+   * string is the whole of what a card draws above its text. Optional on the type and always
+   * present on the wire, for the same reason the two above are: a rolling deploy can put a client in
+   * front of a server that predates it.
+   */
+  picture?: string | null;
+  /**
    * An identity with no code behind it: nothing published and nothing on disk.
    *
    * WHAT THE COMPOSER NEEDS TO KNOW BEFORE IT DECIDES WHAT A SENTENCE MEANS. With an ordinary agent
@@ -1441,6 +1454,18 @@ export interface AgentCardView {
    */
   category: string;
   avatar_id: string | null;
+  /**
+   * Which of the eleven illustrated faces this agent wears (migration 079).
+   *
+   * THE ONE IDENTITY VALUE THE CARD NEEDS, and what retires the two above it. The id names a PAIR —
+   * the portrait the card draws and the banner behind it, cut from the portrait's own palette — so
+   * the card's whole picture comes from this string and `agentFaces.ts`. The name the agent was
+   * given at creation came from the same entry.
+   *
+   * Null only for a row written before migration 079's backfill; `AgentAvatar` draws the agent's
+   * initial for those, which is why every render site treats it as optional rather than assuming.
+   */
+  picture: string | null;
 
   current_version: number;
   version_source: "generation" | "edit" | "import" | "deploy" | null;

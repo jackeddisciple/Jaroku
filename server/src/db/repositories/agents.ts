@@ -14,6 +14,7 @@
 import { randomUUID } from "node:crypto";
 import { assignEmoji } from "../../agents/emojiPalette.ts";
 import { UNCATEGORIZED, avatarIdFor } from "../../agents/avatarRoster.ts";
+import { faceAt } from "../../agents/faces.ts";
 import { asInt, asBool, jsonFromColumn, type Db, type Queryable } from "../db.ts";
 import type { TenantContext } from "../tenant.ts";
 
@@ -161,6 +162,25 @@ export interface Agent {
    * rather than a missing one. Null falls back to the emoji, which is the card's honest answer.
    */
   avatar_id: string | null;
+  /**
+   * Which of the eleven illustrated faces this agent wears (migration 079), or null.
+   *
+   * ONE COLUMN FOR THE WHOLE IDENTITY, which is what makes it worth a new one rather than a third
+   * beside `emoji` and `avatar_id`. The id names a PAIR — a square portrait and the banner cut from
+   * its own palette — and the name the agent was given at creation came from the same entry, so a
+   * row carrying this carries everything the card draws above its own text.
+   *
+   * WRITTEN AT CREATION, NEVER DERIVED AT READ, and here that is load-bearing rather than an
+   * optimisation: the assignment is the agent's POSITION in its workspace's creation order, so
+   * deriving it on read would move every agent's face the moment somebody created or swept another
+   * one. See `agents/faces.ts` for why the position rather than a hash.
+   *
+   * NULLABLE IN THE SCHEMA AND EFFECTIVELY NEVER NULL. Migration 079 explains at length; the short
+   * version is that a DEFAULT here would be a NAMED PORTRAIT, so a row written during a rolling
+   * deploy by a version that does not know the column would silently be Iris — a wrong identity
+   * rather than a missing one. Null draws the agent's initial, which is the honest answer.
+   */
+  picture: string | null;
   created_at: string;
 }
 
@@ -216,7 +236,7 @@ export interface AgentOnDisk {
 
 const COLUMNS = `id, slug, display_name, display_name_is_custom, description, connectors,
                  mcp_tools, required_env, default_provider, hand_written, current_version,
-                 creation_cost, created_by, forked_from, emoji, category, avatar_id,
+                 creation_cost, created_by, forked_from, emoji, category, avatar_id, picture,
                  archived_at, created_at`;
 
 export class AgentRepository {
@@ -244,6 +264,31 @@ export class AgentRepository {
     return rows.map((r) => r.emoji!).filter(Boolean);
   }
 
+  /**
+   * The face the next agent created in this workspace gets — the picture and the name together.
+   *
+   * PUBLIC, BECAUSE THE NAME IS NEEDED BEFORE THE ROW EXISTS. `create` could compute the picture
+   * itself, but the name it pairs with has to be slugified into `agents.slug` and checked for
+   * uniqueness first, so the caller has to be able to ask. One call answers both halves, which is
+   * what keeps a portrait and the name under it from being two independent draws.
+   *
+   * THE COUNT IS UNFILTERED — archived and swept rows are counted. The sequence is a counter rather
+   * than a census: a workspace that archived its third agent should hand the next one the fourth
+   * face rather than repeating the third. Migration 079's backfill counts the same way.
+   *
+   * TWO CREATES IN THE SAME MOMENT CAN READ THE SAME COUNT, and the result is two agents sharing a
+   * face. That is a duplicate of a cosmetic choice, which this product has always permitted — the
+   * emoji assignment this replaces had the same race against its own probe — and a lock taken to
+   * prevent it would be a lock on the agents table for a picture.
+   */
+  async nextFace(ctx: TenantContext): Promise<{ id: string; name: string }> {
+    const row = await this.q(ctx).get<{ n: number | bigint }>(
+      `SELECT COUNT(*) AS n FROM agents WHERE workspace_id = ?`,
+      [ctx.workspaceId],
+    );
+    return faceAt(Number(row?.n ?? 0));
+  }
+
   private hydrate(row: Record<string, unknown>): Agent {
     const d = this.db.dialect;
     const arr = (v: unknown): string[] => {
@@ -266,6 +311,7 @@ export class AgentRepository {
       // row was written on.
       category: (row["category"] as string | null) ?? UNCATEGORIZED,
       avatar_id: (row["avatar_id"] as string | null) ?? null,
+      picture: (row["picture"] as string | null) ?? null,
       archived_at: (row["archived_at"] as string | null) ?? null,
     };
   }
@@ -484,15 +530,25 @@ export class AgentRepository {
        * else is allowed and warned, so this is a parameter rather than a rule.
        */
       avoidAvatar?: string | null;
+      /**
+       * Which of the eleven faces this agent wears (migration 079).
+       *
+       * ABSENT MEANS THE WORKSPACE'S NEXT ONE, so every insert path writes a picture whether or not
+       * the caller thought about it. A caller that has already asked `nextFace` — because it needed
+       * the NAME that goes with the face — passes what it was given rather than asking twice, which
+       * is the only way the portrait and the name under it are guaranteed to be the same entry.
+       */
+      picture?: string | null;
     },
   ): Promise<Agent> {
     if (!SAFE_SLUG.test(a.slug)) throw new Error(`not a usable agent id: ${a.slug}`);
     const taken = await this.takenEmoji(ctx);
+    const picture = a.picture ?? (await this.nextFace(ctx)).id;
     await this.q(ctx).run(
       `INSERT INTO agents (id, workspace_id, slug, display_name, description, connectors,
          mcp_tools, required_env, default_provider, hand_written, creation_cost, created_by,
-         forked_from, emoji, category, avatar_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         forked_from, emoji, category, avatar_id, picture, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         a.id,
         ctx.workspaceId,
@@ -522,6 +578,10 @@ export class AgentRepository {
         // A CHOSEN AVATAR WINS; otherwise the hash, so the form is never empty and somebody who
         // does not care can skip the step. `avoidAvatar` is the fork case and only that.
         a.avatarId ?? avatarIdFor(a.id, a.avoidAvatar ? [a.avoidAvatar] : []),
+        // WHICH OF THE ELEVEN, and it is the position rather than a hash — see `agents/faces.ts`.
+        // There is no `avoid` twin of this: over eleven pictures a fork is nearly always going to
+        // differ from its parent anyway, and the parent's face is not a fact this INSERT holds.
+        picture,
         a.created_at ?? new Date().toISOString(),
       ],
     );
@@ -632,11 +692,12 @@ export class AgentRepository {
     // nothing could ever reproduce.
     const id = randomUUID();
     const taken = await this.takenEmoji(ctx);
+    const picture = (await this.nextFace(ctx)).id;
     await this.q(ctx).run(
       `INSERT INTO agents (id, workspace_id, slug, display_name, description, connectors,
          mcp_tools, required_env, default_provider, hand_written, creation_cost, emoji,
-         category, avatar_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         category, avatar_id, picture, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (workspace_id, slug) DO UPDATE SET
          -- A NAME A PERSON CHOSE SURVIVES THE SYNC. Without the CASE this column is overwritten
          -- from jaroku.json on every reconciliation, so a rename lasts until the next boot that
@@ -651,7 +712,7 @@ export class AgentRepository {
          default_provider = excluded.default_provider,
          hand_written = excluded.hand_written,
          creation_cost = excluded.creation_cost,
-         -- emoji, category AND avatar_id ARE NOT IN THE UPDATE LIST, deliberately. A reconciliation
+         -- emoji, category, avatar_id AND picture ARE NOT IN THE UPDATE LIST, deliberately. A reconciliation
          -- runs on every boot, and all three are things a PERSON sets: an identity that a boot
          -- rewrote would be an identity that changed for a reason nobody could see -- the same trap
          -- display_name was in before display_name_is_custom closed it, one column over. A
@@ -676,6 +737,11 @@ export class AgentRepository {
         // either from the identity section afterwards.
         UNCATEGORIZED,
         avatarIdFor(id),
+        // NOR A PICTURE, so it takes the workspace's next one. A synced agent keeps the name its
+        // directory declares — the face's own name is for agents this product creates, and
+        // overwriting `invoice_chaser` with "Stacey" on a boot would be the reconciliation trap
+        // `display_name_is_custom` closed.
+        picture,
         a.created_at ?? new Date().toISOString(),
       ],
     );

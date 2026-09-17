@@ -455,6 +455,16 @@ jobs:
           # Beside it the pair §5.1 names: a fork must not look like its parent, because the two sit
           # adjacent in the grid and are exactly the ones you need to tell apart.
           npm run test:agent-avatar
+          # AND WHAT REPLACES BOTH OF THEM, which deliberately does NOT hash. Over eleven pictures
+          # the birthday bound the two suites above manage around becomes unmanageable — a hash
+          # collides on the fourth or fifth agent more often than not, and where twenty-eight
+          # characters had a picker that warned, these are handed out silently. So the assignment is
+          # the agent's POSITION in its workspace's creation order, and this is the suite that
+          # asserts the property that buys: eleven agents made one after another in one workspace
+          # wear eleven different faces. Beside it the drift check, which has two halves rather than
+          # one — a face is a portrait AND a name, so the copies can disagree by handing out a
+          # picture the client cannot draw, or by putting the wrong name under one it can.
+          npm run test:agent-picture
           # `test:edit-versions` IS DELIBERATELY NOT HERE, and it is the one suite in this file's
           # history whose absence is a reason rather than an oversight. It replays recorded model
           # output, which needs no network — but an apply VALIDATES the generated project, and
