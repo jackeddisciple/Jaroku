@@ -98,6 +98,35 @@ and nowhere else.
   face and a name is something to build into.
 - **Nothing outside the composer raises a plan.** The dialog sent `planAgent`, one step short of a
   build; a plan raised from a form is a build somebody started by filling in fields.
+- **The New agent dialog asks the brief first and keeps the taxonomy behind one line.** All forty
+  categories were laid out as chips in six labelled groups *above* the question the dialog exists to
+  ask, so the form was six hundred pixels of vocabulary and one textarea — capped at 86% of the
+  viewport, with the brief below a fold. The textarea is the field now; the category is a
+  `CategoryPicker` trigger under it, opening a searchable grouped popover whose **search field
+  doubles as the way to name your own** — it offers `Use "<what you typed>"` as the only row when
+  nothing matches, which retires the separate "Name your own" button and the input it revealed. Two
+  controls for "pick a word" and "supply a word" was one more than the question needs, and the
+  column stores both identically. The popover borrows `Select`'s whole interaction contract —
+  `aria-haspopup`, click-away, Escape, arrow keys, Enter — without widening the six call sites that
+  control serves; free text does not belong in a select.
+- **The agent card's hierarchy is name, category, the recent conversation, then one quiet line of
+  figures.** The tag row used to sit directly under the name, so `IDLE UNVERIFIED DRAFT` — the same
+  three badges on nearly every card in a young workspace — was the second thing read on the
+  product's primary object, above what the agent is for and above anything it had done. They are
+  state, they are secondary, and they now sit under the figures. The thread preview's title takes a
+  weight rather than a rung so it reads as the head of the two lines under it, and it carries no
+  label: `RECENT THREAD` and `CURRENT FOCUS` were both considered and both refused.
+- **The card's footer and its sparkline are one line.** The figures sat on a bordered footer; above
+  it, *sometimes*, a row holding twenty bars and a `live` dot and otherwise nothing at all — which
+  on a fresh workspace was a band of empty space on every card at once. Threads, activity and spend
+  read left to right as one sentence; the sparkline, the deploy dot, the date chip and the creator's
+  initial are objects, and sit right. One `ml-auto` on the box around them rather than one each:
+  flex siblings *distribute* free space, so two would have opened a gap in the middle of the cluster
+  that grew with the card.
+- **New Thread keeps its cylinder and loses its fill.** Filled in `chrome` it was the heaviest shape
+  on the card, a solid bar under a 16px name, three across. The surface arrives on approach instead
+  — nothing at rest, `bg-active` on hover or keyboard focus, the label lifting from `muted` to `ink`
+  with it.
 
 ### Removed
 
@@ -114,6 +143,10 @@ and nowhere else.
   which is worth knowing — a header marker leaves the second `DROP COLUMN` still reported.
 - **The name field on the New agent dialog**, and the onboarding face carousel with it. A field for
   something the product already knows is a question with a right answer nobody has.
+- **The slug from the agent card.** It was a second identifier under the first — `margot` under
+  `Margot`, differing by a capital, down every card in the grid. An identifier earns its pixels
+  where somebody *types* it; nowhere on a card is it typed, and it is still the card's
+  `data-agent-card`. It is written once, on the detail header, as the path it is.
 - **`agents.shuffleEmoji`** from the icon registry, and `avatarRoster.ts`, whose one surviving
   export — the neutral category — moved to `server/src/agents/category.ts`.
 
@@ -148,6 +181,21 @@ than asserted from source:
   Rename, Archive with its creator-naming confirm, Restore from the archived-only grid, the card
   click into the detail, and the New Thread pill.
 - **The detail header** — correct banner and portrait for `agent-03`, and the description rendered.
+- **The redesigned dialog, driven live** — the brief typed, `bill` filtered forty rows to Billing,
+  `queue watching` offered itself and was taken with Return, `Clear category` returned the footer to
+  `No category`, and Create wrote Marisol · Billing with the sentence on its card. Two real bugs
+  came out of watching it rather than reading it: the popover **opened downward through the footer
+  and off the bottom of the window**, with everything below Business unreachable — it measures the
+  room and flips now, preferring downward unless downward is genuinely cramped, because "flip up
+  unless the maximum fits below" covers the header and the textarea every time — and **holding Down
+  lost the cursor**, since thirty-four of forty rows are out of sight and nothing scrolled them into
+  view.
+- **Both fields on the input rung.** The textarea and the popover's search field had picked
+  neighbouring radius rungs; `test:surface-system`'s structural census of every `<input>`,
+  `<textarea>` and `<select>` in the client caught both, which is the argument for mirroring the
+  whole workflow rather than the suites that look related.
+- **Equal card heights after the reorder** — all five cards 306×401 at card density, and compact
+  unchanged.
 
 ### Notes
 
