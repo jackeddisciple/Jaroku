@@ -1,7 +1,7 @@
 // Site-wide constants. Kept as literals so a fact appearing on two pages cannot drift.
 export const SITE = {
   name: "Jaroku",
-  version: "0.3.15",
+  version: "0.3.16",
   tagline: "Build, deploy and operate LangGraph agents you can copy out and run anywhere.",
   domain: "jaroku.dev",
   contactEmail: "contact@jaroku.dev",
