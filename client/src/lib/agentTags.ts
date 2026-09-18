@@ -31,7 +31,7 @@
 // a valid and important state, and a card that hides it is lying about the agent — so `Idle` is a
 // Runtime tag, `Failing` is a Health tag, and nothing here can produce a single tag meaning both.
 
-import { STATUS, TEXT } from "./tokens.ts";
+import { STATUS, TAG_TINT, TEXT } from "./tokens.ts";
 
 /** The five families, in the precedence order §5.4 gives for trimming. */
 export const TAG_FAMILIES = ["attention", "runtime", "deploy", "health", "lifecycle"] as const;
@@ -74,6 +74,25 @@ export const TAG_COLOR: Record<TagTone, string> = {
   green: STATUS.ok,
   grey: TEXT.faint,
 };
+
+/**
+ * The colour a tag wears, BY ITS OWN ID — the product owner's call, and it is a different idea from
+ * `tone` above rather than a replacement for it.
+ *
+ * `tone` IS WHAT THE TAG MEANS. Four values: trouble, in flight, good, neutral. It is what the
+ * precedence rule sorts on and what a reader should take from a colour, and nothing here changes it.
+ *
+ * THIS IS WHICH TAG IT IS. Thirteen of the seventeen were `grey`, so a card's row was three
+ * identical pills and the only way to tell them apart was to read them. Keyed by id, the row is
+ * scannable by colour: amber is always running, blue is always draft, teal is always unverified.
+ *
+ * FALLS BACK TO THE TONE, which is what keeps a tag added to the resolver from rendering colourless
+ * while somebody forgets this map — `agentTagRow`'s own suite counts the tags, and a new one shows
+ * up there rather than here.
+ */
+export function tagColour(tag: AgentTag): string {
+  return TAG_TINT[tag.id as keyof typeof TAG_TINT] ?? TAG_COLOR[tag.tone];
+}
 
 /** Everything the resolver reads. A subset of the card, so a test needs no fixture generator. */
 export interface TagInput {

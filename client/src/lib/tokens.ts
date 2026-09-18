@@ -72,6 +72,63 @@ export const ACCENT = {
   mcp: "#A83E82",
 } as const;
 
+/**
+ * A COLOUR PER AGENT TAG — the product owner's call, and it is an IDENTIFIER rather than a status.
+ *
+ * WHAT CHANGED AND WHY IT NEEDED NEW VALUES. The tags ran on four tones: amber for running, red for
+ * trouble, green for live, grey for everything else. Grey was thirteen of the seventeen, so a card's
+ * row read as three identical pills whose words you had to actually read. The ask was that each tag
+ * carry its own colour and its own dot, so the row is scannable by colour alone.
+ *
+ * NINE OF THE SEVENTEEN REUSE A TOKEN THAT ALREADY MEANS THE RIGHT THING, and they are written as
+ * references rather than as copies so they cannot drift: `failing` IS danger, `live` IS success,
+ * `running` IS warning. Eight are new, and they are here rather than in the component for the reason
+ * every other value in this file is — `test:colour-system` refuses a hex anywhere else, and the one
+ * thing that keeps a palette a palette is that there is one.
+ *
+ * CHOSEN AGAINST WHITE AT TWELVE PERCENT, which is how `Chip` tints a capsule from a single value:
+ * the hue is the text and the dot, and the ground is the same hue at `1f`. So each of these has to
+ * be dark enough to read as text on a near-white pill and separated enough in hue from its
+ * neighbours to be told apart at eleven pixels. That is what rules out a straight ramp of one hue.
+ */
+export const TAG_TINT = {
+  /** Crimson. A credential is missing — the one tag that is about being blocked. */
+  "creds-missing": "#9B2C4A",
+  /** Magenta. Tools that can act on the world. */
+  "high-impact": "#A21CAF",
+  /** Brown. Something here ran on a model with no price. */
+  "cost-unknown": "#8A5A2B",
+  /** Amber — SEMANTIC.warning. A run is in flight. */
+  running: SEMANTIC.warning,
+  /** Cyan. Jaroku is writing this agent's files. */
+  generating: "#0E7490",
+  /** Indigo — ACCENT.state. A deployment is building or releasing. */
+  deploying: ACCENT.state,
+  /** Slate. Halted mid-graph, waiting on a person. */
+  paused: "#64748B",
+  /** Stone. Nothing is running, and nothing is wrong. */
+  idle: "#78716C",
+  /** Orange. What is deployed is behind what is here. */
+  drift: "#C2620E",
+  /** Green — SEMANTIC.success. Serving on a public URL. */
+  live: SEMANTIC.success,
+  /** Red — SEMANTIC.danger. Its recent runs are failing. */
+  failing: SEMANTIC.danger,
+  /** Dark gold. Some of its recent runs failed, not all. */
+  degraded: "#A16207",
+  /** Teal — ACCENT.reviewed. Nobody has verified it yet. */
+  unverified: ACCENT.reviewed,
+  /** Grey — INK.muted. Put away. */
+  archived: INK.muted,
+  /** Purple — ACCENT.bespoke. Copied from another agent. */
+  forked: ACCENT.bespoke,
+  /** Blue — SEMANTIC.info. Nothing has been published yet. */
+  draft: SEMANTIC.info,
+  /** Pink — the same value `RUNS.ink` carries. Created in the last week, or not run yet. */
+  new: "#DB2777",
+} as const;
+
+
 export type AccentName = keyof typeof ACCENT;
 
 /**

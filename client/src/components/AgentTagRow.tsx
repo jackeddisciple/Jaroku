@@ -13,16 +13,38 @@
 
 import { useState } from "react";
 import { Chip } from "./Chip.tsx";
-import { TAG_COLOR, agentTagRow, type AgentTag, type TagInput } from "../lib/agentTags.ts";
+import { agentTagRow, tagColour, type AgentTag, type TagInput } from "../lib/agentTags.ts";
+
+/**
+ * SENTENCE CASE, NOT CAPS — the product owner's call, with a reference.
+ *
+ * The labels are lowercase at the source (`agentTags.ts`) and were uppercased by the chip, so a row
+ * read `IDLE UNVERIFIED DRAFT`. Capitalising only the first letter is what the reference shows and
+ * is also the only transform that survives a two-word label: CSS `capitalize` would give
+ * `High-Impact Tools`, and `high-impact tools` is one thing rather than three.
+ */
+const sentence = (label: string): string => label.charAt(0).toUpperCase() + label.slice(1);
 
 function Tag({ tag }: { tag: AgentTag }) {
+  const colour = tagColour(tag);
   return (
-    // `caps`, like every other badge in the app. Tag labels were authored Title Case while
-    // StatusBadge's are authored lowercase and uppercased by the chip — so `Idle` rendered in
-    // title case beside `CONNECTED` in uppercase, one row apart, two badge systems and two
-    // casings. The labels are lowercase at the source now and the transform is the chip's.
-    <Chip caps size="sm" color={TAG_COLOR[tag.tone]} title={tag.title} className="shrink-0">
-      {tag.label}
+    // A TINTED CAPSULE WITH A SOLID DOT, at the full-round rung — the reference exactly. `Chip`
+    // builds all of it from the one colour: the text and the dot take it directly and the ground is
+    // the same hue at twelve percent, so a capsule's fill can never disagree with what is written
+    // on it. `pill` is §04's rung for "status tags, badges and semantic pills", which is what these
+    // are and what nothing else using `Chip` is.
+    <Chip
+      pill
+      size="sm"
+      color={colour}
+      title={tag.title}
+      className="shrink-0"
+      // THE DOT IS THE CHIP'S ICON SLOT rather than a span in the label, so it sits in the same
+      // place the date chip's calendar mark does and inherits the gap the chip already sets.
+      // `currentColor` rather than the value again: the chip has already set the text to it.
+      icon={<span className="block h-1.5 w-1.5 rounded-full bg-current" />}
+    >
+      {sentence(tag.label)}
     </Chip>
   );
 }

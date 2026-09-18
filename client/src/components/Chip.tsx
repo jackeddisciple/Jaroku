@@ -99,6 +99,11 @@ export type ChipProps = {
    */
   caps?: boolean;
   /**
+   * The full-round rung instead of the chip's own 4px, for §04's "status tags, badges and semantic
+   * pills only". An agent's tag row is that and nothing else here is.
+   */
+  pill?: boolean;
+  /**
    * Inline rather than inline-flex, for a chip inside a sentence. An inline-flex box cannot
    * break across a line, so an identifier in a wrapping paragraph has to stay inline.
    */
@@ -121,6 +126,7 @@ export function chipClass({
   tone = "muted",
   mono = false,
   caps = false,
+  pill = false,
   inline = false,
   interactive = false,
 }: {
@@ -129,11 +135,17 @@ export function chipClass({
   mono?: boolean;
   inline?: boolean;
   caps?: boolean;
+  pill?: boolean;
   interactive?: boolean;
 } = {}): string {
   return [
     inline ? "inline" : "inline-flex items-center",
-    "align-middle rounded-xs",
+    "align-middle",
+    // `xs` IS THE CHIP, AND `pill` IS THE ONE EXCEPTION. §04 keeps the pill rung for "status tags,
+    // badges and semantic pills only" — which is exactly what an agent's tag row is, and nothing
+    // else that uses this component. Opt-in rather than a second component, because everything else
+    // about the two is identical.
+    pill ? "rounded-pill" : "rounded-xs",
     SIZE[size],
     inline ? PAD_Y_INLINE[size] : PAD_Y[size],
     TONE[tone],
@@ -164,6 +176,7 @@ export function Chip({
   background,
   mono = false,
   caps = false,
+  pill = false,
   inline = false,
   selected,
   onClick,
@@ -192,7 +205,7 @@ export function Chip({
   if (background) surface.backgroundColor = background;
 
   const cls = [
-    chipClass({ size, tone: color ? tone : effectiveTone, mono, caps, inline, interactive }),
+    chipClass({ size, tone: color ? tone : effectiveTone, mono, caps, pill, inline, interactive }),
     !color && !background && effectiveVariant === "fill" ? "bg-active" : "",
     // A SELECTED CHIP STILL ANSWERS THE POINTER. It only got a hover response while unselected,
     // so the connector chips and the Chat/Test segments went dead the moment they were chosen —
