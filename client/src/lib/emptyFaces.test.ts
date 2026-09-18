@@ -13,6 +13,12 @@
 //   screen" is a shape somebody will reach for a `sort` or a `Math.random` on sooner or later.
 //   Checked against the ids and against the component's source.
 //
+//   THE HOVER TWIST IS CSS AND HOLDS NO STATE. Hovering a badge turns it six degrees clockwise and
+//   the one before it unwinds — which `:hover` gives for nothing, because a pointer is in exactly
+//   one place and the two badges change in the same frame. Written as `useState` and a pair of
+//   mouse handlers it would look identical in the markup and stutter by a render on every handoff,
+//   which is the one thing the behaviour was asked not to do.
+//
 //   AND THE PIXELS ARE NOT CHECKED HERE, WHICH IS A DECISION RATHER THAN AN OVERSIGHT. The thing
 //   the generator exists for is the cut — four of the six sources are opaque, three of those carry
 //   a grey checkerboard painted into their pixels, and one sits on a black square — so the
@@ -77,6 +83,33 @@ console.log("\nthe row draws them in that order and does nothing else to it");
   for (const banned of [".sort(", ".reverse(", "Math.random", "setInterval", "setTimeout"]) {
     check(`it never calls ${banned}`, !body.includes(banned));
   }
+}
+
+console.log("\nthe hover twist is CSS, so the handoff between two badges cannot stutter");
+{
+  const row = readFileSync(ROW, "utf8");
+  const body = row.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
+
+  check("a badge twists clockwise on hover", /\bhover:rotate-6\b/.test(body), body.match(/hover:rotate-[^\s"]*/)?.[0] ?? "");
+  check("...on a transition of its own", /\btransition-transform\b/.test(body));
+  // THE TWO SLOWEST TOKENS THE SYSTEM HAS, and the pair is the "very smooth" that was asked for.
+  // `duration-fast` here would read as a flick and `ease-state` covers the distance immediately.
+  check("...at the collapse duration", /\bduration-collapse\b/.test(body));
+  check("...on the curve that glides rather than pops", /\bease-smooth\b/.test(body));
+
+  // THE ASSERTION THIS BLOCK EXISTS FOR. "The previous badge returns to its place when you hover
+  // another" is free in CSS — a pointer is in one place, so one badge stops matching `:hover` in
+  // the same frame the next starts — and it is the obvious thing to rewrite as `useState` plus
+  // `onMouseEnter` later. Held in state the two badges are a render apart and the handoff stutters,
+  // which is precisely what was asked not to happen, and nothing about the markup would look wrong.
+  for (const banned of ["useState", "onMouseEnter", "onMouseLeave", "onPointerEnter"]) {
+    check(`it holds no hover state of its own: no ${banned}`, !body.includes(banned));
+  }
+
+  // AND IT STOPS FOR SOMEBODY WHO HAS ASKED FOR LESS MOVEMENT. The hover is neutralised, not just
+  // the transition — killing the transition alone leaves the badge snapping to six degrees.
+  check("reduced motion drops the transition", /motion-reduce:transition-none/.test(body));
+  check("...and the rotation with it", /motion-reduce:hover:rotate-0/.test(body));
 }
 
 console.log("\nthe empty state wears the row, and neither of the marks it replaced");

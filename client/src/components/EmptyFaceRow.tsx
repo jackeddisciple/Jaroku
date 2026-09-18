@@ -79,7 +79,34 @@ export function EmptyFaceRow() {
           // `shrink-0` because this row lives inside the empty state's centred column, which is a
           // flex container: without it a narrow window squeezes six badges into ovals rather than
           // letting them run to the padding.
-          className="block shrink-0"
+          //
+          // THE TWIST IS `:hover` AND NOTHING ELSE, which is the whole of why it behaves the way it
+          // was asked to. "The previous one returns to its place when you move to another" needs no
+          // state and no handler: a pointer is in exactly one place, so the badge it leaves stops
+          // matching `:hover` in the same frame the next one starts matching it, and both animate
+          // at once — one unwinding, one winding. Held in React state instead, the two would be a
+          // render apart and the handoff would stutter; in `onMouseEnter`/`onMouseLeave` it would
+          // also break on the one case CSS gets right for free, which is the pointer leaving the
+          // row entirely rather than moving to a sibling.
+          //
+          // SIX DEGREES, CLOCKWISE. Enough that the face inside visibly turns and small enough that
+          // the circle's own rim gives nothing away — the silhouette is unchanged, so what the eye
+          // catches is the drawing moving inside a badge that has not.
+          //
+          // `duration-collapse` AND `ease-smooth`, which are the two slowest tokens this system has
+          // and are chosen for exactly what their comments say. 220ms is long enough to read as a
+          // movement rather than a frame change; `smooth` "spends its time in the middle of the
+          // movement" where `state` covers the distance immediately and crawls to a stop, which on
+          // a rotation reads as a flick. The pair is what "very smooth" asks for.
+          //
+          // `transition-transform` RATHER THAN `transition-all`: the only thing here that may
+          // animate is the transform, and `all` would put the 220ms curve on the image swapping in
+          // at load as well.
+          //
+          // AND IT STOPS UNDER `prefers-reduced-motion`, spelled the way `ChoiceRow` and
+          // `AgentSparkline` spell it — the hover is neutralised rather than the transition alone,
+          // so the badge does not jump to six degrees with the animation switched off.
+          className="block shrink-0 transition-transform duration-collapse ease-smooth hover:rotate-6 motion-reduce:transition-none motion-reduce:hover:rotate-0"
           style={{
             width: BADGE,
             height: BADGE,
