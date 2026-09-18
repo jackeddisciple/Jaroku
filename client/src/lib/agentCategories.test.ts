@@ -18,6 +18,7 @@
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 
+import { categoryRows } from "../components/CategoryPicker.tsx";
 import { NewAgentDialog } from "../components/NewAgentDialog.tsx";
 import { markup } from "./testRender.ts";
 
@@ -120,30 +121,74 @@ console.log("\nthe column is TEXT, and stays TEXT");
   check("the server holds no copy of the presets", leaked.length === 0, leaked.join(", "));
 }
 
-console.log("\n§6's dialog offers all of them, in this order");
+console.log("\n§6's picker offers all of them, and the dialog does not lay them out");
 {
-  // A STRUCTURAL TEST, NOT A CLICK TEST. `renderToStaticMarkup` gives the markup the browser would
-  // start from, which is enough for the two questions worth asking of a picker: are all
-  // twenty-five actually offered, and are the three inputs in §6's order. Both go wrong silently —
-  // a group left out of a `map` is a category nobody can pick and nothing says so.
+  // ASKED OF THE ROW BUILDER, NOT OF THE MARKUP. The old check scraped the rendered dialog for
+  // each preset, which only worked while all forty were chips on the form; they are behind a
+  // popover now and there is nothing to scrape until somebody clicks. `categoryRows` IS the
+  // picker's logic, so asking it is asking the thing that would actually drop a group — the
+  // silent failure this file exists for.
+  const all = categoryRows("");
+  const offered = all.map((r) => r.value);
+  const missing = AGENT_CATEGORIES.filter((c) => !offered.includes(c));
+  check("every preset is reachable", missing.length === 0, missing.join(", "));
+  check("...in the order the groups declare them",
+    offered.join(",") === AGENT_CATEGORIES.join(","));
+  check("...and nothing else is", all.every((r) => r.kind === "preset"));
+
+  // EVERY GROUP HAS A HEADING, and it is derived rather than hand-written, so a filtered list
+  // cannot strand one over nothing.
+  const heads = new Set(all.map((r) => (r.kind === "preset" ? r.group : "")));
+  check("each row knows its group",
+    CATEGORY_GROUPS.every((g) => heads.has(g.label)) && heads.size === CATEGORY_GROUPS.length,
+    [...heads].join(","));
+
+  // THE FILTER NARROWS AND DOES NOT PROPOSE. Typing part of a preset's name should find it, not
+  // offer to invent a category spelled the same way with different capitals.
+  const bill = categoryRows("bill");
+  check("a partial match finds the preset", bill.some((r) => r.value === "Billing"));
+  check("...and offers nothing custom", bill.every((r) => r.kind === "preset"));
+  check("the match is case-blind", categoryRows("BILL").length === bill.length);
+
+  // AND THE SEARCH FIELD IS THE CUSTOM ENTRY, which is what replaced "Name your own" and the
+  // input it revealed. The offer is the ONLY row when nothing matches, and it is never made on
+  // whitespace: `normalizeCategory("")` is `Uncategorized`, and offering to name a category
+  // "Uncategorized" is offering the absence of one as a choice.
+  const own = categoryRows("queue watching");
+  check("an unmatched query offers itself", own.length === 1 && own[0]?.kind === "custom");
+  check("...spelled as it was typed", own[0]?.value === "queue watching");
+  check("...trimmed", categoryRows("  vendor chasing  ")[0]?.value === "vendor chasing");
+  check("whitespace is no filter at all", categoryRows("   ").length === AGENT_CATEGORIES.length);
+  check("...and offers nothing custom", categoryRows("   ").every((r) => r.kind === "preset"));
+
+  // A STRUCTURAL TEST OF THE DIALOG, for the two things about it that go wrong silently: the order
+  // of its questions, and whether the taxonomy has crept back onto the form.
   const html = markup(
     createElement(NewAgentDialog, { open: true, onClose: () => undefined }),
   );
-  const missing = AGENT_CATEGORIES.filter((c) => !html.includes(`>${c}<`));
-  check("every preset is on screen", missing.length === 0, missing.join(", "));
-  check("...and so is the custom fallback", html.includes("Name your own"));
 
-  // THE ORDER, FOR THE TWO INPUTS THIS DIALOG NOW ASKS. Category, then what it should help with —
-  // and the order is the part a chip row cannot carry, which is the whole reason this is a dialog.
+  // THE ORDER, AND IT IS THE OTHER WAY ROUND FROM §6's FIRST DRAFT. The sentence that says what
+  // the agent is FOR is the field this dialog is for; the category is a word, on one line, under
+  // it. It asked them category-first with all forty presets laid out, which put the brief below
+  // six hundred pixels of vocabulary in a dialog that had to scroll.
   //
   // THE NAME FIELD IS GONE AND ITS ABSENCE IS ASSERTED. It used to be first; the name is paired
   // with the face and given at creation, so a field for it was a question whose answer the product
   // already held. A form that asks for something it will then ignore is the failure this checks for.
   const at = (needle: string): number => html.indexOf(needle);
   check("the dialog asks for no name", at(">Name<") === -1, String(at(">Name<")));
-  check("category comes before what it should help with",
-    at(">Category<") >= 0 && at(">Category<") < at(">What should it help you with?<"),
-    `${at(">Category<")} / ${at(">What should it help you with?<")}`);
+  check("what it should help with comes before the category",
+    at(">What should it help you with?<") >= 0
+      && at(">What should it help you with?<") < at(">Category<"),
+    `${at(">What should it help you with?<")} / ${at(">Category<")}`);
+
+  // AND THE FORTY ARE NOT ON THE FORM. The brief's rule, and the reason for the popover: a
+  // category selector is one line until somebody wants the list. This catches a revert to chips
+  // as surely as the old check caught a dropped group.
+  const onForm = AGENT_CATEGORIES.filter((c) => html.includes(`>${c}<`));
+  check("the taxonomy is not laid out in the dialog", onForm.length === 0, onForm.join(", "));
+  check("...it is behind one trigger",
+    html.includes("Choose a category\u2026") && html.includes('aria-haspopup="listbox"'));
 
   // AND THERE IS NO STEP HERE FOR WHAT AN AGENT LOOKS LIKE, which is now true of every surface in
   // the product rather than just this one. An agent is given one of the eleven faces, and the name
@@ -155,6 +200,10 @@ console.log("\n§6's dialog offers all of them, in this order");
   // AND IT IS A DIALOG, not a div drawn on top of the application — `useDialog`'s whole argument.
   check("it announces itself as a dialog",
     html.includes('role="dialog"') && html.includes('aria-modal="true"'));
+
+  // WITH A WAY OUT THAT IS NOT THE BACKDROP. The redesign added it; a modal whose only dismissal
+  // is a click on the dark area behind it is a modal some people cannot leave.
+  check("it has a close button", html.includes('aria-label="Close (Esc)"'));
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
