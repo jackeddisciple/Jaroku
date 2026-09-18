@@ -459,6 +459,28 @@ function AgentTreeRow({
   // rows lit, and the column said you were in two places. The agent row is lit while the agent is
   // where you are and no chat of its own is open; the chat's own row takes it from there.
   const selected = activeAgentId === agent.agent_id && activeThreadId === null && navView === null;
+  // ITS CHATS ARE FOLDED AWAY UNTIL THE PROJECT IS PRESSED — the product owner's call on 2026-09-18.
+  // They were listed under every agent at all times, which makes the column's length the number of
+  // CONVERSATIONS in the workspace rather than the number of projects in it: forty chats under eight
+  // agents puts the eighth agent off the bottom of the window. A project is one row until somebody
+  // asks what is inside it, and the list falls exactly where it already fell.
+  //
+  // NO TWISTY, AND THAT IS WHY THE FOLD IS ON THE ROW ITSELF. A chevron would be a second control on
+  // a row that already has one press worth making, a pixel from the first, and the two would then
+  // disagree about what pressing the row means. One press does both: the agent lands in the three
+  // panes AND its chats appear — which is also what makes the fold findable with no mark to teach it.
+  const holdsActive = activeThreadId !== null && threads.some((t) => t.id === activeThreadId);
+  // AND THE PROJECT HOLDING THE OPEN CHAT UNFOLDS ITSELF, at mount and whenever the open chat moves
+  // into it. A fold that hid the lit row would be this column contradicting the pane beside it — you
+  // are in that conversation and the sidebar says it is not there.
+  //
+  // IT OPENS AND STAYS OPEN. Nothing here closes a fold: leaving a chat for another project would
+  // otherwise pull a list shut under the pointer, and the press that opened it is the only thing
+  // entitled to close it again.
+  const [open, setOpen] = useState(holdsActive);
+  useEffect(() => {
+    if (holdsActive) setOpen(true);
+  }, [holdsActive]);
   // THERE IS NO TIME ON THIS ROW ANY MORE — the product owner's call. It showed when the agent last
   // ran, falling back to when it was made so that a brand-new agent was not the one row with a gap
   // where every other row had a figure. What it cost was the row's second line, and with it the
@@ -507,8 +529,15 @@ function AgentTreeRow({
             agent's runs, the other selects the agent into the three panes. Nesting a button inside
             a button is invalid markup and makes the inner one unreachable by keyboard. */}
         <button
-          onClick={() => selectAgent(agent.agent_id)}
+          onClick={() => {
+            selectAgent(agent.agent_id);
+            setOpen((v) => !v);
+          }}
           title={identityTitle(agent.name, agent.category)}
+          // DECLARED ONLY WHERE THERE IS SOMETHING TO EXPAND. `aria-expanded` on a project nobody has
+          // talked to announces a fold that does not exist and leaves a screen reader waiting for a
+          // list that never arrives — that agent is a row, not a closed one.
+          aria-expanded={threads.length > 0 ? open : undefined}
           className="flex min-w-0 flex-1 items-center gap-2.5 py-1 text-left focus-visible:outline-none focus-visible:shadow-focusring"
         >
           {/* THE AGENT'S FACE. It was an emoji in a fixed 16px box, and the box existed because an
@@ -596,9 +625,10 @@ function AgentTreeRow({
         <AgentRowMenu agent={agent} />
       </div>
 
-      {/* ITS CHATS, INDENTED UNDER IT AND ALWAYS SHOWN, which is what makes the agent a project: the
-          conversations about it live with it, with no fold to open to find one. */}
-      {threads.length > 0 && (
+      {/* ITS CHATS, UNDER IT AND BEHIND ITS OWN ROW. What makes the agent a project is unchanged — the
+          conversations about it live with it, at the column's own left edge rather than a step in from
+          it — and what changed is that they wait to be asked for. The row above is what asks. */}
+      {open && threads.length > 0 && (
         <div className="flex flex-col">
           {threads.map((t) => (
             <ThreadListRow key={t.id} thread={t} />
