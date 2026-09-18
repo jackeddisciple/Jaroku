@@ -41,6 +41,8 @@ import { useAvatar } from "../lib/avatar.ts";
 import { useMenuFocus } from "../lib/menuFocus.ts";
 import { useAnchoredMenu } from "../lib/anchoredMenu.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
+import { Collapse } from "./Collapse.tsx";
+import { MOTION_ROW, MOTION_SCOPE, withRowMotion } from "../lib/rowMotion.ts";
 
 
 /**
@@ -519,6 +521,10 @@ function AgentTreeRow({
         className={`group relative flex h-8 w-full items-center gap-1 rounded-control pl-2.5 pr-1 transition-colors duration-fast ${
           selected ? "bg-sidebar-active" : "hover:bg-sidebar-hover"
         }`}
+        // WHAT MOVES WHEN SOMETHING ELSE IS PINNED. An agent row travels too — pinning a chat two
+        // projects up pushes every row below it down — so it is a row this column animates. See
+        // `lib/rowMotion.ts`; the key has to survive the rearrangement, which an id does.
+        {...{ [MOTION_ROW]: `agent:${agent.agent_id}` }}
       >
         {/* NO SELECTION BAR HERE, AND IT WAS HERE FOR TWO COMMITS. It was added when the accent was
             the only thing marking a selected agent and the row had no fill at all — but the accent
@@ -627,13 +633,27 @@ function AgentTreeRow({
 
       {/* ITS CHATS, UNDER IT AND BEHIND ITS OWN ROW. What makes the agent a project is unchanged — the
           conversations about it live with it, at the column's own left edge rather than a step in from
-          it — and what changed is that they wait to be asked for. The row above is what asks. */}
-      {open && threads.length > 0 && (
-        <div className="flex flex-col">
-          {threads.map((t) => (
-            <ThreadListRow key={t.id} thread={t} />
-          ))}
-        </div>
+          it — and what changed is that they wait to be asked for. The row above is what asks.
+
+          THROUGH `Collapse`, WHICH IS WHY THE LIST OPENS AT A SPEED THE EYE CAN FOLLOW — the product
+          owner's call on 2026-09-18: "can you make this opening smooth. not rush." It was
+          `{open && …}`, which is a mount: the rows are on screen in one frame and gone in one frame,
+          and everything below them jumps by the height of the list. That component was written for
+          this exact complaint about three disclosures this column used to have, kept its argument
+          about `grid-template-rows` over `max-height`, and had no call site left. It has one now.
+
+          THE ROWS STAY MOUNTED WHEN IT IS SHUT, and `inert` is what makes that honest: a closed fold
+          is squeezed to nothing by a grid track, so without it the Tab key would walk through chats
+          nobody can see. `inert` rather than `tabIndex={-1}`, which would take a real control out of
+          the tab order for good — the thing `test:dead-controls` refuses across the whole client. */}
+      {threads.length > 0 && (
+        <Collapse open={open}>
+          <div className="flex flex-col" inert={!open}>
+            {threads.map((t) => (
+              <ThreadListRow key={t.id} thread={t} />
+            ))}
+          </div>
+        </Collapse>
       )}
     </>
   );
@@ -1070,7 +1090,11 @@ function ThreadRowActions({ thread }: { thread: ThreadView }) {
     <>
       <button
         type="button"
-        onClick={() => useUiStore.getState().togglePinnedThread(thread.id)}
+        // THROUGH `withRowMotion`, so the rows this displaces travel instead of teleporting — the
+        // product owner's call on 2026-09-18: "if anything gets open or something gets pinned, i
+        // want that things move smoothly." Pinning is the biggest rearrangement this column has:
+        // one row leaves a list, a shelf above it grows, and everything between the two moves.
+        onClick={() => withRowMotion(() => useUiStore.getState().togglePinnedThread(thread.id))}
         title={pinned ? "Unpin this chat" : "Pin this chat"}
         aria-label={pinned ? `Unpin ${name}` : `Pin ${name}`}
         aria-pressed={pinned}
@@ -1081,9 +1105,9 @@ function ThreadRowActions({ thread }: { thread: ThreadView }) {
       {canArchive && (
         <button
           type="button"
-          onClick={() => {
+          onClick={() => withRowMotion(() => {
             if (sendArchiveThread(thread.id)) useThreadStore.getState().noteArchived(thread);
-          }}
+          })}
           disabled={!connected}
           title={connected ? "Archive this chat" : "Reconnecting — archiving needs a connection"}
           aria-label={`Archive ${name}`}
@@ -1139,6 +1163,10 @@ function ThreadListRow({ thread }: { thread: ThreadView }) {
       className={`group flex h-7 w-full shrink-0 items-center rounded-control pr-1 transition-colors duration-fast ${
         active ? "bg-sidebar-active" : "hover:bg-sidebar-hover"
       }`}
+      // KEYED BY THE CHAT, NOT BY THE LIST IT IS IN, which is what lets a pinned chat travel from
+      // here up to the shelf rather than vanish from one place and appear in another: the shelf's
+      // row carries the same key, so `rowMotion` recognises it as the same row moved.
+      {...{ [MOTION_ROW]: `thread:${thread.id}` }}
     >
       <button
         type="button"
@@ -1176,6 +1204,7 @@ function ArchivedThreadRow({ thread }: { thread: ThreadView }) {
       className={`flex h-7 w-full shrink-0 items-center rounded-control pr-1 transition-colors duration-fast ${
         active ? "bg-sidebar-active" : "hover:bg-sidebar-hover"
       }`}
+      {...{ [MOTION_ROW]: `thread:${thread.id}` }}
     >
       <button
         type="button"
@@ -1189,7 +1218,7 @@ function ArchivedThreadRow({ thread }: { thread: ThreadView }) {
       {canRestore && (
         <button
           type="button"
-          onClick={() => sendRestoreThread(thread.id)}
+          onClick={() => withRowMotion(() => sendRestoreThread(thread.id))}
           disabled={!connected}
           title={connected ? "Restore this chat" : "Reconnecting — restoring needs a connection"}
           aria-label={`Restore ${chatTitle(thread.title)}`}
@@ -1235,6 +1264,8 @@ function PinnedThreadRow({ thread }: { thread: ThreadView }) {
       className={`group flex h-8 w-full shrink-0 items-center rounded-control pr-1 transition-colors duration-fast ${
         active ? "bg-sidebar-active" : "hover:bg-sidebar-hover"
       }`}
+      // The same key this chat has in the list below — see `ThreadListRow`.
+      {...{ [MOTION_ROW]: `thread:${thread.id}` }}
     >
       <button
         type="button"
@@ -1378,7 +1409,13 @@ export function Sidebar() {
      * agents, and whoever is signed in — in that order, because that is the order they scope each
      * other in. Only the agents scroll; everything else is chrome and stays put.
      */
-    <div className="sidebar-material flex h-full flex-col bg-sidebar">
+    <div
+      className="sidebar-material flex h-full flex-col bg-sidebar"
+      // THE REGION WHOSE ROWS MOVE. Every row inside this carries a key and is animated to its new
+      // place when a press rearranges the lists — see `lib/rowMotion.ts`, which finds the column by
+      // this attribute so a handler in the chat header can reach it too.
+      {...{ [MOTION_SCOPE]: "" }}
+    >
       <SidebarChrome />
       <WorkspaceSwitcher />
       <NavList />
@@ -1388,7 +1425,10 @@ export function Sidebar() {
           that teaches people it is broken — the same rule that leaves an empty Recents empty. It
           appears the moment somebody pins one and goes away again when they unpin the last. */}
       {(pinnedVisible.length > 0 || pinnedThreads.length > 0) && (
-        <div className="mt-4 flex shrink-0 flex-col">
+        // THE HEADING IS A ROW FOR MOTION'S PURPOSES, because on a first pin the whole section
+        // arrives: without a key the shelf would appear instantly above rows that were still
+        // travelling, which is the jump this is meant to remove rather than relocate.
+        <div className="mt-4 flex shrink-0 flex-col" {...{ [MOTION_ROW]: "section:pinned" }}>
           <ListHeading label="Pinned" />
           {/* CAPPED, WHICH IS THE DIFFERENCE FROM RECENTS. The shelf is `shrink-0` so the list below
               can never squeeze it — and that is exactly what makes an unbounded one dangerous:

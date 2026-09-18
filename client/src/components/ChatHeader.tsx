@@ -18,6 +18,7 @@ import {
 import { ICON } from "../lib/tokens.ts";
 import { useCanRun } from "../lib/useCapability.ts";
 import { threadFor, useChatStore } from "../store/chatStore.ts";
+import { withRowMotion } from "../lib/rowMotion.ts";
 import { threadById, useThreadStore } from "../store/threadStore.ts";
 import { useTraceStore, type ConnectionState } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
@@ -322,7 +323,11 @@ function ThreadMenu({ thread, connected, onRename }: { thread: ThreadView; conne
               <button
                 type="button"
                 role="menuitem"
-                onClick={choose(() => useUiStore.getState().togglePinnedThread(thread.id))}
+                // THROUGH `withRowMotion` FOR THE SAME REASON THE SIDEBAR'S OWN PIN IS: this moves a
+                // row between two lists in a column that is on screen while this menu is open, and
+                // the rows it displaces should travel rather than teleport. The helper finds that
+                // column in the DOM, so this works from here without either side knowing the other.
+                onClick={choose(() => withRowMotion(() => useUiStore.getState().togglePinnedThread(thread.id)))}
                 className={MENU_ROW}
               >
                 <Icon.chatHeader.pin size={ICON.sm} />
@@ -340,10 +345,10 @@ function ThreadMenu({ thread, connected, onRename }: { thread: ThreadView; conne
                   role="menuitem"
                   disabled={!connected}
                   title={offline}
-                  onClick={choose(() => {
+                  onClick={choose(() => withRowMotion(() => {
                     if (archived) sendRestoreThread(thread.id);
                     else if (sendArchiveThread(thread.id)) useThreadStore.getState().noteArchived(thread);
-                  })}
+                  }))}
                   className={MENU_ROW}
                 >
                   <Icon.chatHeader.archive size={ICON.sm} />
