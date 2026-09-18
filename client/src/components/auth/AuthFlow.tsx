@@ -18,7 +18,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { storeWorkspace } from "../../lib/auth.ts";
-import { clearAuthCallback, onAuthCallback } from "../../lib/authLink.ts";
+import { onAuthCallback } from "../../lib/authLink.ts";
 import { SignInFailure, clearNonce, exchangeTicket } from "../../lib/signIn.ts";
 import { restartSocket } from "../../lib/socket.ts";
 import { useSessionStore } from "../../store/sessionStore.ts";
@@ -162,82 +162,46 @@ export function AuthFlow() {
  * The specification's wording assumes an email is available; it is not, and a prompt that guessed
  * would be a prompt that named the wrong person.
  */
-export function SignInSwapPrompt() {
+export function SignInSwapHandler() {
   const [ticket, setTicket] = useState<string | null>(null);
   const email = useSessionStore((s) => s.user?.email ?? null);
 
   useEffect(() => onAuthCallback((callback) => setTicket(callback.ticket)), []);
 
   /**
-   * NOBODY TO SWAP, SO NOTHING TO ASK.
+   * A LINK IS SPENT, NEVER ASKED ABOUT — the product owner's call, and it replaced a confirmation
+   * strip that turned up on ordinary sign-ins.
    *
-   * This strip exists for §4.5's one case: a link arrives while a DIFFERENT person is signed in,
-   * and swapping them silently would be indefensible. With no session there is no second person —
-   * the honest reading of "a sign-in link opened Jaroku" is that somebody is signing in, which is
-   * the thing they just asked for. Asking anyway produced a confirmation whose only true answer is
-   * "yes, obviously", in front of an application they could not use until they gave it.
+   * WHAT IT USED TO DO. §4.5 asked for a prompt when a link arrives while somebody is signed in:
+   * "A sign-in link opened Jaroku. Continuing will sign out <email>", with Cancel and Continue. The
+   * case it was written for is a link belonging to somebody ELSE being opened on your machine, and
+   * swapping silently there would be indefensible.
    *
-   * It is re-offered rather than spent here, because `AuthFlow` is the only thing that should ever
-   * hold a ticket — the same reasoning `Continue` follows below, minus the sign-out it does not
-   * need.
+   * WHY IT WENT ANYWAY. It cannot tell that case from the ordinary one, because the ticket is
+   * OPAQUE — that is the entire point of a ticket — so this app does not know whose account is
+   * behind it until the exchange, and the exchange is the thing being asked about. What it CAN see
+   * is that somebody is signed in, which is true every time a person whose session is still live
+   * clicks their own link. So the strip asked "shall I sign out Adarsh?" of Adarsh, who had just
+   * asked to be signed in, and the only true answer was yes.
+   *
+   * SO THE SWAP IS SILENT AND THIS DRAWS NOTHING. It was not simply deleted, because it is still
+   * the only thing that claims a ticket while a session is live: `AuthFlow` mounts only when signed
+   * out, so with nothing here a link clicked by a signed-in person would be offered, claimed by
+   * nobody, and appear to do nothing at all.
+   *
+   * SIGN OUT FIRST, THEN LET THE FLOW SPEND IT. Signing out unmounts the app and mounts `AuthFlow`,
+   * which claims the callback and exchanges it — so the swap goes through the one code path that
+   * already knows how rather than through a second copy of it here. The ticket is re-offered rather
+   * than passed, because `AuthFlow` is the only thing that should ever hold one.
    */
   useEffect(() => {
-    if (!ticket || email) return;
+    if (!ticket) return;
     setTicket(null);
-    void import("../../lib/authLink.ts").then((m) => m.offerAuthCallback({ ticket }));
+    void import("../../lib/authLink.ts").then((m) => {
+      if (email) useSessionStore.getState().signOut(null);
+      m.offerAuthCallback({ ticket });
+    });
   }, [ticket, email]);
 
-  if (!ticket || !email) return null;
-
-  const cancel = (): void => {
-    setTicket(null);
-    // FORGOTTEN, not deferred. Somebody said no; a ticket kept for the next screen that claims
-    // readiness would sign them out the moment they happened to sign out and back in.
-    clearAuthCallback();
-    clearNonce();
-  };
-
-  return (
-    // A strip rather than a modal, in the same place `AdminModeBanner` and `EnforcementStrip` sit —
-    // above every pane and below the top bar. It is about the whole session rather than about
-    // whatever is on screen, which is exactly what those two are about too.
-    <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-edge bg-panel px-4 py-2.5">
-      <span className="text-caption leading-[1.5] text-ink">
-        A sign-in link opened Jaroku.
-        {email ? (
-          <span className="text-muted"> Continuing will sign out {email}.</span>
-        ) : (
-          <span className="text-muted"> Continuing will end this session.</span>
-        )}
-      </span>
-      <span className="ml-auto flex items-center gap-2">
-        <button
-          type="button"
-          onClick={cancel}
-          className="rounded-control px-2.5 py-1 text-caption text-muted outline-none transition-colors duration-fast hover:text-ink focus-visible:shadow-focusring"
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            const pending = ticket;
-            setTicket(null);
-            // SIGN OUT FIRST, THEN LET THE FLOW SPEND IT. Signing out unmounts the app and mounts
-            // `AuthFlow`, which claims the callback and exchanges it — so the swap goes through the
-            // one code path that already knows how, rather than through a second copy of it here.
-            // The ticket is re-offered rather than passed, because `AuthFlow` is the only thing
-            // that should ever hold one.
-            void import("../../lib/authLink.ts").then((m) => {
-              useSessionStore.getState().signOut(null);
-              m.offerAuthCallback({ ticket: pending });
-            });
-          }}
-          className="rounded-control bg-ink px-2.5 py-1 text-caption font-medium text-void outline-none transition-shadow duration-base hover:shadow-glow-cta focus-visible:shadow-focusring"
-        >
-          Continue
-        </button>
-      </span>
-    </div>
-  );
+  return null;
 }

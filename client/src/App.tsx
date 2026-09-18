@@ -7,7 +7,7 @@ import { CommandPalette } from "./components/CommandPalette.tsx";
 import { ProviderKeysDialog } from "./components/ProviderKeysDialog.tsx";
 import { BuildPane } from "./components/BuildPane.tsx";
 import { CodeOverlay } from "./components/CodeOverlay.tsx";
-import { AuthFlow, SignInSwapPrompt } from "./components/auth/AuthFlow.tsx";
+import { AuthFlow, SignInSwapHandler } from "./components/auth/AuthFlow.tsx";
 import { SetUpAccountScreen } from "./components/auth/SetUpAccountScreen.tsx";
 import { FirstRun } from "./components/firstrun/FirstRun.tsx";
 import { firstRunOnScreen, useFirstRunStore } from "./store/firstRunStore.ts";
@@ -496,10 +496,6 @@ export function App() {
             describes what this workspace may not do, and this describes every limit not being
             applied at all. Both are true about the whole session rather than about whatever is on
             screen, which is why neither lives in a panel. */}
-        {/* §4.5's last row: a sign-in link arrived while somebody else is signed in. A strip
-            rather than a modal, beside the app rather than instead of it — taking the screen away
-            to ask about an event they may not have caused is the modal-mid-flow pattern this
-            product refuses everywhere else. Renders nothing at all when no link is waiting. */}
         {/* §5.1s "Skip setup" left somebody in the app with nothing set up. Persistent, with no
             dismiss, because the state it describes does not resolve on its own and there is no
             other surface that mentions it. Renders nothing for everybody who did not skip. */}
@@ -507,12 +503,16 @@ export function App() {
             than about the banners. Under `[data-vibrancy]` the two planes above this are
             transparent so the window's own material can reach the sidebar, which means every
             region that is NOT the sidebar has to paint itself or the desktop shows through it.
-            Three of these four carry a background of their own and `SignInSwapPrompt` does not;
-            one opaque wrapper covers the case rather than four edits and a rule to remember.
-            It renders as nothing when they all do — an empty flex child with no height. */}
+            Two of these three carry a background of their own and one opaque wrapper covers the
+            case rather than three edits and a rule to remember. It renders as nothing when they all
+            do — an empty flex child with no height. */}
+        {/* HEADLESS, AND IT IS WHAT MAKES A SIGN-IN LINK WORK FOR SOMEBODY ALREADY SIGNED IN.
+            `AuthFlow` mounts only when signed out, so without this a clicked link would be offered
+            and claimed by nobody. It used to be a confirmation strip in the stack below; see
+            `SignInSwapHandler` for why the asking went. */}
+        <SignInSwapHandler />
         <div className="shrink-0 bg-bg">
           <FinishSetupBanner />
-          <SignInSwapPrompt />
           <AdminModeBanner />
           <EnforcementStrip />
         </div>
