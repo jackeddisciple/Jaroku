@@ -59,10 +59,11 @@ export function threadTitle(message: string): string {
 /**
  * The most words a topic title may have. The client asks the model for the same.
  *
- * FIVE, THE PRODUCT OWNER'S CALL ON 2026-09-16: "thread title should be max 4 to 5 words". The cap is
- * the SERVER's because `titleThread` is a command anybody's tab can send.
+ * FOUR, THE PRODUCT OWNER'S CALL ON 2026-09-18: "every thread name should not exceed 4 words". The cap
+ * is the SERVER's because `titleThread` is a command anybody's tab can send — a client asking for four
+ * and a server storing five would put the limit in the one place a request can decline to honour it.
  */
-export const TOPIC_WORDS = 5;
+export const TOPIC_WORDS = 4;
 
 /**
  * A topic title a provider CLI suggested, made fit to store — or null when nothing usable came back.

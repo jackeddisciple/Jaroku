@@ -23,10 +23,13 @@ import { __parseClaudeLine, __parseCodexLine, type Parsed } from "./providerTurn
 /**
  * The most a title may say. The server enforces the same cap; this is what the model is asked for.
  *
- * FIVE, THE PRODUCT OWNER'S CALL ON 2026-09-16: "thread title should be max 4 to 5 words". Six let a
- * title run to most of a sentence, which is the thing a topic title exists to stop being.
+ * FOUR, THE PRODUCT OWNER'S CALL ON 2026-09-18: "every thread name should not exceed 4 words". It was
+ * five, and five is a title that fits the sidebar and not the thing the sidebar is for — the column is
+ * scanned rather than read, and the fifth word is the one that pushes the name past what a 240px row
+ * shows. Four is the number, not a preference between four and five: a cap somebody has to choose
+ * inside is not a cap.
  */
-export const TOPIC_WORDS = 5;
+export const TOPIC_WORDS = 4;
 
 /** How long a title turn may take before it is abandoned and the first-line title stands. */
 export const TITLE_TIMEOUT_MS = 60_000;
