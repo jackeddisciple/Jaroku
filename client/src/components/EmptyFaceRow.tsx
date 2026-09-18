@@ -111,6 +111,19 @@ export function EmptyFaceRow() {
             width: BADGE,
             height: BADGE,
             marginLeft: i === 0 ? 0 : -OVERLAP,
+            // THE HIT AREA IS THE CIRCLE, NOT THE SQUARE — and without this a fifth of each badge
+            // answers for the wrong one. The elements are squares overlapping by ten pixels and a
+            // later sibling paints over an earlier one, so the next badge's TRANSPARENT top-left
+            // and bottom-left corners sit on top of this badge's visible rim. Measured in the
+            // running app: badge two spans x 791 to 835 and everything past 827 — the rightmost
+            // nine pixels of its own circle — hovered badge three instead.
+            //
+            // AND IT CANNOT CLIP ANYTHING, which is why this is a hit-testing fix rather than a
+            // trade. The generator builds each badge's alpha as the source multiplied by a disc of
+            // radius r and then crops to exactly that disc's bounding square, so every opaque pixel
+            // in every one of these files lies inside the inscribed circle by construction. There
+            // is nothing in the corners to cut.
+            clipPath: "circle(50%)",
           }}
         />
       ))}
