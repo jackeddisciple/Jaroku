@@ -90,7 +90,10 @@ console.log("\nthe hover twist is CSS, so the handoff between two badges cannot 
   const row = readFileSync(ROW, "utf8");
   const body = row.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
 
-  check("a badge twists clockwise on hover", /\bhover:rotate-6\b/.test(body), body.match(/hover:rotate-[^\s"]*/)?.[0] ?? "");
+  // TWELVE RATHER THAN SIX, which is pinned rather than left loose because the number is the whole
+  // of the effect: six was shipped first and read as no tilt at all, since a circle's outline
+  // cannot carry the angle and only the drawing inside can.
+  check("a badge twists clockwise on hover", /\bhover:rotate-12\b/.test(body), body.match(/hover:rotate-[^\s"]*/)?.[0] ?? "");
   check("...on a transition of its own", /\btransition-transform\b/.test(body));
   // THE TWO SLOWEST TOKENS THE SYSTEM HAS, and the pair is the "very smooth" that was asked for.
   // `duration-fast` here would read as a flick and `ease-state` covers the distance immediately.

@@ -89,9 +89,16 @@ export function EmptyFaceRow() {
           // also break on the one case CSS gets right for free, which is the pointer leaving the
           // row entirely rather than moving to a sibling.
           //
-          // SIX DEGREES, CLOCKWISE. Enough that the face inside visibly turns and small enough that
-          // the circle's own rim gives nothing away — the silhouette is unchanged, so what the eye
-          // catches is the drawing moving inside a badge that has not.
+          // TWELVE DEGREES, CLOCKWISE, AND IT WAS SIX FIRST. Six was measurably there — the computed
+          // transform read cos/sin of 6° — and still read as "very less" on screen, which is exactly
+          // what a small rotation does to a circle: the silhouette cannot move, so the only thing
+          // carrying the angle is the drawing inside, and a face cocked six degrees is inside the
+          // range people read as "not quite straight" rather than as a deliberate tilt. Twelve is
+          // the next step on the scale and reads as one.
+          //
+          // AND THE RIM STILL GIVES NOTHING AWAY, which is what keeps this from needing a redraw at
+          // any angle: every badge is a circle, so rotating it moves the artwork and leaves the
+          // outline exactly where it was.
           //
           // `duration-collapse` AND `ease-smooth`, which are the two slowest tokens this system has
           // and are chosen for exactly what their comments say. 220ms is long enough to read as a
@@ -106,7 +113,7 @@ export function EmptyFaceRow() {
           // AND IT STOPS UNDER `prefers-reduced-motion`, spelled the way `ChoiceRow` and
           // `AgentSparkline` spell it — the hover is neutralised rather than the transition alone,
           // so the badge does not jump to six degrees with the animation switched off.
-          className="block shrink-0 transition-transform duration-collapse ease-smooth hover:rotate-6 motion-reduce:transition-none motion-reduce:hover:rotate-0"
+          className="block shrink-0 transition-transform duration-collapse ease-smooth hover:rotate-12 motion-reduce:transition-none motion-reduce:hover:rotate-0"
           style={{
             width: BADGE,
             height: BADGE,
