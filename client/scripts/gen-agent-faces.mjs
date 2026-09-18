@@ -118,9 +118,24 @@ src, dst, count, portrait, badge, bw, bh, quality = (
 # black line does pass through it, but only as single pixels with black on one side, and a 1254px
 # source delivered at 256 buries them five to one.
 CHECK_LO, CHECK_HI, NEUTRAL = 110, 230, 15
-# Anything darker than this is the drawing rather than the paper — the pale disc some of the
-# portraits are set on measures about 245, so this keeps the disc as part of the picture.
-PAPER = 250
+# WHAT COUNTS AS THE DRAWING WHEN THE CROP IS MEASURED, and the number is the fix for faces coming
+# out at different sizes on the cards.
+#
+# FOUR OF THE ELEVEN ARE SET ON A PALE DISC — agent1, 2, 4 and 9 — and the disc is WIDER than the
+# figure on it. Measured at 250 the disc is "drawing", so those four were cropped to a circle with a
+# small person inside it while the other seven were cropped to the person: agent-01 ended up with
+# 183px of figure in a 256px tile against agent-03's 235, and in a grid that reads as one agent
+# photographed from further away.
+#
+# 200 IS BELOW THE INK AND ABOVE THE DISC, which measures about 245. The line art is solid black and
+# its antialiasing is the only thing in between, so this is not a threshold anything lands on by
+# accident. The disc is not REMOVED, only ignored while the crop is measured — and what survives of
+# it is invisible anyway, nine units off the white it sits on.
+PAPER = 200
+# How the portrait's square is sized against the head it holds — see square. The band is the top
+# third, where only hair and skull live; 1.9 heads across leaves the shoulders room without letting
+# a drawing that has more of them shrink the face; the air is what sits above the hair.
+HEAD_BAND, HEAD_RATIO, HEAD_AIR = 0.34, 1.9, 0.06
 # Alpha at or above this is the badge; below it is the space around it.
 OPAQUE = 200
 # The disc is drawn at this multiple and brought down, which is what antialiases a cut rim.
@@ -140,17 +155,48 @@ def source(stem):
             return path
     raise SystemExit('no source image for ' + stem)
 
-def square(im, box, fill):
-    """Crop to the smallest square holding box, padded with fill where it runs off the image."""
+def square(im, mask, box, fill):
+    """
+    Crop to a square sized against the HEAD, so eleven cards carry eleven faces at one size.
+
+    CROPPING TO THE WHOLE DRAWING WAS THE OBVIOUS THING AND IT DOES NOT WORK. These eleven are not
+    framed alike: two are a head and a collar, one is a head with a raised arm beside it, one has a
+    braid running to the waist. Normalise the FIGURE and every drawing fills its tile — which is
+    exactly why the faces then differ by half again, because a tile filled by a head is a big face
+    and a tile filled by a head plus an arm is a small one. Measured on the output: 157px of head
+    against 232px, in the same 256px box.
+
+    SO THE HEAD IS THE THING HELD CONSTANT. It is measured as the widest run of ink in the top third
+    of the drawing, which on every one of these is hair and skull and nothing else — shoulders,
+    arms and braids all begin lower. The square is 1.9 heads across, which leaves room for the
+    shoulders these drawings have without letting the ones that have more of them shrink the face.
+
+    CENTRED ON THE HEAD RATHER THAN ON THE DRAWING, for the same reason: a raised arm pulls the
+    drawing's centre sideways and would set the face off-axis in its tile.
+
+    PADDED, NOT CLIPPED. The square is allowed to run off the source — it usually does at the top,
+    because the head starts near the frame's edge — so only the part that exists is copied, onto
+    paper, at the offset it belongs at. Cropping out of bounds and pasting the result would put a
+    black band wherever the source ran out.
+    """
     x0, y0, x1, y1 = box
-    side = max(x1 - x0, y1 - y0)
-    # CENTRED HORIZONTALLY, FLUSH AT THE BOTTOM. Most of these drawings are cut off by the source's
-    # own bottom edge — a shoulder or a waist — and a cut that floats in the middle of a tile reads
-    # as a mistake where a cut at the tile's edge reads as the picture continuing past it.
-    cx = (x0 + x1) // 2
-    left, top = cx - side // 2, y1 - side
+    px = mask.load()
+    head, hy = 0, y0
+    for y in range(y0, y0 + max(1, int((y1 - y0) * HEAD_BAND))):
+        xs = [x for x in range(x0, x1) if px[x, y]]
+        if xs and xs[-1] - xs[0] > head:
+            head, hy = xs[-1] - xs[0], y
+    if head <= 0:
+        head, hy = x1 - x0, y0
+    side = max(1, int(head * HEAD_RATIO))
+    xs = [x for x in range(x0, x1) if px[x, hy]]
+    cx = (xs[0] + xs[-1]) // 2 if xs else (x0 + x1) // 2
+    left, top = cx - side // 2, y0 - int(side * HEAD_AIR)
+    w, h = im.size
+    cl, ct, cr, cb = max(0, left), max(0, top), min(w, left + side), min(h, top + side)
     out = Image.new(im.mode, (side, side), fill)
-    out.paste(im.crop((left, top, left + side, top + side)), (0, 0))
+    if cr > cl and cb > ct:
+        out.paste(im.crop((cl, ct, cr, cb)), (cl - left, ct - top))
     return out
 
 for n in range(1, count + 1):
@@ -192,8 +238,13 @@ for n in range(1, count + 1):
         im.putalpha(mask.resize((w, h), Image.LANCZOS))
         print('  agent%02d badge: cut a circle, r=%d' % (n, radius))
 
-    box = im.getchannel('A').point(lambda v: 255 if v > 8 else 0).getbbox()
-    square(im, box, (0, 0, 0, 0)).resize((badge, badge), Image.LANCZOS).save(
+    # THE BADGE IS ALREADY A CIRCLE, so it is squared on its own bounds and nothing is measured: its
+    # rim is the frame, and every one of the eleven fills it the same way by construction.
+    x0, y0, x1, y1 = im.getchannel('A').point(lambda v: 255 if v > 8 else 0).getbbox()
+    side = max(x1 - x0, y1 - y0)
+    disc = Image.new('RGBA', (side, side), (0, 0, 0, 0))
+    disc.paste(im.crop((x0, y0, x1, y1)), ((side - (x1 - x0)) // 2, (side - (y1 - y0)) // 2))
+    disc.resize((badge, badge), Image.LANCZOS).save(
         os.path.join(dst, 'agent-%02d-sidebar.png' % n), 'PNG', optimize=True)
 
     # --- the portrait: the drawing on its own paper, normalised ---------------------------------
@@ -214,10 +265,11 @@ for n in range(1, count + 1):
                     px[x, y] = (255, 255, 255)
         print('  agent%02d portrait: painted out a checkerboard' % n)
 
-    box = im.convert('L').point(lambda v: 255 if v < PAPER else 0).getbbox()
+    m = im.convert('L').point(lambda v: 255 if v < PAPER else 0)
+    box = m.getbbox()
     if box is None:
         raise SystemExit('agent%dgeneric: the whole frame is paper' % n)
-    square(im, box, (255, 255, 255)).resize((portrait, portrait), Image.LANCZOS).save(
+    square(im, m, box, (255, 255, 255)).resize((portrait, portrait), Image.LANCZOS).save(
         os.path.join(dst, 'agent-%02d.png' % n), 'PNG', optimize=True)
 
     # --- the banner: the centre 2:1 band, unchanged ----------------------------------------------
