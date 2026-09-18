@@ -657,13 +657,18 @@ export function AgentCard({
             overflow menu is a primary action disguised as a third icon. That still holds: it is
             full width, it is `rounded-pill`, and it keeps its label.
 
-            THE SECOND CALL TOOK ITS FILL AWAY. Filled in `chrome` it was the heaviest shape on the
-            card — a solid bar under a 16px name, on three cards across — and the hierarchy the
-            specification asks for ends at a preview and a line of figures, not at a button. So the
-            surface arrives on approach instead: nothing at rest, `bg-active` on hover or focus,
-            and the label lifts from `muted` to `ink` with it. A ghost control still has to show its
-            hit area when somebody reaches for it, which is what `buttons.ts` argues about
-            `quietBtn` and is the same argument here.
+            THE SECOND CALL TOOK ITS FILL AWAY AND THE THIRD PUT ONE BACK, which is worth recording
+            rather than quietly rewriting, because the two calls were about different things. Ghosted
+            it was invisible: `bg-active` is four units off the `void` the content block is painted
+            in, so at rest the control read as a line of muted text and on hover as a line of muted
+            text on a slightly different grey. The product owner's words were that it should be a
+            different colour from the background and look visible.
+
+            SO IT IS FILLED AGAIN, AND IN `chrome` RATHER THAN IN INK. What the second call was
+            right about still holds — the card's hierarchy ends at the preview and the figures, and a
+            black bar under a 16px name would take the first read. `chrome` is eleven units off the
+            block and the darkest neutral §01 has, which is a shape you cannot miss and still not a
+            primary. Hover deepens to `active` over it rather than arriving from nothing.
 
             `rounded-pill` SURVIVES BOTH. §04 reserves that rung for "status tags, badges and
             semantic pills only", and this is the exception asked for by name; it earns it by being
@@ -679,7 +684,7 @@ export function AgentCard({
               onNewThread();
             }}
             title={`Start a new thread on ${agent.name}`}
-            className="flex w-full items-center justify-center gap-1.5 rounded-pill py-1.5 text-caption text-muted transition-colors duration-fast hover:bg-active hover:text-ink active:bg-chrome focus-visible:outline-none focus-visible:shadow-focusring"
+            className="flex w-full items-center justify-center gap-1.5 rounded-pill bg-chrome py-2 text-caption text-ink transition-colors duration-fast hover:bg-active active:bg-chrome focus-visible:outline-none focus-visible:shadow-focusring"
           >
             <Icon.agents.newThread size={ICON.sm} />
             New Thread
