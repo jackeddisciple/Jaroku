@@ -1002,14 +1002,25 @@ function FilterMenu({
 /**
  * The small circle beside every chat in the sidebar — what marks a row as a conversation.
  *
- * IN THE AGENT EMOJI'S OWN BOX, and that is the product owner's call on 2026-09-15: "threads icon
- * should fall just below the agent emoji". The circle is narrower than an emoji, so a shared left
- * edge is not enough — it takes the same `ICON.md` box and the same 10px gap after it, which puts
- * the circle under the emoji and a chat's name under its agent's.
+ * IN THE AGENT'S OWN BOX, and that is the product owner's call on 2026-09-15: "threads icon should
+ * fall just below the agent emoji". The circle is narrower than what sits above it, so a shared left
+ * edge is not enough — it takes that mark's whole box and the same 10px gap after it, which puts the
+ * circle under the picture and a chat's name under its agent's.
+ *
+ * AND THE BOX IS `FACE_SIZE.sidebar`, WHICH IS THE BUG THIS CARRIED FOR THREE SIZES. It was
+ * `ICON.md` — correct on the day it was written, when an agent wore a 16px emoji — and the mark
+ * above went to a 22px picture and then a 28px one without this following it. Every chat title in
+ * the column therefore started 12px to the LEFT of its own agent's name: two ragged left edges in
+ * the one place a name has to be compared with the name above it. One constant for both, so the
+ * next time that mark is resized the titles move with it.
  */
 function ChatDot() {
   return (
-    <span className="mr-2.5 inline-flex shrink-0 justify-center text-faint" style={{ width: ICON.md }} aria-hidden>
+    <span
+      className="mr-2.5 inline-flex shrink-0 justify-center text-faint"
+      style={{ width: FACE_SIZE.sidebar }}
+      aria-hidden
+    >
       <Icon.threads.chat size={ICON.sm} />
     </span>
   );
@@ -1229,11 +1240,12 @@ function PinnedThreadRow({ thread }: { thread: ThreadView }) {
         type="button"
         onClick={() => openThread(thread)}
         title={chatTitle(thread.title)}
-        className="flex min-w-0 flex-1 items-center gap-2.5 pl-2.5 text-left focus-visible:outline-none focus-visible:shadow-focusring"
+        className="flex min-w-0 flex-1 items-center pl-2.5 text-left focus-visible:outline-none focus-visible:shadow-focusring"
       >
-        <span className="inline-flex shrink-0 justify-center text-faint" style={{ width: ICON.md }} aria-hidden>
-          <Icon.threads.chat size={ICON.sm} />
-        </span>
+        {/* THE SHARED DOT, WHERE THIS ROW HAD ITS OWN COPY OF THE MARKUP — the same circle in the same
+            box, expressed as a `gap` instead of a margin. Two copies is how one of them was left
+            behind when the box changed, which is exactly what happened: see `ChatDot`. */}
+        <ChatDot />
         <Truncate className="min-w-0 flex-1 text-body font-medium text-ink" title={chatTitle(thread.title)}>
           {shownTitle}
         </Truncate>
