@@ -502,6 +502,24 @@ export function AgentCard({
                   )}
                 </div>
               </>
+            ) : agent.description ? (
+              // NO THREADS BUT THERE IS A PURPOSE, so the card says the purpose. §5.2's rule was
+              // written when the only thing an unbuilt agent had was its name: "if the agent has no
+              // threads, the line reads 'Not started yet'." An agent now arrives with a sentence —
+              // "What should it help you with?" is one of the two questions asked at creation — and
+              // a card that answers that with "Not started yet" is withholding the most useful
+              // thing it knows in favour of the least.
+              //
+              // NOTHING IS FABRICATED, WHICH IS THE PART OF §5.2 THAT STILL BINDS. This is the
+              // description the person typed, verbatim; there is no invented summary and no
+              // placeholder. When there is no description either, the line below still says so.
+              //
+              // AT `text-muted` RATHER THAN `text-ink`, because it is the agent's standing purpose
+              // rather than what it is doing now — the rung the current-work subtitle uses, not the
+              // rung its title does.
+              <Truncate className="text-caption text-muted" title={agent.description}>
+                {agent.description}
+              </Truncate>
             ) : (
               // NOTHING IS FABRICATED. §5.2: "If the agent has no threads, the line reads 'Not
               // started yet'." No invented summary, no placeholder title.
