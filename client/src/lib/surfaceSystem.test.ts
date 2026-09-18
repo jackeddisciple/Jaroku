@@ -429,8 +429,16 @@ console.log("\n§03: each surface's first read, and what it keeps quiet");
     /<Truncate className="text-title text-ink" title=\{agent\.name\}>/.test(agentCard));
   check("...and it is the largest type on the card",
     !/text-(display|page|section)\b/.test(agentCard), agentCard.match(/text-(display|page|section)\b/)?.[0] ?? "");
-  check("...and its slug and footer stay at tertiary",
-    /text-tiny text-faint" title=\{agent\.slug\}/.test(agentCard) && /border-t border-hair pt-2 text-tiny text-faint/.test(agentCard));
+  // ITS CATEGORY IS THE SUBTITLE AND ITS FIGURES ARE TERTIARY. The slug used to be the subtitle
+  // and is no longer on the card at all — a second identifier under the first, `margot` under
+  // `Margot`, down every card in the grid — so what this pins is the pair that replaced it: the
+  // category one ink down from the name, and the figures at the bottom of the ladder.
+  check("...its category is the subtitle under it",
+    /text-caption text-muted" title=\{agent\.category\}/.test(agentCard));
+  check("...and there is no slug on the card to compete with it",
+    !/>\{agent\.slug\}</.test(agentCard), agentCard.match(/[^\n]*\{agent\.slug\}[^\n]*/)?.[0] ?? "");
+  check("...and its figures stay at tertiary",
+    /border-t border-hair pt-2 text-tiny text-faint/.test(agentCard));
 
   // SIDEBAR: the current destination, which is the one thing §03 asks the sidebar to say loudest —
   // and the only surface of the five whose first read is a STATE rather than a piece of content.

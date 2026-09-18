@@ -314,13 +314,24 @@ console.log("\n...and the same rule where it arrives as a PROP rather than as a 
 
 console.log("\n§04's Sans list, at the call sites the specification names by name");
 {
-  // Four of §04's Sans entries, checked where they actually render. These are not a sample — they
-  // are the four that were monospaced when the specification arrived, so each one is a line that
-  // had to change and could quietly change back.
+  // Three of §04's Sans entries, checked where they actually render. These are not a sample — they
+  // are what is left of the four that were monospaced when the specification arrived, so each one
+  // is a line that had to change and could quietly change back. The fourth is retired below.
   const at = (path: string, needle: string): string =>
     (SOURCES.find((f) => f.path === path)?.text.split("\n").find((l) => l.includes(needle)) ?? "");
 
-  check("an agent's slug is Sans", !/font-mono/.test(at("components/AgentCard.tsx", "title={agent.slug}")));
+  // AN AGENT'S SLUG IS NOT CHECKED HERE ANY MORE, AND THAT IS A RETIREMENT RATHER THAN AN
+  // OVERSIGHT. The line it was written against was the agent card's subtitle, and the slug has
+  // left that card: an identifier earns its pixels where somebody TYPES it, and nowhere on a card
+  // in a grid is it typed.
+  //
+  // THE ONE SITE LEFT IS A PATH, WHICH IS THE OTHER SIDE OF §04's OWN DISTINCTION. `AgentOverview`
+  // writes it as a `mono` chip titled "the directory on disk, and the id every run row names" —
+  // the same reading that lets `AttachmentRail` monospace a file path and not a label. Repointing
+  // the check there would have been worse than dropping it: `mono` arrives as a PROP on the
+  // `<Chip>` line, so `font-mono` appears nowhere near `{a.slug}` and the assertion would have
+  // passed while the text rendered in the face it was written to forbid.
+
   check("a version is Sans", !/font-mono/.test(at("components/GitHubPanel.tsx", "v{row.version}")));
   check("a model name is Sans", !/font-mono/.test(at("components/TraceTimeline.tsx", "{run.provider}/{run.model}")));
   check("a figure is Sans", !/font-mono/.test(at("components/StatRow.tsx", "{s.value}")));

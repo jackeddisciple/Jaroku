@@ -350,17 +350,22 @@ export function AgentCard({
                 : `absolute ${compact ? "right-2.5 top-2.5" : "right-3 top-3"}`
             }
           />
-          {/* THE HIERARCHY ON THIS CARD IS PICTURE, NAME, SLUG, TAGS, CURRENT WORK, FOOTER, and each
-              step down is a real step: a 56px portrait over a banner, 14px of title, 11px of faint
-              slug, 10px caps tags, 12px prose, 10px faint figures. The picture is the largest
-              element and the name is the next thing the eye lands on, which is the order §5.2 asks
-              for — what changed is that the picture is no longer competing for a column beside the
-              name and is instead the thing the name is written under.
+          {/* THE HIERARCHY ON THIS CARD, IN THE ORDER THE PRODUCT OWNER SPECIFIED IT: picture,
+              NAME, category, the recent conversation, one line of figures, the status tags, the
+              action. Every step down is a real step — a 56px portrait over a banner, 16px/600 of
+              name, 12px/400 muted category, 12px/500 thread title over 11px muted prompt, 11px
+              faint figures, 10px caps tags, and a control with no surface until you reach for it.
 
-              THE IDENTITY BLOCK, WHICH IS NOW THE WHOLE LEFT SIDE OF THIS ROW. It was a picture and
-              two lines beside it; the picture moved to the seam, so what is left is the two lines —
-              and the right padding is the picture's footprint, because a name that ran under a
-              portrait would truncate against nothing visible. */}
+              WHAT THIS ORDER CHANGED. The tag row used to sit directly under the name, so
+              `IDLE UNVERIFIED DRAFT` — three caps badges, the same three on nearly every card in a
+              young workspace — was the second thing read on the product's primary object, above
+              what the agent is for and above anything it had actually done. They are state, they
+              are secondary, and they are now under the figures.
+
+              THE IDENTITY BLOCK, WHICH IS THE WHOLE LEFT SIDE OF THIS ROW. It was a picture and two
+              lines beside it; the picture moved to the seam and the slug left the card, so what is
+              left is the name and the category — and the right padding is the picture's footprint,
+              because a name that ran under a portrait would truncate against nothing visible. */}
           <div className={`flex min-w-0 items-start ${compact ? "pr-16" : "pr-20"}`}>
             <div className="min-w-0 flex-1">
             {/* THE PHASE GLYPH IS GONE FROM THIS LINE — the product owner's call. It was a small
@@ -375,91 +380,38 @@ export function AgentCard({
 
                 THE NAME IS THE LOUDEST THING ON THE CARD, at `text-title` — 16px/600 rather than the
                 13px/500 of `TYPE.title`, which is a label rung and was never meant to carry the
-                primary object of the product's primary surface. The ladder under it is real and each
-                step is a step: 16/600 name, 11px faint slug and category, 10px caps tags, 12px prose
-                for the current work, 10px faint figures in the footer. */}
+                primary object of the product's primary surface. See the block above for the ladder
+                under it. */}
             <Truncate className="text-title text-ink" title={agent.name}>
               {agent.name}
             </Truncate>
-            {/* The slug at the smaller size — §5.2. It was also in the mono face, on the argument
-                that it is an identifier and the prose/code split tells a reader which of the two
-                lines they can type. typography.pdf §04 names "agent IDs/slugs" in its Sans list
-                explicitly, so what separates the two lines now is size and colour, which is what
-                §03 says hierarchy is supposed to come from anyway.
+            {/* WHAT THIS AGENT IS FOR, ON ITS OWN LINE — and the slug that used to share it is
+                gone from the card entirely, which is the product owner's call. It was a second
+                identifier under the first: `margot` under `Margot`, differing by a capital, down
+                every card in the grid. An identifier earns its pixels where somebody TYPES it —
+                the detail header, an export, a URL — and nowhere on this card is it typed. It is
+                still the card's `data-agent-card`, so the grid's keyboard navigation and the
+                suites that address a card by name are unaffected.
 
-                THE CATEGORY SHARES THE SLUG'S LINE, which is the sidebar's arrangement one surface
-                over: the name is the identity and never gives way, and what an agent is FOR sits
-                under it with the identifier. Two lines rather than three keeps the card's hierarchy
-                at picture, name, then everything else — and the pair reads as one subtitle rather
-                than as two competing facts.
+                WHICH LEAVES THE SUBTITLE SAYING SOMETHING. Name, then the category: the two facts
+                the specified hierarchy puts first and second, with nothing between them.
+
+                SAME SIZE AS THE THREAD TITLE BELOW, A LIGHTER WEIGHT AND A LOWER INK. The category
+                outranks the thread preview and it would read the other way round if it were a rung
+                smaller, because the preview's title is the next thing with a real head to it. What
+                separates them is weight and colour, which is where §03 puts hierarchy when the
+                size ladder has run out of rungs to spend.
 
                 `Uncategorized` IS ABSENT rather than shown, on §7's rule: an agent nobody has
-                categorised should read as a name and a slug, not as a name, a slug and a
-                placeholder repeated down every card in the grid. */}
-            <div className="mt-0.5 flex min-w-0 items-baseline gap-1.5">
-              <Truncate className="min-w-0 text-tiny text-faint" title={agent.slug}>
-                {agent.slug}
+                categorised should read as a name, not as a name and a placeholder repeated down
+                every card in the grid. */}
+            {showsCategory(agent.category) && (
+              <Truncate className="mt-0.5 text-caption text-muted" title={agent.category}>
+                {agent.category}
               </Truncate>
-              {showsCategory(agent.category) && (
-                <>
-                  <span className="shrink-0 text-tiny text-faint" aria-hidden>·</span>
-                  <Truncate className="min-w-0 shrink-0 text-tiny text-muted" title={agent.category}>
-                    {agent.category}
-                  </Truncate>
-                </>
-              )}
-            </div>
+            )}
             </div>
           </div>
-
-        {/* §5.4's TAG ROW AND THE CARD'S OWN ACTIONS, SHARING A LINE — and the sharing is what the
-            portrait's arrival forced. The actions were the top right of the identity row, which is
-            where the picture now sits; a control under a portrait is a control nobody can press.
-
-            THIS LINE RATHER THAN THE BANNER, which was the other candidate and is worse on both
-            counts that matter: a faint glyph over a saturated band fails contrast at every one of
-            the eleven hues, and giving the controls their own scrim to sit on would be the first
-            filled container in a product that draws structure in hairlines.
-
-            SO THEY MOVED DOWN ONE ROW AND NOTHING ELSE CHANGED about them. Same cluster, same
-            spacing, same held-back weight — the tag row takes the width it needs and the controls
-            keep the right end, which is where they have always been. The tags trim to three plus a
-            `+n` chip, so there is no width at which the two fight.
-
-            NOT HIDDEN UNTIL HOVER. A control that does not exist until you move the mouse is a
-            control nobody finds and nobody can reach on a touch screen — and `focus-within` puts
-            them back at full weight for the keyboard, which hover alone would strand. */}
-        <div className="flex min-w-0 items-center gap-2">
-          <AgentTagRow agent={agent} className="min-w-0 flex-1" />
-          <div className="-mr-1 flex shrink-0 items-center gap-0.5 opacity-70 transition-opacity duration-fast focus-within:opacity-100 group-hover:opacity-100">
-            {/* §5.2'S PRIMARY ACTION IS NOT HERE ANY MORE. It was a bare `+` in this cluster, on the
-                argument that three cards across would otherwise mean three outlined bars competing
-                with three agent names. The product owner's call is the other way: it is the one
-                thing on the card somebody came to DO, and a plus indistinguishable in weight from
-                copy-context and the overflow menu is a primary action disguised as a third icon. It
-                is a labelled pill at the foot of the card now — see the end of this component. */}
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                void copyContext();
-              }}
-              title={copied ? "Copied" : "Copy this agent's context as markdown"}
-              aria-label={`Copy ${agent.name}'s context`}
-              className="rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active active:bg-chrome hover:text-ink"
-            >
-              <Icon.agentDetail.copy size={ICON.sm} />
-            </button>
-            <Overflow
-              agent={agent}
-              onFork={onFork}
-              onRename={onRename}
-              onExport={onExport}
-              onArchive={onArchive}
-              onRestore={onRestore}
-            />
-          </div>
-        </div>
 
         {/* §5.2's current work. Dropped entirely at compact density — that is what makes the two
             densities different layouts rather than one at two scales. */}
@@ -467,7 +419,19 @@ export function AgentCard({
           <div className="min-w-0">
             {agent.latest_thread ? (
               <>
-                <Truncate className="text-caption text-ink" title={agent.latest_thread.title}>
+                {/* THE THREAD'S TITLE, AT A WEIGHT RATHER THAN A SIZE. It is the head of the
+                    preview and the first prompt under it is the body, and the two were the same
+                    12px at the same weight one ink apart — which read as two lines of the same
+                    thing. 500 against 400 is the distinction, and it costs no rung.
+
+                    AND IT IS NOT A DESCRIPTION OF THE AGENT, which the specification says in
+                    capitals and which is worth restating here because the line ABOVE this block
+                    now looks like a subtitle: the category is what the agent is for, and this is
+                    what somebody happened to talk to it about most recently. There is no label
+                    over it — "RECENT THREAD" and "CURRENT FOCUS" were both considered and both
+                    refused — because a preview of a conversation reads as one, and a caps label
+                    over two lines of 12px text is a third thing to read before the two. */}
+                <Truncate className="text-caption font-medium text-ink" title={agent.latest_thread.title}>
                   {agent.latest_thread.title}
                 </Truncate>
                 <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
@@ -548,34 +512,22 @@ export function AgentCard({
           </div>
         )}
 
-        {/* §5.5's clickable sparkline, and the deploy dot beside it — RENDERED ONLY WHEN EITHER HAS
-            SOMETHING TO SAY. An agent that has never run has no bars and one that is not deployed
-            has no dot, so on a fresh workspace this row was a band of empty space between the
-            current-work line and the footer, on every card at once. A row that is blank on every
-            card is not a row; it is the awkward vertical gap it looks like. */}
-        {(agent.outcomes.length > 0 || agent.deployment?.status === "live") && (
-        <div className="flex min-w-0 items-center gap-2">
-          <AgentSparkline outcomes={agent.outcomes} max={compact ? 12 : 20} height={compact ? 10 : 12} />
-          {agent.deployment?.status === "live" && (
-            <span
-              className="ml-auto flex shrink-0 items-center gap-1 text-tiny"
-              style={{ color: agent.drift ? STATUS.error : STATUS.ok }}
-              title={
-                agent.drift
-                  ? `Deployed from v${agent.drift.deployed}; this agent is now at v${agent.drift.current}`
-                  : agent.deployment.url ?? "Serving on a public URL"
-              }
-            >
-              <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: "currentColor" }} aria-hidden />
-              {agent.drift ? `v${agent.drift.deployed} → v${agent.drift.current}` : "live"}
-            </span>
-          )}
-        </div>
-        )}
+        {/* §5.2's FOOTER AND §5.5's SPARKLINE, AS ONE LINE — the product owner's call, and the
+            two were never really two. The figures sat on a bordered footer; above it, sometimes,
+            a row holding twenty bars and a `live` dot and otherwise nothing at all, which on a
+            fresh workspace was a band of empty space between the preview and the footer on every
+            card at once. Folded together they are one sentence of quiet facts with the marks that
+            qualify them at the right end.
 
-        {/* §5.2's footer, and the one action the card owns. `mt-auto` so a card with a short
-            current-work line still puts its footer on the bottom edge — a grid whose footers sit at
-            different heights reads as misaligned rather than as varied. */}
+            `mt-auto` SO THE FOOTERS ALIGN. A card with a one-line preview and one with a
+            three-line preview put this row at different heights otherwise, and a grid whose
+            figures sit at different heights reads as misaligned rather than as varied — which
+            matters more now that the tag row and the action below hang off it.
+
+            THE SENTENCE ON THE LEFT, THE OBJECTS ON THE RIGHT. Threads, activity and spend are
+            words and numbers separated by `·`; the sparkline, the deploy dot, the date chip and
+            the creator's initial are each their own shape, and a `·` before a bordered pill is a
+            separator between a sentence and an object. */}
         <div className="mt-auto flex min-w-0 items-center gap-2 border-t border-hair pt-2 text-tiny text-faint">
           <span className="tabular-nums" title={`${agent.thread_count} open thread${agent.thread_count === 1 ? "" : "s"}`}>
             {agent.thread_count} thread{agent.thread_count === 1 ? "" : "s"}
@@ -598,47 +550,127 @@ export function AgentCard({
               </span>
             </>
           )}
-          {/* §7.2: LAST ACTIVE. The dot separator goes with it — a chip is its own boundary, and a
-              `·` before a bordered pill is a separator between a sentence and an object. */}
-          {agent.last_run_at && <DateChip at={agent.last_run_at} title={`Last active ${absTime(agent.last_run_at)}`} />}
-          {/* Team workspaces only. In a personal one this is a picture of the only person who could
-              have made it, which is a pixel spent saying nothing. */}
-          {creatorInitial && (
-            <span
-              // THE ACCOUNT ROW'S TREATMENT. This was a 16px circle with a 9px muted initial
-              // against the sidebar's 20px rounded square with an 11px ink one — two
-              // initial badges in one app at two shapes, two sizes and two ink levels. And it
-              // was `aria-hidden` while carrying a `title`, so the tooltip sat on an element
-              // removed from the accessibility tree and reached nobody.
-              className="ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-control bg-active text-tiny text-ink"
-              title="Who created this agent"
-              role="img"
-              aria-label="Who created this agent"
-            >
-              {creatorInitial}
-            </span>
-          )}
+          {/* ONE CLUSTER WITH ONE `ml-auto`, WHICH IS ALSO A BUG THIS MERGE WOULD HAVE MADE. The
+              deploy dot and the creator's initial each carried their own `ml-auto` when they were
+              on separate rows; siblings in one flex row DISTRIBUTE the free space between them, so
+              putting both on this line would have opened a gap in the middle of the cluster that
+              grew with the card. One margin on the box around them. */}
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            {/* §5.5's CLICKABLE SPARKLINE, and it draws nothing at all for an agent that has never
+                run — which is why it is conditional rather than an empty 20-bar box. */}
+            {agent.outcomes.length > 0 && (
+              <AgentSparkline outcomes={agent.outcomes} max={compact ? 12 : 20} height={compact ? 10 : 12} />
+            )}
+            {agent.deployment?.status === "live" && (
+              <span
+                className="flex shrink-0 items-center gap-1"
+                style={{ color: agent.drift ? STATUS.error : STATUS.ok }}
+                title={
+                  agent.drift
+                    ? `Deployed from v${agent.drift.deployed}; this agent is now at v${agent.drift.current}`
+                    : agent.deployment.url ?? "Serving on a public URL"
+                }
+              >
+                <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: "currentColor" }} aria-hidden />
+                {agent.drift ? `v${agent.drift.deployed} → v${agent.drift.current}` : "live"}
+              </span>
+            )}
+            {/* §7.2: LAST ACTIVE, as the one date chip this product has. It is a hairline outline
+                at `faint`, which is quiet enough for this line — and it stays a chip rather than
+                becoming bare text because §7.1 puts this site in the list by name, and a site that
+                quietly goes back to a `relTime` leaves no trace but a screenshot. */}
+            {agent.last_run_at && <DateChip at={agent.last_run_at} title={`Last active ${absTime(agent.last_run_at)}`} />}
+            {/* Team workspaces only. In a personal one this is a picture of the only person who
+                could have made it, which is a pixel spent saying nothing. */}
+            {creatorInitial && (
+              <span
+                // THE ACCOUNT ROW'S TREATMENT. This was a 16px circle with a 9px muted initial
+                // against the sidebar's 20px rounded square with an 11px ink one — two initial
+                // badges in one app at two shapes, two sizes and two ink levels. And it was
+                // `aria-hidden` while carrying a `title`, so the tooltip sat on an element removed
+                // from the accessibility tree and reached nobody.
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-control bg-active text-tiny text-ink"
+                title="Who created this agent"
+                role="img"
+                aria-label="Who created this agent"
+              >
+                {creatorInitial}
+              </span>
+            )}
+          </div>
         </div>
 
-        {/* §5.2'S PRIMARY ACTION, AS A BUTTON THAT LOOKS LIKE ONE — the product owner's call, and it
-            moved here from the icon cluster at the top of the card. Inside the content block rather
-            than on the frame, because it acts on the agent the block describes.
+        {/* §5.4's TAG ROW AND THE CARD'S OWN ACTIONS, SHARING A LINE — and the sharing is what the
+            portrait's arrival forced. The actions were the top right of the identity row, which is
+            where the picture now sits; a control under a portrait is a control nobody can press.
 
-            A CYLINDER: `rounded-pill`, which is the one rung §04 reserves for a shape whose corners
-            are its full height. That is the rung's stated use — "status tags, badges and semantic
-            pills only" — and this is the exception the product owner asked for by name; it earns it
-            by being the only control on the card with a label, so nothing else can be confused for
-            it.
+            THIS LINE RATHER THAN THE BANNER, which was the other candidate and is worse on both
+            counts that matter: a faint glyph over a saturated band fails contrast at every one of
+            the eleven hues, and giving the controls their own scrim to sit on would be the first
+            filled container in a product that draws structure in hairlines.
 
-            FULL WIDTH, AND THAT WAS THE OLD OBJECTION. A glyph was chosen over "a full-width
-            outlined button under everything" because three cards across meant three outlined bars
-            competing with three agent names. The names are 16px/600 now and the bar is a filled
-            pill at the bottom of a recessed block — the hierarchy the objection was about runs the
-            other way, so the bar reads as the card's floor rather than as a rival to its title.
+            SO THEY MOVED DOWN ONE ROW AND NOTHING ELSE CHANGED about them. Same cluster, same
+            spacing, same held-back weight — the tag row takes the width it needs and the controls
+            keep the right end, which is where they have always been. The tags trim to three plus a
+            `+n` chip, so there is no width at which the two fight.
+
+            NOT HIDDEN UNTIL HOVER. A control that does not exist until you move the mouse is a
+            control nobody finds and nobody can reach on a touch screen — and `focus-within` puts
+            them back at full weight for the keyboard, which hover alone would strand. */}
+        <div className="flex min-w-0 items-center gap-2">
+          <AgentTagRow agent={agent} className="min-w-0 flex-1" />
+          <div className="-mr-1 flex shrink-0 items-center gap-0.5 opacity-70 transition-opacity duration-fast focus-within:opacity-100 group-hover:opacity-100">
+            {/* §5.2'S PRIMARY ACTION IS NOT HERE ANY MORE. It was a bare `+` in this cluster, on the
+                argument that three cards across would otherwise mean three outlined bars competing
+                with three agent names. The product owner's call is the other way: it is the one
+                thing on the card somebody came to DO, and a plus indistinguishable in weight from
+                copy-context and the overflow menu is a primary action disguised as a third icon. It
+                is a labelled pill at the foot of the card now — see the end of this component. */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                void copyContext();
+              }}
+              title={copied ? "Copied" : "Copy this agent's context as markdown"}
+              aria-label={`Copy ${agent.name}'s context`}
+              className="rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active active:bg-chrome hover:text-ink"
+            >
+              <Icon.agentDetail.copy size={ICON.sm} />
+            </button>
+            <Overflow
+              agent={agent}
+              onFork={onFork}
+              onRename={onRename}
+              onExport={onExport}
+              onArchive={onArchive}
+              onRestore={onRestore}
+            />
+          </div>
+        </div>
+
+        {/* §5.2'S PRIMARY ACTION, AND IT IS NOW THE QUIETEST WAY OF BEING ONE — the product
+            owner's call, twice, arriving from two directions.
+
+            THE FIRST CALL MOVED IT HERE from the icon cluster at the top of the card, as a labelled
+            cylinder, because a bare `+` indistinguishable in weight from copy-context and the
+            overflow menu is a primary action disguised as a third icon. That still holds: it is
+            full width, it is `rounded-pill`, and it keeps its label.
+
+            THE SECOND CALL TOOK ITS FILL AWAY. Filled in `chrome` it was the heaviest shape on the
+            card — a solid bar under a 16px name, on three cards across — and the hierarchy the
+            specification asks for ends at a preview and a line of figures, not at a button. So the
+            surface arrives on approach instead: nothing at rest, `bg-active` on hover or focus,
+            and the label lifts from `muted` to `ink` with it. A ghost control still has to show its
+            hit area when somebody reaches for it, which is what `buttons.ts` argues about
+            `quietBtn` and is the same argument here.
+
+            `rounded-pill` SURVIVES BOTH. §04 reserves that rung for "status tags, badges and
+            semantic pills only", and this is the exception asked for by name; it earns it by being
+            the only control on the card with a label, so nothing else can be confused for it.
 
             ABSENT FOR AN ARCHIVED AGENT, which §4 requires: an agent that has been put away should
-            not offer work. The footer above is then the last thing in the card, which is what it
-            always was. */}
+            not offer work. */}
         {!agent.archived_at && (
           <button
             type="button"
@@ -647,7 +679,7 @@ export function AgentCard({
               onNewThread();
             }}
             title={`Start a new thread on ${agent.name}`}
-            className="mt-0.5 flex w-full items-center justify-center gap-1.5 rounded-pill bg-chrome py-2 text-caption text-ink transition-colors duration-fast hover:bg-active active:bg-chrome focus-visible:outline-none focus-visible:shadow-focusring"
+            className="flex w-full items-center justify-center gap-1.5 rounded-pill py-1.5 text-caption text-muted transition-colors duration-fast hover:bg-active hover:text-ink active:bg-chrome focus-visible:outline-none focus-visible:shadow-focusring"
           >
             <Icon.agents.newThread size={ICON.sm} />
             New Thread
