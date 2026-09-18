@@ -132,10 +132,6 @@ CHECK_LO, CHECK_HI, NEUTRAL = 110, 230, 15
 # accident. The disc is not REMOVED, only ignored while the crop is measured — and what survives of
 # it is invisible anyway, nine units off the white it sits on.
 PAPER = 200
-# How the portrait's square is sized against the head it holds — see square. The band is the top
-# third, where only hair and skull live; 1.9 heads across leaves the shoulders room without letting
-# a drawing that has more of them shrink the face; the air is what sits above the hair.
-HEAD_BAND, HEAD_RATIO, HEAD_AIR = 0.34, 1.9, 0.06
 # Alpha at or above this is the badge; below it is the space around it.
 OPAQUE = 200
 # The disc is drawn at this multiple and brought down, which is what antialiases a cut rim.
@@ -157,41 +153,32 @@ def source(stem):
 
 def square(im, mask, box, fill):
     """
-    Crop to a square sized against the HEAD, so eleven cards carry eleven faces at one size.
+    Crop to the smallest square holding the drawing, padded with fill where it runs off the image.
 
-    CROPPING TO THE WHOLE DRAWING WAS THE OBVIOUS THING AND IT DOES NOT WORK. These eleven are not
-    framed alike: two are a head and a collar, one is a head with a raised arm beside it, one has a
-    braid running to the waist. Normalise the FIGURE and every drawing fills its tile — which is
-    exactly why the faces then differ by half again, because a tile filled by a head is a big face
-    and a tile filled by a head plus an arm is a small one. Measured on the output: 157px of head
-    against 232px, in the same 256px box.
+    THE DRAWING FILLS ITS TILE, AND A HEAD-SIZED SQUARE WAS TRIED AND REVERTED. Sizing the square
+    against the head — 1.9 heads across — did make eleven faces the same size, and the product
+    owner's verdict on it was that the borders were huge: a square that big leaves the figure
+    floating in white on a tile that is already white, so the padding reads as a fat frame rather
+    than as air. The faces differ a little again and that is the accepted trade.
 
-    SO THE HEAD IS THE THING HELD CONSTANT. It is measured as the widest run of ink in the top third
-    of the drawing, which on every one of these is hair and skull and nothing else — shoulders,
-    arms and braids all begin lower. The square is 1.9 heads across, which leaves room for the
-    shoulders these drawings have without letting the ones that have more of them shrink the face.
+    WHAT SURVIVED FROM THAT PASS IS THE THRESHOLD, which is the half that was actually broken. See
+    PAPER: four of the eleven sit on a pale disc wider than the drawing, and measuring the crop at
+    250 cropped those four to the disc and left a small person inside it. Measured at 200 the disc
+    is not the drawing, so those four fill their tiles like the other seven — which is the "enlarge
+    the ones that came out small" half of the ask, done by measuring rather than by zooming.
 
-    CENTRED ON THE HEAD RATHER THAN ON THE DRAWING, for the same reason: a raised arm pulls the
-    drawing's centre sideways and would set the face off-axis in its tile.
+    CENTRED HORIZONTALLY, FLUSH AT THE BOTTOM. Most of these drawings are cut off by the source's
+    own bottom edge — a shoulder or a waist — and a cut that floats in the middle of a tile reads as
+    a mistake where a cut at the tile's edge reads as the picture continuing past it.
 
-    PADDED, NOT CLIPPED. The square is allowed to run off the source — it usually does at the top,
-    because the head starts near the frame's edge — so only the part that exists is copied, onto
-    paper, at the offset it belongs at. Cropping out of bounds and pasting the result would put a
-    black band wherever the source ran out.
+    PADDED, NOT CLIPPED. The square is allowed to run off the source, so only the part that exists
+    is copied, onto paper, at the offset it belongs at. Cropping out of bounds and pasting the
+    result would put a black band wherever the source ran out.
     """
     x0, y0, x1, y1 = box
-    px = mask.load()
-    head, hy = 0, y0
-    for y in range(y0, y0 + max(1, int((y1 - y0) * HEAD_BAND))):
-        xs = [x for x in range(x0, x1) if px[x, y]]
-        if xs and xs[-1] - xs[0] > head:
-            head, hy = xs[-1] - xs[0], y
-    if head <= 0:
-        head, hy = x1 - x0, y0
-    side = max(1, int(head * HEAD_RATIO))
-    xs = [x for x in range(x0, x1) if px[x, hy]]
-    cx = (xs[0] + xs[-1]) // 2 if xs else (x0 + x1) // 2
-    left, top = cx - side // 2, y0 - int(side * HEAD_AIR)
+    side = max(x1 - x0, y1 - y0)
+    cx = (x0 + x1) // 2
+    left, top = cx - side // 2, y1 - side
     w, h = im.size
     cl, ct, cr, cb = max(0, left), max(0, top), min(w, left + side), min(h, top + side)
     out = Image.new(im.mode, (side, side), fill)
