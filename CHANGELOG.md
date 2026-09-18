@@ -8,6 +8,168 @@ release notes and the commits in that release's range.
 
 ---
 
+## v0.3.16 : Eleven Faces — the 3D Cast Retired, and an Agent You Do Not Have to Name
+
+Every agent had a procedurally-generated 3D character, an emoji, and a generated gradient: three
+identity systems, three answers to "which one is this", none of which agreed with the other two.
+v0.3.14 shipped the characters on one shared WebGL context and spent a release's worth of
+engineering making that safe — a build queue, a frame budget, a gaze region, an emoji placeholder
+for the seconds before a character landed, and a suite whose whole subject was that browsers cap
+live contexts at eight to sixteen and kill the oldest silently.
+
+This release replaces all of it with **eleven illustrated faces**, and the replacement is an `<img>`.
+Each face is a square portrait drawn on its own flat hue, paired with a banner cut from the same
+artwork and a human name that travels with it: `agent-06` is Stacey with Stacey's colours wherever
+it appears. **62,000 lines of vendored runtime, the roster, the carousel, the shared canvas and both
+identity columns are gone.**
+
+The second half is about who decides what an agent is. Onboarding asked for a name, a face and a
+category; the New agent dialog asked for a name, a category and a brief, and then raised a plan. Now
+both surfaces ask **two questions** — what sort of agent it is, and **what it should help you with** —
+and neither builds anything. An agent arrives already called something, already wearing a face,
+with a sentence on its card saying what it is for. Generating it is a deliberate act in the composer
+and nowhere else.
+
+### Added
+
+- **Eleven portrait/banner pairs**, in `client/public/agent-faces/`, generated from
+  `assets/agent_characters/` by `client/scripts/gen-agent-faces.mjs`. The sources are 40MB of
+  1254px PNGs and 1672px-tall backgrounds; what ships is 920KB. The generator does two things a
+  resize does not: it **bleeds each circular portrait out to a full-bleed square** by sampling the
+  backdrop as a ring of colours by angle and interpolating the character out of it — a flat fill
+  leaves a seam because every backdrop is a gradient, and extending each edge pixel along its own
+  ray drags hair into the corners as antennae — and it **blurs each banner at the source's halftone
+  pitch**, because the dot grid survives an 941→800px resize and moirés on screen.
+- **`agents.picture`** (migration 079), nullable, backfilled. An agent takes the entry at its own
+  **position** in its workspace's creation order, modulo eleven. This is the one place the release
+  deliberately breaks with the three systems it replaces, all of which hashed the agent's uuid: over
+  eleven buckets the birthday bound puts a duplicate on the fourth or fifth agent more often than
+  not, and where twenty-eight characters had a picker that warned about a collision, eleven faces are
+  handed out silently. A position guarantees the first eleven agents in a workspace are eleven
+  different people; a hash cannot.
+- **`last_provider` / `last_model` on the agent card.** There is no model column on `agents` —
+  `default_provider` holds a provider — so what the card can honestly show is what its **newest run**
+  used, and nothing at all for an agent nobody has run. The display name is resolved server-side out
+  of `pricing.json` (`claude-opus-5` → "Opus 5"); a second copy of that mapping in the browser is the
+  drift that once put a model selector four models behind the price sheet. Both columns come off the
+  window function the sparkline already runs, so neither costs a statement.
+- **A New Thread pill** at the foot of every card — `Add01Icon` and a label, at the `pill` rung.
+  It replaces a bare `+` that sat in the icon cluster at the top, indistinguishable in weight from
+  copy-context and the overflow menu: the one thing somebody came to the card to do, disguised as a
+  third glyph.
+- **`client/src/lib/agentFaces.test.ts`** (`test:agent-faces`) and
+  **`server/src/agents/faces.test.ts`** (`test:agent-picture`) — the list matches the directory in
+  both directions, every portrait has its own banner, every face has a distinct name, and a
+  workspace's first eleven agents come out different. The drift check has two halves rather than one,
+  because a face is a portrait AND a name: the copies can disagree by handing out a picture the
+  client cannot draw, or by putting the wrong name under one it can.
+
+### Changed
+
+- **The agent card is a frame around a recessed block.** Three surfaces that are meant to be
+  tellable apart: the page at `#F6F6F4`, the card frame at `#FFFFFF`, the content block at `#F0F0EE`
+  — a step *down* past the page, so the block reads as inset into a white mount. Frame and block
+  were `#FFFFFF` and `#FAFAF9` first, one percent apart, which §01 itself warns is "the same
+  surface".
+- **The agent name is the loudest thing on its card**, at 16px/600. It was on `TYPE.title`, which is
+  `text-label` — the 13px/500 *label* rung — so the primary object of the product's primary surface
+  was set one step above its own slug.
+- **The phase dot before the name is gone.** A coloured circle reads as decoration until somebody
+  explains it; the tag row under the name says `Running`, `Failing`, `Draft` and `Archived` in words,
+  which is what I8's "a shape or a WORD" asks for.
+- **Banners are 104px** (72 compact), and **every card in the grid is the same height** —
+  `auto-rows-fr`, so a row sizes to its tallest card and the slack falls below the footer. The
+  alternative, one fixed height everywhere, clips whichever card has the most to say, and the cards
+  with the most to say are the ones in trouble.
+- **The sidebar's agent row is one line**: face, name, `·`, category. The date is gone — a relative
+  timestamp on forty rows is forty figures nobody is scanning for — and with it the `lastRunAt` prop
+  and the per-render map that existed only to feed it. The row is 32px again rather than 44.
+- **The whole sidebar reads at one size**, `text-body font-medium`, the pair the tab options already
+  used; only the Projects/Recents headings stay smaller. The 15px that was asked for is not on the
+  locked eight-rung scale, and the ladder alternates 500/400 going up, so `font-medium` is restored
+  on the rows that would otherwise have got bigger and lighter at once.
+- **The sidebar row mounts `AgentIdentityLine`** instead of a hand-rolled copy of half its behaviour.
+  The component was written for §7's rule — the name that never truncates, the category that does,
+  no dangling separator when the column narrows — and had been left with no call site when the row
+  grew a second line. Its separator is a middle dot now rather than an em dash: a dash joins two
+  clauses, and on one line these are two facts about one agent.
+- **Onboarding and the New agent dialog ask the same two questions**, in the same order, and both
+  write a draft. The dialog's Create is never disabled — both answers are optional, and a row with a
+  face and a name is something to build into.
+- **Nothing outside the composer raises a plan.** The dialog sent `planAgent`, one step short of a
+  build; a plan raised from a form is a build somebody started by filling in fields.
+
+### Removed
+
+- **The Gloss 3D system, entire** — `client/src/lib/gloss/` (25 vendored files plus a pinned
+  Three.js), `GlossAvatar`, `AvatarCarousel`, the shared stage and its four suites
+  (`test:gloss-vendor`, `test:gloss-roster`, `test:gloss-stage`, `test:gloss-budget`). 62,000 lines.
+- **The agent emoji, entire** — the sixty-four-entry palette on both sides, the picker, the
+  `setAgentEmoji` command and all five of its registrations, and `test:agent-emoji` /
+  `test:emoji-render`. The three dense surfaces that resolved a mark by slug — the Cockpit work row,
+  the fleet card, the command palette — resolve the agent's picture instead, at the same register.
+- **`agents.emoji` and `agents.avatar_id`** (migration 080), as an explicit contract step. It went
+  out as **two deploys**: nothing may drop a column the running version still selects, and Fly rolls
+  machines one at a time. `migrate:check`'s override silences the gate per *statement*, not per file,
+  which is worth knowing — a header marker leaves the second `DROP COLUMN` still reported.
+- **The name field on the New agent dialog**, and the onboarding face carousel with it. A field for
+  something the product already knows is a question with a right answer nobody has.
+- **`agents.shuffleEmoji`** from the icon registry, and `avatarRoster.ts`, whose one surviving
+  export — the neutral category — moved to `server/src/agents/category.ts`.
+
+### Fixed
+
+- **`Export current version` is no longer offered on an agent with nothing published.** Its only
+  possible outcome on a draft was the error `no such agent version in this workspace`, in the
+  product's internal vocabulary, for a state that is completely ordinary — and the one-shot export
+  intent was left armed. `exportRequest` clears only when a *matching* version payload lands, and
+  `setError` does not clear it, so a failed export would fire the next time anybody loaded a version
+  of that agent and save a file nobody asked for.
+- **A draft agent's card says what the agent is for.** It read `Not started yet`, which is about
+  threads, while withholding the sentence the person had just typed at creation.
+- **The New agent button's tooltip promised "name, category and avatar"** on a form that asks for a
+  category and what the agent should help with — on the control somebody would press to find out
+  what they were about to be asked.
+
+### Verified
+
+Driven against the running client in a browser, against a real server and a real database, rather
+than asserted from source:
+
+- **The creation flow end to end** — dialog → `createDraftAgent` → row in Postgres with the typed
+  description → card and detail header both showing it. Three agents made this way took
+  `agent-02`, `agent-03`, `agent-04` in order, with Bruno, Margot and Kai's names attached.
+- **No plan is raised from the dialog** — the socket carries `createDraftAgent` and nothing else.
+- **Equal card heights** — one card forced taller; all three went 294px → 384px together, nothing
+  clipped or dropped.
+- **Every control on the Agents tab pressed**: search and its empty state and `Clear them`, all four
+  filter groups (status, category, deployed, archived), all four sort options, the density toggle
+  (401×294 ↔ 297×230), refresh, copy-context (markdown on the clipboard, tooltip to `Copied`),
+  Rename, Archive with its creator-naming confirm, Restore from the archived-only grid, the card
+  click into the detail, and the New Thread pill.
+- **The detail header** — correct banner and portrait for `agent-03`, and the description rendered.
+
+### Notes
+
+Six findings during the pass turned out not to be defects, and are recorded because two of them
+looked conclusive:
+
+- A **collapsed 1519/76px pane layout** that reproduced in a fresh tab with cleared storage. The tab
+  was never visible, so `document.timeline.currentTime` stayed at 0, and the `flex-grow` transition
+  held its from-value indefinitely. The layout resolves correctly the moment animations can run.
+- **Fork appearing dead** on an agent — the free plan's three-agent limit, which the grid's error
+  strip does report.
+- The agent **description's absence from copied context** is deliberate (`agentContext.ts`: "prose
+  somebody already has"), as is the **archived filter showing only archived** ("a gate, not a filter
+  value"), and the composer covered by the full-screen Agents view is correctly `inert`.
+
+One inconsistency is left open rather than decided: `createDraftAgent` is ungated
+(`entitlementGate.ts`: "a row, and nothing else"), so the New agent button can add agents past the
+plan's limit while `forkAgent` refuses at it. That reasoning was written when the command was
+onboarding's one-row-at-setup path.
+
+---
+
 ## v0.3.15 : Bug Fixes and a Production-Grade Check Pass
 
 A full functional-integrity audit of the shipped product — every route, every interactive control,
