@@ -96,6 +96,23 @@ export const FACE_SIZE = {
  */
 const RADIUS_FOR = (size: number): number => (size >= FACE_SIZE.header ? RADIUS.hero : RADIUS.xl);
 
+/**
+ * WHICH OF THE TWO DRAWINGS A SIZE GETS, and the rule is the product owner's split spelled as a
+ * number: the ringed badge in dense rows, the free-standing portrait wherever there is room for a
+ * face.
+ *
+ * ONE RULE HERE RATHER THAN A PROP AT SIX CALL SITES. The two variants are not a caller's
+ * preference, they are a property of the surface — and "surface" and "size" are the same fact on
+ * this component, because a 16px face only ever appears on a one-line row and a 56px one only ever
+ * on a card. A prop would let the two disagree; a threshold cannot, and a seventh call site added
+ * at 16px gets the badge without anybody having to know this rule exists.
+ *
+ * THE BREAK IS WIDE ON PURPOSE. The sizes are 16, 22, 44, 56, 96 — so the gap between the badge's
+ * largest use and the portrait's smallest is exactly the gap between 22 and 44, which is nowhere
+ * near anything. This is not a threshold anybody will land on by accident.
+ */
+const BADGE_UPTO = FACE_SIZE.sidebar;
+
 export function AgentFace({
   picture,
   name,
@@ -157,9 +174,15 @@ export function AgentFace({
     );
   }
 
+  // A BADGE IS ALREADY THE SHAPE IT WANTS TO BE. Its source is a circle with a coloured ring drawn
+  // into it and transparency around that, so clipping it to `RADIUS_FOR`'s squircle would shave four
+  // arcs off its own rim — and `object-cover` would have nothing to crop. The portrait is the one
+  // that needs the radius, because it is a square tile.
+  const badge = size <= BADGE_UPTO;
+
   return (
     <img
-      src={face.portrait}
+      src={badge ? face.sidebar : face.portrait}
       alt=""
       aria-hidden
       // LAZY AND ASYNC, because a workspace with forty agents is forty portraits and the grid
@@ -169,8 +192,12 @@ export function AgentFace({
       decoding="async"
       width={size}
       height={size}
-      style={style}
-      className={`shrink-0 object-cover ${className}`}
+      // THE RADIUS IS DROPPED FOR A BADGE, not set to a circle: the picture already ends in a
+      // circle, and a `border-radius` on top of it is a second edge that can only disagree with the
+      // first by a sub-pixel. The ring prop is likewise ignored — a badge brings its own, and the
+      // surface-coloured band exists to separate a SQUARE tile from what it overlaps.
+      style={badge ? { width: size, height: size } : style}
+      className={`shrink-0 ${badge ? "" : "object-cover"} ${className}`}
     />
   );
 }

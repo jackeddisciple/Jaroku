@@ -12,7 +12,11 @@
 //   and the surfaces stack them, so a set that has come apart is a portrait on somebody else's
 //   colour, or Iris's face in a card beside Bruno's badge in the sidebar — the failure modes of this
 //   feature that look deliberate.
-
+//
+//   AND THE SIZE DECIDES WHICH DRAWING IS USED. Dense rows get the ringed badge, real portraits get
+//   the free-standing one; that is the product owner's split and `AgentFace` spells it as a single
+//   threshold rather than a prop, so it is worth pinning that the threshold still falls between the
+//   two groups of sizes.
 //
 //   EVERY FACE HAS A NAME, AND NO TWO SHARE ONE. `agentFaces.ts` falls back to the id when a name is
 //   missing, which keeps a card rendering; this is what stops that fallback being something anybody
@@ -24,9 +28,10 @@
 //
 //   npm run test:agent-faces
 
-import { readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+import { FACE_SIZE } from "../components/AgentFace.tsx";
 import { AGENT_FACE_COUNT, AGENT_FACES, faceAt, faceFor } from "./agentFaces.ts";
 import { AGENT_FACE_FILES } from "./agentFaceFiles.ts";
 
@@ -85,6 +90,33 @@ console.log("\nthe pairs are real files, and the module and the directory agree"
     AGENT_FACES.every((f) => f.portrait.startsWith("/agent-faces/")
       && f.sidebar.startsWith("/agent-faces/")
       && f.banner.startsWith("/agent-faces/")));
+}
+
+console.log("\nthe size a face is drawn at decides which of the two drawings it gets");
+{
+  const face = readFileSync(fileURLToPath(new URL("../components/AgentFace.tsx", import.meta.url)), "utf8");
+  const body = face.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
+
+  check("the badge is chosen by a threshold rather than a prop",
+    /const badge = size <= BADGE_UPTO/.test(body) && !/variant\?:/.test(body));
+  check("...and the threshold is the sidebar's own size",
+    /const BADGE_UPTO = FACE_SIZE\.sidebar/.test(body));
+  check("a badge draws the badge file and a portrait the portrait",
+    /src=\{badge \? face\.sidebar : face\.portrait\}/.test(body));
+
+  // THE BREAK HAS TO STAY BETWEEN THE TWO GROUPS, which is the thing a future size can quietly
+  // move. `row` and `sidebar` are the dense rows; `compact`, `card` and `header` are the surfaces
+  // with room for a face. A sixth size added between 22 and 44 would land in the gap and pick a
+  // side silently, so the gap itself is asserted.
+  const dense = [FACE_SIZE.row, FACE_SIZE.sidebar];
+  const portraits = [FACE_SIZE.compact, FACE_SIZE.card, FACE_SIZE.header];
+  check("every dense-row size is at or under the threshold",
+    dense.every((n) => n <= FACE_SIZE.sidebar), dense.join(","));
+  check("every portrait size is over it",
+    portraits.every((n) => n > FACE_SIZE.sidebar), portraits.join(","));
+  check("...and nothing sits in the gap between them",
+    Math.min(...portraits) - Math.max(...dense) >= 20,
+    `${Math.max(...dense)} -> ${Math.min(...portraits)}`);
 }
 
 console.log("\nevery face is named, and no two share a name");
