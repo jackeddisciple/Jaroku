@@ -237,7 +237,11 @@ export function CategoryPicker({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Escape") { e.preventDefault(); setOpen(false); return; }
+                // ESCAPE IS SWALLOWED, NOT JUST HANDLED. `lib/dialog.ts` names this failure in its
+                // own header — "a nested pair closing both at once" — and the dialog around this
+                // one listens on `document`, so an Escape that bubbled would close the popover and
+                // the dialog in one keystroke, throwing away a brief somebody had typed.
+                if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setOpen(false); return; }
                 if (e.key === "ArrowDown") { e.preventDefault(); setCursor((c) => Math.min(c + 1, rows.length - 1)); return; }
                 if (e.key === "ArrowUp") { e.preventDefault(); setCursor((c) => Math.max(c - 1, 0)); return; }
                 if (e.key === "Enter") {

@@ -60,6 +60,30 @@ export function NewAgentDialog({
   const [helpWith, setHelpWith] = useState("");
   const [category, setCategory] = useState<string>(UNCATEGORIZED);
 
+  /**
+   * ESCAPE CLOSES IT, which it did not — and the close button has said "Close (Esc)" since the
+   * redesign, so the promise was on screen before the behaviour was.
+   *
+   * IT IS THE DIALOG'S OWN LISTENER, not `useDialog`'s. That hook's header explains why: "adding a
+   * second Escape listener would mean two closers per dialog and a nested pair closing both at
+   * once", so each overlay owns its key and `ProviderKeysDialog` is the shape this copies. What
+   * makes the nested case safe here is the other half of it — `CategoryPicker` calls
+   * `stopPropagation` on the Escape that closes its popover, so the first press closes the popover
+   * and only the second reaches this.
+   *
+   * SAFE TO CLOSE ON, in `GrantDialog`'s terms: nothing is blocked waiting on this answer. It does
+   * discard a typed brief, which is what the button beside Create also does and what the backdrop
+   * has always done.
+   */
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
   // A FRESH DIALOG EVERY TIME IT OPENS. Left as it was, somebody who cancelled halfway through
   // reopens onto half of a decision they abandoned — and the brief in particular would be the one
   // they were writing for a different agent.
