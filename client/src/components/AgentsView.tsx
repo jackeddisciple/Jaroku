@@ -486,15 +486,20 @@ export function AgentsView() {
         {/* §9 keeps a label on the two `+ New` actions, which is where a label genuinely carries
             meaning. §5.4 is explicit that no `New` pill goes beside it — there it would read as a
             label ON the button rather than as a description of anything. */}
-        {/* §6'S DIALOG, AND THE COMPOSER IS STILL THERE. This opens the three-input form — name,
-            category, avatar — which asks for a plan exactly as the composer's first move does. The
-            composer path is untouched for anybody who would rather just start typing; what this
-            adds is the ORDER, which is the thing a chip row cannot carry. */}
+        {/* THE NEW AGENT DIALOG, AND THE COMPOSER IS STILL THERE. Two questions — what sort of
+            agent it is, and what it should help with — and it writes a DRAFT rather than asking for
+            a plan. The tooltip said "name, category and avatar" until this pass: it described a
+            three-input form that no longer exists, on the control that opens the form, which is the
+            one place somebody would check what they were about to be asked.
+
+            IT DOES NOT BUILD, and the composer path is untouched for anybody who would rather just
+            start typing. Generating an agent happens in the composer and nowhere else; what this
+            adds is the ORDER of the two questions, which is the thing a chip row cannot carry. */}
         <button
           onClick={() => setCreating(true)}
           disabled={!connected}
           className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink disabled:pointer-events-none disabled:opacity-40"
-          title={connected ? "New agent — name, category and avatar" : "Reconnecting — a new agent needs a connection"}
+          title={connected ? "New agent — what it is for" : "Reconnecting — a new agent needs a connection"}
           aria-label="New agent"
         >
           <Icon.agents.new size={ICON.sm} />
