@@ -61,18 +61,28 @@ export const FACE_SIZE = {
   /**
    * The sidebar's agent list.
    *
-   * TWENTY-TWO — the product owner's call, and it has moved twice for a reason each time. It was
-   * 16, the emoji's own register, chosen so the mark landed on the same column the five nav
-   * destinations start at; that was right for a glyph on a baseline and left a portrait as a
-   * coloured dot with a face implied in it. It went to 28, sized against a two-line row.
+   * TWENTY-EIGHT, AND IT HAS MOVED FOUR TIMES — every one of them the product owner's call, which
+   * is why the history is here rather than a single number with no argument.
    *
-   * THE ROW IS ONE LINE NOW, which is what brought it back down. The date is gone and the category
-   * sits beside the name rather than under it, so there is no two-line block to match — the
-   * measure is a single 13px line, and 22 is a picture that reads as a face while still being the
-   * row's mark rather than its subject. It leaves 5px of air in the 32px row, which is the same air
-   * the 18px nav icons have in their 28px ones.
+   * IT STARTED AT 16, the emoji's own register, so the mark landed on the column the five nav
+   * destinations start at. That is right for a glyph on a baseline and left a PORTRAIT as a
+   * coloured dot with a face implied in it. It went to 28 against a two-line row, then back to 22
+   * when the row became one line — the date went and the category came up beside the name, so
+   * there was no two-line block left to match.
+   *
+   * AND 22 WAS TOO SMALL ONCE THE ARTWORK CHANGED, which is the part the earlier reasoning could
+   * not have known. These badges are line drawings inside a thin coloured rim, not the flat
+   * full-bleed portraits that preceded them: the rim costs a pixel at each edge and the face inside
+   * is drawn smaller than a full-bleed crop of the same head. So 22 of rim-and-drawing reads as
+   * less than 22 of portrait did, and the faces stopped being legible.
+   *
+   * TWENTY-EIGHT IS THE LARGEST THE ROW HOLDS. The agent row is `h-8` — 32px — so this leaves 2px
+   * of air, which is the point where the badge is as big as it can be without the row having to
+   * grow. 32 was rendered and rejected for exactly that: it fills the row edge to edge, neighbours'
+   * rims nearly touch, and shipping it properly would mean a 40px row and an agent list taller
+   * than the navigation above it.
    */
-  sidebar: 22,
+  sidebar: 28,
   /** The portrait on an agent card, straddling its banner. */
   card: 56,
   /** The compact density's, which is the one thing compact shrinks besides dropping a line. */

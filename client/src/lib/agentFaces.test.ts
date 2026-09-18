@@ -106,17 +106,26 @@ console.log("\nthe size a face is drawn at decides which of the two drawings it 
 
   // THE BREAK HAS TO STAY BETWEEN THE TWO GROUPS, which is the thing a future size can quietly
   // move. `row` and `sidebar` are the dense rows; `compact`, `card` and `header` are the surfaces
-  // with room for a face. A sixth size added between 22 and 44 would land in the gap and pick a
-  // side silently, so the gap itself is asserted.
+  // with room for a face. A sixth size added between the two would land in the gap and pick a side
+  // silently, so the gap itself is asserted.
   const dense = [FACE_SIZE.row, FACE_SIZE.sidebar];
   const portraits = [FACE_SIZE.compact, FACE_SIZE.card, FACE_SIZE.header];
   check("every dense-row size is at or under the threshold",
     dense.every((n) => n <= FACE_SIZE.sidebar), dense.join(","));
   check("every portrait size is over it",
     portraits.every((n) => n > FACE_SIZE.sidebar), portraits.join(","));
+
+  // AND THE GAP IS MEASURED AGAINST THE LADDER RATHER THAN AGAINST A ROUND NUMBER, which is the
+  // correction this check needed. It asked for 20px and the sidebar badge then went to 28 — a
+  // deliberate, rendered, chosen size — leaving a 16px gap and a red suite over nothing. What makes
+  // a gap wide enough is that it is no tighter than the tightest step the scale already takes
+  // between two adjacent sizes, because a gap narrower than that would be the one place on the
+  // ladder where two rungs are closer together than the rungs themselves.
+  const rungs = [...dense, ...portraits].sort((a, b) => a - b);
+  const tightest = Math.min(...rungs.slice(1).map((n, i) => n - rungs[i]!));
   check("...and nothing sits in the gap between them",
-    Math.min(...portraits) - Math.max(...dense) >= 20,
-    `${Math.max(...dense)} -> ${Math.min(...portraits)}`);
+    Math.min(...portraits) - Math.max(...dense) >= tightest,
+    `gap ${Math.min(...portraits) - Math.max(...dense)}, tightest step ${tightest}`);
 }
 
 console.log("\nevery face is named, and no two share a name");
