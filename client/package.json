@@ -112,6 +112,7 @@
     "test:entitlement-store": "tsx src/store/entitlementStore.test.ts",
     "test:agent-art": "tsx src/lib/agentArt.test.ts",
     "test:agent-faces": "tsx src/lib/agentFaces.test.ts",
+    "test:empty-faces": "tsx src/lib/emptyFaces.test.ts",
     "test:agent-tags": "tsx src/lib/agentTags.test.ts",
     "test:agent-filter": "tsx src/lib/agentFilter.test.ts",
     "test:agent-context": "tsx src/lib/agentContext.test.ts",
@@ -128,7 +129,6 @@
     "test:agent-category": "tsx src/lib/agentCategories.test.ts",
     "test:sidebar-identity": "tsx src/lib/sidebarIdentity.test.ts",
     "test:surface-system": "tsx src/lib/surfaceSystem.test.ts",
-    "test:greeting-emoji": "tsx src/components/greetingEmoji.test.ts",
     "test:build-turn": "tsx src/lib/buildTurn.test.ts"
   },
   "dependencies": {

@@ -63,7 +63,7 @@ import { chatSubscriptionFor } from "../lib/chatSubscription.ts";
 import { subscriptionBadge, subscriptionBlockedReason } from "../lib/subscriptionState.ts";
 import { effortName, effortStops, stopFor, subscriptionEffort } from "../lib/effortLevels.ts";
 import { ShieldControl, modeLabel } from "./composer/ShieldControl.tsx";
-import { GreetingEmoji } from "./GreetingEmoji.tsx";
+import { EmptyFaceRow } from "./EmptyFaceRow.tsx";
 import { ChatHeader } from "./ChatHeader.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { dayStarts, turnStamp } from "../lib/turnDates.ts";
@@ -95,8 +95,8 @@ import {
 import { useMcpStore, allMcpTools } from "../store/mcpStore.ts";
 import { useThreadStore } from "../store/threadStore.ts";
 import { firstUnresolvedTurnId } from "../lib/threadResume.ts";
-import { ACCENT, BRAND, ICON, INTERACTION, STATUS, SURFACE, TEXT, TYPE } from "../lib/tokens.ts";
-import { JarokuGlyph, ProviderMark } from "../lib/icons.tsx";
+import { ACCENT, ICON, INTERACTION, STATUS, SURFACE, TEXT, TYPE } from "../lib/tokens.ts";
+import { ProviderMark } from "../lib/icons.tsx";
 import { firstNameOf } from "../lib/accountOnboarding.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { ComposerSuggestions } from "./composer/ComposerSuggestions.tsx";
@@ -3099,21 +3099,25 @@ export function BuildPane({
             // every height, and neither takes anything once the window is too short to have any.
             <div className="flex min-h-full flex-col items-center px-6 py-10 text-center">
               <div className="grow-[2]" aria-hidden />
-              {/* The mark reads as an empty state, not a brand moment: small, and in the strongest
-                  border grey — quiet, but not so faint that it looks like a rendering fault. */}
-              <span className="inline-flex text-grip" aria-hidden>
-                <JarokuGlyph size={BRAND.greeting} />
-              </span>
+              {/* SIX ILLUSTRATED BADGES WHERE THE BRAND MARK WAS — the product owner's call. It
+                  was a faint 32px Jaroku glyph, which is a logo on a screen somebody has already
+                  signed into and already knows the name of; the badges say what this product is
+                  FOR, which is the thing an empty state has to earn its pixels saying.
+                  `EmptyFaceRow` holds the order, the size and the overlap. */}
+              <EmptyFaceRow />
               {/* REGULAR WEIGHT, one rung below the hero, and the dominant thing in the group. The
                   rung carries 600 for headings a person scans for; this is a sentence addressed to
                   them. `text-balance` so a narrow window breaks it into even lines.
                   THE QUESTION NAMES WHOEVER IS SIGNED IN — "What are we working on today, <name>?", the
                   product owner's wording on 2026-09-11 — with the account's first name, and the plain question
-                  standing in when there is none. Their own emojis follow it, a new one every second;
-                  `GreetingEmoji` says which, and how it keeps to what each machine can draw. */}
+                  standing in when there is none.
+
+                  AND NOTHING FOLLOWS IT ANY MORE. A rotating emoji used to, one of the account's own,
+                  swapped every second on a crossfade — taken out with the brand mark above, on the
+                  product owner's call. The badges are the picture on this screen now, and a second
+                  animated mark on the same line was the heading competing with itself. */}
               <h1 className="mt-8 text-balance text-page font-normal text-ink">
                 {firstName ? `What are we working on today, ${firstName}?` : "What are we working on today?"}
-                <GreetingEmoji />
               </h1>
               {/* FOUR WAYS TO START, under the question. Offered while the Chat composer is empty and
                   gone the moment it holds anything — read off the draft, never remembered — and a

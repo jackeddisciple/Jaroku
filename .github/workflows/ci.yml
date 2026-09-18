@@ -1831,10 +1831,11 @@ jobs:
           # spellings of a timestamp, including a raw `toLocaleString` in the secrets rotation
           # history, which is the one view where somebody is comparing dates to each other.
           npm run test:date-chip
-          # THE GREETING'S EMOJIS: the product owner's twenty-five, in their order, by code point; a
-          # new one every second, popping in; only the ones this machine draws as colour emoji, so no
-          # desktop shows a box mid-question; still under prefers-reduced-motion, paused while hidden.
-          npm run test:greeting-emoji
+          # THE EMPTY STATE'S SIX BADGES, which replaced that greeting's rotating emoji and the faint
+          # brand mark above it. The list matches the directory both ways, the order is img1 through
+          # img6 and nothing reorders it — the thing it replaced rotated every second, so a timer
+          # counts as reordering here — and the screen draws the row with neither old mark left on it.
+          npm run test:empty-faces
 
       # THE ICON SYSTEM, IN ITS OWN STEP, because the six suites guard six different invariants and
       # a reader looking at a red build should be able to tell which one broke without opening a

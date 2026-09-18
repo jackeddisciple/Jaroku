@@ -360,12 +360,6 @@ export const BRAND = {
   screen: 26,
   /** The first-run hero, and only there. */
   hero: 40,
-  /**
-   * The new-agent screen's empty-state mark, above its greeting. Between the screen mark and the
-   * hero: enough to hold the middle of an empty panel, small enough that the question below it is
-   * what gets read.
-   */
-  greeting: 32,
 } as const;
 
 // ── Type ────────────────────────────────────────────────────────────────────
