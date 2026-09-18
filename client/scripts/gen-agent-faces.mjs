@@ -1,54 +1,52 @@
-// Turn `assets/agent_characters/` into the two pictures every agent card serves, and into the typed
+// Turn `assets/agent_characters/` into the three pictures every agent wears, and into the typed
 // module that names them.
 //
 // WHY THE DERIVED COPIES ARE COMMITTED RATHER THAN BUILT ON EVERY `npm run build`. The sources are
-// 40MB of 1254px PNGs and 1672px-tall backgrounds; a card draws a 56px portrait over an 80px band.
-// Resizing at build time would mean an image dependency in `client/package.json` that exists to
-// produce twenty-two files that never change, and a CI job that decodes 40MB of PNG to emit the same
-// bytes it emitted last time. So this runs by hand when the source set changes, and
-// `test:agent-faces` is what stops the output drifting from `lib/agentFaceFiles.ts` in between.
+// 60MB of 1254px PNGs and 1672px-tall backgrounds; a sidebar row draws a 22px badge. Resizing at
+// build time would mean an image dependency in `client/package.json` that exists to produce
+// thirty-three files that never change, and a CI job that decodes 60MB of PNG to emit the same bytes
+// it emitted last time. So this runs by hand when the source set changes, and `test:agent-faces` is
+// what stops the output drifting from `lib/agentFaceFiles.ts` in between.
 //
-// This is `gen-agent-art.mjs`'s arrangement exactly, one asset set over, and it is deliberately the
-// same one: two generators in a client with two derived image sets should not be two different
-// shapes of script.
+// ── THREE PICTURES, AND WHY THERE ARE THREE ───────────────────────────────────────────────────
 //
-// ── THE ONE THING THIS DOES THAT A RESIZE DOES NOT ─────────────────────────────────────────────
+// THE PRODUCT OWNER DREW TWO PORTRAITS PER AGENT, and the difference is not decoration. A
+// `sidebar` source is a circular badge with a COLOURED RING around it; a `generic` source is the
+// same character drawn as a free-standing line portrait with no ring and no circle. They were made
+// for two different jobs and this generator keeps them apart:
 //
-// THE PORTRAIT IS A CIRCLE ON A WHITE SQUARE, AND THE CARD DRAWS A ROUNDED SQUARE. Cropped as it
-// comes, the four corners are white — and white is not a colour this palette has at card level, so
-// on a #FAFAF9 sheet they read as four chipped corners rather than as a picture. A circular mask in
-// CSS is not the fix (the design wants the squircle) and neither is a transparent PNG (the corners
-// would then show the banner through them, which is worse). What fills them is the character's own
-// backdrop, CONTINUED outward to the square's edge.
+//   THE BADGE GOES IN DENSE ROWS — the sidebar's agent list, the Cockpit work rows, the fleet strip,
+//   the command palette. At 16 to 22px a borderless drawing is a smudge; the ring is what makes it
+//   read as a distinct object at the size of a line of text, which is why the source carries its own
+//   rather than having one drawn over it.
 //
-// AND IT IS CONTINUED RATHER THAN FLOODED, WHICH IS THE WHOLE OF WHY THIS IS THIRTY LINES INSTEAD
-// OF THREE. Two versions were written before this one and each failed in a way worth recording,
-// because both are the obvious thing to try:
+//   THE PORTRAIT GOES WHERE THERE IS ROOM FOR A FACE — the agent card at 44 and 56px, the detail
+//   header at 96. Here the ring would be a frame round a frame: the card already mounts the picture
+//   on a tile with a ring in the card's own surface colour, over the banner.
 //
-//   FLOOD THE CORNERS WITH THE BACKDROP COLOUR. There is no such colour. Every one of the eleven
-//   circles is drawn on a GRADIENT, so one hex meets it along an arc and the seam reads as a circle
-//   faintly outlined on the card. Measuring harder does not help.
+//   AND THE BANNER IS UNCHANGED, still cut from `agentN_bg`, which the new art did not replace.
 //
-//   EXTEND EVERY EDGE PIXEL OUTWARD ALONG ITS OWN RAY. This continues the gradient perfectly and
-//   also continues the CHARACTER: hair that touches the circle's edge is dragged into the corner as
-//   a dark bar, and three of the eleven grew a pair of antennae.
+// `AgentFace` PICKS BETWEEN THEM BY SIZE, and the threshold is stated there rather than here.
 //
-// So the ring just inside the circle's edge is sampled BY ANGLE and then filtered down to the
-// backdrop alone — a sample too far from the ring's median is hair, a collar or a raised hand, and
-// is replaced by interpolating across it from the backdrop either side. That field fills the square,
-// and the artwork is laid back over it.
+// ── WHAT THIS DOES THAT A RESIZE DOES NOT ─────────────────────────────────────────────────────
 //
-// WHICH LEAVES THE ARTWORK CLIPPED BY A CIRCLE 4% INSIDE ITS OWN, AND THAT IS THE POINT RATHER THAN
-// A COMPROMISE. The source is drawn to be cut off by its circle — shoulders and hair run into the
-// edge deliberately — so cutting at 0.96 is the same picture, and what changes is only that the cut
-// now happens against the character's own backdrop instead of against white. Where the backdrop
-// meets the corners there is no edge to see; where the character meets it, the edge you see is the
-// character's own silhouette, which is what §04 means by "artwork may have its own silhouette".
+// THREE OF THE ELEVEN `generic` SOURCES CARRY A GREY CHECKERBOARD PAINTED INTO THEIR PIXELS, and
+// two of the eleven `sidebar` ones have no alpha at all. Both are the same export slip — an editor's
+// transparency indicator flattened into the image, or transparency dropped on the way out — and
+// both are invisible until the picture lands on something that is not white. Shipped as they come,
+// three cards would show a chequered tile and two sidebar rows a white square around the badge.
 //
-// THE RING IS READ INSIDE THE EDGE AND THE ARTWORK IS CLIPPED INSIDE IT TOO, which is what deals
-// with the antialiased fringe: the source's circle is drawn against white, so its outermost pixels
-// are part backdrop and part white and belong to neither. Reading at 0.94 of the radius and clipping
-// at 0.96 drops the fringe entirely.
+// SO THE BACKDROP IS NEUTRALISED AND THE BADGE IS CUT. The checkerboard is recognised by what it is
+// — a NEUTRAL grey in a band well above the ink and well below the paper — and painted white, which
+// is what the other eight sources already have behind them. An opaque badge has its circle measured
+// and an alpha disc built for it, the same way `gen-empty-faces.mjs` does it one asset set over.
+//
+// AND THE PORTRAITS ARE NORMALISED TO THEIR OWN DRAWING. As delivered the art fills 68% of the
+// frame on one source and 92% on another, which in a grid of cards reads as one agent photographed
+// from further away. Each is cropped to its drawing's bounds and squared, so eleven cards carry
+// eleven faces at one weight. The crop keeps the bottom flush where the source cut the body off at
+// its own edge, because a torso cropped mid-tile floats and a torso cropped at the tile's edge
+// reads as continuing past it.
 //
 // ── THE BANNER ────────────────────────────────────────────────────────────────────────────────
 //
@@ -86,10 +84,19 @@ const CLIENT = join(HERE, "..");
 const SOURCES = join(CLIENT, "..", "assets", "agent_characters");
 const OUT = join(CLIENT, "public", "agent-faces");
 
-/** How many pairs there are. A source set of a different size is a mistake rather than a resize. */
+/** How many agents there are. A source set of a different size is a mistake rather than a resize. */
 const COUNT = 11;
 /** The portrait, square. 256 is 2× the largest size anything draws it at — the detail header's 96. */
 const PORTRAIT = 256;
+/**
+ * The badge, square.
+ *
+ * FOUR TIMES ITS LARGEST USE, which is the sidebar's 22px, and eight times the 16px rows. That is
+ * more headroom than the portrait gets on purpose: a badge is a thin coloured ring around a small
+ * drawing, and a ring landing between two device pixels goes grey down one side. The file is a few
+ * kilobytes either way.
+ */
+const BADGE = 128;
 /** The banner band, 2:1. See the header for why it is wider than the band a card draws. */
 const BANNER = [800, 400];
 const QUALITY = 82;
@@ -97,34 +104,30 @@ const QUALITY = 82;
 mkdirSync(OUT, { recursive: true });
 
 const script = `
-import math, os, sys
-from PIL import Image, ImageDraw, ImageFilter
+import os, sys
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
-src, dst, count, portrait, bw, bh, quality = (
+src, dst, count, portrait, badge, bw, bh, quality = (
     sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4]),
-    int(sys.argv[5]), int(sys.argv[6]), int(sys.argv[7]),
+    int(sys.argv[5]), int(sys.argv[6]), int(sys.argv[7]), int(sys.argv[8]),
 )
 
-# THE SQUARE IS BUILT AT TWICE THE DELIVERED SIZE and downsampled at the end. The fill below walks
-# pixels in Python, so the working size is what decides whether this runs in a second or a minute —
-# and doing it here rather than at 1254px costs nothing visible, because every pixel it writes is a
-# copy of one a few pixels away.
-WORK = portrait * 2
-# How many directions the backdrop ring is sampled in. At WORK=512 the circle's circumference is
-# about 1600px, so 1440 spokes is a shade under one per pixel — fine enough that two neighbouring
-# pixels never land more than one sample apart, which is what keeps the corners smooth.
-SPOKES = 1440
-# Read the ring here, clip the artwork here. See the header: between the two lies the antialiased
-# edge, which belongs to neither the backdrop nor the white around it.
-READ, CLIP = 0.94, 0.96
-# How far from the ring's median a sample may be and still count as backdrop. The eleven backdrops
-# span about 35 units of RGB distance across their own gradients; hair and clothing come in at four
-# to five times that, so anywhere in between separates them and 70 is in the middle of it.
-BACKDROP = 70
-# A moving average over ±3° at the end, which is not doing the separating — it is smoothing the joins
-# where an interpolated run meets a measured one, so a wide collar cannot leave a corner with a
-# visible crease in it.
-SMOOTH = 12
+# THE CHECKERBOARD'S BAND. Its two tones measure about 135 and 198 and both are NEUTRAL — red, green
+# and blue within a couple of units of each other. The ink it must not touch is below 60 and the
+# paper above 250, so a band from 110 to 230 sits in open space on both sides. Antialiasing along a
+# black line does pass through it, but only as single pixels with black on one side, and a 1254px
+# source delivered at 256 buries them five to one.
+CHECK_LO, CHECK_HI, NEUTRAL = 110, 230, 15
+# Anything darker than this is the drawing rather than the paper — the pale disc some of the
+# portraits are set on measures about 245, so this keeps the disc as part of the picture.
+PAPER = 250
+# Alpha at or above this is the badge; below it is the space around it.
+OPAQUE = 200
+# The disc is drawn at this multiple and brought down, which is what antialiases a cut rim.
+SS = 4
+# Source pixels off a measured radius, for the row where the rim's antialiasing is mixed with
+# whatever was behind it.
+INSET = 2
 # The banner's blur, in source pixels, against a halftone pitch of about six. See the header: this is
 # a moiré fix rather than a soft-focus effect, and the radius is set by the dot grid it removes.
 SCREEN = 5
@@ -137,96 +140,87 @@ def source(stem):
             return path
     raise SystemExit('no source image for ' + stem)
 
-def circle(im):
-    """The drawn circle's centre and radius, from the bounding box of what is not white."""
-    grey = im.convert('L')
-    # 250 rather than 255: the source's white is white, and a JPEG-ish source's would not be.
-    box = grey.point(lambda v: 255 if v < 250 else 0).getbbox()
-    if box is None:
-        raise SystemExit('a portrait that is entirely white')
-    left, top, right, bottom = box
-    return ((left + right) / 2, (top + bottom) / 2, min(right - left, bottom - top) / 2)
-
-def backdrop_ring(px, size, half, c):
-    """The backdrop's colour by angle, with the character interpolated out of it."""
-    ring = []
-    for i in range(SPOKES):
-        a = i * 2 * math.pi / SPOKES
-        x = min(size[0] - 1, max(0, int(round(c + half * READ * math.cos(a)))))
-        y = min(size[1] - 1, max(0, int(round(c + half * READ * math.sin(a)))))
-        ring.append(px[x, y])
-
-    # THE MEDIAN PER CHANNEL, which is a robust enough centre for this: whatever share of the ring
-    # the character occupies, it is well under half in all eleven, so the median lands in the
-    # backdrop rather than between the two.
-    mid = tuple(sorted(s[ch] for s in ring)[SPOKES // 2] for ch in (0, 1, 2))
-    keep = [
-        sum((s[ch] - mid[ch]) ** 2 for ch in (0, 1, 2)) <= BACKDROP ** 2
-        for s in ring
-    ]
-    if not any(keep):
-        # A circle whose backdrop is a minority of its own edge. None of the eleven is, and a
-        # generator that silently produced something else would be worse than one that stops.
-        raise SystemExit('no backdrop found around the circle')
-
-    # INTERPOLATED ACROSS EACH RUN OF THE CHARACTER, circularly, so a run that straddles due east is
-    # not two runs. Walking out to the nearest kept sample each side and mixing by how far along the
-    # run a spoke sits continues the gradient THROUGH the character rather than flattening it.
-    out = list(ring)
-    for i in range(SPOKES):
-        if keep[i]:
-            continue
-        lo = next(i - k for k in range(1, SPOKES + 1) if keep[(i - k) % SPOKES])
-        hi = next(i + k for k in range(1, SPOKES + 1) if keep[(i + k) % SPOKES])
-        t = (i - lo) / (hi - lo)
-        a, b = ring[lo % SPOKES], ring[hi % SPOKES]
-        out[i] = tuple(int(round(a[ch] + (b[ch] - a[ch]) * t)) for ch in (0, 1, 2))
-
-    return [
-        tuple(
-            int(round(sum(out[(i + k) % SPOKES][ch] for k in range(-SMOOTH, SMOOTH + 1)) / (2 * SMOOTH + 1)))
-            for ch in (0, 1, 2)
-        )
-        for i in range(SPOKES)
-    ]
-
-
-def squared(im):
-    """The circle on a square of its own backdrop: no white corners, no fringe, no streaks."""
-    half = im.size[0] / 2
-    c = half - 0.5
-    ring = backdrop_ring(im.load(), im.size, half, c)
-
-    # THE FIELD IS ANGULAR AND HAS NO RADIAL TERM, and the singularity that implies at the centre
-    # does not matter: the artwork covers everything inside CLIP and only the corners are ever
-    # seen. What the corners need is smoothness with their neighbours, which an angular field has.
-    out = Image.new('RGB', im.size)
-    field = out.load()
-    for y in range(im.size[1]):
-        dy = y - c
-        for x in range(im.size[0]):
-            field[x, y] = ring[int(math.atan2(dy, x - c) * SPOKES / (2 * math.pi)) % SPOKES]
-
-    mask = Image.new('L', im.size, 0)
-    inset = half * (1 - CLIP)
-    ImageDraw.Draw(mask).ellipse(
-        (inset, inset, im.size[0] - 1 - inset, im.size[1] - 1 - inset), fill=255)
-    out.paste(im, (0, 0), mask)
+def square(im, box, fill):
+    """Crop to the smallest square holding box, padded with fill where it runs off the image."""
+    x0, y0, x1, y1 = box
+    side = max(x1 - x0, y1 - y0)
+    # CENTRED HORIZONTALLY, FLUSH AT THE BOTTOM. Most of these drawings are cut off by the source's
+    # own bottom edge — a shoulder or a waist — and a cut that floats in the middle of a tile reads
+    # as a mistake where a cut at the tile's edge reads as the picture continuing past it.
+    cx = (x0 + x1) // 2
+    left, top = cx - side // 2, y1 - side
+    out = Image.new(im.mode, (side, side), fill)
+    out.paste(im.crop((left, top, left + side, top + side)), (0, 0))
     return out
 
 for n in range(1, count + 1):
-    # --- the portrait: the circle bled out to a full-bleed square ------------------------------
-    im = Image.open(source('agent%d' % n)).convert('RGB')
-    cx, cy, r = circle(im)
-    # CROPPED TO THE CIRCLE'S OWN BOUNDS, not to the source's square: the white margin around the
-    # circle is uneven, and cropping to the circle is what centres the face in the card's box.
-    side = int(r * 2)
-    square = im.crop((int(cx - r), int(cy - r), int(cx - r) + side, int(cy - r) + side))
-    squared(square.resize((WORK, WORK), Image.LANCZOS)).resize(
-        (portrait, portrait), Image.LANCZOS).save(
+    # --- the badge: the ringed circle, transparent around it ------------------------------------
+    im = Image.open(source('agent%dsidebar' % n)).convert('RGBA')
+    lo, _ = im.getchannel('A').getextrema()
+    if lo >= OPAQUE:
+        # NO ALPHA AT ALL, so the circle has to be found. Its rim is a saturated colour against
+        # paper, which is the one thing on the image far from every colour its own border carries —
+        # gen-empty-faces.mjs argues this at length for the same reason.
+        rgb = im.convert('RGB')
+        px = rgb.load()
+        w, h = rgb.size
+        edge = set()
+        for y in list(range(6)) + list(range(h - 6, h)):
+            for x in range(0, w, 3):
+                r, g, b = px[x, y]
+                edge.add((r // 16 * 16 + 8, g // 16 * 16 + 8, b // 16 * 16 + 8))
+        for x in list(range(6)) + list(range(w - 6, w)):
+            for y in range(0, h, 3):
+                r, g, b = px[x, y]
+                edge.add((r // 16 * 16 + 8, g // 16 * 16 + 8, b // 16 * 16 + 8))
+        x0, y0, x1, y1 = w, h, -1, -1
+        for y in range(h):
+            for x in range(w):
+                r, g, b = px[x, y]
+                if all(abs(r - q[0]) + abs(g - q[1]) + abs(b - q[2]) >= 120 for q in edge):
+                    if x < x0: x0 = x
+                    if x > x1: x1 = x
+                    if y < y0: y0 = y
+                    if y > y1: y1 = y
+        if x1 < 0:
+            raise SystemExit('agent%dsidebar: no rim found' % n)
+        cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+        radius = max(x1 - x0, y1 - y0) / 2.0 - INSET
+        mask = Image.new('L', (w * SS, h * SS), 0)
+        ImageDraw.Draw(mask).ellipse(
+            [(cx - radius) * SS, (cy - radius) * SS, (cx + radius) * SS, (cy + radius) * SS], fill=255)
+        im.putalpha(mask.resize((w, h), Image.LANCZOS))
+        print('  agent%02d badge: cut a circle, r=%d' % (n, radius))
+
+    box = im.getchannel('A').point(lambda v: 255 if v > 8 else 0).getbbox()
+    square(im, box, (0, 0, 0, 0)).resize((badge, badge), Image.LANCZOS).save(
+        os.path.join(dst, 'agent-%02d-sidebar.png' % n), 'PNG', optimize=True)
+
+    # --- the portrait: the drawing on its own paper, normalised ---------------------------------
+    im = Image.open(source('agent%dgeneric' % n)).convert('RGB')
+    w, h = im.size
+    px = im.load()
+    # IS THERE A CHECKERBOARD? Asked of the border, which is paper on every one of these by
+    # construction — the drawing never reaches the frame's outermost rows.
+    edge = [px[x, y] for y in (1, h - 2) for x in range(0, w, 7)]
+    edge += [px[x, y] for x in (1, w - 2) for y in range(0, h, 7)]
+    checks = sum(1 for r, g, b in edge
+                 if max(r, g, b) - min(r, g, b) < NEUTRAL and CHECK_LO < (r + g + b) / 3 < CHECK_HI)
+    if checks > len(edge) // 100:
+        for y in range(h):
+            for x in range(w):
+                r, g, b = px[x, y]
+                if max(r, g, b) - min(r, g, b) < NEUTRAL and CHECK_LO < (r + g + b) / 3 < CHECK_HI:
+                    px[x, y] = (255, 255, 255)
+        print('  agent%02d portrait: painted out a checkerboard' % n)
+
+    box = im.convert('L').point(lambda v: 255 if v < PAPER else 0).getbbox()
+    if box is None:
+        raise SystemExit('agent%dgeneric: the whole frame is paper' % n)
+    square(im, box, (255, 255, 255)).resize((portrait, portrait), Image.LANCZOS).save(
         os.path.join(dst, 'agent-%02d.png' % n), 'PNG', optimize=True)
 
-    # --- the banner: the centre 2:1 band ------------------------------------------------------
+    # --- the banner: the centre 2:1 band, unchanged ----------------------------------------------
     bg = Image.open(source('agent%d_bg' % n)).convert('RGB')
     w, h = bg.size
     band = min(h, int(w / 2))
@@ -236,26 +230,27 @@ for n in range(1, count + 1):
         os.path.join(dst, 'agent-%02d-bg.jpg' % n), 'JPEG',
         quality=quality, optimize=True, progressive=True)
 
-print('wrote %d portraits and %d banners' % (count, count))
+print('wrote %d badges, %d portraits and %d banners' % (count, count, count))
 `;
 
 execFileSync(
   "python3",
-  ["-c", script, SOURCES, OUT, String(COUNT), String(PORTRAIT), String(BANNER[0]), String(BANNER[1]), String(QUALITY)],
+  ["-c", script, SOURCES, OUT, String(COUNT), String(PORTRAIT), String(BADGE),
+    String(BANNER[0]), String(BANNER[1]), String(QUALITY)],
   { stdio: "inherit" },
 );
 
 const entries = Array.from({ length: COUNT }, (_, i) => {
   const id = `agent-${String(i + 1).padStart(2, "0")}`;
-  return `  { id: "${id}", portrait: "${id}.png", banner: "${id}-bg.jpg" },`;
+  return `  { id: "${id}", portrait: "${id}.png", sidebar: "${id}-sidebar.png", banner: "${id}-bg.jpg" },`;
 }).join("\n");
 
 writeFileSync(
   join(CLIENT, "src", "lib", "agentFaceFiles.ts"),
   `// GENERATED by scripts/gen-agent-faces.mjs. Do not edit by hand.
 //
-// The eleven portrait/banner pairs in \`public/agent-faces/\`, in source order, as a typed list. The
-// list is built at BUILD TIME rather than read from a directory at runtime for the reason
+// The eleven portrait/badge/banner sets in \`public/agent-faces/\`, in source order, as a typed list.
+// The list is built at BUILD TIME rather than read from a directory at runtime for the reason
 // \`agentArtFiles.ts\` gives one asset set over: a browser cannot list a directory, and a server that
 // could would be answering a question whose answer must be identical on every replica.
 //
@@ -270,9 +265,17 @@ writeFileSync(
 export interface AgentFaceFiles {
   /** The value \`agents.picture\` stores. */
   readonly id: string;
-  /** The square portrait, drawn on the character's own hue and full bleed to its edges. */
+  /**
+   * The free-standing portrait, for surfaces with room for a face — the agent card and the detail
+   * header. No ring: the card mounts it on a tile that draws its own.
+   */
   readonly portrait: string;
-  /** The banner band, 2:1, in the same hue as the portrait it belongs to. */
+  /**
+   * The circular badge with its own coloured ring, for dense rows — the sidebar, the Cockpit work
+   * rows, the fleet strip, the command palette. Transparent around the ring.
+   */
+  readonly sidebar: string;
+  /** The banner band, 2:1, in the hue this agent's background was painted in. */
   readonly banner: string;
 }
 
@@ -282,4 +285,4 @@ ${entries}
 `,
 );
 
-console.log(`wrote ${COUNT} pairs to public/agent-faces and src/lib/agentFaceFiles.ts`);
+console.log(`wrote ${COUNT} sets to public/agent-faces and src/lib/agentFaceFiles.ts`);

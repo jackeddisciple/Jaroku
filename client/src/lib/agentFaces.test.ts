@@ -8,9 +8,11 @@
 //   directory iteration order is not stable across platforms and that is exactly the class of bug
 //   the generator's zero-padding exists to rule out.
 //
-//   EVERY PORTRAIT HAS ITS OWN BANNER. The two are crops of one palette and the card stacks them,
-//   so a pair that has come apart is a portrait on somebody else's colour — the one failure mode of
-//   this feature that looks deliberate.
+//   EVERY PORTRAIT HAS ITS OWN BADGE AND ITS OWN BANNER. The three are one agent drawn three ways
+//   and the surfaces stack them, so a set that has come apart is a portrait on somebody else's
+//   colour, or Iris's face in a card beside Bruno's badge in the sidebar — the failure modes of this
+//   feature that look deliberate.
+
 //
 //   EVERY FACE HAS A NAME, AND NO TWO SHARE ONE. `agentFaces.ts` falls back to the id when a name is
 //   missing, which keeps a card rendering; this is what stops that fallback being something anybody
@@ -50,7 +52,13 @@ console.log("\nthe pairs are real files, and the module and the directory agree"
   // pictures, so a twelfth pair arriving without a twelfth name is a thing to be told about.
   check("there are eleven of them", AGENT_FACE_COUNT === 11, String(AGENT_FACE_COUNT));
 
-  const named = [...AGENT_FACE_FILES.map((f) => f.portrait), ...AGENT_FACE_FILES.map((f) => f.banner)].sort();
+  // ALL THREE OF THE SET, because an agent now wears three pictures rather than two: the portrait
+  // where there is room for a face, the ringed badge in dense rows, and the banner behind both.
+  const named = [
+    ...AGENT_FACE_FILES.map((f) => f.portrait),
+    ...AGENT_FACE_FILES.map((f) => f.sidebar),
+    ...AGENT_FACE_FILES.map((f) => f.banner),
+  ].sort();
   check("the generated list matches the directory exactly",
     JSON.stringify(named) === JSON.stringify(onDisk),
     `module=${named.length} disk=${onDisk.length}`);
@@ -62,14 +70,21 @@ console.log("\nthe pairs are real files, and the module and the directory agree"
     JSON.stringify(ids) === JSON.stringify([...ids].sort()), ids.join(","));
   check("no id appears twice", new Set(ids).size === ids.length);
 
+  // EACH OF THE THREE BELONGS TO THE SAME AGENT, which is the failure this feature has that still
+  // renders: a portrait resolved from one place and a banner from another is Iris's face on Bruno's
+  // green, and now a third way to get it wrong is Iris's face beside Bruno's badge in the sidebar.
   for (const face of AGENT_FACES) {
-    check(`${face.id} has a portrait and a banner of its own`,
-      face.portrait === `/agent-faces/${face.id}.png` && face.banner === `/agent-faces/${face.id}-bg.jpg`,
-      `${face.portrait} + ${face.banner}`);
+    check(`${face.id} has a portrait, a badge and a banner of its own`,
+      face.portrait === `/agent-faces/${face.id}.png`
+        && face.sidebar === `/agent-faces/${face.id}-sidebar.png`
+        && face.banner === `/agent-faces/${face.id}-bg.jpg`,
+      `${face.portrait} + ${face.sidebar} + ${face.banner}`);
   }
 
   check("every url points inside the served directory",
-    AGENT_FACES.every((f) => f.portrait.startsWith("/agent-faces/") && f.banner.startsWith("/agent-faces/")));
+    AGENT_FACES.every((f) => f.portrait.startsWith("/agent-faces/")
+      && f.sidebar.startsWith("/agent-faces/")
+      && f.banner.startsWith("/agent-faces/")));
 }
 
 console.log("\nevery face is named, and no two share a name");

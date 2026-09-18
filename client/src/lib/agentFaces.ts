@@ -54,9 +54,22 @@ export interface AgentFace {
    * particular.
    */
   readonly name: string;
-  /** The square portrait, full bleed. */
+  /**
+   * The free-standing portrait, for surfaces with room for a face — the agent card and the detail
+   * header. No ring of its own: the card mounts it on a tile that draws one in its own surface.
+   */
   readonly portrait: string;
-  /** The banner, in the same hue as the portrait. */
+  /**
+   * The circular badge, ringed in this agent's own colour and transparent around it, for dense rows
+   * — the sidebar, the Cockpit work rows, the fleet strip, the command palette.
+   *
+   * A SECOND DRAWING RATHER THAN THE FIRST ONE SHRUNK, which is the product owner's call and the
+   * reason there are two files. At 16 to 22px a borderless line portrait is a smudge; what makes a
+   * face read at the height of a line of text is a ring around it, and a ring drawn over the
+   * portrait by CSS would be a frame this artwork was not composed inside.
+   */
+  readonly sidebar: string;
+  /** The banner, in the hue this agent's background was painted in. */
   readonly banner: string;
 }
 
@@ -88,6 +101,7 @@ export const AGENT_FACES: readonly AgentFace[] = AGENT_FACE_FILES.map((f) => ({
   // `test:agent-faces` fails on it, so it is not a state that reaches anybody.
   name: NAMES[f.id] ?? f.id,
   portrait: FACE_BASE + f.portrait,
+  sidebar: FACE_BASE + f.sidebar,
   banner: FACE_BASE + f.banner,
 }));
 
