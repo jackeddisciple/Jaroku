@@ -34,7 +34,7 @@
 //
 //   npm run test:agent-category
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { CATEGORY_GROUPS, UNCATEGORIZED, normalizeCategory } from "../lib/agentCategories.ts";
 import { ICON, LAYER, TYPE } from "../lib/tokens.ts";
@@ -109,6 +109,11 @@ export function CategoryPicker({
   const [cursor, setCursor] = useState(0);
   /** Which way it opens, and how tall it may be — measured, never assumed. See `fit` below. */
   const [box, setBox] = useState<{ above: boolean; max: number }>({ above: false, max: POPOVER_MAX });
+  /**
+   * A NAMESPACE FOR THE ROW IDS, because `aria-activedescendant` points at one by id and two pickers
+   * on one screen would otherwise both claim `row-0`.
+   */
+  const rowId = useId();
   const host = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
@@ -243,13 +248,23 @@ export function CategoryPicker({
               }}
               placeholder="Search, or type your own…"
               aria-label="Search categories, or type your own"
+              // A COMBOBOX, WHICH IS WHAT IT HAS BEEN BEHAVING AS. Focus stays in this field while
+              // the arrow keys move a highlight down the list, so without `aria-activedescendant`
+              // there is nothing for a screen reader to announce: the cursor was visible and
+              // silent, which is the same defect as the one that made it invisible (see the scroll
+              // effect above) arriving through the other sense.
+              role="combobox"
+              aria-expanded
+              aria-controls={`${rowId}-list`}
+              aria-autocomplete="list"
+              aria-activedescendant={rows[cursor] ? `${rowId}-${cursor}` : undefined}
               className="w-full rounded-input bg-transparent px-2 py-1 text-caption text-ink outline-none placeholder:text-faint"
             />
           </div>
 
           {/* THE PART THAT SCROLLS. `min-h-0` because a flex child will not shrink below its
               content otherwise, and a list that refuses to shrink is how the cap gets ignored. */}
-          <div ref={list} role="listbox" aria-label="Category" className="min-h-0 flex-1 overflow-y-auto p-1">
+          <div ref={list} id={`${rowId}-list`} role="listbox" aria-label="Category" className="min-h-0 flex-1 overflow-y-auto p-1">
             {rows.length === 0 && (
               // ONLY REACHABLE ON WHITESPACE. A query with characters in it always produces either
               // a match or the offer, so this is the empty field's own state, not a dead end.
@@ -270,6 +285,7 @@ export function CategoryPicker({
                   <button
                     type="button"
                     role="option"
+                    id={`${rowId}-${i}`}
                     aria-selected={row.value === chosen}
                     onMouseEnter={() => setCursor(i)}
                     onClick={() => choose(row)}
