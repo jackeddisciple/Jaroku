@@ -58,7 +58,9 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // 168 WITH `plan.generate`, the send the plan gate's own verb carries.
   // 167 WITHOUT `agents.shuffleEmoji`: the emoji an agent wore is gone, and so is the picker whose
   // shuffle button was the only thing that drew this.
-  check("167 registry keys", entries.length === 167, `${entries.length}`);
+  // 168 WITH `threads.pin`, for the pin at the end of every chat row in the sidebar — `PinIcon`, which
+  // two keys already draw, so the count of distinct marks below does not move.
+  check("168 registry keys", entries.length === 168, `${entries.length}`);
   const names = new Set(entries.map((e) => e.export));
   // 104 from icons_integration's appendix, plus D8's 13 — the composer glyphs that had to move
   // here when `@hugeicons/react` came out. See the note at the top of `registry.ts`.

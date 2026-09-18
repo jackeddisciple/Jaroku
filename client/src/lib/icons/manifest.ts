@@ -182,6 +182,15 @@ export const MANIFEST = {
     chat: "CircleSmallIcon",
     archive: "Archive04Icon",
     restore: "RestoreBinIcon",
+    /**
+     * Pinning a chat from its own row in the sidebar.
+     *
+     * THE MARK `agents.pin` AND `chatHeader.pin` ALREADY DRAW, under the key that says what this one
+     * does. Three keys on one glyph is not a duplicate: the action is "pin this object", the object
+     * differs, and a row that borrowed the agent's key would break the day an agent's pin should look
+     * different from a chat's. No new mark enters the set.
+     */
+    pin: "PinIcon",
   },
 
   // ── §5/§6 Agent detail ────────────────────────────────────────────────────

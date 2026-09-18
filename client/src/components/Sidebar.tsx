@@ -16,7 +16,7 @@ import { ThreadGlyph } from "./ThreadGlyph.tsx";
 import { agentStatus } from "../lib/agentStatus.ts";
 import { selectAgent } from "../lib/selection.ts";
 import {
-  sendDeleteAgent, sendOpenGithubPr, sendRenameAgent, sendRestoreThread, signOut,
+  sendArchiveThread, sendDeleteAgent, sendOpenGithubPr, sendRenameAgent, sendRestoreThread, signOut,
 } from "../lib/socket.ts";
 import { ICON } from "../lib/tokens.ts";
 import { quietBtn, secondaryBtn } from "./buttons.ts";
@@ -1016,6 +1016,76 @@ function ChatDot() {
 }
 
 /**
+ * A chat row's own control: 24px, quiet, and painted only while the row is pointed at or focused.
+ *
+ * ONE STRING RATHER THAN A COPY PER BUTTON, because the pair has to appear and disappear together —
+ * a pin that faded in a frame before the archive beside it would read as two unrelated controls.
+ *
+ * `opacity` RATHER THAN A CONDITIONAL RENDER, which is the agent row's rule above and is about
+ * layout: the space is reserved on every row whether or not the marks are painted, so a name does
+ * not reflow as the pointer travels down the column.
+ */
+const CHAT_ROW_ACTION =
+  "flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-faint opacity-0 " +
+  "transition-[background-color,color,opacity] duration-fast hover:bg-sidebar-hover hover:text-ink " +
+  "group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:shadow-focusring " +
+  "disabled:cursor-default disabled:text-disabled";
+
+/**
+ * Pin and Archive, at the end of a chat's row — the product owner's call on 2026-09-18.
+ *
+ * TWO PRESSES THAT WERE FOUR. Both actions existed only in the open conversation's own menu, so
+ * doing either to a row in this column meant opening the chat first, crossing to the header's far
+ * end, and picking an item out of a menu — for a decision about a row you are already pointing at.
+ *
+ * ON HOVER AND ON KEYBOARD FOCUS, the rule the agent row's pull request and its overflow already
+ * follow. Two marks resting on every chat in a column of quiet grey text would be the loudest thing
+ * in the sidebar, and pointing at a row still finds them.
+ *
+ * PIN NEEDS NO CONNECTION and is never disabled: it is this person's own shelf in `localStorage`
+ * (see uiStore), not a mutation anybody else sees. ARCHIVE IS A MUTATION — absent for somebody who
+ * may not archive, disabled while reconnecting with the reason in its tooltip, and it names what was
+ * outstanding on the way out through `noteArchived`, exactly as the chat's own menu does.
+ */
+function ThreadRowActions({ thread }: { thread: ThreadView }) {
+  const pinned = useUiStore((s) => s.pinnedThreads.includes(thread.id));
+  const connected = useTraceStore((s) => s.connection === "open");
+  const canArchive = useCanRun("archiveThread");
+  // THE NAME IS IN THE ACCESSIBLE LABEL AND NOT IN THE TOOLTIP, and the two therefore differ on
+  // purpose. A column of forty chats announces "Pin" forty times over unless the label says which
+  // one; on screen the row is under the pointer, so the tooltip says the action and nothing else.
+  const name = chatTitle(thread.title);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => useUiStore.getState().togglePinnedThread(thread.id)}
+        title={pinned ? "Unpin this chat" : "Pin this chat"}
+        aria-label={pinned ? `Unpin ${name}` : `Pin ${name}`}
+        aria-pressed={pinned}
+        className={CHAT_ROW_ACTION}
+      >
+        <Icon.threads.pin size={ICON.sm} />
+      </button>
+      {canArchive && (
+        <button
+          type="button"
+          onClick={() => {
+            if (sendArchiveThread(thread.id)) useThreadStore.getState().noteArchived(thread);
+          }}
+          disabled={!connected}
+          title={connected ? "Archive this chat" : "Reconnecting — archiving needs a connection"}
+          aria-label={`Archive ${name}`}
+          className={CHAT_ROW_ACTION}
+        >
+          <Icon.threads.archive size={ICON.sm} />
+        </button>
+      )}
+    </>
+  );
+}
+
+/**
  * Whether a chat row is the selected one — and not while a section is on screen.
  *
  * Opening the Inbox or Activity is going somewhere else; a chat row still lit under it would be the
@@ -1051,24 +1121,33 @@ function ThreadListRow({ thread }: { thread: ThreadView }) {
   // The same typing as the header when a topic title arrives — see lib/typedText.ts.
   const shownTitle = useTypedText(chatTitle(thread.title), !thread.title_is_custom);
   return (
-    <button
-      type="button"
-      onClick={() => openThread(thread)}
-      title={chatTitle(thread.title)}
-      className={`flex h-7 w-full shrink-0 items-center rounded-control pl-2.5 pr-2 text-left transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+    // A ROW WITH A BUTTON IN IT, WHERE THE ROW ITSELF USED TO BE THE BUTTON. Pin and Archive are
+    // controls of their own, and a button inside a button is invalid markup that leaves the inner one
+    // unreachable by keyboard — the same reason the agent row above is built this way.
+    <div
+      className={`group flex h-7 w-full shrink-0 items-center rounded-control pr-1 transition-colors duration-fast ${
         active ? "bg-sidebar-active" : "hover:bg-sidebar-hover"
       }`}
     >
-      <ChatDot />
-      <Truncate className={`min-w-0 flex-1 text-body font-medium ${active ? "text-ink" : "text-muted"}`} title={chatTitle(thread.title)}>
-        {shownTitle}
-      </Truncate>
-      {/* WHAT IS OUTSTANDING, AT THE ROW'S END. The circle holds the left for every chat alike; a chat
-          that needs you, is running or has failed says so after its name, in the shared glyph. */}
+      <button
+        type="button"
+        onClick={() => openThread(thread)}
+        title={chatTitle(thread.title)}
+        className="flex min-w-0 flex-1 items-center pl-2.5 text-left focus-visible:outline-none focus-visible:shadow-focusring"
+      >
+        <ChatDot />
+        <Truncate className={`min-w-0 flex-1 text-body font-medium ${active ? "text-ink" : "text-muted"}`} title={chatTitle(thread.title)}>
+          {shownTitle}
+        </Truncate>
+      </button>
+      {/* WHAT IS OUTSTANDING, THEN WHAT CAN BE DONE. The circle holds the left for every chat alike; a
+          chat that needs you, is running or has failed says so after its name, in the shared glyph —
+          and the two controls take the row's end, where this column puts controls on every other row. */}
       {thread.status !== "idle" && thread.status !== "archived" && (
         <span className="ml-2 shrink-0"><ThreadGlyph status={thread.status} /></span>
       )}
-    </button>
+      <ThreadRowActions thread={thread} />
+    </div>
   );
 }
 
@@ -1139,21 +1218,28 @@ function PinnedThreadRow({ thread }: { thread: ThreadView }) {
   const active = useThreadRowActive(thread.id);
   const shownTitle = useTypedText(chatTitle(thread.title), !thread.title_is_custom);
   return (
-    <button
-      type="button"
-      onClick={() => openThread(thread)}
-      title={chatTitle(thread.title)}
-      className={`flex h-8 w-full shrink-0 items-center gap-2.5 rounded-control pl-2.5 pr-2 text-left transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+    // SPLIT FOR THE SAME REASON THE LIST ROW IS — see `ThreadListRow`. Here the pin reads `Unpin`,
+    // which is the shelf's own way off it and is one press rather than a trip through the chat's menu.
+    <div
+      className={`group flex h-8 w-full shrink-0 items-center rounded-control pr-1 transition-colors duration-fast ${
         active ? "bg-sidebar-active" : "hover:bg-sidebar-hover"
       }`}
     >
-      <span className="inline-flex shrink-0 justify-center text-faint" style={{ width: ICON.md }} aria-hidden>
-        <Icon.threads.chat size={ICON.sm} />
-      </span>
-      <Truncate className="min-w-0 flex-1 text-body font-medium text-ink" title={chatTitle(thread.title)}>
-        {shownTitle}
-      </Truncate>
-    </button>
+      <button
+        type="button"
+        onClick={() => openThread(thread)}
+        title={chatTitle(thread.title)}
+        className="flex min-w-0 flex-1 items-center gap-2.5 pl-2.5 text-left focus-visible:outline-none focus-visible:shadow-focusring"
+      >
+        <span className="inline-flex shrink-0 justify-center text-faint" style={{ width: ICON.md }} aria-hidden>
+          <Icon.threads.chat size={ICON.sm} />
+        </span>
+        <Truncate className="min-w-0 flex-1 text-body font-medium text-ink" title={chatTitle(thread.title)}>
+          {shownTitle}
+        </Truncate>
+      </button>
+      <ThreadRowActions thread={thread} />
+    </div>
   );
 }
 
