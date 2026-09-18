@@ -61,28 +61,30 @@ export const FACE_SIZE = {
   /**
    * The sidebar's agent list.
    *
-   * TWENTY-EIGHT, AND IT HAS MOVED FOUR TIMES — every one of them the product owner's call, which
-   * is why the history is here rather than a single number with no argument.
+   * TWENTY-TWO, AND IT HAS MOVED FIVE TIMES — every one of them the product owner's call, which is
+   * why the history is here rather than a single number with no argument.
    *
    * IT STARTED AT 16, the emoji's own register, so the mark landed on the column the five nav
    * destinations start at. That is right for a glyph on a baseline and left a PORTRAIT as a
-   * coloured dot with a face implied in it. It went to 28 against a two-line row, then back to 22
-   * when the row became one line — the date went and the category came up beside the name, so
-   * there was no two-line block left to match.
+   * coloured dot with a face implied in it. It went to 28 against a two-line row, back to 22 when
+   * the row became one line, and to 28 again when the artwork became line drawings inside a thin
+   * coloured rim: the rim costs a pixel at each edge and the head inside is drawn smaller than a
+   * full-bleed crop, so 22 of rim-and-drawing inked less than 22 of portrait had.
    *
-   * AND 22 WAS TOO SMALL ONCE THE ARTWORK CHANGED, which is the part the earlier reasoning could
-   * not have known. These badges are line drawings inside a thin coloured rim, not the flat
-   * full-bleed portraits that preceded them: the rim costs a pixel at each edge and the face inside
-   * is drawn smaller than a full-bleed crop of the same head. So 22 of rim-and-drawing reads as
-   * less than 22 of portrait did, and the faces stopped being legible.
+   * AND IT IS 22 AGAIN — the product owner's call on 2026-09-18, made against that argument rather
+   * than without it. The trade is stated so nobody re-derives half of it: what 28 bought was the
+   * drawing inside the rim being legible, and what it cost was a picture that outweighs the 13px
+   * name beside it, in the column whose job is telling forty names apart.
    *
-   * TWENTY-EIGHT IS THE LARGEST THE ROW HOLDS. The agent row is `h-8` — 32px — so this leaves 2px
-   * of air, which is the point where the badge is as big as it can be without the row having to
-   * grow. 32 was rendered and rejected for exactly that: it fills the row edge to edge, neighbours'
-   * rims nearly touch, and shipping it properly would mean a 40px row and an agent list taller
-   * than the navigation above it.
+   * TWENTY-EIGHT IS THE CEILING RATHER THAN THE VALUE. The agent row is `h-8` — 32px — so 28 is
+   * the point where the badge is as big as it can be without the row having to grow; 32 was
+   * rendered and rejected for exactly that, and past it a 40px row would make the agent list
+   * taller than the navigation above it.
+   *
+   * AND THE CHAT ROWS FOLLOW THIS NUMBER, whatever it is set to: `ChatDot`'s box is this constant,
+   * so a chat's title starts where its own agent's name starts. See `Sidebar.tsx`.
    */
-  sidebar: 28,
+  sidebar: 22,
   /** The portrait on an agent card, straddling its banner. */
   card: 56,
   /** The compact density's, which is the one thing compact shrinks besides dropping a line. */
