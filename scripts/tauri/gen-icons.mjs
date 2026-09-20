@@ -1,202 +1,257 @@
-// The desktop app's icon set, rendered from `client/public/favicon.svg`.
+// The desktop app's icon set, rendered from the two PNGs in `assets/`.
 //
-// WHY THIS EXISTS RATHER THAN A DIRECTORY OF CHECKED-IN PNGs SOMEBODY EXPORTED. The mark has
-// been redrawn once already — v0.2.2 replaced an outlined amber triangle because in an app where
-// amber means running it read as a warning sign — and the thing that makes a redraw safe is that
-// every rendering of the mark comes from ONE source. The tab icon and the dock icon are the same
-// three contours here by construction; exported separately they are the same three contours
-// until the day somebody re-exports one of them.
+// TWO PIECES OF ARTWORK, BECAUSE TWO PLACES WANT DIFFERENT THINGS. `mainlogo.png` is the logo:
+// the mark on its orange plate, and what belongs in the dock, the Finder, the installer and the
+// window. `mono.png` is the same animal as one flat silhouette on transparency, and it is what
+// belongs in the macOS menu bar — where an icon is a TEMPLATE, recoloured by the system to match
+// a light or dark bar and whatever the user has done to their accent colour. A plate in the menu
+// bar is a coloured rectangle sitting in a row of glyphs; it is not a smaller version of the dock
+// icon, it is the wrong thing. So there are two sources here and the tray gets its own file.
+//
+// WHY THE SOURCE IS A RASTER NOW. It used to be `client/public/favicon.svg`, on the reasoning that
+// every rendering of the mark should come from ONE vector so a redraw could not leave half the
+// product behind. That reasoning still holds and this file still honours it — there is exactly one
+// source per destination and both are checked in — but the artwork itself arrived as PNG, and a
+// vector traced from it would be a copy that drifts rather than a source. The tab icon keeps a
+// vector because a favicon genuinely wants one; see `client/public/favicon.svg`.
 //
 // AND WHY IT IS NOT `tauri icon`. That command is the ordinary way to do this and it works; it
-// also takes a 1024px PNG this repository does not have, which would mean checking in a raster
-// of a vector — the exact second copy the paragraph above is about. Everything below is
+// also would not know about the menu bar's template icon, would not strip the black the artwork
+// carries outside its plate, and would not inset anything to Apple's grid. Everything below is
 // `node:zlib` and arithmetic: no dependency, no install step, and it runs on a machine with no
 // Rust toolchain, which is the machine most of this wrapper was written on.
 //
 // Run it with `node scripts/tauri/gen-icons.mjs` from the repository root, or through the
-// `tauri:icons` alias the desktop scripts add there. It is deterministic: re-running it on an
-// unchanged favicon rewrites the same bytes, so a diff here means the mark itself moved.
+// `tauri:icons` alias the desktop scripts add there. It is deterministic: re-running it on
+// unchanged artwork rewrites the same bytes, so a diff here means the logo itself moved.
 
-import { deflateSync } from "node:zlib";
+import { deflateSync, inflateSync } from "node:zlib";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const SOURCE = join(ROOT, "client", "public", "favicon.svg");
+const LOGO = join(ROOT, "assets", "mainlogo.png");
+const MONO = join(ROOT, "assets", "mono.png");
 const OUT = join(ROOT, "src-tauri", "icons");
 
 // ---------------------------------------------------------------------------------------------
-// Reading the source.
+// Reading a PNG.
 //
-// A deliberately narrow SVG reader: the rounded rectangle, one transform, and paths built from
-// `M`, `C` and `Z`. It THROWS on anything it does not recognise rather than skipping it, because
-// the failure this guards against is a redrawn logo whose new command silently drops a contour —
-// an icon that is subtly wrong everywhere is worse than a generator that refuses to run.
+// A deliberately narrow decoder: 8-bit, non-interlaced, truecolour with or without alpha, which
+// is what both files are and what an export of this artwork will be. It THROWS on anything else
+// rather than guessing, because the failure this guards against is a re-export in some other
+// shape being silently misread into an icon that is subtly wrong everywhere.
 // ---------------------------------------------------------------------------------------------
 
-function readSource() {
-  const svg = readFileSync(SOURCE, "utf8");
+/** @returns {{width: number, height: number, rgba: Buffer}} */
+function decodePng(file) {
+  const buf = readFileSync(file);
+  const SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  if (!SIGNATURE.every((b, i) => buf[i] === b)) throw new Error(`${file}: not a PNG`);
 
-  const view = /viewBox="0 0 (\d+) (\d+)"/.exec(svg);
-  if (!view) throw new Error("favicon.svg: no viewBox — this reader assumes one starting at 0 0");
-  const units = Number(view[1]);
-  if (Number(view[2]) !== units) throw new Error("favicon.svg: the viewBox is not square");
+  let width = 0;
+  let height = 0;
+  let depth = 0;
+  let colour = 0;
+  const idat = [];
 
-  const rect = /<rect[^>]*rx="([\d.]+)"[^>]*fill="(#[0-9a-fA-F]{6})"/.exec(svg);
-  if (!rect) throw new Error("favicon.svg: no background rect with an rx and a fill");
+  for (let at = 8; at < buf.length; ) {
+    const length = buf.readUInt32BE(at);
+    const type = buf.toString("latin1", at + 4, at + 8);
+    const data = buf.subarray(at + 8, at + 8 + length);
+    at += length + 12;
 
-  const group =
-    /<g[^>]*fill="(#[0-9a-fA-F]{6})"[^>]*transform="translate\(([\d.]+) ([\d.]+)\) scale\(([\d.]+)\)"/.exec(svg);
-  if (!group) throw new Error("favicon.svg: the mark's <g> is not the translate+scale shape this reader knows");
+    if (type === "IHDR") {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      depth = data[8];
+      colour = data[9];
+      if (depth !== 8) throw new Error(`${file}: bit depth ${depth}, and this reader only knows 8`);
+      if (colour !== 2 && colour !== 6) throw new Error(`${file}: colour type ${colour}, and this reader knows 2 (RGB) and 6 (RGBA)`);
+      if (data[12] !== 0) throw new Error(`${file}: interlaced, and this reader reads one pass`);
+    } else if (type === "IDAT") {
+      idat.push(data);
+    } else if (type === "IEND") {
+      break;
+    }
+  }
+  if (!width) throw new Error(`${file}: no IHDR`);
 
-  const paths = [...svg.matchAll(/<path[^>]*\sd="([^"]+)"/g)].map((m) => m[1]);
-  if (paths.length !== 3) throw new Error(`favicon.svg: expected the mark's three contours, found ${paths.length}`);
+  const channels = colour === 6 ? 4 : 3;
+  const raw = inflateSync(Buffer.concat(idat));
+  const stride = width * channels;
+  const rgba = Buffer.alloc(width * height * 4);
+  let prior = Buffer.alloc(stride);
 
-  return {
-    units,
-    radius: Number(rect[1]),
-    background: hex(rect[2]),
-    ink: hex(group[1]),
-    translate: [Number(group[2]), Number(group[3])],
-    scale: Number(group[4]),
-    paths,
+  // Undo the per-scanline filters. The five of them are the whole of PNG's compression front end,
+  // and each needs the reconstructed byte to its left and the reconstructed line above.
+  for (let row = 0; row < height; row++) {
+    const filter = raw[row * (stride + 1)];
+    const line = Buffer.from(raw.subarray(row * (stride + 1) + 1, (row + 1) * (stride + 1)));
+    for (let i = 0; i < stride; i++) {
+      const a = i >= channels ? line[i - channels] : 0;
+      const b = prior[i];
+      const c = i >= channels ? prior[i - channels] : 0;
+      let value = line[i];
+      if (filter === 1) value += a;
+      else if (filter === 2) value += b;
+      else if (filter === 3) value += (a + b) >> 1;
+      else if (filter === 4) {
+        const p = a + b - c;
+        const pa = Math.abs(p - a);
+        const pb = Math.abs(p - b);
+        const pc = Math.abs(p - c);
+        value += pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+      } else if (filter !== 0) throw new Error(`${file}: scanline filter ${filter} is not one of the five`);
+      line[i] = value & 0xff;
+    }
+    for (let x = 0; x < width; x++) {
+      const from = x * channels;
+      const to = (row * width + x) * 4;
+      rgba[to] = line[from];
+      rgba[to + 1] = line[from + 1];
+      rgba[to + 2] = line[from + 2];
+      rgba[to + 3] = channels === 4 ? line[from + 3] : 255;
+    }
+    prior = line;
+  }
+  return { width, height, rgba };
+}
+
+// ---------------------------------------------------------------------------------------------
+// The plate.
+//
+// `mainlogo.png` is drawn edge to edge with SOLID BLACK in the four corners the rounded plate does
+// not reach — which is correct in a design tool on a white board and is a black square in a dock.
+// So the plate's own outline is measured off the artwork and everything outside it is cut to
+// transparent. Measuring rather than hard-coding a radius means a redrawn plate with a different
+// corner still produces a clean icon.
+// ---------------------------------------------------------------------------------------------
+
+/** How far in the plate's edge sits on each row of its top-left quadrant. The mark never reaches
+ *  that corner, so the profile there is the plate and nothing else; the other three are mirrors
+ *  of it, which is also what makes the result symmetrical when the artwork is not quite. */
+function cornerProfile({ width, height, rgba }) {
+  const plateish = (x, y) => {
+    const at = (y * width + x) * 4;
+    // The plate, whatever colour it is: anything that is not the near-black surround.
+    return rgba[at] + rgba[at + 1] + rgba[at + 2] > 210;
   };
+
+  const limit = Math.floor(Math.min(width, height) / 3);
+  const profile = [];
+  for (let y = 0; y < limit; y++) {
+    let x = 0;
+    while (x < limit && !plateish(x, y)) x++;
+    if (x >= limit) throw new Error("mainlogo.png: no plate edge in the top-left quadrant");
+    profile.push(x);
+    if (x === 0) break;
+  }
+  if (profile.length < 2) throw new Error("mainlogo.png: the plate has no rounded corner to measure");
+  return profile;
 }
 
-function hex(s) {
-  return [parseInt(s.slice(1, 3), 16), parseInt(s.slice(3, 5), 16), parseInt(s.slice(5, 7), 16)];
-}
-
-/** `M`/`C`/`Z` into a list of closed polygons, in the SVG's own user units. */
-function flatten(d, translate, scale) {
-  const tokens = d.match(/[MCZmcz]|-?\d*\.?\d+/g) ?? [];
-  const map = (x, y) => [translate[0] + x * scale, translate[1] + y * scale];
-
-  const polygons = [];
-  let current = null;
-  let cursor = [0, 0];
-  let start = [0, 0];
-
-  for (let i = 0; i < tokens.length; ) {
-    const op = tokens[i++];
-    if (op === "M" || op === "m") {
-      if (current && current.length > 2) polygons.push(current);
-      const p = map(Number(tokens[i++]), Number(tokens[i++]));
-      current = [p];
-      cursor = p;
-      start = p;
-    } else if (op === "C" || op === "c") {
-      const c1 = map(Number(tokens[i++]), Number(tokens[i++]));
-      const c2 = map(Number(tokens[i++]), Number(tokens[i++]));
-      const end = map(Number(tokens[i++]), Number(tokens[i++]));
-      // Segment count from the control polygon's length rather than a constant: these contours
-      // are hundreds of short curves, and twenty segments on each of them is a million points
-      // that render identically to four.
-      const span = dist(cursor, c1) + dist(c1, c2) + dist(c2, end);
-      const steps = Math.max(3, Math.min(24, Math.ceil(span * 4)));
-      for (let s = 1; s <= steps; s++) current.push(cubic(cursor, c1, c2, end, s / steps));
-      cursor = end;
-    } else if (op === "Z" || op === "z") {
-      if (current && current.length > 2) polygons.push(current);
-      current = null;
-      cursor = start;
-    } else {
-      throw new Error(`favicon.svg: path command ${op} is not one this reader knows how to draw`);
+/** Coverage of the plate at a point, supersampled so the corner is antialiased rather than
+ *  stepped — the corner is the only curved edge in the whole image and the only place it shows. */
+function plateCoverage(profile, width, height, x, y, factor) {
+  let hits = 0;
+  for (let sy = 0; sy < factor; sy++) {
+    for (let sx = 0; sx < factor; sx++) {
+      const px = x + (sx + 0.5) / factor;
+      const py = y + (sy + 0.5) / factor;
+      const row = py < profile.length ? Math.floor(py) : py >= height - profile.length ? Math.floor(height - 1 - py) : -1;
+      const inset = row >= 0 && row < profile.length ? profile[row] : 0;
+      if (px >= inset && px <= width - inset) hits++;
     }
   }
-  if (current && current.length > 2) polygons.push(current);
-  return polygons;
-}
-
-const dist = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]);
-
-function cubic(p0, p1, p2, p3, t) {
-  const u = 1 - t;
-  const a = u * u * u;
-  const b = 3 * u * u * t;
-  const c = 3 * u * t * t;
-  const d = t * t * t;
-  return [a * p0[0] + b * p1[0] + c * p2[0] + d * p3[0], a * p0[1] + b * p1[1] + c * p2[1] + d * p3[1]];
+  return hits / (factor * factor);
 }
 
 // ---------------------------------------------------------------------------------------------
-// Rasterising.
+// Resampling.
 //
-// Coverage is sampled on a grid `factor` times finer than the output and box-filtered down,
-// which is the cheapest antialiasing that does not make a 32px mark look chewed. Winding is
-// NONZERO, matching `fill-rule`'s default — these three contours do not overlap today, but a
-// mark that gained a counter would render as a hole under even-odd and as solid under nonzero,
-// and the SVG's own default is the one to agree with.
+// A box filter over the source, on PREMULTIPLIED alpha. Premultiplying is not optional here: the
+// artwork's transparent corner pixels still carry a colour, and averaging colour and alpha
+// separately drags that colour into every edge pixel — which is the dark halo an icon gets when
+// somebody scales it in the obvious way.
 // ---------------------------------------------------------------------------------------------
 
-function render(source, size) {
-  const factor = size >= 512 ? 2 : 4;
-  const n = size * factor;
-  const unitsPerSample = source.units / n;
+/** Draw `src` into a `size` x `size` canvas, occupying `fill` of it, centred. */
+function resample(src, size, fill) {
+  const target = Math.round(size * fill);
+  const offset = Math.round((size - target) / 2);
+  const out = Buffer.alloc(size * size * 4);
 
-  const polygons = source.paths.flatMap((d) => flatten(d, source.translate, source.scale));
-  const edges = [];
-  for (const poly of polygons) {
-    for (let i = 0; i < poly.length; i++) {
-      const a = poly[i];
-      const b = poly[(i + 1) % poly.length];
-      if (a[1] !== b[1]) edges.push([a[0], a[1], b[0], b[1]]);
-    }
-  }
+  for (let y = 0; y < target; y++) {
+    // The source window this destination pixel averages. Computed from the edges rather than from
+    // a centre and a width so that consecutive pixels share a boundary exactly and no source row
+    // is counted twice or skipped.
+    const y0 = (y * src.height) / target;
+    const y1 = ((y + 1) * src.height) / target;
+    for (let x = 0; x < target; x++) {
+      const x0 = (x * src.width) / target;
+      const x1 = ((x + 1) * src.width) / target;
 
-  // Two accumulators rather than one image: the mark is drawn over the plate, and keeping them
-  // apart means the plate's rounded corner is antialiased against transparency while the mark is
-  // antialiased against the plate — compositing them per SAMPLE, before the box filter, which is
-  // the only order that does not leave a dark fringe around the mark at 32px.
-  const plate = new Float32Array(size * size);
-  const ink = new Float32Array(size * size);
-  const weight = 1 / (factor * factor);
-
-  let xs = [];
-  for (let row = 0; row < n; row++) {
-    const y = (row + 0.5) * unitsPerSample;
-
-    xs.length = 0;
-    for (const [x0, y0, x1, y1] of edges) {
-      if ((y >= y0 && y < y1) || (y >= y1 && y < y0)) {
-        xs.push([x0 + ((y - y0) / (y1 - y0)) * (x1 - x0), y1 > y0 ? 1 : -1]);
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let a = 0;
+      let weight = 0;
+      for (let sy = Math.floor(y0); sy < Math.ceil(y1); sy++) {
+        const cy = Math.min(y1, sy + 1) - Math.max(y0, sy);
+        for (let sx = Math.floor(x0); sx < Math.ceil(x1); sx++) {
+          const cx = Math.min(x1, sx + 1) - Math.max(x0, sx);
+          const w = cx * cy;
+          const at = (sy * src.width + sx) * 4;
+          const alpha = src.rgba[at + 3] / 255;
+          r += src.rgba[at] * alpha * w;
+          g += src.rgba[at + 1] * alpha * w;
+          b += src.rgba[at + 2] * alpha * w;
+          a += alpha * w;
+          weight += w;
+        }
       }
-    }
-    xs.sort((a, b) => a[0] - b[0]);
-
-    const outRow = (row / factor) | 0;
-    let winding = 0;
-    let span = 0;
-    for (let col = 0; col < n; col++) {
-      const x = (col + 0.5) * unitsPerSample;
-      while (span < xs.length && xs[span][0] <= x) winding += xs[span++][1];
-      const cell = outRow * size + ((col / factor) | 0);
-      if (insidePlate(x, y, source)) plate[cell] += weight;
-      if (winding !== 0) ink[cell] += weight;
+      if (weight === 0) continue;
+      const alpha = a / weight;
+      const to = ((y + offset) * size + x + offset) * 4;
+      // Back out of premultiplied space for storage; PNG wants straight alpha.
+      out[to] = alpha > 0 ? Math.round(Math.min(255, r / weight / alpha)) : 0;
+      out[to + 1] = alpha > 0 ? Math.round(Math.min(255, g / weight / alpha)) : 0;
+      out[to + 2] = alpha > 0 ? Math.round(Math.min(255, b / weight / alpha)) : 0;
+      out[to + 3] = Math.round(alpha * 255);
     }
   }
-
-  const rgba = Buffer.alloc(size * size * 4);
-  for (let i = 0; i < size * size; i++) {
-    const alpha = Math.min(1, plate[i]);
-    const mark = Math.min(1, ink[i]);
-    for (let c = 0; c < 3; c++) {
-      rgba[i * 4 + c] = Math.round(source.background[c] * (1 - mark) + source.ink[c] * mark);
-    }
-    rgba[i * 4 + 3] = Math.round(alpha * 255);
-  }
-  return rgba;
+  return out;
 }
 
-/** The rounded rectangle, as a predicate rather than as a path: it is four line segments and
- *  four quarter-circles, and stating it directly is shorter and exact at every size. */
-function insidePlate(x, y, { units, radius: r }) {
-  if (x < 0 || y < 0 || x > units || y > units) return false;
-  const cx = x < r ? r : x > units - r ? units - r : x;
-  const cy = y < r ? r : y > units - r ? units - r : y;
-  if (cx === x || cy === y) return true;
-  return (x - cx) ** 2 + (y - cy) ** 2 <= r * r;
+/** The logo with its corners cut to transparency, at the artwork's own resolution. */
+function plated() {
+  const src = decodePng(LOGO);
+  if (src.width !== src.height) throw new Error("mainlogo.png: the logo is not square");
+  const profile = cornerProfile(src);
+  const rgba = Buffer.from(src.rgba);
+  for (let y = 0; y < src.height; y++) {
+    for (let x = 0; x < src.width; x++) {
+      const coverage = plateCoverage(profile, src.width, src.height, x, y, 4);
+      if (coverage < 1) rgba[(y * src.width + x) * 4 + 3] = Math.round(coverage * 255);
+    }
+  }
+  return { width: src.width, height: src.height, rgba, corner: profile[0] / src.width };
+}
+
+/** The menu bar's mark: the silhouette alone, as a template image. Every pixel is black and only
+ *  alpha carries the shape, because that is what macOS reads a template icon's bytes as — it
+ *  throws the colour away and redraws the coverage in the bar's own ink. */
+function template(size, fill) {
+  const src = decodePng(MONO);
+  const out = resample(src, size, fill);
+  for (let i = 0; i < size * size; i++) {
+    out[i * 4] = 0;
+    out[i * 4 + 1] = 0;
+    out[i * 4 + 2] = 0;
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -289,24 +344,45 @@ function icns(entries) {
 
 // ---------------------------------------------------------------------------------------------
 
-const source = readSource();
+// APPLE'S ICON GRID, which is why the .icns is inset and nothing else is. Since Big Sur every
+// macOS app icon is a rounded square occupying 824 of a 1024pt canvas, with the remaining margin
+// left empty so the system can put a shadow in it. The artwork is drawn edge to edge, so an icns
+// made from it at full bleed is a correct icon that reads noticeably LARGER than every icon
+// beside it in the dock — which looks like a mistake rather than like confidence.
+const MACOS_FILL = 824 / 1024;
+
+// Windows and Linux have no such convention and their icons are full bleed, so the .ico and the
+// loose PNGs — which are also what Tauri hands back as the window icon — use the whole canvas.
+const FULL = 1;
+
+// The menu bar wants the mark to breathe: macOS draws a 22pt bar and expects a glyph of about 18
+// inside it, and a template that fills its own square sits hard against the items either side.
+const TRAY_FILL = 18 / 22;
+
+const logo = plated();
 mkdirSync(OUT, { recursive: true });
 
-// Rendered once per size and reused by every container below.
 const SIZES = [32, 64, 128, 256, 512, 1024];
-const rendered = new Map(SIZES.map((size) => [size, png(render(source, size), size)]));
+const bleed = new Map(SIZES.map((size) => [size, png(resample(logo, size, FULL), size)]));
+const inset = new Map(SIZES.map((size) => [size, png(resample(logo, size, MACOS_FILL), size)]));
 
 const files = [
-  ["32x32.png", rendered.get(32)],
-  ["128x128.png", rendered.get(128)],
+  ["32x32.png", bleed.get(32)],
+  ["128x128.png", bleed.get(128)],
   // Tauri's own naming for the 2x asset; it is a 256px image and the name is what macOS reads.
-  ["128x128@2x.png", rendered.get(256)],
-  ["icon.png", rendered.get(1024)],
-  ["icon.ico", ico([32, 64, 128, 256].map((size) => ({ size, data: rendered.get(size) })))],
-  ["icon.icns", icns([32, 64, 128, 256, 512, 1024].map((size) => ({ size, data: rendered.get(size) })))],
+  ["128x128@2x.png", bleed.get(256)],
+  ["icon.png", bleed.get(1024)],
+  ["icon.ico", ico([32, 64, 128, 256].map((size) => ({ size, data: bleed.get(size) })))],
+  ["icon.icns", icns(SIZES.map((size) => ({ size, data: inset.get(size) })))],
+  // The menu bar's two, at 1x and 2x. `tray.rs` compiles the 2x one in and lets macOS halve it,
+  // which is sharper on every display made in the last decade than sending the 1x and letting a
+  // Retina bar double it.
+  ["tray.png", png(template(22, TRAY_FILL), 22)],
+  ["tray@2x.png", png(template(44, TRAY_FILL), 44)],
 ];
 
 for (const [name, data] of files) {
   writeFileSync(join(OUT, name), data);
   console.log(`${name.padEnd(18)} ${String(data.length).padStart(8)} bytes`);
 }
+console.log(`\nplate corner measured at ${(logo.corner * 100).toFixed(1)}% of the artwork's width`);

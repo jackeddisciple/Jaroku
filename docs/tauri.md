@@ -216,7 +216,7 @@ checkout into a bundle:
 |---|---|---|
 | `npm run tauri:payload` | the Node runtime as a sidecar; every file `git ls-files` reports under `server/` and `runtime/`; `server/node_modules` | `src-tauri/binaries/`, `src-tauri/resources/app/` |
 | `npm run tauri:python` | the uv binary, a standalone CPython, and the wheels `runtime/uv.lock` pins | `src-tauri/resources/python/` |
-| `npm run tauri:icons` | the icon set, rendered from `client/public/favicon.svg` | `src-tauri/icons/` |
+| `npm run tauri:icons` | the icon set, rendered from `assets/mainlogo.png` (dock, window, installer) and `assets/mono.png` (the macOS menu bar's template icon) | `src-tauri/icons/` |
 
 `server/node_modules` must be installed first (`cd server && npm ci`) — the bundle ships the
 dependency tree rather than resolving one at install time, and `tsx` is in it because the packaged

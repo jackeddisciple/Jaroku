@@ -19,6 +19,7 @@
 // is a real configuration — the close button is left alone and quits, because hiding a window
 // with nothing to bring it back is the one outcome worse than cancelling a run.
 
+use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
@@ -35,15 +36,31 @@ pub fn install(app: &AppHandle) -> tauri::Result<bool> {
     let quit = MenuItem::with_id(app, ID_QUIT, "Quit Jaroku", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &PredefinedMenuItem::separator(app)?, &quit])?;
 
-    // The window icon rather than a second asset. It is the same mark at the same weight, it is
-    // already in the bundle, and a tray-specific icon would be a second file to keep in step with
-    // a logo this project has already redrawn once.
-    let Some(icon) = app.default_window_icon().cloned() else {
-        return Ok(false);
+    // THE MENU BAR IS NOT A SMALL DOCK, and this is the one place the logo is deliberately not the
+    // logo. macOS draws a tray icon as a TEMPLATE: it discards the colours, keeps the coverage, and
+    // redraws it in the bar's own ink — which is how an icon follows a light bar, a dark bar, and
+    // the inverted ink it gets while its own menu is open. Hand that the orange plate and macOS
+    // renders a solid rounded rectangle. So macOS gets `assets/mono.png`'s silhouette, which is the
+    // piece of artwork drawn for exactly this, by way of `icons/tray@2x.png`.
+    //
+    // EVERY OTHER PLATFORM GETS THE PLATE. Windows and Linux composite a tray icon as it is, over a
+    // notification area whose colour they do not tell us; a black-on-transparent glyph there is
+    // invisible against half the themes in existence. Those keep the window icon, as before.
+    #[cfg(target_os = "macos")]
+    let (icon, is_template) = (Image::from_bytes(include_bytes!("../icons/tray@2x.png"))?, true);
+    #[cfg(not(target_os = "macos"))]
+    let (icon, is_template) = {
+        let Some(icon) = app.default_window_icon().cloned() else {
+            return Ok(false);
+        };
+        (icon, false)
     };
 
     let built = TrayIconBuilder::with_id("jaroku")
         .icon(icon)
+        // macOS only, and a no-op everywhere else — see above for what it buys and what it costs
+        // if the icon handed to it is not a silhouette.
+        .icon_as_template(is_template)
         .tooltip("Jaroku")
         .menu(&menu)
         // FALSE, so a left click is not swallowed by the menu on Windows and Linux, where the
