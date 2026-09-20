@@ -402,10 +402,10 @@ export function WorkspaceSwitcher() {
   // too, and an empty row is quieter than a placeholder that flashes into somebody else's
   // workspace name. A fixed height, so the four destinations beneath it do not jump when the
   // session lands.
-  // 38px is what the row below measures: `py-2` either side of `text-title`'s 22px line. Written as
-  // a number because it is one — there is no height rung that happens to equal a rung's line height
-  // plus its padding, and a `h-9` that no longer matches is a one-pixel jump nobody would find.
-  if (!user || !workspaceId) return <div className="sidebar-seam h-[38px] shrink-0 border-b border-hair" />;
+  // `h-9` is what the row below measures: `py-2` either side of `text-body`'s 20px line. It tracks
+  // the name's rung, so a change to that size is a change here too — `test:workspace-switcher`
+  // asserts the number, which is what catches the pair drifting apart.
+  if (!user || !workspaceId) return <div className="sidebar-seam h-9 shrink-0 border-b border-hair" />;
   const current = workspaces.find((w) => w.id === workspaceId);
 
   return (
@@ -425,13 +425,19 @@ export function WorkspaceSwitcher() {
           onClick={() => setOpen((v) => !v)}
           aria-haspopup="menu"
           aria-expanded={open}
-          // THE ROW EVERY OTHER ROW IN THE COLUMN IS SCOPED BY, and it is drawn a rung above them
-          // again — §9.1's original call, restored by the product owner on 2026-09-20. It spent a
-          // fortnight at the rows' own 14px on the reasoning that the row it heads set it apart,
-          // and at the top of a column of 14px rows it simply read as another one of them. 16px is
-          // `text-title`, which carries its own 600: no weight class beside it, because the ladder
-          // already made that decision and `test:surface-system` holds everything to it.
-          className={`flex min-w-0 flex-1 items-center gap-2 py-2 pl-3 pr-2 text-left transition-colors hover:bg-active/40 active:bg-chrome focus-visible:outline-none focus-visible:shadow-focusring ${
+          // THE ROW EVERY OTHER ROW IN THE COLUMN IS SCOPED BY, at the rows' OWN size. §9.1 put it a
+          // rung above the tab labels; the product owner took it back down from 16px on 2026-09-11,
+          // and again on 2026-09-20 after a second look at 16 — with no rung between 16 and 14 and
+          // no semibold on top of a rung (`test:surface-system`), the step up is the whole 16px
+          // `text-title`, and against a column of 14px rows that reads as a heading shouting rather
+          // than leading. It is 14px medium; what sets it apart is the row it heads and the gap
+          // under it, not its size. See `NavList` in Sidebar.tsx for the other half of that.
+          // `pl-4` RATHER THAN `pl-3`, SO THE NAME SITS ON THE DESTINATIONS' OWN LEFT EDGE. The rows
+          // beneath are indented twice — `px-2` on `NavList` and `px-2` again on each row, so their
+          // icons start at 16px — and at 12px this name hung four pixels left of all of them. Four
+          // pixels is too small to read as a deliberate outdent and too large to look level, which
+          // is the worst of both. It is the same 16px; the two columns line up.
+          className={`flex min-w-0 flex-1 items-center gap-2 py-2 pl-4 pr-2 text-left transition-colors hover:bg-active/40 active:bg-chrome focus-visible:outline-none focus-visible:shadow-focusring ${
             open ? "bg-active/40" : ""
           }`}
           title={`${current?.name ?? "workspace"} — ${current?.kind ?? ""}, you are ${current?.role ?? "a member"}`}
@@ -443,7 +449,7 @@ export function WorkspaceSwitcher() {
               row in the column is scoped by. It stays in the row's tooltip, which reads
               "<name> — team, you are owner", so the fact is still reachable where somebody asking
               for it would look. */}
-          <Truncate className="min-w-0 text-title text-ink" title={current?.name}>
+          <Truncate className="min-w-0 text-body font-medium text-ink" title={current?.name}>
             {current?.name ?? "workspace"}
           </Truncate>
           {/* THE AFFORDANCE SITS AGAINST THE NAME, NOT AT THE ROW'S EDGE — and the difference is

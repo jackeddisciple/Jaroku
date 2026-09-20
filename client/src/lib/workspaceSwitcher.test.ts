@@ -170,9 +170,9 @@ console.log("\n§9.1 — before the session lands");
   //
   // THE NUMBER TRACKS THE ROW, and is asserted rather than derived because deriving it from the
   // component would be the component compared against itself. It is `py-2` either side of
-  // `text-title`'s 22px line; it was `h-9` while the name was a 14px rung. If this fails after a
-  // change to the name's size, the placeholder is the thing that did not move.
-  check(html.includes("h-[38px]"), "an empty row of the same height holds the space");
+  // `text-body`'s 20px line. If this fails after a change to the name's size, the placeholder is
+  // the thing that did not move.
+  check(html.includes("h-9"), "an empty row of the same height holds the space");
   check(!/Acme|Adarsh/.test(html), "...and names nobody");
 }
 
