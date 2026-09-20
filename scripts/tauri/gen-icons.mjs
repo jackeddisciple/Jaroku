@@ -17,7 +17,8 @@
 //
 // AND WHY IT IS NOT `tauri icon`. That command is the ordinary way to do this and it works; it
 // also would not know about the menu bar's template icon, would not strip the black the artwork
-// carries outside its plate, and would not inset anything to Apple's grid. Everything below is
+// carries outside its plate, and would hand macOS 26 an icon with alpha in it — see the note on
+// `ICNS` for what Tahoe does with one of those. Everything below is
 // `node:zlib` and arithmetic: no dependency, no install step, and it runs on a machine with no
 // Rust toolchain, which is the machine most of this wrapper was written on.
 //
@@ -177,21 +178,19 @@ function plateCoverage(profile, width, height, x, y, factor) {
 // somebody scales it in the obvious way.
 // ---------------------------------------------------------------------------------------------
 
-/** Draw `src` into a `size` x `size` canvas, occupying `fill` of it, centred. */
-function resample(src, size, fill) {
-  const target = Math.round(size * fill);
-  const offset = Math.round((size - target) / 2);
-  const out = Buffer.alloc(size * size * 4);
+/** Draw the whole of `src` into a `width` x `height` canvas. */
+function resample(src, width, height) {
+  const out = Buffer.alloc(width * height * 4);
 
-  for (let y = 0; y < target; y++) {
+  for (let y = 0; y < height; y++) {
     // The source window this destination pixel averages. Computed from the edges rather than from
     // a centre and a width so that consecutive pixels share a boundary exactly and no source row
     // is counted twice or skipped.
-    const y0 = (y * src.height) / target;
-    const y1 = ((y + 1) * src.height) / target;
-    for (let x = 0; x < target; x++) {
-      const x0 = (x * src.width) / target;
-      const x1 = ((x + 1) * src.width) / target;
+    const y0 = (y * src.height) / height;
+    const y1 = ((y + 1) * src.height) / height;
+    for (let x = 0; x < width; x++) {
+      const x0 = (x * src.width) / width;
+      const x1 = ((x + 1) * src.width) / width;
 
       let r = 0;
       let g = 0;
@@ -214,7 +213,7 @@ function resample(src, size, fill) {
       }
       if (weight === 0) continue;
       const alpha = a / weight;
-      const to = ((y + offset) * size + x + offset) * 4;
+      const to = (y * width + x) * 4;
       // Back out of premultiplied space for storage; PNG wants straight alpha.
       out[to] = alpha > 0 ? Math.round(Math.min(255, r / weight / alpha)) : 0;
       out[to + 1] = alpha > 0 ? Math.round(Math.min(255, g / weight / alpha)) : 0;
@@ -225,33 +224,81 @@ function resample(src, size, fill) {
   return out;
 }
 
-/** The logo with its corners cut to transparency, at the artwork's own resolution. */
+/** The logo in two finishes, at the artwork's own resolution: `rounded` keeps the plate's shape
+ *  and cuts the black surround to transparency, `opaque` extends the plate colour into the corners
+ *  so the image is a solid square. Which one a platform wants is the comment above `OPAQUE_MACOS`. */
 function plated() {
   const src = decodePng(LOGO);
   if (src.width !== src.height) throw new Error("mainlogo.png: the logo is not square");
   const profile = cornerProfile(src);
-  const rgba = Buffer.from(src.rgba);
+
+  // The plate's own colour, read from the top edge between the two corners — which is plate and
+  // nothing else — rather than named here, so a replate does not need this file edited.
+  const mid = ((3 * src.width) + (src.width >> 1)) * 4;
+  const plate = [src.rgba[mid], src.rgba[mid + 1], src.rgba[mid + 2]];
+
+  const rounded = Buffer.from(src.rgba);
+  const opaque = Buffer.from(src.rgba);
   for (let y = 0; y < src.height; y++) {
     for (let x = 0; x < src.width; x++) {
       const coverage = plateCoverage(profile, src.width, src.height, x, y, 4);
-      if (coverage < 1) rgba[(y * src.width + x) * 4 + 3] = Math.round(coverage * 255);
+      if (coverage === 1) continue;
+      const at = (y * src.width + x) * 4;
+      rounded[at + 3] = Math.round(coverage * 255);
+      // The corner, filled rather than cut: blend the surround out at the plate's own edge so the
+      // seam is not a hard line where the antialiasing used to be.
+      for (let c = 0; c < 3; c++) opaque[at + c] = plate[c];
+      opaque[at + 3] = 255;
     }
   }
-  return { width: src.width, height: src.height, rgba, corner: profile[0] / src.width };
+  const base = { width: src.width, height: src.height };
+  return { rounded: { ...base, rgba: rounded }, opaque: { ...base, rgba: opaque }, corner: profile[0] / src.width };
 }
 
 /** The menu bar's mark: the silhouette alone, as a template image. Every pixel is black and only
  *  alpha carries the shape, because that is what macOS reads a template icon's bytes as — it
- *  throws the colour away and redraws the coverage in the bar's own ink. */
-function template(size, fill) {
+ *  throws the colour away and redraws the coverage in the bar's own ink.
+ *
+ *  CROPPED TO THE INK, and that is the whole reason this is not just a resize. `tray-icon` draws
+ *  whatever it is given at a FIXED 18pt tall with the width scaled to match (its macOS backend
+ *  hard-codes `icon_height: f64 = 18.0`). So the mark's height on screen is 18pt times its share
+ *  of the image, and mono.png's own margins — the mark is 828 of 1254 tall — were spending nearly
+ *  half of that on nothing. Cropped, the 18pt is all mark, which is the size a menu bar glyph is
+ *  meant to be. It also means this image is WIDER THAN IT IS TALL, as the animal is; the bar is
+ *  sized by height and takes the width it is given. */
+function template(height) {
   const src = decodePng(MONO);
-  const out = resample(src, size, fill);
-  for (let i = 0; i < size * size; i++) {
+
+  let minX = src.width;
+  let minY = src.height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < src.height; y++) {
+    for (let x = 0; x < src.width; x++) {
+      if (src.rgba[(y * src.width + x) * 4 + 3] < 128) continue;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  if (maxX < 0) throw new Error("mono.png: no opaque pixels, so there is no mark to crop to");
+
+  const cw = maxX - minX + 1;
+  const ch = maxY - minY + 1;
+  const cropped = Buffer.alloc(cw * ch * 4);
+  for (let y = 0; y < ch; y++) {
+    src.rgba.copy(cropped, y * cw * 4, ((y + minY) * src.width + minX) * 4, ((y + minY) * src.width + maxX + 1) * 4);
+  }
+
+  const width = Math.round((height * cw) / ch);
+  const out = resample({ width: cw, height: ch, rgba: cropped }, width, height);
+  for (let i = 0; i < width * height; i++) {
     out[i * 4] = 0;
     out[i * 4 + 1] = 0;
     out[i * 4 + 2] = 0;
   }
-  return out;
+  return { rgba: out, width, height };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -282,19 +329,19 @@ function chunk(type, data) {
   return out;
 }
 
-function png(rgba, size) {
+function png(rgba, width, height = width) {
   const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(size, 0);
-  ihdr.writeUInt32BE(size, 4);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
   ihdr[8] = 8; // bit depth
   ihdr[9] = 6; // truecolour with alpha
   // Every scanline gets filter type 0. A real encoder would choose per line and save perhaps a
   // fifth of the bytes; these files are counted in kilobytes and the deflate does the work.
-  const stride = size * 4 + 1;
-  const raw = Buffer.alloc(size * stride);
-  for (let row = 0; row < size; row++) {
+  const stride = width * 4 + 1;
+  const raw = Buffer.alloc(height * stride);
+  for (let row = 0; row < height; row++) {
     raw[row * stride] = 0;
-    rgba.copy(raw, row * stride + 1, row * size * 4, (row + 1) * size * 4);
+    rgba.copy(raw, row * stride + 1, row * width * 4, (row + 1) * width * 4);
   }
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
@@ -344,41 +391,47 @@ function icns(entries) {
 
 // ---------------------------------------------------------------------------------------------
 
-// APPLE'S ICON GRID, which is why the .icns is inset and nothing else is. Since Big Sur every
-// macOS app icon is a rounded square occupying 824 of a 1024pt canvas, with the remaining margin
-// left empty so the system can put a shadow in it. The artwork is drawn edge to edge, so an icns
-// made from it at full bleed is a correct icon that reads noticeably LARGER than every icon
-// beside it in the dock — which looks like a mistake rather than like confidence.
-const MACOS_FILL = 824 / 1024;
+// A LEGACY .icns ON macOS 26 MUST BE FULLY OPAQUE. Tahoe composites an app icon it is given into
+// its own squircle and draws the shadow itself — but only when the image fills the canvas. Hand it
+// anything with alpha, including nothing more than the plate's own rounded corners, and it decides
+// the icon is a small graphic rather than an icon and drops it onto a light backing plate: the mark
+// shrinks, gains a white border, and reads noticeably smaller than every icon beside it. Verified
+// on 26.6.2 — inset-to-Apple's-grid and full-bleed-with-rounded-corners BOTH plate; only the solid
+// square fills the tile. So the corners go to the plate colour and macOS rounds them back.
+//
+// WINDOWS AND LINUX DO NOT MASK, so their icons keep the plate's own rounded corners and the
+// transparency outside them — a solid square there would be a square icon.
+const ICNS = "opaque";
+const OTHERS = "rounded";
 
-// Windows and Linux have no such convention and their icons are full bleed, so the .ico and the
-// loose PNGs — which are also what Tauri hands back as the window icon — use the whole canvas.
-const FULL = 1;
-
-// The menu bar wants the mark to breathe: macOS draws a 22pt bar and expects a glyph of about 18
-// inside it, and a template that fills its own square sits hard against the items either side.
-const TRAY_FILL = 18 / 22;
+// The menu bar's mark is sized by `tray-icon` at a fixed 18pt tall; see `template`. Rendering the
+// 1x at 18 and the 2x at 36 means the bitmap lands on whole pixels on both kinds of display.
+const TRAY_HEIGHT = 18;
 
 const logo = plated();
 mkdirSync(OUT, { recursive: true });
 
 const SIZES = [32, 64, 128, 256, 512, 1024];
-const bleed = new Map(SIZES.map((size) => [size, png(resample(logo, size, FULL), size)]));
-const inset = new Map(SIZES.map((size) => [size, png(resample(logo, size, MACOS_FILL), size)]));
+const square = (finish, size) => png(resample(logo[finish], size, size), size);
+const rounded = new Map(SIZES.map((size) => [size, square(OTHERS, size)]));
+const opaque = new Map(SIZES.map((size) => [size, square(ICNS, size)]));
+
+const tray1x = template(TRAY_HEIGHT);
+const tray2x = template(TRAY_HEIGHT * 2);
 
 const files = [
-  ["32x32.png", bleed.get(32)],
-  ["128x128.png", bleed.get(128)],
+  ["32x32.png", rounded.get(32)],
+  ["128x128.png", rounded.get(128)],
   // Tauri's own naming for the 2x asset; it is a 256px image and the name is what macOS reads.
-  ["128x128@2x.png", bleed.get(256)],
-  ["icon.png", bleed.get(1024)],
-  ["icon.ico", ico([32, 64, 128, 256].map((size) => ({ size, data: bleed.get(size) })))],
-  ["icon.icns", icns(SIZES.map((size) => ({ size, data: inset.get(size) })))],
+  ["128x128@2x.png", rounded.get(256)],
+  ["icon.png", rounded.get(1024)],
+  ["icon.ico", ico([32, 64, 128, 256].map((size) => ({ size, data: rounded.get(size) })))],
+  ["icon.icns", icns(SIZES.map((size) => ({ size, data: opaque.get(size) })))],
   // The menu bar's two, at 1x and 2x. `tray.rs` compiles the 2x one in and lets macOS halve it,
   // which is sharper on every display made in the last decade than sending the 1x and letting a
   // Retina bar double it.
-  ["tray.png", png(template(22, TRAY_FILL), 22)],
-  ["tray@2x.png", png(template(44, TRAY_FILL), 44)],
+  ["tray.png", png(tray1x.rgba, tray1x.width, tray1x.height)],
+  ["tray@2x.png", png(tray2x.rgba, tray2x.width, tray2x.height)],
 ];
 
 for (const [name, data] of files) {
@@ -386,3 +439,4 @@ for (const [name, data] of files) {
   console.log(`${name.padEnd(18)} ${String(data.length).padStart(8)} bytes`);
 }
 console.log(`\nplate corner measured at ${(logo.corner * 100).toFixed(1)}% of the artwork's width`);
+console.log(`menu bar mark ${tray2x.width}x${tray2x.height} at 2x, drawn ${TRAY_HEIGHT}pt tall`);
