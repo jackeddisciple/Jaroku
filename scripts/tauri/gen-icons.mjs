@@ -259,14 +259,17 @@ function plated() {
  *  alpha carries the shape, because that is what macOS reads a template icon's bytes as — it
  *  throws the colour away and redraws the coverage in the bar's own ink.
  *
- *  CROPPED TO THE INK, and that is the whole reason this is not just a resize. `tray-icon` draws
- *  whatever it is given at a FIXED 18pt tall with the width scaled to match (its macOS backend
- *  hard-codes `icon_height: f64 = 18.0`). So the mark's height on screen is 18pt times its share
- *  of the image, and mono.png's own margins — the mark is 828 of 1254 tall — were spending nearly
- *  half of that on nothing. Cropped, the 18pt is all mark, which is the size a menu bar glyph is
- *  meant to be. It also means this image is WIDER THAN IT IS TALL, as the animal is; the bar is
- *  sized by height and takes the width it is given. */
-function template(height) {
+ *  CROPPED TO THE INK AND THEN PADDED BACK, which is the whole reason this is not just a resize.
+ *  `tray-icon` draws whatever it is given at a FIXED 18pt tall with the width scaled to match (its
+ *  macOS backend hard-codes `icon_height: f64 = 18.0`), so the ONLY control over how big the mark
+ *  looks is its share of the image. mono.png's own margins — the mark is 828 of 1254 tall — spent
+ *  nearly half the slot on nothing and drew a mark around 10pt, visibly smaller than the WiFi and
+ *  battery glyphs next to it. Cropping to the ink and padding by a known amount replaces an
+ *  accident of the export with a number: `TRAY_INK` is that number.
+ *
+ *  It also means this image is WIDER THAN IT IS TALL, as the animal is; the bar is sized by height
+ *  and takes whatever width it is given, and the spacing between items is the system's. */
+function template(height, inkShare) {
   const src = decodePng(MONO);
 
   let minX = src.width;
@@ -291,14 +294,22 @@ function template(height) {
     src.rgba.copy(cropped, y * cw * 4, ((y + minY) * src.width + minX) * 4, ((y + minY) * src.width + maxX + 1) * 4);
   }
 
-  const width = Math.round((height * cw) / ch);
-  const out = resample({ width: cw, height: ch, rgba: cropped }, width, height);
-  for (let i = 0; i < width * height; i++) {
+  // The mark, at its share of the slot, then centred in a canvas of the full slot height. Only the
+  // vertical padding matters: the width follows the aspect, and the gap between status items is
+  // the system's to decide.
+  const inkHeight = Math.round(height * inkShare);
+  const inkWidth = Math.round((inkHeight * cw) / ch);
+  const ink = resample({ width: cw, height: ch, rgba: cropped }, inkWidth, inkHeight);
+
+  const out = Buffer.alloc(inkWidth * height * 4);
+  const top = Math.round((height - inkHeight) / 2);
+  ink.copy(out, top * inkWidth * 4);
+  for (let i = 0; i < inkWidth * height; i++) {
     out[i * 4] = 0;
     out[i * 4 + 1] = 0;
     out[i * 4 + 2] = 0;
   }
-  return { rgba: out, width, height };
+  return { rgba: out, width: inkWidth, height };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -408,6 +419,11 @@ const OTHERS = "rounded";
 // 1x at 18 and the 2x at 36 means the bitmap lands on whole pixels on both kinds of display.
 const TRAY_HEIGHT = 18;
 
+// The share of that slot the mark actually occupies, which is the one dial there is on how big it
+// looks. Filling the slot outright drew a mark that read LARGER than the system glyphs beside it —
+// they do not fill theirs either — so it sits a little inside instead, at about 15pt of the 18.
+const TRAY_INK = 0.85;
+
 const logo = plated();
 mkdirSync(OUT, { recursive: true });
 
@@ -416,8 +432,8 @@ const square = (finish, size) => png(resample(logo[finish], size, size), size);
 const rounded = new Map(SIZES.map((size) => [size, square(OTHERS, size)]));
 const opaque = new Map(SIZES.map((size) => [size, square(ICNS, size)]));
 
-const tray1x = template(TRAY_HEIGHT);
-const tray2x = template(TRAY_HEIGHT * 2);
+const tray1x = template(TRAY_HEIGHT, TRAY_INK);
+const tray2x = template(TRAY_HEIGHT * 2, TRAY_INK);
 
 const files = [
   ["32x32.png", rounded.get(32)],
@@ -439,4 +455,4 @@ for (const [name, data] of files) {
   console.log(`${name.padEnd(18)} ${String(data.length).padStart(8)} bytes`);
 }
 console.log(`\nplate corner measured at ${(logo.corner * 100).toFixed(1)}% of the artwork's width`);
-console.log(`menu bar mark ${tray2x.width}x${tray2x.height} at 2x, drawn ${TRAY_HEIGHT}pt tall`);
+console.log(`menu bar mark ${tray2x.width}x${tray2x.height} at 2x, drawn ${(TRAY_HEIGHT * TRAY_INK).toFixed(1)}pt of a ${TRAY_HEIGHT}pt slot`);
