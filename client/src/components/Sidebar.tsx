@@ -166,7 +166,10 @@ function NavList() {
   const waitingOnYou = useWorkStore((s) => workBadgeCount(s.workspaceCounts));
 
   return (
-    <div className="flex shrink-0 flex-col px-2 pb-1">
+    // `pt-2` SETS THE DESTINATIONS OFF FROM THE WORKSPACE ROW. They used to start flush against its
+    // divider, which made `New` read as the first item of the header rather than the first of this
+    // list — the gap is what says the name above scopes the column instead of belonging to it.
+    <div className="flex shrink-0 flex-col px-2 pb-1 pt-2">
       {/* NEW IS THE FIRST THING, which is what makes it a destination rather than a button that
           happened to be moved here. It was a `+` in the Recents header, filed with that section's
           filter — a creation control scoped by a list it does not belong to.

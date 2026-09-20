@@ -167,7 +167,12 @@ console.log("\n§9.1 — before the session lands");
   // A FIXED-HEIGHT PLACEHOLDER RATHER THAN NOTHING. The four destinations sit under this row, and
   // a switcher that appears when the session lands would move all of them down a frame after
   // paint — on every launch.
-  check(html.includes("h-9"), "an empty row of the same height holds the space");
+  //
+  // THE NUMBER TRACKS THE ROW, and is asserted rather than derived because deriving it from the
+  // component would be the component compared against itself. It is `py-2` either side of
+  // `text-title`'s 22px line; it was `h-9` while the name was a 14px rung. If this fails after a
+  // change to the name's size, the placeholder is the thing that did not move.
+  check(html.includes("h-[38px]"), "an empty row of the same height holds the space");
   check(!/Acme|Adarsh/.test(html), "...and names nobody");
 }
 

@@ -402,7 +402,10 @@ export function WorkspaceSwitcher() {
   // too, and an empty row is quieter than a placeholder that flashes into somebody else's
   // workspace name. A fixed height, so the four destinations beneath it do not jump when the
   // session lands.
-  if (!user || !workspaceId) return <div className="sidebar-seam h-9 shrink-0 border-b border-hair" />;
+  // 38px is what the row below measures: `py-2` either side of `text-title`'s 22px line. Written as
+  // a number because it is one — there is no height rung that happens to equal a rung's line height
+  // plus its padding, and a `h-9` that no longer matches is a one-pixel jump nobody would find.
+  if (!user || !workspaceId) return <div className="sidebar-seam h-[38px] shrink-0 border-b border-hair" />;
   const current = workspaces.find((w) => w.id === workspaceId);
 
   return (
@@ -422,10 +425,12 @@ export function WorkspaceSwitcher() {
           onClick={() => setOpen((v) => !v)}
           aria-haspopup="menu"
           aria-expanded={open}
-          // THE ROW EVERY OTHER ROW IN THE COLUMN IS SCOPED BY. §9.1 put it a size above the tab
-          // labels; the product owner took it back down from 16px on 2026-09-11, and with no rung
-          // between 16 and 14 and no semibold on top of a rung (`test:surface-system`), it is 14px
-          // medium, the rows' own size — the row it heads is what sets it apart now.
+          // THE ROW EVERY OTHER ROW IN THE COLUMN IS SCOPED BY, and it is drawn a rung above them
+          // again — §9.1's original call, restored by the product owner on 2026-09-20. It spent a
+          // fortnight at the rows' own 14px on the reasoning that the row it heads set it apart,
+          // and at the top of a column of 14px rows it simply read as another one of them. 16px is
+          // `text-title`, which carries its own 600: no weight class beside it, because the ladder
+          // already made that decision and `test:surface-system` holds everything to it.
           className={`flex min-w-0 flex-1 items-center gap-2 py-2 pl-3 pr-2 text-left transition-colors hover:bg-active/40 active:bg-chrome focus-visible:outline-none focus-visible:shadow-focusring ${
             open ? "bg-active/40" : ""
           }`}
@@ -438,7 +443,7 @@ export function WorkspaceSwitcher() {
               row in the column is scoped by. It stays in the row's tooltip, which reads
               "<name> — team, you are owner", so the fact is still reachable where somebody asking
               for it would look. */}
-          <Truncate className="min-w-0 text-body font-medium text-ink" title={current?.name}>
+          <Truncate className="min-w-0 text-title text-ink" title={current?.name}>
             {current?.name ?? "workspace"}
           </Truncate>
           {/* THE AFFORDANCE SITS AGAINST THE NAME, NOT AT THE ROW'S EDGE — and the difference is
