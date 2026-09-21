@@ -34,7 +34,7 @@
 // noise. That is true everywhere this is used, which is why it is not a prop.
 
 import { faceFor } from "../lib/agentFaces.ts";
-import { RADIUS } from "../lib/tokens.ts";
+import { ICON, RADIUS } from "../lib/tokens.ts";
 
 /**
  * The sizes a face is drawn at. Three, and each is a surface rather than a preference.
@@ -61,30 +61,37 @@ export const FACE_SIZE = {
   /**
    * The sidebar's agent list.
    *
-   * TWENTY-TWO, AND IT HAS MOVED FIVE TIMES — every one of them the product owner's call, which is
-   * why the history is here rather than a single number with no argument.
+   * THE NAVIGATION RUNG, AND THAT IS WHY IT IS A REFERENCE RATHER THAN A NUMBER. It has moved six
+   * times — 16, 28, 22, 28, 22, and now `ICON.md` — every one of them the product owner's call,
+   * which is why the history is here rather than a single number with no argument.
    *
-   * IT STARTED AT 16, the emoji's own register, so the mark landed on the column the five nav
+   * IT STARTED AT 16, the emoji's own register, so the mark landed on the column the nav
    * destinations start at. That is right for a glyph on a baseline and left a PORTRAIT as a
    * coloured dot with a face implied in it. It went to 28 against a two-line row, back to 22 when
    * the row became one line, and to 28 again when the artwork became line drawings inside a thin
    * coloured rim: the rim costs a pixel at each edge and the head inside is drawn smaller than a
    * full-bleed crop, so 22 of rim-and-drawing inked less than 22 of portrait had.
    *
-   * AND IT IS 22 AGAIN — the product owner's call on 2026-09-18, made against that argument rather
-   * than without it. The trade is stated so nobody re-derives half of it: what 28 bought was the
-   * drawing inside the rim being legible, and what it cost was a picture that outweighs the 13px
-   * name beside it, in the column whose job is telling forty names apart.
+   * AND IT IS THE NAV'S OWN SIZE AGAIN — the product owner's call on 2026-09-21, made against that
+   * argument rather than without it. An agent's mark and a destination's mark are two marks on one
+   * rail, and a column where the agents' are the larger of the two reads as a second list hanging
+   * off the first. What 22 bought was the drawing inside the rim being legible; what it cost was a
+   * picture that outweighs the 13px name beside it, in the column whose job is telling forty names
+   * apart.
    *
-   * TWENTY-EIGHT IS THE CEILING RATHER THAN THE VALUE. The agent row is `h-8` — 32px — so 28 is
-   * the point where the badge is as big as it can be without the row having to grow; 32 was
-   * rendered and rejected for exactly that, and past it a 40px row would make the agent list
-   * taller than the navigation above it.
+   * WRITTEN AS `ICON.md` RATHER THAN AS 16, because the agreement is the point rather than the
+   * number. That rung has moved before — all six marks at the top of the column came down from
+   * `lg` together on 2026-09-11 — and a face that matched it by coincidence would part from it the
+   * next time without anybody deciding to.
+   *
+   * AND THE ROW CAME DOWN WITH IT. The agent row was `h-8`: 32px, which was this picture at 22 plus
+   * five pixels of air either side. It is `h-7` now, the destinations' own height — so this number
+   * is also a ceiling of about 22, past which that row would have to grow again. See `Sidebar.tsx`.
    *
    * AND THE CHAT ROWS FOLLOW THIS NUMBER, whatever it is set to: `ChatDot`'s box is this constant,
    * so a chat's title starts where its own agent's name starts. See `Sidebar.tsx`.
    */
-  sidebar: 22,
+  sidebar: ICON.md,
   /** The portrait on an agent card, straddling its banner. */
   card: 56,
   /** The compact density's, which is the one thing compact shrinks besides dropping a line. */
@@ -119,9 +126,10 @@ const RADIUS_FOR = (size: number): number => (size >= FACE_SIZE.header ? RADIUS.
  * on a card. A prop would let the two disagree; a threshold cannot, and a seventh call site added
  * at 16px gets the badge without anybody having to know this rule exists.
  *
- * THE BREAK IS WIDE ON PURPOSE. The sizes are 16, 22, 44, 56, 96 — so the gap between the badge's
- * largest use and the portrait's smallest is exactly the gap between 22 and 44, which is nowhere
- * near anything. This is not a threshold anybody will land on by accident.
+ * THE BREAK IS WIDE ON PURPOSE. The sizes are 16, 16, 44, 56, 96 — the two dense rows share one
+ * number now, so the gap between the badge's largest use and the portrait's smallest is the whole
+ * of 16 to 44, which is nowhere near anything. This is not a threshold anybody will land on by
+ * accident.
  */
 const BADGE_UPTO = FACE_SIZE.sidebar;
 

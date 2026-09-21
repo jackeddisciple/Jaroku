@@ -507,11 +507,11 @@ function AgentTreeRow({
   return (
     <>
       <div
-        // EIGHT, BACK DOWN FROM ELEVEN. It was 44px to hold two lines — a name over a category and
-        // a time — and it is one line again, so 44px would be a row with 28px of nothing in it. 32px
-        // is the 22px picture plus 5px of air either side, which is the same air the 18px nav icons
-        // have in their 28px rows; the agents are a half-step taller than the destinations because
-        // their mark is, and no taller than that.
+        // SEVEN, WHICH IS THE DESTINATIONS' OWN HEIGHT. It was 44px to hold two lines — a name over
+        // a category and a time — then 32px, once it was one line again: the 22px picture plus 5px of
+        // air either side. The picture is `ICON.md` now, the same mark the rows above this one wear,
+        // so the half-step this row stood taller by had nothing holding it up. One mark, one row
+        // height, one rail — see `FACE_SIZE.sidebar` for the size and why it has moved.
         //
         // AND IT SAYS WHICH AGENT IS SELECTED THE WAY EVERY OTHER ROW IN THIS COLUMN DOES. It did
         // not: the only mark was the name in `text-accent`, which worked while the accent was a
@@ -521,7 +521,7 @@ function AgentTreeRow({
         // was missing rather than a new one, and it survives an accent that is a neutral.
         // THE RUNS TWISTY THAT USED TO HOLD THE LEFT COLUMN moved to the row's right end, before the
         // pull request, which is what leaves the picture at the start of the row.
-        className={`group relative flex h-8 w-full items-center gap-1 rounded-control pl-2.5 pr-1 transition-colors duration-fast ${
+        className={`group relative flex h-7 w-full items-center gap-1 rounded-control pl-2.5 pr-1 transition-colors duration-fast ${
           selected ? "bg-sidebar-active" : "hover:bg-sidebar-hover"
         }`}
         // WHAT MOVES WHEN SOMETHING ELSE IS PINNED. An agent row travels too — pinning a chat two
