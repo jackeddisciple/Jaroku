@@ -657,7 +657,13 @@ export function AgentCard({
             words and numbers separated by `·`; the sparkline, the deploy dot, the date chip and
             the creator's initial are each their own shape, and a `·` before a bordered pill is a
             separator between a sentence and an object. */}
-        <div className="mt-auto flex min-w-0 items-center gap-2 border-t border-hair pt-2 text-tiny text-faint">
+        {/* IT WRAPS RATHER THAN RUNNING OFF THE CARD. The cluster on the right is objects that
+            cannot shrink — twenty bars, a drift arrow, a date chip — and on a compact card, or a
+            comfortable one carrying all three, the row was wider than the card: `overflow-hidden`
+            cut it mid-token at the edge, and "7 threads" broke across two lines to make room. The
+            words now hold together and the objects take a second line, right-aligned, when they
+            have to; `auto-rows-fr` keeps the grid's cards one height either way. */}
+        <div className="mt-auto flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 whitespace-nowrap border-t border-hair pt-2 text-tiny text-faint">
           <span className="tabular-nums" title={`${agent.thread_count} open thread${agent.thread_count === 1 ? "" : "s"}`}>
             {agent.thread_count} thread{agent.thread_count === 1 ? "" : "s"}
           </span>
