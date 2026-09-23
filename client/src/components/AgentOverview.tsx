@@ -27,6 +27,7 @@ import { faceFor } from "../lib/agentFaces.ts";
 import { sendSetAgentCategory } from "../lib/socket.ts";
 import { sendRenameAgent } from "../lib/socket.ts";
 import { fmtCost, relTime } from "../lib/format.ts";
+import { validatorVerdict } from "../lib/validatorVerdict.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import type { AgentDetailView } from "../types.ts";
 
@@ -291,11 +292,10 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
           <Fact
             label="Live version"
             value={`v${a.current_version}${a.version_source ? ` · ${a.version_source}` : ""}`}
-            title={
-              a.version_source === "import"
-                ? "Published as-is, so the validator never saw it"
-                : "Published through the validator"
-            }
+            // THE HEALTH TAB'S VERDICT, IN ITS SHORT FORM. This was a two-way branch that gave
+            // "Published through the validator" to everything that was not an import — including a
+            // draft that had published nothing and a deploy version the validator never saw.
+            title={validatorVerdict(a.version_source, a.current_version).short}
           />
           <Fact
             label="Runs, 7 days"
