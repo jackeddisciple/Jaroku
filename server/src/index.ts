@@ -6318,9 +6318,16 @@ const GRID_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 /** The second window §6's Health tab asks for, beside the first. */
 const GRID_WINDOW_30_MS = 30 * 24 * 60 * 60 * 1000;
 
+/**
+ * What the dispatch chain hands to `handleAgentCommand`.
+ *
+ * A NAME MISSING HERE IS DROPPED WITHOUT A WORD, which is how `setAgentTools` shipped: the relay
+ * forwarded it, the handler knew it, and the chain between them fell off the end — so the
+ * Capabilities tab's Save closed its editor over a grant that never changed.
+ */
 const AGENT_COMMAND_NAMES = new Set([
   "archiveAgent", "restoreAgent", "renameAgent", "forkAgent", "restoreAgentVersion",
-  "setAgentCategory", "createDraftAgent",
+  "setAgentCategory", "createDraftAgent", "setAgentTools",
 ]);
 
 /** A refusal on the agents channel, to the socket that earned it and nobody else. */
