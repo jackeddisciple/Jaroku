@@ -46,6 +46,7 @@ export function AgentDetail() {
   const loading = useAgentGridStore((s) => s.detailLoading);
   const error = useAgentGridStore((s) => s.error);
   const openAgentId = useAgentGridStore((s) => s.openAgentId);
+  const stale = useAgentGridStore((s) => s.detailStale);
   const [narrow, setNarrow] = useState(false);
   const [host, setHost] = useState<HTMLDivElement | null>(null);
 
@@ -74,6 +75,14 @@ export function AgentDetail() {
       sendLoadExposure(openUuid);
     }
   }, [openUuid]);
+
+  // A SNAPSHOT MOVED SOMETHING THIS PANE WAS BUILT FROM — a Restore or a grant change issued from
+  // it, a run, a credential — so it asks again. The header already follows the snapshot; this is
+  // what brings the version list, the grants and the runs under it along. Once per change, and
+  // never while an answer is already on its way: see `detailStale`.
+  useEffect(() => {
+    if (stale && !loading && openAgentId) sendLoadAgentDetail(openAgentId);
+  }, [stale, loading, openAgentId]);
 
   useEffect(() => {
     if (!host || typeof ResizeObserver === "undefined") return;

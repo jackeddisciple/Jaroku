@@ -116,6 +116,7 @@
     "test:agent-tags": "tsx src/lib/agentTags.test.ts",
     "test:version-span": "tsx src/lib/versionSpan.test.ts",
     "test:validator-verdict": "tsx src/lib/validatorVerdict.test.ts",
+    "test:agent-detail-refresh": "tsx src/store/agentDetailRefresh.test.ts",
     "test:agent-filter": "tsx src/lib/agentFilter.test.ts",
     "test:agent-context": "tsx src/lib/agentContext.test.ts",
     "test:inbox-board": "tsx src/lib/inboxBoard.test.ts",

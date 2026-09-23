@@ -63,6 +63,15 @@ interface AgentGridState {
   detail: AgentDetailView | null;
   /** True while a detail is on its way, so the pane can hold its shape rather than flash empty. */
   detailLoading: boolean;
+  /**
+   * The open detail was assembled from a card that a snapshot has since changed underneath it.
+   *
+   * See `detailBasis`. The pane asks again when this is set, so its version list, grants,
+   * credentials and runs catch up with the header that the snapshot already moved.
+   */
+  detailStale: boolean;
+  /** `detailBasis` of the card the open detail was assembled from, or null with nothing open. */
+  detailBuiltFrom: string | null;
 
   /** The version the file browser is showing, and its files. Null before anything is asked for. */
   version: { agentId: string; version: number; files: AgentFileView[] } | null;
@@ -117,6 +126,8 @@ export const useAgentGridStore = create<AgentGridState>((set, get) => ({
   openAgentId: null,
   detail: null,
   detailLoading: false,
+  detailStale: false,
+  detailBuiltFrom: null,
   version: null,
   versionLoading: false,
   exportRequest: null,
@@ -138,18 +149,26 @@ export const useAgentGridStore = create<AgentGridState>((set, get) => ({
       countedSteps: {},
       // A DETAIL THAT IS OPEN FOLLOWS THE SNAPSHOT'S CARD, so the header of the detail and the card
       // behind it can never disagree about a tag. The rest of the detail — versions, tools, latency —
-      // is not in a grid snapshot and is deliberately left as it was rather than blanked: it is still
-      // true, and blanking it would make every broadcast in the workspace flicker somebody's open
-      // agent.
+      // is not in a grid snapshot and is deliberately left as it was rather than blanked, because
+      // blanking it would make every broadcast in the workspace flicker somebody's open agent.
       detail: s.detail
         ? { ...s.detail, card: cards.find((c) => c.slug === s.detail!.card.slug) ?? s.detail.card }
         : null,
+      // ...BUT "IT IS STILL TRUE" ONLY HOLDS FOR A BROADCAST ABOUT SOMETHING ELSE. After a Restore
+      // issued from this very pane, the header moved to v5 while the version list below it still
+      // marked v4 LIVE — one pane stating two live versions, and the list, with a Restore button on
+      // every row, was the wrong one. So a snapshot that changed what the detail was built from
+      // marks it stale, and the pane asks again rather than this store guessing at the rest.
+      detailStale: s.detailStale || movedFrom(s.detailBuiltFrom, s.detail?.card.slug, cards),
     })),
 
   startDetail: (agentId) =>
     set((s) => ({
       openAgentId: agentId,
       detailLoading: true,
+      // CLEARED BY ASKING. From here the flag means "a snapshot moved the basis while this request
+      // was in flight", which is the only case the answer on its way might not cover.
+      detailStale: false,
       // The previous agent's detail is dropped immediately rather than left showing while the next
       // one loads. A pane that renders one agent's versions under another agent's name for two
       // frames is worse than one that is briefly empty.
@@ -157,9 +176,21 @@ export const useAgentGridStore = create<AgentGridState>((set, get) => ({
       version: null,
     })),
 
-  setDetail: (detail) => set({ detail, detailLoading: false, openAgentId: detail.card.slug, error: null }),
+  // STILL STALE ONLY IF A SNAPSHOT MOVED THE BASIS WHILE THIS WAS IN FLIGHT and the answer does not
+  // match it. Comparing every answer against the grid instead would ask forever whenever something
+  // the detail reads — metered spend — changed without a snapshot being broadcast.
+  setDetail: (detail) =>
+    set((s) => {
+      const built = detailBasis(detail.card);
+      return {
+        detail, detailLoading: false, openAgentId: detail.card.slug, error: null,
+        detailBuiltFrom: built,
+        detailStale: s.detailStale && movedFrom(built, detail.card.slug, s.cards),
+      };
+    }),
 
-  closeDetail: () => set({ openAgentId: null, detail: null, detailLoading: false, version: null }),
+  closeDetail: () =>
+    set({ openAgentId: null, detail: null, detailLoading: false, detailStale: false, detailBuiltFrom: null, version: null }),
 
   startVersion: () => set({ versionLoading: true }),
   requestExport: (slug) => set({ exportRequest: slug }),
@@ -183,6 +214,39 @@ export const useAgentGridStore = create<AgentGridState>((set, get) => ({
     }));
   },
 }));
+
+/**
+ * The facts on a card that the rest of the detail was built from, as one comparable string.
+ *
+ * THE VERSION, THE GRANTS, THE CREDENTIALS, THE RUNS AND THE THREADS — each is the input to a part
+ * of the detail a snapshot does not carry: the version list and its LIVE badge, the Capabilities
+ * tab's tools, the configured/missing flags, Recent runs with p50 and p95, and the Threads list.
+ * When none of them moved, the detail is still true and is left alone; when one did, it is not.
+ *
+ * NOT THE WHOLE CARD. A rename or a new category changes the card and nothing the card's detail was
+ * assembled from, and the header already follows the snapshot for those.
+ */
+export function detailBasis(card: AgentCardView): string {
+  return JSON.stringify([
+    card.current_version,
+    card.version_source,
+    card.mcp_tools,
+    card.required_env,
+    card.missing_env,
+    card.outcomes.map((o) => `${o.run_id}:${o.outcome}`),
+    card.thread_count,
+    card.latest_thread?.id ?? null,
+    card.spend_7d,
+    card.deployment?.id ?? null,
+  ]);
+}
+
+/** Whether the agent's card in `cards` has moved away from the basis `built` recorded. */
+function movedFrom(built: string | null, slug: string | undefined, cards: readonly AgentCardView[]): boolean {
+  if (built === null || slug === undefined) return false;
+  const now = cards.find((c) => c.slug === slug);
+  return now !== undefined && detailBasis(now) !== built;
+}
 
 /**
  * What a card's spend figure should read: the ledger's answer plus what has arrived since.
