@@ -38,7 +38,6 @@ export function StatusBar() {
   const connection = useTraceStore((s) => s.connection);
   const deploying = useDeployStore((s) => s.deployments.find((d) => isDeployInFlight(d.status)));
   const deployStage = useDeployStore((s) => (deploying ? (s.stage[deploying.id] ?? null) : null));
-  const live = useDeployStore((s) => s.deployments.filter((d) => d.status === "live").length);
   // WHAT THE HOST KNOWS THAT THIS TAB DOES NOT. Null in a browser, and null under the desktop
   // shell too until something goes wrong. `disconnected — retrying` is the truth about what this
   // tab is doing and a lie about what is going to happen, and the difference between the two is
@@ -57,10 +56,14 @@ export function StatusBar() {
    * plane with a seam under it: the exact "two layers" the shell's own inset had just been removed
    * for. An empty container is not neutral; it is a border and a gap.
    *
-   * The three things this strip exists to say are all conditional, so the strip is too — and when
-   * any of them becomes true it comes back with its border, its height and its place.
+   * Everything this strip exists to say is conditional, so the strip is too — and when any of it
+   * becomes true it comes back with its border, its height and its place.
+   *
+   * A RESTING DEPLOYMENT COUNT IS NOT ONE OF THEM — the product owner's call. "1 deployed" sat in
+   * the corner of every screen for as long as anything was live, a standing figure about a state
+   * that needs nothing from anybody; the Agents grid and the Deploy tab are where a deployment is.
    */
-  if (!failed && connection === "open" && !deploying && live === 0) return null;
+  if (!failed && connection === "open" && !deploying) return null;
 
 
   return (
@@ -99,9 +102,6 @@ export function StatusBar() {
           {sep}
           <span className="shrink-0 text-run">{deployStage ?? deploying.status}</span>
         </>
-      )}
-      {!deploying && live > 0 && (
-        <span className="ml-auto shrink-0"><span className="tabular-nums">{live}</span> deployed</span>
       )}
     </div>
   );
