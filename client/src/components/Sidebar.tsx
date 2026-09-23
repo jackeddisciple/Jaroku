@@ -393,6 +393,14 @@ function AgentRowMenu({ agent }: { agent: AgentSummary }) {
                 value={typed}
                 onChange={(e) => setTyped(e.target.value)}
                 autoFocus
+                // A SLUG IS NOT A WORD, AND macOS TREATS IT AS ONE. In the desktop app autocorrect
+                // turned `margot` into `Margot` and drew its suggestion over "Delete for good" — so
+                // the typed slug no longer matched, the button stayed disabled, and the delete could
+                // not be confirmed at all. The field compares exact characters; nothing may change them.
+                spellCheck={false}
+                autoCorrect="off"
+                autoCapitalize="off"
+                autoComplete="off"
                 aria-label={`Type ${agent.agent_id} to confirm deletion`}
                 className="w-full rounded-input border border-edge bg-panel px-2 py-1 text-body text-ink outline-none focus-visible:shadow-focusring"
               />
