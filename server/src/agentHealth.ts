@@ -69,10 +69,13 @@ export interface HealthFacts {
    * per agent per grid load, which is the opposite of one query.
    *
    * It does not need to. The validator is the gate on PUBLISHING: a generation or an edit that it
-   * refuses is discarded and never becomes a version, so every row whose `source` is `generation`,
-   * `edit` or `deploy` passed it by construction. What did NOT pass it is `import` — the backfill and
-   * the hand-dropped directory, published as-is because it already existed — and a version nobody
-   * has ever checked is exactly what §5.4's `Unverified` means.
+   * refuses is discarded and never becomes a version, so every row whose `source` is `generation`
+   * or `edit` passed it by construction. A `deploy` row did NOT — `recordArtifacts` publishes the
+   * directory as the host wrote its artifacts into it, with no validator call — but what it adds is
+   * host-owned files, not the agent's own code, so it is not read as unverified here; the panel says
+   * "recorded rather than validated" for it rather than claiming a pass. What never passed it at all
+   * is `import` — the backfill and the hand-dropped directory, published as-is because it already
+   * existed — and a version nobody has ever checked is exactly what §5.4's `Unverified` means.
    *
    * Null is an agent with no version row at all, which is the same claim: nothing has been validated.
    */

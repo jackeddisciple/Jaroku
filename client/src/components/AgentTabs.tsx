@@ -33,6 +33,7 @@ import {
 import { openThreadAgent } from "../lib/threadNav.ts";
 import { selectRun } from "../lib/selection.ts";
 import { fmtCostPerRun } from "../lib/agentFormat.ts";
+import { validatorVerdict } from "../lib/validatorVerdict.ts";
 import { absTime, fmtLatency, relTime } from "../lib/format.ts";
 import { ACCENT, ICON, STATUS, TEXT, TYPE } from "../lib/tokens.ts";
 import { useUiStore } from "../store/uiStore.ts";
@@ -299,6 +300,9 @@ function Capabilities({ detail }: { detail: AgentDetailView }) {
 /** Tab 2 — the validator's verdict on what is live, and what has happened since. */
 function Health({ detail }: { detail: AgentDetailView }) {
   const a = detail.card;
+  // ONE CLAIM, FROM ONE PLACE. A `deploy` version used to fall into the green branch here, and the
+  // validator never sees one — see lib/validatorVerdict.ts.
+  const verdict = validatorVerdict(a.version_source, a.current_version);
   const settled = a.outcomes.filter((o) => o.outcome === "ok" || o.outcome === "error");
   const errorRate = settled.length === 0 ? null : a.outcomes.filter((o) => o.outcome === "error").length / settled.length;
 
@@ -306,19 +310,7 @@ function Health({ detail }: { detail: AgentDetailView }) {
     <div className="space-y-5 p-4">
       <Section label="Validator" hint="the verdict on the live version">
         <div className="rounded-control border border-hair px-2.5 py-2 text-caption">
-          {a.version_source === null ? (
-            <span className="text-muted">
-              Nothing has been published, so nothing has been validated.
-            </span>
-          ) : a.version_source === "import" ? (
-            <span style={{ color: TEXT.muted }}>
-              v{a.current_version} was published as-is and never went through the validator.
-            </span>
-          ) : (
-            <span style={{ color: STATUS.ok }}>
-              v{a.current_version} passed the validator when it was published.
-            </span>
-          )}
+          <span style={{ color: verdict.passed ? STATUS.ok : TEXT.muted }}>{verdict.sentence}</span>
         </div>
       </Section>
 
