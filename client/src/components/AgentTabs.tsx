@@ -678,7 +678,11 @@ export function AgentTabs({ detail }: { detail: AgentDetailView }) {
           const to = tabs[next];
           if (to) setTab(to.id);
         }}
-        className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-hair px-3 py-2"
+        // IT WRAPS RATHER THAN SCROLLS. At the pane's natural width the six did not fit, and the
+        // scroll hid Capabilities — the default tab — off the left edge, cut Health to `ealth`, and
+        // answered only a horizontal trackpad swipe behind a scrollbar macOS fades at rest. A second
+        // row costs one line of height and hides nothing.
+        className="flex shrink-0 flex-wrap items-center gap-1 border-b border-hair px-3 py-2"
       >
         {tabs.map(({ id, label, icon: Icon }) => (
           <button
@@ -697,10 +701,10 @@ export function AgentTabs({ detail }: { detail: AgentDetailView }) {
             }}
             onClick={() => setTab(id)}
             // §8: every tab is an icon, and every icon-only control carries a label and a tooltip.
-            // The label rides beside the icon rather than replacing it, and the strip scrolls
-            // horizontally when five of them do not fit — a label that disappeared at a width
-            // nobody chose would leave somebody hunting five unnamed glyphs, which is the failure
-            // "an icon nobody can name is a worse button than a text button" describes.
+            // The label rides beside the icon rather than replacing it, and the strip wraps when
+            // they do not fit — a label that disappeared at a width nobody chose would leave
+            // somebody hunting unnamed glyphs, which is the failure "an icon nobody can name is a
+            // worse button than a text button" describes.
             title={label}
             aria-label={label}
             // THE SHARED TAB RECIPE. This was a third tab implementation inside one right-hand
