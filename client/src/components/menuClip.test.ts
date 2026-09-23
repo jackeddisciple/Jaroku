@@ -105,6 +105,21 @@ console.log("\n...and the Runs tab's run menu, which opens from inside its own s
   check("...not positioned inside the row", !/className="absolute/.test(runsPanel));
 }
 
+console.log("\n...and the agent card's menu, which opens from inside a card that clips");
+{
+  // THE THIRD OF THE SAME BUG. A card is `overflow-hidden` so its banner keeps the rounded corners,
+  // and its `⋯` sits on the card's last row — so a panel hung `top-full` inside it was cut flush at
+  // the card's edge, and Export and Archive, the last two items, could not be reached at all.
+  const card = withoutComments(read("components/AgentCard.tsx"));
+  const overflow = /function Overflow\([\s\S]*?\n\}\n/.exec(card)?.[0] ?? "";
+  check("AgentCard declares its overflow menu", overflow.length > 0);
+  check("...rendered through a portal into the body", /createPortal\(/.test(overflow) && /document\.body,/.test(overflow));
+  check("...not positioned inside the card", !/className="absolute/.test(overflow));
+  check("...anchored back to its trigger", /useAnchoredMenu\(open, ref, panelRef\)/.test(overflow));
+  check("...and a click on it does not open the card through the portal",
+    /onClick=\{\(e\) => e\.stopPropagation\(\)\}/.test(overflow));
+}
+
 console.log("\n...and a portalled panel keeps the wiring the portal breaks");
 {
   // CLICK-AWAY IS THE ONE THAT FAILS SILENTLY AND TOTALLY. Once the panel is not inside the

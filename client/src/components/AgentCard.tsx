@@ -17,7 +17,8 @@
 // and could only get brighter at its edge. The palette is light now and `shadow-glow` deepens the
 // border instead of brightening it, which is the same treatment arriving from the other direction.
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { DateChip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { AgentTagRow } from "./AgentTagRow.tsx";
@@ -29,6 +30,7 @@ import { agentContextMarkdown } from "../lib/agentContext.ts";
 import { faceFor } from "../lib/agentFaces.ts";
 import { showsCategory } from "../lib/agentCategories.ts";
 import { absTime, fmtCost } from "../lib/format.ts";
+import { useAnchoredMenu } from "../lib/anchoredMenu.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { ProviderMark } from "../lib/icons.tsx";
 import { ICON, STATUS } from "../lib/tokens.ts";
@@ -76,6 +78,11 @@ function Overflow({
 }) {
   const [open, setOpen] = useState(false);
   const archived = agent.archived_at !== null;
+  const ref = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  // lib/anchoredMenu.ts puts the portalled panel back under its trigger, flipping up when the card
+  // is low in the window, and follows it when the grid scrolls.
+  useAnchoredMenu(open, ref, panelRef);
 
   const item = (
     label: string,
@@ -101,7 +108,7 @@ function Overflow({
   );
 
   return (
-    <div className="relative shrink-0">
+    <div ref={ref} className="relative shrink-0">
       <button
         type="button"
         onClick={(e) => {
@@ -117,13 +124,28 @@ function Overflow({
       >
         <Icon.agents.more size={ICON.sm} />
       </button>
-      {open && (
+      {/* INTO `document.body`, NOT INTO THE CARD — and the card is why. Its root is `overflow-hidden`
+          so the banner is clipped to its rounded corners, and this panel hung `top-full` off a
+          trigger on the card's last row: an `overflow` ancestor clips an absolutely-positioned
+          descendant whatever its `z-index`, so the menu was cut flush at the card's edge. Fork and
+          Rename showed; Export current version and Archive could not be seen or clicked, and at
+          compact density Rename was sliced through its own text. Archive is offered nowhere else,
+          so the whole archive feature sat behind a filter nothing could populate. The sidebar's
+          menu already leaves its list this way (lib/anchoredMenu.ts); this is the same move. */}
+      {open && createPortal(
         <>
           {/* A full-screen catcher rather than a document listener: it closes on any click outside,
               including one that would otherwise open a different card, and it disappears with the
               menu rather than outliving it. */}
-          <div className="fixed inset-0 z-30" aria-hidden onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
-          <div className="absolute right-0 top-full z-30 mt-1 w-52 animate-slide-in rounded-card border border-edge bg-elevated p-1 shadow-floating motion-reduce:animate-none">
+          <div className="fixed inset-0 z-40" aria-hidden onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
+          {/* `top-0 left-0` IS THE STARTING POINT, NOT THE POSITION — `useAnchoredMenu` places it
+              before paint. A click on the panel's own padding stops here: React carries events up
+              through a portal to the card, whose click opens the agent. */}
+          <div
+            ref={panelRef}
+            onClick={(e) => e.stopPropagation()}
+            className="fixed left-0 top-0 z-50 w-52 animate-slide-in rounded-card border border-edge bg-elevated p-1 shadow-floating motion-reduce:animate-none"
+          >
             {archived
               ? item("Restore", Icon.agents.restore, onRestore)
               : [
@@ -163,7 +185,8 @@ function Overflow({
                   item("Archive", Icon.threads.archive, onArchive, true),
                 ]}
           </div>
-        </>
+        </>,
+        document.body,
       )}
     </div>
   );
