@@ -38,8 +38,14 @@ import { useAgentGridStore } from "../store/agentGridStore.ts";
  * in percentages — there is no element whose width a query could watch that is not itself decided by
  * the answer. The observer below watches the surface as a whole, which is the thing that actually
  * changes when somebody drags the sidebar or narrows the window.
+ *
+ * SET AGAINST THE WIDTH THE PANE CAN ACTUALLY REACH. It was 720, and at the app's own default window
+ * of 1440 the pane tops out near 709 — the window less the sidebar's 248px floor, the rail, the
+ * divider and the composer's 440px floor — so the layout this file is mostly about could not be
+ * reached without collapsing the sidebar. 640 is reachable there, and still two columns of about
+ * 330px each, which is wide enough for a path and a tab strip that wraps rather than hides.
  */
-const STACK_BELOW_PX = 720;
+const STACK_BELOW_PX = 640;
 
 export function AgentDetail() {
   const detail = useAgentGridStore((s) => s.detail);
