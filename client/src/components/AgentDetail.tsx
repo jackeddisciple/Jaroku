@@ -162,11 +162,11 @@ export function AgentDetail() {
   }
 
   const artifact = (
-    <div className="flex h-full min-h-0 flex-col overflow-auto">
+    <>
       <AgentOverview detail={detail} />
       <AgentVersions detail={detail} />
       <AgentFiles detail={detail} />
-    </div>
+    </>
   );
 
   return (
@@ -185,16 +185,22 @@ export function AgentDetail() {
       {narrow ? (
         // STACKED, ARTIFACT FIRST. The overview and the version history are what the surface is
         // about; the tabs are what you go to next, which is the right order to scroll through.
-        <div className="flex min-h-0 flex-1 flex-col overflow-auto">
+        //
+        // ONE SCROLLER, NOT TWO. The artifact kept its two-column `h-full` and its own scroll here,
+        // so inside this column it was a viewport-tall pane of its own: the tab strip cut it off
+        // mid-row — through a version, through the facts, through a file name — and on a short
+        // agent it stood a screen tall over nothing, a dead gap between Files and the tabs. It is
+        // plain flow now, and the tab strip sticks to the top so it stays in reach below it.
+        <div className="min-h-0 flex-1 overflow-auto">
           {artifact}
-          <div className="min-h-0 border-t border-hair">
-            <AgentTabs detail={detail} />
+          <div className="border-t border-hair">
+            <AgentTabs detail={detail} stacked />
           </div>
         </div>
       ) : (
         <PanelGroup direction="horizontal" autoSaveId="jaroku-agent-detail-v1" className="min-h-0 flex-1">
           <Panel defaultSize={52} minSize={30} order={1}>
-            {artifact}
+            <div className="flex h-full min-h-0 flex-col overflow-auto">{artifact}</div>
           </Panel>
           <PanelResizeHandle className="w-[3px] bg-hair transition-colors duration-fast hover:bg-grip" />
           <Panel defaultSize={48} minSize={28} order={2}>

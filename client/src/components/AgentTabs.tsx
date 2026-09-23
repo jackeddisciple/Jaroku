@@ -633,7 +633,17 @@ function ThreadsAndRuns({ detail }: { detail: AgentDetailView }) {
   );
 }
 
-export function AgentTabs({ detail }: { detail: AgentDetailView }) {
+export function AgentTabs({
+  detail,
+  stacked = false,
+}: {
+  detail: AgentDetailView;
+  /**
+   * Below the artifact in one scrolling column rather than in a column of its own — see
+   * `AgentDetail`. The panel then flows instead of scrolling, and the strip sticks to the top.
+   */
+  stacked?: boolean;
+}) {
   // CAPABILITIES IS THE DEFAULT (§6), and the state is per mount rather than global: which tab
   // somebody last read about ONE agent is not a preference about the next one.
   const [tab, setTab] = useState<TabId>("capabilities");
@@ -656,7 +666,7 @@ export function AgentTabs({ detail }: { detail: AgentDetailView }) {
   const shown: TabId = tabs.some((t) => t.id === tab) ? tab : "capabilities";
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-bg">
+    <div className={`flex flex-col bg-bg ${stacked ? "" : "h-full min-h-0"}`}>
       {/* A TABLIST, AND REACHABLE THE WAY ONE IS — the pattern the right-panel rail beside it already
           uses. These were six buttons with `aria-pressed`: announced as six toggles rather than
           "tab 2 of 6", every one a stop in the Tab order, and no arrow keys at all. One stop for the
@@ -682,7 +692,9 @@ export function AgentTabs({ detail }: { detail: AgentDetailView }) {
         // scroll hid Capabilities — the default tab — off the left edge, cut Health to `ealth`, and
         // answered only a horizontal trackpad swipe behind a scrollbar macOS fades at rest. A second
         // row costs one line of height and hides nothing.
-        className="flex shrink-0 flex-wrap items-center gap-1 border-b border-hair px-3 py-2"
+        className={`flex shrink-0 flex-wrap items-center gap-1 border-b border-hair bg-bg px-3 py-2 ${
+          stacked ? "sticky top-0 z-10" : ""
+        }`}
       >
         {tabs.map(({ id, label, icon: Icon }) => (
           <button
@@ -733,7 +745,7 @@ export function AgentTabs({ detail }: { detail: AgentDetailView }) {
         role="tabpanel"
         id={`${ids}-panel`}
         aria-labelledby={`${ids}-tab-${shown}`}
-        className="min-h-0 flex-1 overflow-auto"
+        className={stacked ? "" : "min-h-0 flex-1 overflow-auto"}
       >
         {/* AND A TAB THAT HAS GONE FALLS BACK RATHER THAN RENDERING NOTHING. Switching from a team
             to a personal workspace with Access selected would otherwise leave an empty pane — the
