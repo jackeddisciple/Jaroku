@@ -22,7 +22,7 @@ import { Chip } from "./Chip.tsx";
 import { CollapsibleRegion } from "./CollapsibleRegion.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { DownloadIcon } from "./agentIcons.tsx";
-import { LockIcon } from "./panelIcons.tsx";
+import { CheckIcon, LockIcon } from "./panelIcons.tsx";
 import { iconForPath } from "./fileIcons.tsx";
 import { sendLoadAgentVersion } from "../lib/socket.ts";
 import { downloadVersion } from "../lib/agentExport.ts";
@@ -101,6 +101,19 @@ export function AgentFiles({ detail }: { detail: AgentDetailView }) {
   const loading = useAgentGridStore((s) => s.versionLoading);
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  /**
+   * The file the last export was saved as, for a few seconds.
+   *
+   * THE EXPORT WAS SILENT. It wrote the file, and nothing in the window changed — no mark, no
+   * sentence — and a desktop app has no browser download shelf to fall back on, which is exactly the
+   * "menu item that did nothing visible" this module's header describes for the card's entry.
+   */
+  const [exported, setExported] = useState<string | null>(null);
+  useEffect(() => {
+    if (!exported) return;
+    const t = window.setTimeout(() => setExported(null), 3000);
+    return () => window.clearTimeout(t);
+  }, [exported]);
 
   const slug = detail.card.slug;
   const showing = version && version.agentId === slug ? version : null;
@@ -143,17 +156,24 @@ export function AgentFiles({ detail }: { detail: AgentDetailView }) {
         onToggle={() => setOpen((v) => !v)}
         trailing={
           showing && files.length > 0 ? (
-            <button
-              type="button"
-              // THE SHARED BUILDER, so this and the card's overflow entry produce the same document.
-              // Two copies of it would drift the first time one grew a heading.
-              onClick={() => downloadVersion(slug, showing.version, files)}
-              title={`Export ${slug} v${showing.version} as markdown`}
-              aria-label={`Export ${slug} v${showing.version}`}
-              className="rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active active:bg-chrome hover:text-ink"
-            >
-              <DownloadIcon size={ICON.xs} />
-            </button>
+            <span className="flex items-center gap-1.5">
+              {exported && (
+                <span className="flex items-center gap-1 text-tiny text-muted" role="status">
+                  <CheckIcon size={ICON.badge} /> Saved {exported}
+                </span>
+              )}
+              <button
+                type="button"
+                // THE SHARED BUILDER, so this and the card's overflow entry produce the same document.
+                // Two copies of it would drift the first time one grew a heading.
+                onClick={() => setExported(downloadVersion(slug, showing.version, files))}
+                title={`Export ${slug} v${showing.version} as markdown`}
+                aria-label={`Export ${slug} v${showing.version}`}
+                className="rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active active:bg-chrome hover:text-ink"
+              >
+                <DownloadIcon size={ICON.xs} />
+              </button>
+            </span>
           ) : undefined
         }
       >

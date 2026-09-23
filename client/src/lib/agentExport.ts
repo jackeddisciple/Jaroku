@@ -46,12 +46,21 @@ export function versionMarkdown(slug: string, version: number, files: readonly A
  * same tick: the anchor's click has already started the save, and leaving it alive holds the whole
  * document in memory for the life of the tab.
  */
-export function downloadVersion(slug: string, version: number, files: readonly AgentFileView[]): void {
+export function downloadVersion(slug: string, version: number, files: readonly AgentFileView[]): string {
+  const name = exportName(slug, version);
   const blob = new Blob([versionMarkdown(slug, version, files)], { type: "text/markdown" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `${slug}-v${version}.md`;
+  link.download = name;
   link.click();
   URL.revokeObjectURL(url);
+  // THE NAME GOES BACK TO THE CALLER, because the caller has to say it. A desktop app has no
+  // download shelf, so a save that nothing on screen mentions is indistinguishable from none.
+  return name;
+}
+
+/** The file an export is saved as. One spelling, for the save and for the sentence about it. */
+export function exportName(slug: string, version: number): string {
+  return `${slug}-v${version}.md`;
 }

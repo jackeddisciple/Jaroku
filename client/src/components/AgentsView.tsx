@@ -357,8 +357,11 @@ export function AgentsView() {
    */
   useEffect(() => {
     if (!exportRequest || !version || version.agentId !== exportRequest) return;
-    downloadVersion(version.agentId, version.version, version.files);
+    const saved = downloadVersion(version.agentId, version.version, version.files);
     useAgentGridStore.getState().clearExportRequest();
+    // SAID, because nothing else would say it: a desktop app has no download shelf, and a menu entry
+    // whose only effect is a file somewhere is a menu entry that looks like it did nothing.
+    useAgentGridStore.getState().setNotice(`Saved ${saved} to your downloads.`);
   }, [exportRequest, version]);
 
   // AND THE FOCUSED CARD IS SCROLLED TO. A cursor that is visible only when it happens to be on
