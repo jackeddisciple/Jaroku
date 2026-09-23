@@ -12,9 +12,9 @@
 //   npm run test:agent-filter
 
 import {
-  NO_FILTERS, activeAt, categoryOptions, connectorOptions, describeFilters, filterAgents,
+  DENSITY_KEY, NO_FILTERS, activeAt, categoryOptions, connectorOptions, describeFilters, filterAgents,
   hasActiveFilters,
-  matchesQuery, sortAgents, visibleAgents,
+  matchesQuery, readDensity, sortAgents, visibleAgents, writeDensity,
 } from "./agentFilter.ts";
 import type { AgentCardView } from "../types.ts";
 
@@ -227,6 +227,28 @@ console.log("\n§14: the grid filters by category");
   check("...and names itself in the empty state",
     describeFilters({ ...NO_FILTERS, category: "Billing" }).includes("Billing"),
     describeFilters({ ...NO_FILTERS, category: "Billing" }).join(", "));
+}
+
+console.log("\nthe grid's density is remembered, and a missing store costs only the preference");
+{
+  const g = globalThis as { localStorage?: unknown };
+  const saved = g.localStorage;
+  const map = new Map<string, string>();
+  g.localStorage = {
+    getItem: (k: string) => map.get(k) ?? null,
+    setItem: (k: string, v: string) => { map.set(k, v); },
+  };
+  check("nothing remembered reads as comfortable", readDensity() === "comfortable");
+  writeDensity("compact");
+  check("compact survives leaving the view — it is read back", readDensity() === "compact");
+  map.set(DENSITY_KEY, "enormous");
+  check("a value it does not know reads as comfortable", readDensity() === "comfortable");
+  g.localStorage = { getItem: () => { throw new Error("denied"); }, setItem: () => { throw new Error("denied"); } };
+  check("storage that throws reads as comfortable", readDensity() === "comfortable");
+  let threw = false;
+  try { writeDensity("compact"); } catch { threw = true; }
+  check("...and writing to it does not throw", !threw);
+  g.localStorage = saved;
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

@@ -37,6 +37,34 @@ export const SORT_LABEL: Record<AgentSort, string> = {
 export type AgentDensity = "comfortable" | "compact";
 
 /**
+ * Where the grid's density is remembered.
+ *
+ * A DISPLAY PREFERENCE, NOT A FILTER, and that is why it outlives the view when the filters do not.
+ * The filters are per visit on purpose — a narrowing somebody forgets they set is how agents seem to
+ * disappear — but density was held in the same local state, so compact reverted to comfortable
+ * every time somebody opened an agent and came back. One person's preference about how the grid is
+ * drawn: `localStorage`, like a pinned agent, and not per workspace, because it is not about one.
+ */
+export const DENSITY_KEY = "jaroku.agents.density";
+
+/** The remembered density, or comfortable when there is none or storage cannot be read. */
+export function readDensity(): AgentDensity {
+  try {
+    return localStorage.getItem(DENSITY_KEY) === "compact" ? "compact" : "comfortable";
+  } catch {
+    return "comfortable";
+  }
+}
+
+export function writeDensity(density: AgentDensity): void {
+  try {
+    localStorage.setItem(DENSITY_KEY, density);
+  } catch {
+    /* an unwritable store costs the preference, never the grid */
+  }
+}
+
+/**
  * The header's filter state, all of it, as one object.
  *
  * ONE OBJECT RATHER THAN FIVE PIECES OF STATE, because every consumer needs all of them at once and

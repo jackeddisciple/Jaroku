@@ -27,7 +27,7 @@ import { Select } from "./Select.tsx";
 import { Truncate } from "./Truncate.tsx";
 import {
   AGENT_SORTS, NO_FILTERS, SORT_LABEL, categoryOptions, connectorOptions, describeFilters, hasActiveFilters,
-  visibleAgents, type AgentDensity, type AgentFilterState, type AgentSort,
+  readDensity, visibleAgents, writeDensity, type AgentDensity, type AgentFilterState, type AgentSort,
 } from "../lib/agentFilter.ts";
 import { openAgentDetail, startAgentThread } from "../lib/agentNav.ts";
 import { downloadVersion } from "../lib/agentExport.ts";
@@ -265,7 +265,12 @@ export function AgentsView() {
 
   const [filters, setFilters] = useState<AgentFilterState>(NO_FILTERS);
   const [sort, setSort] = useState<AgentSort>("active");
-  const [density, setDensity] = useState<AgentDensity>("comfortable");
+  // REMEMBERED, unlike the filters beside it — see `readDensity`.
+  const [density, setDensityState] = useState<AgentDensity>(readDensity);
+  const setDensity = (next: AgentDensity): void => {
+    setDensityState(next);
+    writeDensity(next);
+  };
   /**
    * §6's dialog, open or not.
    *
