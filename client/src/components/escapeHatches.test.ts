@@ -194,12 +194,16 @@ console.log("\n§16 — a disabled Send says why");
 {
   check("the draft survives an offline press",
     /if \(!connected \|\| !trimmed\) return;/.test(pane), "submit's early return");
-  // THE NOTICE, and it is a `role="status"` line like the budget one rather than a new mechanism.
-  const at = pane.indexOf("{!connected && (");
-  check("a notice renders when disconnected", at > 0, String(at));
-  const notice = pane.slice(at, at + 700);
-  check('...as role="status"', /role="status"/.test(notice), notice.slice(0, 200));
-  check("...saying the draft is kept", /draft is kept/.test(notice), notice.slice(0, 400));
+  // NO CARD, which reverses what this suite first asked for: a notice that appeared on every drop
+  // pushed the composer up and back down with it. The sentence lives on the button, and the corner
+  // toast says the connection went — neither moves anything.
+  check("no card comes and goes with the connection", pane.indexOf("{!connected && (") === -1,
+    String(pane.indexOf("{!connected && (")));
+  check("...the button's sentence says the draft is kept",
+    /const OFFLINE_SEND = "[^"]*draft is kept/.test(pane), "OFFLINE_SEND");
+  const socket = strip(readFileSync(`${HERE}../lib/socket.ts`, "utf8"));
+  check("...and the drop is announced in a toast", /showToast\(everOpen \? "Reconnecting/.test(socket),
+    "scheduleReconnect's toast");
   // AND THE BUTTON ITSELF, checked ahead of the key and the mode — the order matters, because
   // `missingKey` is false on a fresh disconnect and would otherwise win the ternary.
   check("the button's label names it first",

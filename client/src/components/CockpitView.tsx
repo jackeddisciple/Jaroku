@@ -88,12 +88,6 @@ function Header() {
     <div className={`flex shrink-0 items-center gap-3 border-b border-hair py-3 ${SPINE_X}`}>
       <span className={TYPE.panelLabel}>{HEADER.label}</span>
       <span className="text-tiny tabular-nums text-faint">{total}</span>
-      {!connected && (
-        // §10's offline treatment, and it is the Inbox's own so the two tabs say it identically.
-        <span className="text-tiny text-muted" title={OFFLINE.hint}>
-          {OFFLINE.header}
-        </span>
-      )}
       {/* ASK AGAIN. A full-snapshot channel that goes stale — a transition nothing broadcast, a
           frame dropped during a reconnect — otherwise has no remedy but reloading the page. BOTH
           reads, because they answer on different clocks and the relay volunteers only one of them. */}

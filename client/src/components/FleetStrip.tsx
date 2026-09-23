@@ -24,13 +24,12 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMenuFocus } from "../lib/menuFocus.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 
-import { CONNECTION_LABEL, DESTRUCTIVE, FILTERS, OFFLINE } from "../lib/cockpitCopy.ts";
+import { CONNECTION_LABEL, DESTRUCTIVE, FILTERS } from "../lib/cockpitCopy.ts";
 import { cockpitCost } from "../lib/cockpitFormat.ts";
 import { factsOf, fleetSentence, healthLine } from "../lib/fleetSentence.ts";
 import { sendCreateThread, sendKillAgent, sendListWork, sendReconnectAgent } from "../lib/socket.ts";
 import { ICON } from "../lib/tokens.ts";
 import { CARD_HEIGHT, CARD_WIDTH, SPINE_X } from "../lib/cockpitLayout.ts";
-import { useTraceStore } from "../store/traceStore.ts";
 import { useWorkStore } from "../store/workStore.ts";
 import type { FleetCardView } from "../types.ts";
 import { LogPane } from "./AgentOps.tsx";
@@ -532,7 +531,6 @@ export function FleetStrip() {
   const agents = useBuildStore((s) => s.agents);
   const marks = useMemo(() => pictureBySlug(agents), [agents]);
   const notice = useWorkStore((s) => s.notice);
-  const connected = useTraceStore((s) => s.connection === "open");
   const { ref, fade } = useEdgeFade();
 
   return (
@@ -579,22 +577,11 @@ export function FleetStrip() {
           />
         ))}
       </div>
-      {/* §10's OFFLINE TREATMENT, and the half that is a decision rather than a notice.
-          "Freeze the fleet strip's sentences RATHER THAN BLANKING THEM, with the header notice
-          explaining that the figures are as of the last update. Blanking reads as 'everything
-          stopped'; a stale figure with a STATED staleness is honest and calmer."
-
-          THE FREEZING IS FREE AND THE STATEMENT IS NOT. The sentences are computed from the store,
-          which nothing clears on a drop — so they already survive; what a dropped channel would
-          otherwise leave is a strip that looks live and is not. This line is the difference between
-          those two, and it is why the notice belongs beside the cards rather than only in the
-          header: a reader looking at a figure needs the caveat where the figure is.
-
-          THE CARDS ARE NOT DIMMED. Reduced opacity would say "these are disabled", which is a
-          different and wrong claim — the numbers were true when they were sent. */}
-      {!connected && (
-        <div className={`border-t border-hair py-1.5 text-tiny text-faint ${SPINE_X}`}>{OFFLINE.frozen}</div>
-      )}
+      {/* §10's OFFLINE TREATMENT: the sentences are FROZEN RATHER THAN BLANKED, which is free —
+          they are computed from the store and nothing clears it on a drop. The cards are not dimmed
+          either; the numbers were true when they were sent. What used to sit here was a row saying
+          so, and it pushed the list below it down on every drop and back up on every return. The
+          corner toast says the connection went; a frozen figure needs nothing more. */}
 
       {/* WHAT A RECONNECT OR A KILL ACTUALLY DID, which is not the same as what was asked for —
           Part 1's commands return the difference and this is where it is read. It stays until

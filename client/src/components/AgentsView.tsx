@@ -413,11 +413,6 @@ export function AgentsView() {
             disagreement. `visible` is what the grid actually renders. */}
         <span className="text-tiny tabular-nums text-faint">{visible.length}</span>
         {workspaceName && <span className="text-tiny text-faint">agents</span>}
-        {!connected && (
-          <span className="text-tiny text-muted" title="Changes here need a connection">
-            reconnecting…
-          </span>
-        )}
 
         {/* Live filter over display_name and slug. `/` focuses it — see useAgentKeys. */}
         <div className="ml-2 flex min-w-[180px] flex-1 items-center gap-2 rounded-control border border-hair bg-panel px-2 py-1 focus-within:border-edge">

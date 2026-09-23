@@ -3480,36 +3480,20 @@ export function BuildPane({
             </div>
           )}
 
-          {/* §16.1's OFFLINE-SEND ATTACK, and the send button's own standard applied to it: "a
-              disabled button is never unexplained." Send disables on `!connected` alongside
-              `overBudget` and `missingKey`, and those two each had a notice — this one had none, so
-              a dropped socket left a greyed arrow with a tooltip still promising a route.
+          {/* §16.1's OFFLINE-SEND ATTACK is answered by the send button's own tooltip and by the
+              corner toast, NOT by a card here. A card that appeared on every drop pushed the
+              composer up and back down with it — the layout jump the toast exists to end. The draft
+              was never at risk: `submit` returns early on `!connected`, so nothing is cleared. */}
 
-              THE DRAFT WAS NEVER AT RISK: `submit` returns early on `!connected`, so nothing
-              phantom is appended and nothing is cleared. What was missing was the sentence. Both
-              guards predate this feature; the attack is what surfaced them. */}
-          {!connected && (
-            <div
-              className="mb-2 flex items-start gap-2 rounded-card border border-edge bg-bg px-2.5 py-2 text-tiny"
-              role="status"
-            >
-              <span className="shrink-0" style={{ color: STATUS.warn }} aria-hidden>
-                <AlertTriangleIcon size={ICON.xs} />
-              </span>
-              <span className="min-w-0 flex-1 text-muted">
-                Not connected to the Jaroku server — reconnecting. Your draft is kept; send as soon
-                as this clears.
-              </span>
-            </div>
-          )}
+          {/* NO SUBSCRIPTION, AND THE SEND SAYS SO IN PLACE: a disabled button is never unexplained.
 
-          {/* NO SUBSCRIPTION, AND THE SEND SAYS SO IN PLACE. Same standard as the strip above: a
-              disabled button is never unexplained. Shown only when the socket IS up, because
-              "connect a provider" is not the useful sentence for somebody who is offline — that one
-              is, and two stacked warnings would bury it.
+              NOT WITHDRAWN ON A DROP. It waits for the first snapshot to say which subscriptions
+              exist, and once that has arrived it stays whatever the socket does — the rows are
+              still true while it reconnects, and a card that left on every drop and came back on
+              every return would move the composer twice each time.
 
               THE WAY OUT IS A CONTROL, not a line of prose telling somebody to go and find one. */}
-          {connected && noSubscription && (
+          {noSubscription && (connected || subscriptionRows.length > 0) && (
             <div
               className="mb-2 flex items-start gap-2 rounded-card border border-edge bg-bg px-2.5 py-2 text-tiny"
               role="status"

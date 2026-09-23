@@ -271,8 +271,8 @@ console.log("\nthe phrases three documents quote");
   // §7: a truncated output says so where the text ends.
   check("truncation is announced rather than silent", DETAIL.truncated.length > 10, DETAIL.truncated);
 
-  // §10: offline freezes the figures and says they are frozen.
-  check("the offline notice states the staleness", /last update/.test(OFFLINE.frozen), OFFLINE.frozen);
+  // §10: offline freezes the figures, and a control that cannot act says what it is waiting for.
+  check("the offline reason names the connection", /connection/.test(OFFLINE.hint), OFFLINE.hint);
 
   // §12: the live region announces `waiting` and only `waiting`, so its one sentence is about that.
   check("the announcement is about waiting on a person",

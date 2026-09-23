@@ -165,17 +165,13 @@ export const EMPTY = {
 /**
  * The channel dropped.
  *
- * §10: freeze the fleet strip's sentences rather than blanking them, and say in the header that
- * the figures are as of the last update. Blanking reads as "everything stopped"; a stale figure
- * with a STATED staleness is honest and calmer, and it is the difference between a surface that
- * has lost its connection and one that is reporting a workspace that has gone quiet.
+ * §10: freeze the fleet strip's sentences rather than blanking them. The corner toast is what says
+ * the connection went — a header word and a row under the strip used to say it here too, and both
+ * moved the page when they came and went. What is left is the reason a disabled control gives.
  */
 export const OFFLINE = {
-  header: "reconnecting…",
-  /** The `title` on it, which is the Inbox's own sentence — two tabs saying it differently is worse. */
+  /** The disabled refresh's reason, which is the Inbox's own sentence — two tabs saying it differently is worse. */
   hint: "Changes here need a connection",
-  /** Beside the frozen strip, so a figure nobody can refresh says how old it is. */
-  frozen: "These figures are as of the last update.",
 } as const;
 
 /**

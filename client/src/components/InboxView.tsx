@@ -473,11 +473,6 @@ export function InboxView() {
       <div className="flex shrink-0 items-center gap-3 border-b border-hair px-5 py-3">
         <span className={TYPE.panelLabel}>Inbox</span>
         <span className="text-tiny tabular-nums text-faint">{counts.all}</span>
-        {!connected && (
-          <span className="text-tiny text-muted" title="Changes here need a connection">
-            reconnecting…
-          </span>
-        )}
         {/* ASK AGAIN. A full-snapshot channel that goes stale — a transition nothing broadcast, a
             frame dropped during a reconnect — otherwise has no remedy but reloading the page. Quiet
             and to the left, because it is a way to check rather than a thing to do. */}
