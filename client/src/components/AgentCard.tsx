@@ -17,7 +17,7 @@
 // and could only get brighter at its edge. The palette is light now and `shadow-glow` deepens the
 // border instead of brightening it, which is the same treatment arriving from the other direction.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { DateChip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
@@ -63,6 +63,7 @@ const BANNER_HEIGHT = { card: 104, compact: 72 } as const;
 /** §5.2's overflow menu: Fork · Rename · Export current version · Archive. */
 function Overflow({
   agent,
+  creator,
   onFork,
   onRename,
   onExport,
@@ -70,6 +71,8 @@ function Overflow({
   onRestore,
 }: {
   agent: AgentCardView;
+  /** Who created it, by name, for §7.5's archive confirmation. Null outside a team workspace. */
+  creator: string | null;
   onFork: () => void;
   onRename: () => void;
   onExport: () => void;
@@ -77,25 +80,40 @@ function Overflow({
   onRestore: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  /**
+   * The archive confirmation, IN THE MENU, rather than `window.confirm`.
+   *
+   * THE DESKTOP APP HAS NO `window.confirm`. Its webview implements none of the JavaScript dialogs,
+   * so `confirm()` returns false without showing anything — Archive closed the menu and did
+   * nothing, every time, on the one surface that offers it. The sidebar's delete already asks in
+   * its own panel for the same reason; this is that shape.
+   */
+  const [confirming, setConfirming] = useState(false);
   const archived = agent.archived_at !== null;
   const ref = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   // lib/anchoredMenu.ts puts the portalled panel back under its trigger, flipping up when the card
   // is low in the window, and follows it when the grid scrolls.
   useAnchoredMenu(open, ref, panelRef);
+  // A menu reopened on a half-answered confirmation remembers a decision somebody walked away from.
+  useEffect(() => {
+    if (!open) setConfirming(false);
+  }, [open]);
 
   const item = (
     label: string,
     Icon: (p: { size?: number }) => React.ReactElement,
     onPick: () => void,
     danger = false,
+    /** Keep the panel open, for an item whose next step is asked inside it. */
+    stay = false,
   ) => (
     <button
       key={label}
       type="button"
       onClick={(e) => {
         e.stopPropagation();
-        setOpen(false);
+        if (!stay) setOpen(false);
         onPick();
       }}
       className={`flex w-full items-center gap-2 rounded-control px-2.5 py-1.5 text-left text-caption transition-colors duration-fast hover:bg-active active:bg-chrome ${
@@ -146,7 +164,34 @@ function Overflow({
             onClick={(e) => e.stopPropagation()}
             className="fixed left-0 top-0 z-50 w-52 animate-slide-in rounded-card border border-edge bg-elevated p-1 shadow-floating motion-reduce:animate-none"
           >
-            {archived
+            {confirming ? (
+              // §7.5's CONFIRMATION, NAMING THE CREATOR, as the collaborative-workspace safety net —
+              // said here, where the button was pressed, and answered with a button rather than a
+              // dialog the desktop app cannot show.
+              <div className="flex flex-col gap-1 p-1">
+                <p className="px-1 py-0.5 text-caption leading-[1.5] text-muted">
+                  Archive <span className="text-ink">{agent.name}</span>?
+                  {creator ? ` It was created by ${creator}.` : ""} Its versions, runs and threads all
+                  stay, and you can restore it.
+                </p>
+                <div className="flex gap-3 px-1 pb-0.5">
+                  <button
+                    type="button"
+                    onClick={() => { setOpen(false); onArchive(); }}
+                    className="text-caption font-medium text-err underline underline-offset-2"
+                  >
+                    Archive
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirming(false)}
+                    className="text-caption font-medium text-muted underline underline-offset-2"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : archived
               ? item("Restore", Icon.agents.restore, onRestore)
               : [
                   item("Fork", GitForkIcon, onFork),
@@ -182,7 +227,7 @@ function Overflow({
                   // the record every past comparison points at. The confirmation §7.5 asks for —
                   // naming the creator, as the collaborative-workspace safety net — is on this,
                   // because this is the destructive-looking act that actually exists.
-                  item("Archive", Icon.threads.archive, onArchive, true),
+                  item("Archive", Icon.threads.archive, () => setConfirming(true), true, true),
                 ]}
           </div>
         </>,
@@ -199,6 +244,8 @@ export interface AgentCardProps {
   focused: boolean;
   /** Names, for §5.2's creator initial. Team workspaces only — see `AgentGridSnapshot.team`. */
   creatorInitial: string | null;
+  /** The creator's name, for §7.5's archive confirmation. Team workspaces only, like the initial. */
+  creatorName: string | null;
   onOpen: () => void;
   onNewThread: () => void;
   onFork: () => void;
@@ -218,7 +265,7 @@ export interface AgentCardProps {
  */
 
 export function AgentCard({
-  agent, density, focused, creatorInitial,
+  agent, density, focused, creatorInitial, creatorName,
   onOpen, onNewThread, onFork, onRename, onExport, onArchive, onRestore,
 }: AgentCardProps) {
   const liveSpend = useAgentGridStore((s) => s.liveSpend);
@@ -663,6 +710,7 @@ export function AgentCard({
             </button>
             <Overflow
               agent={agent}
+              creator={creatorName}
               onFork={onFork}
               onRename={onRename}
               onExport={onExport}

@@ -370,6 +370,16 @@ export function AgentsView() {
     const member = memberOptions.find((m) => m.id === agent.created_by);
     return (member?.name ?? "?").slice(0, 1).toUpperCase();
   };
+  /**
+   * §7.5's creator, for the archive confirmation — "someone else" when they have since left.
+   *
+   * TEAM ONLY, like the initial above. A personal workspace is sent no members list, so every agent
+   * in one was "created by someone else" — said to the only person who could have created it.
+   */
+  const creatorFor = (agent: AgentCardView): string | null =>
+    team && agent.created_by
+      ? memberOptions.find((m) => m.id === agent.created_by)?.name ?? "someone else"
+      : null;
 
   return (
     <div className="flex h-full flex-col bg-bg">
@@ -608,6 +618,7 @@ export function AgentsView() {
                 density={density}
                 focused={agent.slug === cursor}
                 creatorInitial={initialFor(agent)}
+                creatorName={creatorFor(agent)}
                 onOpen={() => openCard(agent)}
                 onNewThread={() => newThread(agent)}
                 onFork={() => sendForkAgent(agent.slug)}
@@ -625,20 +636,10 @@ export function AgentsView() {
                   useAgentGridStore.getState().requestExport(agent.slug);
                   sendLoadAgentVersion(agent.slug);
                 }}
-                onArchive={() => {
-                  // §7.5's confirmation, NAMING THE CREATOR, as the collaborative-workspace safety
-                  // net. It sits on archive because archive is the destructive-looking act this
-                  // product actually has — there is no delete path for an agent, deliberately.
-                  const who = agent.created_by
-                    ? memberOptions.find((m) => m.id === agent.created_by)?.name ?? "someone else"
-                    : null;
-                  const line = who
-                    ? `Archive ${agent.name}? It was created by ${who}.`
-                    : `Archive ${agent.name}?`;
-                  if (window.confirm(`${line}\n\nIts versions, runs and threads all stay. You can restore it.`)) {
-                    sendArchiveAgent(agent.slug);
-                  }
-                }}
+                // §7.5's confirmation, NAMING THE CREATOR, is asked inside the card's menu — see
+                // `Overflow`. It was `window.confirm`, which the desktop webview never shows: it
+                // returned false and Archive did nothing there at all.
+                onArchive={() => sendArchiveAgent(agent.slug)}
                 onRestore={() => sendRestoreAgent(agent.slug)}
               />
             ))}
