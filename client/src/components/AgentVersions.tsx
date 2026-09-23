@@ -67,6 +67,11 @@ function VersionRow({
   onOpenFiles: () => void;
 }) {
   const picked = selection.from === version.version || selection.to === version.version;
+  /**
+   * Restore's confirmation, ON THE ROW, rather than `window.confirm` — which the desktop webview
+   * never shows. It returned false, so Restore did nothing there at all: no version, no notice.
+   */
+  const [confirming, setConfirming] = useState(false);
   const additions = version.file_stats.reduce((n, s) => n + s.additions, 0);
   const deletions = version.file_stats.reduce((n, s) => n + s.deletions, 0);
 
@@ -173,7 +178,7 @@ function VersionRow({
           {!version.current && (
             <button
               type="button"
-              onClick={onRestore}
+              onClick={() => setConfirming(true)}
               // The tooltip says what actually happens, because the button says "Restore" and the
               // mechanism is the safety property.
               title={`Publish a new version pointing at v${version.version}'s files — nothing is rewritten`}
@@ -185,6 +190,33 @@ function VersionRow({
           )}
         </div>
       </div>
+
+      {confirming && (
+        // SAID WHERE IT WAS ASKED, and the mechanism is the sentence, because it is the safety
+        // property: a restore publishes forward and rewrites nothing.
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-t border-hair pt-1.5 text-tiny">
+          <span className="text-muted">
+            Restore v{version.version}? A new version is published from its files. Nothing is rewritten
+            and nothing is lost.
+          </span>
+          <span className="flex shrink-0 gap-3">
+            <button
+              type="button"
+              onClick={() => { setConfirming(false); onRestore(); }}
+              className="font-medium text-ink underline underline-offset-2"
+            >
+              Restore
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirming(false)}
+              className="font-medium text-muted underline underline-offset-2"
+            >
+              Cancel
+            </button>
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -294,16 +326,8 @@ export function AgentVersions({ detail }: { detail: AgentDetailView }) {
               selection={selection}
               publisher={publisherOf(v.created_by)}
               onPick={() => pick(v.version)}
-              onRestore={() => {
-                if (
-                  window.confirm(
-                    `Restore v${v.version}?\n\nA new version is published pointing at its files. ` +
-                      `Nothing is rewritten and nothing is lost.`,
-                  )
-                ) {
-                  sendRestoreAgentVersion(detail.card.slug, v.version);
-                }
-              }}
+              // CONFIRMED ON THE ROW — see `VersionRow`.
+              onRestore={() => sendRestoreAgentVersion(detail.card.slug, v.version)}
               onOpenFiles={() => sendLoadAgentVersion(detail.card.slug, v.version)}
             />
           ))}
