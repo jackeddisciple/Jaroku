@@ -257,6 +257,12 @@ export function CategoryPicker({
               // keeps eighty characters of it; past that the field stops rather than the value
               // being quietly cut on the way in.
               maxLength={CATEGORY_MAX}
+              // NO SPELLING HELP ON A VOCABULARY. What is typed here is matched against a fixed list,
+              // and macOS drew its substitution popup over the field — offering `Uncategorised` for
+              // `Uncategorized` — on words that are names rather than prose.
+              spellCheck={false}
+              autoCorrect="off"
+              autoCapitalize="off"
               // A COMBOBOX, WHICH IS WHAT IT HAS BEEN BEHAVING AS. Focus stays in this field while
               // the arrow keys move a highlight down the list, so without `aria-activedescendant`
               // there is nothing for a screen reader to announce: the cursor was visible and
