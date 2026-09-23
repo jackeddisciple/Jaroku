@@ -79,7 +79,10 @@ console.log("\nevery component that declares a menu also drives one");
     // Escape was already handled everywhere; asserted so a new menu does not arrive without it.
     check(`${f.path} closes on Escape`, /"Escape"/.test(f.text));
     // And the click-away, which is the mouse half of the same "a menu is dismissible" promise.
-    check(`${f.path} closes on a click outside`, /mousedown/.test(f.text));
+    // Either a document listener or a full-screen catcher under the panel — the agent card uses
+    // the catcher so that the click that dismisses its menu cannot also open the card beneath it.
+    check(`${f.path} closes on a click outside`,
+      /mousedown/.test(f.text) || /fixed inset-0[^>]*onClick=/.test(f.text));
   }
 }
 
@@ -108,6 +111,12 @@ console.log("\n...and the hook actually implements what the role promises");
   // AND ONLY WHEN FOCUS WOULD OTHERWISE BE DESTROYED. Closing by clicking elsewhere must leave
   // focus where the person put it; yanking it back to the trigger would fight them.
   check("...only when focus is still inside the panel", /root\.contains\(active\)/.test(hook));
+  // A PORTALLED PANEL IS UNMOUNTED WHEN IT CLOSES, so the effect that tracks open/closed must not
+  // bail out on a missing panel before recording the transition — it did, and every open after the
+  // first skipped the focus above, and no close ever handed focus back.
+  const tracker = /useEffect\(\(\) => \{[\s\S]*?wasOpen\.current = open;/.exec(hook)?.[0] ?? "";
+  check("...and records every open and close, even of a panel that is no longer mounted",
+    tracker.length > 0 && !/if \(!root\) return;/.test(tracker));
   // Tab is not swallowed: these panels are not modal, and trapping focus in one would be worse
   // than the bug this replaced.
   check("Tab is left alone — these menus are not modal", !/"Tab"/.test(hook));

@@ -59,22 +59,36 @@ export function useMenuFocus(
   const wasOpen = useRef(false);
 
   useEffect(() => {
+    // A PORTALLED PANEL IS GONE BY THE TIME IT IS CLOSED, so `root` is null exactly then — and this
+    // used to return before recording that the menu had shut. `wasOpen` stayed true, so every later
+    // open skipped the focus below: the first open of a portalled menu reached its items from the
+    // keyboard and none after it did, and no close ever handed focus back. The transition is
+    // recorded whatever is mounted now; `root` is only asked what it can still answer.
     const root = container.current;
-    if (!root) return;
 
     if (open && !wasOpen.current) {
       // Opening. The first item, because a menu opened from the keyboard should land on something
       // actionable rather than on the panel itself.
-      const first = root.querySelector<HTMLElement>(MENU_ITEM);
+      const first = root?.querySelector<HTMLElement>(MENU_ITEM);
       // `preventScroll` because these panels are inside a scrolling column, and focusing an item
       // near its bottom edge would otherwise jump the whole sidebar.
       first?.focus({ preventScroll: true });
     } else if (!open && wasOpen.current) {
-      // Closing. Only rescue focus if it is about to be destroyed with the panel — see above.
+      // Closing. Only rescue focus if it is about to be destroyed with the panel — see above. A
+      // panel that has already been unmounted took the focused item with it, which leaves focus on
+      // `<body>`: that is the same case arriving one step later, not a choice somebody made.
       const active = document.activeElement;
-      if (active instanceof HTMLElement && root.contains(active)) {
-        (trigger?.current ?? root.querySelector<HTMLElement>('[aria-haspopup="menu"]'))
-          ?.focus({ preventScroll: true });
+      const lost = root ? active instanceof HTMLElement && root.contains(active)
+        : active === null || active === document.body;
+      if (lost) {
+        // THE BUTTON, NOT THE ELEMENT THAT HOLDS IT. Both portalled menus pass the wrapper around
+        // their trigger, and a `div` without a tabindex does not take focus — so the hand-back
+        // silently went nowhere. The `aria-haspopup` inside it is the control to return to.
+        const t = trigger?.current;
+        const target = t?.matches('[aria-haspopup="menu"]') ? t
+          : t?.querySelector<HTMLElement>('[aria-haspopup="menu"]') ?? t
+            ?? root?.querySelector<HTMLElement>('[aria-haspopup="menu"]');
+        target?.focus({ preventScroll: true });
       }
     }
     wasOpen.current = open;
