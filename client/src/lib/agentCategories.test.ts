@@ -23,7 +23,7 @@ import { NewAgentDialog } from "../components/NewAgentDialog.tsx";
 import { markup } from "./testRender.ts";
 
 import {
-  AGENT_CATEGORIES, CATEGORY_GROUPS, UNCATEGORIZED, isPresetCategory, normalizeCategory,
+  AGENT_CATEGORIES, CATEGORY_GROUPS, CATEGORY_MAX, UNCATEGORIZED, isPresetCategory, normalizeCategory,
   showsCategory,
 } from "./agentCategories.ts";
 
@@ -213,6 +213,17 @@ console.log("\nthe agent detail changes a category with the same picker that set
   const overview = readFileSync("src/components/AgentOverview.tsx", "utf8");
   check("the detail renders CategoryPicker", /<CategoryPicker\b/.test(overview));
   check("...and lays out no preset chips of its own", !/AGENT_CATEGORIES\.map/.test(overview));
+}
+
+console.log("\na typed category stops where the server would cut it");
+{
+  // THE CUT WAS SILENT: the server kept eighty of a hundred characters and said nothing.
+  const server = readFileSync("../server/src/index.ts", "utf8");
+  const cuts = [...server.matchAll(/category\.trim\(\)\.slice\(0, (\d+)\)/g)].map((m) => Number(m[1]));
+  check("the server cuts a category in both places it takes one", cuts.length === 2, JSON.stringify(cuts));
+  check(`...at CATEGORY_MAX (${CATEGORY_MAX})`, cuts.every((n) => n === CATEGORY_MAX), JSON.stringify(cuts));
+  const picker = readFileSync("src/components/CategoryPicker.tsx", "utf8");
+  check("the picker's field refuses the character after it", /maxLength=\{CATEGORY_MAX\}/.test(picker));
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

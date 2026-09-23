@@ -167,9 +167,12 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
                   the same rule §7 gives the sidebar: an agent nobody has categorised should read as
                   a name, not as a name and a placeholder. The control that SETS it is in the
                   identity section below. */}
+              {/* TRUNCATED, like the name above it. A typed category can run to eighty characters,
+                  and a chip with no width limit wrapped one onto two lines inside itself and took
+                  the whole identity row. The full text is on hover. */}
               {showsCategory(a.category) && (
-                <Chip size="sm" tone="faint" title="What this agent is for">
-                  {a.category}
+                <Chip size="sm" tone="faint" title={`What this agent is for: ${a.category}`} className="max-w-[240px]">
+                  <Truncate>{a.category}</Truncate>
                 </Chip>
               )}
             </div>

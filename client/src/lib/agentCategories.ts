@@ -32,6 +32,16 @@
 /** The value an agent has when nobody has said. The server's `UNCATEGORIZED`, spelled once here. */
 export const UNCATEGORIZED = "Uncategorized";
 
+/**
+ * The longest category the server keeps — `setAgentCategory` and `createDraftAgent` both cut at it.
+ *
+ * STATED HERE SO THE FIELD CAN STOP AT IT. The server's cut was silent: a hundred typed characters
+ * went up, eighty came back, and nothing on screen said a word. A field that refuses the eighty-
+ * first keystroke is the same rule said where somebody is typing. `test:agent-category` holds the
+ * two numbers together.
+ */
+export const CATEGORY_MAX = 80;
+
 export interface CategoryGroup {
   /** The heading. Not stored, not sent, and safe to reword. */
   label: string;

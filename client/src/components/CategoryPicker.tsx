@@ -37,7 +37,7 @@
 
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { CATEGORY_GROUPS, UNCATEGORIZED, normalizeCategory } from "../lib/agentCategories.ts";
+import { CATEGORY_GROUPS, CATEGORY_MAX, UNCATEGORIZED, normalizeCategory } from "../lib/agentCategories.ts";
 import { ICON, LAYER, TYPE } from "../lib/tokens.ts";
 import { CheckIcon, ChevronDownIcon } from "./panelIcons.tsx";
 
@@ -253,6 +253,10 @@ export function CategoryPicker({
               }}
               placeholder="Search, or type your own…"
               aria-label="Search categories, or type your own"
+              // THE SERVER'S CAP, SAID HERE. What is typed can become the category, and the server
+              // keeps eighty characters of it; past that the field stops rather than the value
+              // being quietly cut on the way in.
+              maxLength={CATEGORY_MAX}
               // A COMBOBOX, WHICH IS WHAT IT HAS BEEN BEHAVING AS. Focus stays in this field while
               // the arrow keys move a highlight down the list, so without `aria-activedescendant`
               // there is nothing for a screen reader to announce: the cursor was visible and
