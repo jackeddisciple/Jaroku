@@ -206,5 +206,14 @@ console.log("\n§6's picker offers all of them, and the dialog does not lay them
   check("it has a close button", html.includes('aria-label="Close (Esc)"'));
 }
 
+console.log("\nthe agent detail changes a category with the same picker that set it");
+{
+  // TWO CONTROLS FOR ONE DECISION was the bug: the dialog had this picker, and the detail a flat
+  // wall of forty chips and a bare field with no way back to no category at all.
+  const overview = readFileSync("src/components/AgentOverview.tsx", "utf8");
+  check("the detail renders CategoryPicker", /<CategoryPicker\b/.test(overview));
+  check("...and lays out no preset chips of its own", !/AGENT_CATEGORIES\.map/.test(overview));
+}
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 (globalThis as { process?: { exit(code: number): void } }).process?.exit(fail === 0 ? 0 : 1);

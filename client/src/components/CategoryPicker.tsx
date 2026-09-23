@@ -6,7 +6,8 @@
 // is, though, is a COMBOBOX rather than a select: it searches, it groups, and its text field can
 // produce a value that is not in the list at all. Bending `Select`'s flat `options: SelectOption[]`
 // to carry group headings, a filter and free text would widen the one control six other call sites
-// depend on, to serve the one call site that needs all three.
+// depend on, to serve the two that need all three — the create dialog and the agent detail, which
+// ask the same question of the same vocabulary and so must not ask it two different ways.
 //
 // SO IT BORROWS THE CONTRACT INSTEAD OF THE CODE. Everything `Select` promises, this promises, in
 // the same spelling: a real `<button>` trigger with `aria-haspopup` and `aria-expanded`, a

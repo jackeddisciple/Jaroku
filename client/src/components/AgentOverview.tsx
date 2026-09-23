@@ -22,7 +22,8 @@ import { AgentSparkline } from "./AgentSparkline.tsx";
 import { PencilIcon } from "./panelIcons.tsx";
 import { ChevronDownIcon } from "./panelIcons.tsx";
 import { FACE_SIZE, AgentFace, AgentBanner } from "./AgentFace.tsx";
-import { AGENT_CATEGORIES, normalizeCategory, showsCategory } from "../lib/agentCategories.ts";
+import { showsCategory } from "../lib/agentCategories.ts";
+import { CategoryPicker } from "./CategoryPicker.tsx";
 import { faceFor } from "../lib/agentFaces.ts";
 import { sendSetAgentCategory } from "../lib/socket.ts";
 import { sendRenameAgent } from "../lib/socket.ts";
@@ -45,8 +46,6 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
   const a = detail.card;
   /** The version the live one restored, if it is a restore (migration 081). */
   const restoredFrom = detail.versions.find((v) => v.current)?.restored_from ?? null;
-  /** §6's "name your own", for an agent that already exists. Cleared once it has been sent. */
-  const [customCategory, setCustomCategory] = useState("");
   /**
    * Does this agent have a picture? The banner and the overlap both depend on it.
    *
@@ -217,10 +216,8 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
             workspace's creation order. So there is nothing here to pick it with, deliberately —
             a picker for a decision the product makes is a control that exists to be ignored.
 
-            STILL BEHIND A DISCLOSURE, CLOSED, even at one control. Forty category pills open by
-            default would be forty controls above the description, the tag row and every fact on the
-            header — a page about categorising an agent rather than about the agent. Setting a
-            category is something somebody does once; reading the header is what they do every time. */}
+            STILL BEHIND A DISCLOSURE, CLOSED, even at one control. Setting a category is something
+            somebody does once; reading the header is what they do every time. */}
         <details className="group/identity rounded-control border border-hair">
           <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2.5 py-1.5 text-tiny text-muted transition-colors duration-fast hover:text-ink">
             {/* A CHEVRON, NOT A WORD — the app's one disclosure vocabulary. Down when open, ninety
@@ -233,38 +230,17 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
           </summary>
 
           <div className="space-y-3 border-t border-hair p-2.5">
-            {/* §6'S CATEGORY. The same twenty-five presets the create dialog offers plus a typed
-                one, because they are the same question and a second vocabulary here would be a
-                second list to keep in step. Stored identically either way (I6). */}
+            {/* §6'S CATEGORY, WITH THE CREATE DIALOG'S OWN PICKER. They are the same question on the
+                same vocabulary, and this was a second control for it: a flat wall of forty chips and
+                a bare field, where the dialog has a grouped, searchable list — and no way back to no
+                category at all, since pressing the chosen chip only sent it again. The picker's
+                "Clear category" is that way back, and a typed category is offered when nothing
+                matches, exactly as at creation. Stored identically either way (I6). */}
             <div>
               <span className={TYPE.sectionLabel}>Category</span>
-              <div className="mt-1.5 flex flex-wrap gap-1">
-                {AGENT_CATEGORIES.map((c) => (
-                  <Chip
-                    key={c}
-                    size="sm"
-                    onClick={() => sendSetAgentCategory(a.slug, c)}
-                    selected={a.category === c}
-                    variant={a.category === c ? undefined : "outline"}
-                  >
-                    {c}
-                  </Chip>
-                ))}
+              <div className="mt-1.5">
+                <CategoryPicker value={a.category} onChange={(next) => sendSetAgentCategory(a.slug, next)} />
               </div>
-              <input
-                value={customCategory}
-                onChange={(e) => setCustomCategory(e.target.value)}
-                onKeyDown={(e) => {
-                  e.stopPropagation();
-                  if (e.key === "Enter" && customCategory.trim()) {
-                    sendSetAgentCategory(a.slug, normalizeCategory(customCategory));
-                    setCustomCategory("");
-                  }
-                }}
-                placeholder="…or name your own, then Enter"
-                aria-label="Name your own category"
-                className="mt-1.5 w-full rounded-input border border-edge bg-elevated px-2.5 py-1 text-caption text-ink outline-none placeholder:text-faint focus:shadow-focusring"
-              />
             </div>
 
             {/* AND THERE IS NO PICTURE PICKER HERE, WHICH IS NOW TRUE OF THE WHOLE PRODUCT. It used
