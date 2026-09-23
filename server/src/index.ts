@@ -6557,7 +6557,9 @@ async function agentDetail(ctx: TenantContext, slug: string): Promise<AgentDetai
     evalStore.listDatasets(ctx, card.slug),
     evalStore.listEvalRuns(ctx, 50),
     threadStore.listForAgent(ctx, card.uuid),
-    store.listRuns(ctx, 50),
+    // THIS AGENT'S OWN RUNS, and as many as the sparkline draws. A workspace page filtered here
+    // afterwards was how another agent's traffic emptied Recent runs and blanked p50 and p95.
+    store.listRunsForAgent(ctx, card.slug, OUTCOME_WINDOW),
     billing.spendByAgent(ctx, since30),
     store.runCountSince(ctx, card.slug, since30),
   ]);
@@ -6565,7 +6567,8 @@ async function agentDetail(ctx: TenantContext, slug: string): Promise<AgentDetai
   const byRef = new Map(tools.map((t) => [`${t.server_id}/${t.name}`, t]));
   const refByName = new Map(refs.map((r) => [r.name, r]));
   // Durations of the settled runs in the same window the sparkline covers, so a p95 beside a
-  // sparkline is a percentile OF that sparkline rather than of a different set of runs.
+  // sparkline is a percentile OF that sparkline rather than of a different set of runs. Both are
+  // this agent's newest OUTCOME_WINDOW, ranked the same way, so the intersection is the whole set.
   const settled = new Set(
     card.outcomes.filter((o) => o.outcome === "ok" || o.outcome === "error").map((o) => o.run_id),
   );
@@ -6655,8 +6658,6 @@ async function agentDetail(ctx: TenantContext, slug: string): Promise<AgentDetai
       archived: t.archived_at !== null,
     })),
     runs: runs
-      .filter((r) => r.agent_id === card.slug)
-      .slice(0, 20)
       .map((r) => ({
         id: r.id,
         status: r.status,

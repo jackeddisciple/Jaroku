@@ -179,6 +179,26 @@ export class TraceStore {
   }
 
   /**
+   * One agent's newest runs, newest first — §6's Recent runs, and the latency figures beside them.
+   *
+   * ITS OWN RUNS, NOT A WORKSPACE PAGE FILTERED AFTERWARDS. The detail read `listRuns(ctx, 50)` and
+   * kept this agent's rows, so how much of an agent's own history it showed depended on how busy
+   * every OTHER agent had been: sixty runs of a neighbour emptied the list and blanked p50 and p95
+   * on an agent whose sparkline still drew twenty bars. A busy team is exactly when that happens.
+   *
+   * THE SAME ORDER `agentRunFacts` RANKS BY — `started_at` and then `id`, both descending — so the
+   * newest N here are the runs the sparkline draws, not a set that differs from it on a tie.
+   */
+  async listRunsForAgent(ctx: TenantContext, agentSlug: string, limit = 20): Promise<Run[]> {
+    return (await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT ${cols(RUN_COLUMNS)} FROM runs
+        WHERE workspace_id = ? AND agent_id = ?
+        ORDER BY started_at DESC, id DESC LIMIT ?`,
+      [ctx.workspaceId, agentSlug, limit],
+    )) as unknown as Run[];
+  }
+
+  /**
    * How every run in this workspace went, for §3.3's derivation.
    *
    * TWO QUERIES RATHER THAN ONE, and the second one's shape is the point. Every run's status is a

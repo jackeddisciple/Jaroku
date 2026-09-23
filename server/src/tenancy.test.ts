@@ -232,6 +232,8 @@ async function suite(label: string, db: Db): Promise<void> {
 
   console.log("  · enumeration");
   check((await trace.listRuns(A.ctx)).every((r) => r.id !== B.runId), "history lists none of B's runs");
+  check((await trace.listRunsForAgent(A.ctx, "agent_b")).length === 0,
+    "...and one agent's history lists none of them, asked for by B's own slug");
   check((await evals.listDatasets(A.ctx)).every((d) => d.id !== B.datasetId), "datasets list none of B's");
   check((await evals.listEvalRuns(A.ctx)).every((e) => e.id !== B.evalId), "eval history lists none of B's");
   check((await mcp.listServers(A.ctx)).every((s) => s.label !== "mock b"), "MCP servers list none of B's");
@@ -253,6 +255,8 @@ async function suite(label: string, db: Db): Promise<void> {
 
   // Both really do have their own, or the assertions above pass on an empty database.
   check((await trace.listRuns(A.ctx)).some((r) => r.id === A.runId), "...while A sees its own run");
+  check((await trace.listRunsForAgent(A.ctx, "agent_a")).some((r) => r.id === A.runId),
+    "...and finds it again through its agent");
   check((await agents.list(A.ctx)).some((a) => a.display_name === "support (a)"), "...and its own agent");
   check((await inbox.listOpen(A.ctx)).some((i) => i.id === A.inboxItemId), "...and its own Inbox item");
 
@@ -567,6 +571,8 @@ const SCOPED_API: Record<string, string[]> = {
     // The first leg of the Inbox's memory-proposal triple. A cross-tenant read here would offer one
     // workspace a proposal built from another workspace's failure.
     "failedRunBefore",
+    // §6's Recent runs and the latency beside them. By slug, which B's agents can share with A's.
+    "listRunsForAgent",
   ],
   EvalStore: [
     "createDataset", "renameDataset", "listDatasets", "getDataset", "deleteDataset",

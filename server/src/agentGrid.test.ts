@@ -186,6 +186,35 @@ async function seedAgent(
       check("the footer's thread count is per agent", threadFacts.get(uuid)?.threadCount === 1);
     }
 
+    console.log("\n§6's detail reads an agent's OWN runs, however busy its neighbours are");
+    {
+      // THE BUG THIS HOLDS. The detail's Recent runs and its p50/p95 came from a WORKSPACE page of
+      // fifty, filtered to one agent afterwards — so sixty runs of a neighbour emptied the list and
+      // blanked both percentiles on an agent whose sparkline still drew every bar.
+      await seedAgent(db, A, agents, threads, "quiet_agent", { runs: 5 });
+      await seedAgent(db, A, agents, threads, "noisy_agent");
+      for (let i = 0; i < 60; i++) {
+        await db.forWorkspace(A.workspaceId).run(
+          `INSERT INTO runs (id, workspace_id, agent_id, provider, model, status, started_at, ended_at,
+                             cost, tokens, error)
+           VALUES (?, ?, 'noisy_agent', 'fake', 'fake-1', 'completed', ?, ?, 0, 0, NULL)`,
+          [randomUUID(), A.workspaceId, ISO((i + 1) * 1000), ISO((i + 1) * 1000 - 500)],
+        );
+      }
+      check("a workspace page of fifty holds none of them — the old read's blind spot",
+        !(await store.listRuns(A, 50)).some((r) => r.agent_id === "quiet_agent"));
+      const own = await store.listRunsForAgent(A, "quiet_agent", OUTCOME_WINDOW);
+      check("...while the agent's own read still returns all five", own.length === 5, String(own.length));
+      check("...every one of them its own", own.every((r) => r.agent_id === "quiet_agent"));
+      check("...newest first", (own[0]?.started_at ?? "") > (own[4]?.started_at ?? ""));
+      // THE SAME SET THE SPARKLINE DRAWS, which is what makes a p95 a percentile of the bars beside it.
+      const bars = (await store.agentRunFacts(A, since, OUTCOME_WINDOW)).get("busy_agent")?.recent
+        .map((r) => r.runId).sort() ?? [];
+      const fetched = (await store.listRunsForAgent(A, "busy_agent", OUTCOME_WINDOW)).map((r) => r.id).sort();
+      check("...and for a busy agent it is exactly the runs its sparkline draws",
+        bars.length === OUTCOME_WINDOW && JSON.stringify(bars) === JSON.stringify(fetched));
+    }
+
     console.log("\nan agent that has failed reads as failing, and the failing STEP is findable");
     {
       await seedAgent(db, A, agents, threads, "broken_agent", { runs: 4, failing: true });
@@ -264,6 +293,8 @@ async function seedAgent(
       // written by accident.
       check("A's run facts contain none of B's agents",
         !(await store.agentRunFacts(A, since, OUTCOME_WINDOW)).has("other_tenant_agent"));
+      check("...nor does asking for one of them by slug",
+        (await store.listRunsForAgent(A, "other_tenant_agent", OUTCOME_WINDOW)).length === 0);
       check("A's thread facts contain none of B's agents",
         !(await threads.agentThreadFacts(A)).has(bAgent.id));
       check("...and B still sees its own", (await threads.agentThreadFacts(B)).has(bAgent.id));
