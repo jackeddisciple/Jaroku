@@ -34,7 +34,7 @@ import { openThreadAgent } from "../lib/threadNav.ts";
 import { selectRun } from "../lib/selection.ts";
 import { fmtCostPerRun } from "../lib/agentFormat.ts";
 import { validatorVerdict } from "../lib/validatorVerdict.ts";
-import { absTime, fmtLatency, relTime } from "../lib/format.ts";
+import { absTime, fmtCost, fmtLatency, relTime } from "../lib/format.ts";
 import { ACCENT, ICON, STATUS, TEXT, TYPE } from "../lib/tokens.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { useMcpStore } from "../store/mcpStore.ts";
@@ -341,6 +341,24 @@ function Health({ detail }: { detail: AgentDetailView }) {
           title={settled.length === 0 ? "No settled runs to compute one from" : `${settled.length} settled runs`}
         />
         <Stat label="Runs, 7 days" value={a.runs_7d} />
+        {/* THE COUNT BESIDE THE RATE. `errors_7d` was on the wire and drawn nowhere, so the tab gave
+            a percentage of the sparkline's window and never how many runs actually failed this week. */}
+        <Stat
+          label="Errors, 7 days"
+          value={a.errors_7d}
+          title={`${a.errors_7d} of ${a.runs_7d} run${a.runs_7d === 1 ? "" : "s"} in the last 7 days ended in an error`}
+        />
+        {/* AND WHAT IT COST. The detail gave cost per run and never the total, so "what did this agent
+            cost this week" was a trip back to the grid. The card's figure and the card's rule: null is
+            nothing spent, never `$0`, and a floor over an unpriced model carries a `+`. */}
+        <Stat
+          label="Spend, 7 days"
+          value={a.spend_7d === null
+            ? <span className="text-faint">—</span>
+            : `${fmtCost(a.spend_7d)}${a.spend_known ? "" : "+"}`}
+          title={a.spend_7d === null ? "Nothing spent in the last 7 days"
+            : a.spend_known ? "Spend over the last 7 days" : "A floor — something here ran on an unpriced model"}
+        />
         {/* NULL IS UNKNOWN, NEVER `0 ms`. A p95 of zero is a claim about speed rather than an
             admission that nothing has been measured. */}
         <Stat label="p50 latency" value={fmtLatency(detail.p50_ms)} />
