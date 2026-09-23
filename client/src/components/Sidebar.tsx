@@ -233,7 +233,11 @@ function NavList() {
                 // A CLASS RATHER THAN AN INLINE STYLE, so the material can reach it. An inline
                 // `background` wins over every stylesheet rule there is, which left this badge the
                 // one opaque patch in the column that could not be softened with the rest.
-                className="shrink-0 rounded-xs bg-chrome px-1 text-body leading-[16px] tabular-nums text-ink"
+                //
+                // `text-caption`, A RUNG UNDER THE LABEL BESIDE IT — the product owner's call on
+                // 2026-09-23. At the label's own size the count read as a second word on the row
+                // rather than a mark on it.
+                className="shrink-0 rounded-xs bg-chrome px-1 text-caption leading-[16px] tabular-nums text-ink"
               >
                 {badge}
               </span>
