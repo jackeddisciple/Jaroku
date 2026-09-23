@@ -15,7 +15,7 @@
 // away in the same panel. The registry is workspace-level configuration rather than an agent-level
 // fact, so this shows the agent's GRANTS and links to the servers rather than restating them.
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Chip } from "./Chip.tsx";
 import { iconBtn, tabBtn } from "./buttons.ts";
 import { EmptyState } from "./EmptyState.tsx";
@@ -650,14 +650,51 @@ export function AgentTabs({ detail }: { detail: AgentDetailView }) {
     useAccessStore((s) => s.exposure[detail.card.uuid]),
     useAccessStore((s) => accessFor(s, detail.card.uuid)?.invites),
   );
+  /** A namespace for the tab/panel ids, since `aria-controls` and `aria-labelledby` point by id. */
+  const ids = useId();
+  // THE TAB ON SCREEN, which is not always the one in state — see the fallback in the panel below.
+  const shown: TabId = tabs.some((t) => t.id === tab) ? tab : "capabilities";
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-bg">
-      <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-hair px-3 py-2">
+      {/* A TABLIST, AND REACHABLE THE WAY ONE IS — the pattern the right-panel rail beside it already
+          uses. These were six buttons with `aria-pressed`: announced as six toggles rather than
+          "tab 2 of 6", every one a stop in the Tab order, and no arrow keys at all. One stop for the
+          set now, the arrows (and Home/End) to move inside it, selection following the arrow. */}
+      <div
+        role="tablist"
+        aria-label={`${detail.card.name} — detail`}
+        aria-orientation="horizontal"
+        onKeyDown={(e) => {
+          const at = tabs.findIndex((t) => t.id === shown);
+          const next =
+            e.key === "ArrowRight" ? (at + 1) % tabs.length
+            : e.key === "ArrowLeft" ? (at - 1 + tabs.length) % tabs.length
+            : e.key === "Home" ? 0
+            : e.key === "End" ? tabs.length - 1
+            : -1;
+          if (next < 0) return;
+          e.preventDefault();
+          const to = tabs[next];
+          if (to) setTab(to.id);
+        }}
+        className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-hair px-3 py-2"
+      >
         {tabs.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             type="button"
+            role="tab"
+            id={`${ids}-tab-${id}`}
+            aria-controls={`${ids}-panel`}
+            aria-selected={shown === id}
+            // ROVING: the chosen tab is the one stop, so returning to the strip returns to it.
+            tabIndex={shown === id ? 0 : -1}
+            ref={(el) => {
+              // Focus follows the choice only while the strip already holds focus — an arrow press
+              // moves the ring with it, and a broadcast re-render must not pull focus from elsewhere.
+              if (shown === id && el && el.parentElement?.contains(document.activeElement)) el.focus();
+            }}
             onClick={() => setTab(id)}
             // §8: every tab is an icon, and every icon-only control carries a label and a tooltip.
             // The label rides beside the icon rather than replacing it, and the strip scrolls
@@ -666,12 +703,11 @@ export function AgentTabs({ detail }: { detail: AgentDetailView }) {
             // "an icon nobody can name is a worse button than a text button" describes.
             title={label}
             aria-label={label}
-            aria-pressed={tab === id}
             // THE SHARED TAB RECIPE. This was a third tab implementation inside one right-hand
             // panel, with its own padding and its own idea of what active looks like — and
             // "active" was `bg-active`, which is also the row-hover colour, so a chosen tab and a
             // hovered tab were the same fill.
-            className={`${tabBtn(tab === id)} relative shrink-0`}
+            className={`${tabBtn(shown === id)} relative shrink-0`}
           >
             <Icon size={ICON.sm} />
             <span className="whitespace-nowrap">{label}</span>
@@ -689,16 +725,20 @@ export function AgentTabs({ detail }: { detail: AgentDetailView }) {
           </button>
         ))}
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div
+        role="tabpanel"
+        id={`${ids}-panel`}
+        aria-labelledby={`${ids}-tab-${shown}`}
+        className="min-h-0 flex-1 overflow-auto"
+      >
         {/* AND A TAB THAT HAS GONE FALLS BACK RATHER THAN RENDERING NOTHING. Switching from a team
             to a personal workspace with Access selected would otherwise leave an empty pane — the
-            state is per mount, but a mount can outlive a switch. */}
-        {!tabs.some((t) => t.id === tab) ? <Capabilities detail={detail} />
-          : tab === "capabilities" ? <Capabilities detail={detail} />
-          : tab === "health" ? <Health detail={detail} />
-          : tab === "deploy" ? <Deploy detail={detail} />
-          : tab === "evals" ? <Evals detail={detail} />
-          : tab === "access" ? <AccessPanel detail={detail} />
+            state is per mount, but a mount can outlive a switch. `shown` is that fallback. */}
+        {shown === "capabilities" ? <Capabilities detail={detail} />
+          : shown === "health" ? <Health detail={detail} />
+          : shown === "deploy" ? <Deploy detail={detail} />
+          : shown === "evals" ? <Evals detail={detail} />
+          : shown === "access" ? <AccessPanel detail={detail} />
           : <ThreadsAndRuns detail={detail} />}
       </div>
     </div>

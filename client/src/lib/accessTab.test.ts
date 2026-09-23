@@ -688,6 +688,18 @@ console.log("\n§16 — the tab is absent in a personal workspace");
 
   // Put the fixture back, so nothing after this block inherits a personal workspace.
   seed(useSessionStore, sessionAs("owner", { kind: "team" }));
+
+  // AND THE STRIP IS A TABLIST, which it was not: six buttons with `aria-pressed`, announced as six
+  // toggles, every one a Tab stop, no arrow keys. The same pattern the right-panel rail uses.
+  const strip = markup(React.createElement(AgentTabs, { detail }));
+  check(strip.includes('role="tablist"'), "the strip is a tablist");
+  check((strip.match(/role="tab"/g) ?? []).length === 6, "...of six tabs in a team workspace");
+  check(!strip.includes("aria-pressed"), "...none of them a toggle any more");
+  check((strip.match(/aria-selected="true"/g) ?? []).length === 1, "...exactly one selected");
+  check((strip.match(/tabindex="0"/g) ?? []).length === 1,
+    "...and one Tab stop for the set, so the arrows move inside it");
+  check(/role="tabpanel"[^>]*aria-labelledby="[^"]*-tab-capabilities"/.test(strip),
+    "the panel is labelled by the tab it shows, Capabilities by default");
 }
 
 console.log("\n§9.3's dot carries its own reason");
