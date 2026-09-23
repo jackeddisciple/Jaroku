@@ -227,6 +227,40 @@ console.log("\nrunnable is answered by the manifest, and by the disk only for wh
   );
 }
 
+console.log("\nper-file blame is about the version being browsed, not the newest one");
+{
+  // THE BUG THIS HOLDS: browsing the first version labelled its README "last changed in" the
+  // newest, a version that did not exist yet. The history is the one the report seeded: a third
+  // version undone, and a fourth published over the second.
+  const bot = await agents.upsertFromDisk(A, { slug: "blame_bot" });
+  const publish = async (path: string, content: string, source: "generation" | "edit" | "deploy") =>
+    (await projects.publish(A, bot.id, [{ path, content }], {
+      source, fileStats: [{ path, status: "modified", additions: 1, deletions: 0 }],
+    })).version;
+  const first = await publish("README.md", "one\n", "generation");
+  const second = await publish("README.md", "two\n", "edit");
+  const third = await publish("tools/city_time.py", "three\n", "edit");
+  await agents.undoVersion(A, bot.id);
+  const fourth = await publish("README.md", "four\n", "deploy");
+  const asOf = async (n: number) => {
+    const row = (await agents.version(A, bot.id, n))!;
+    return agents.fileBlame(A, bot.id, { version: n, createdAt: row.created_at });
+  };
+
+  check("browsing the first version, README was last changed in it",
+    (await asOf(first)).get("README.md") === first, String((await asOf(first)).get("README.md")));
+  check("browsing the second, in the second — never a later version",
+    (await asOf(second)).get("README.md") === second);
+  check("browsing the undone third, its own change is attributed to it",
+    (await asOf(third)).get("tools/city_time.py") === third);
+  check("browsing the fourth, the undone third's change is not — the undo took it out of the lineage",
+    !(await asOf(fourth)).has("tools/city_time.py"));
+  check("...and README is the fourth's", (await asOf(fourth)).get("README.md") === fourth);
+  check("unbounded, it is the live history, as it always was",
+    (await agents.fileBlame(A, bot.id)).get("README.md") === fourth
+      && !(await agents.fileBlame(A, bot.id)).has("tools/city_time.py"));
+}
+
 await db.close();
 rmSync(dir, { recursive: true, force: true });
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);

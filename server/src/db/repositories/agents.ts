@@ -1037,18 +1037,38 @@ export class AgentRepository {
    * A PATH WITH NO ENTRY IS NOT A BUG. A version imported from disk records no file stats at all
    * (014's default is an empty array, and it says why: nobody recorded a diff), so every file of a
    * hand-dropped project is unattributed. The browser renders nothing rather than claiming v1.
+   *
+   * `asOf` IS THE VERSION BEING BROWSED, AND WITHOUT IT THE ANSWER IS ABOUT A DIFFERENT ONE. Blame
+   * walked every version, so v1's README was labelled "last changed in v4" — a version published
+   * weeks after the file on screen. Bounded, it is the newest version AT OR BELOW the one being read
+   * that changed the path, walking that version's own lineage: an undone version counts only when it
+   * is the one being read or was undone after it was published, which is the rule the version
+   * comparison follows (`client/src/lib/versionSpan.ts`). Unbounded is the live history, as before.
    */
-  async fileBlame(ctx: TenantContext, agentId: string): Promise<Map<string, number>> {
+  async fileBlame(
+    ctx: TenantContext,
+    agentId: string,
+    asOf?: { version: number; createdAt: string },
+  ): Promise<Map<string, number>> {
     const rows = await this.q(ctx).all<Record<string, unknown>>(
-      `SELECT v.version AS version, v.file_stats AS file_stats
+      `SELECT v.version AS version, v.file_stats AS file_stats, v.undone_at AS undone_at
          FROM agent_versions v JOIN agents a ON a.id = v.agent_id
-        WHERE v.agent_id = ? AND a.workspace_id = ? AND v.undone_at IS NULL
+        WHERE v.agent_id = ? AND a.workspace_id = ?
         ORDER BY v.version ASC`,
       [agentId, ctx.workspaceId],
     );
+    // Compared here rather than in SQL: the two drivers disagree about what a timestamp is, and a
+    // text comparison against a `timestamptz` is the class of bug `test:timestamp-text` exists for.
+    const madeAt = asOf ? new Date(asOf.createdAt).getTime() : Number.POSITIVE_INFINITY;
     const out = new Map<string, number>();
     for (const row of rows) {
       const version = asInt(row["version"], 0);
+      if (asOf && version > asOf.version) continue;
+      const undone = row["undone_at"];
+      const inLineage = undone === null || undone === undefined
+        || version === asOf?.version
+        || new Date(undone as string).getTime() > madeAt;
+      if (!inLineage) continue;
       const stats = jsonFromColumn(this.db.dialect, row["file_stats"]);
       if (!Array.isArray(stats)) continue;
       for (const stat of stats as VersionFileStat[]) {

@@ -6695,7 +6695,8 @@ async function agentVersionFiles(
 
   const [files, blame] = await Promise.all([
     projects.readVersion(ctx, agent.id, wanted),
-    agentRepo.fileBlame(ctx, agent.id),
+    // BOUNDED BY THE VERSION BEING READ. Unbounded, v1's README said "last changed in v4".
+    agentRepo.fileBlame(ctx, agent.id, { version: wanted, createdAt: row.created_at }),
   ]);
   // POSIX SEPARATORS, and the match is against object paths rather than against anything a
   // filesystem produced. The Windows separator bug that silently dropped `tools/mcp_bridge.py` from
