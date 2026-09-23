@@ -562,6 +562,22 @@ export class EvalStore {
   }
 
   /**
+   * One agent's newest eval runs, newest first — §6's "Last eval" asks for one.
+   *
+   * ITS OWN, NOT A WORKSPACE PAGE SEARCHED AFTERWARDS. The detail looked for this agent in the
+   * workspace's fifty newest evals, so fifty evals of any other agent made a finished comparison
+   * and its winning model vanish from the Evals tab — the same window `listRunsForAgent` replaced.
+   */
+  async listEvalRunsForAgent(ctx: TenantContext, agentSlug: string, limit = 1): Promise<EvalRun[]> {
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT ${EVAL_RUN_COLUMNS} FROM eval_runs
+        WHERE workspace_id = ? AND agent_id = ? ORDER BY started_at DESC LIMIT ?`,
+      [ctx.workspaceId, agentSlug, limit],
+    );
+    return rows.map((r) => this.hydrateEvalRun(r));
+  }
+
+  /**
    * Evals still in flight at startup — what a restart has to reconcile, for ONE workspace.
    *
    * Scoped, and it used to not be. An unscoped query here returns NOTHING under RLS as the

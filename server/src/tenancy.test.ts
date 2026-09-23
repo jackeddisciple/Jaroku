@@ -236,6 +236,10 @@ async function suite(label: string, db: Db): Promise<void> {
     "...and one agent's history lists none of them, asked for by B's own slug");
   check((await evals.listDatasets(A.ctx)).every((d) => d.id !== B.datasetId), "datasets list none of B's");
   check((await evals.listEvalRuns(A.ctx)).every((e) => e.id !== B.evalId), "eval history lists none of B's");
+  check((await evals.listEvalRunsForAgent(A.ctx, "agent_b", 50)).length === 0,
+    "...and one agent's eval history lists none of them, asked for by B's own slug");
+  check((await evals.listEvalRunsForAgent(A.ctx, "agent_a", 50)).some((e) => e.id === A.evalId),
+    "...while A's own agent finds its eval");
   check((await mcp.listServers(A.ctx)).every((s) => s.label !== "mock b"), "MCP servers list none of B's");
   check((await mcp.listTools(A.ctx)).every((t) => t.description !== "for b"), "MCP tools list none of B's");
   check((await deploys.list(A.ctx)).every((d) => d.id !== B.deploymentId), "deployments list none of B's");
@@ -579,7 +583,7 @@ const SCOPED_API: Record<string, string[]> = {
     "addExample", "updateExample", "deleteExample", "hasExampleWithInput", "defaultDatasetFor",
     "listExamples", "getExample", "putRubric", "getRubric", "rubricForDataset",
     "defaultRubricFor", "createEvalRun", "setEvalStatus", "addJudgeCost", "getEvalRun",
-    "listEvalRuns", "createJobs", "markJobRunning", "finishJob", "requeueJob", "retryJob",
+    "listEvalRuns", "listEvalRunsForAgent", "createJobs", "markJobRunning", "finishJob", "requeueJob", "retryJob",
     "cancelQueuedJobs", "jobsForEval", "getJob", "jobForRun", "trueSpend", "putScore",
     "scoresForEval",
   ],

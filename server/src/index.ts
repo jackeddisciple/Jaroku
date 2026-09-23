@@ -6550,12 +6550,14 @@ async function agentDetail(ctx: TenantContext, slug: string): Promise<AgentDetai
   if (!card) return undefined;
 
   const since30 = new Date(Date.now() - GRID_WINDOW_30_MS).toISOString();
-  const [versions, tools, refs, datasets, evalRuns, threads, runs, spend30, runs30] = await Promise.all([
+  const [versions, tools, refs, datasets, [lastEval], threads, runs, spend30, runs30] = await Promise.all([
     agentRepo.versions(ctx, card.uuid),
     mcpRegistry.allTools(ctx),
     secretRefs.list(ctx),
     evalStore.listDatasets(ctx, card.slug),
-    evalStore.listEvalRuns(ctx, 50),
+    // THIS AGENT'S NEWEST, not a search of the workspace's fifty — which lost a finished comparison
+    // to any other agent's fifty evals.
+    evalStore.listEvalRunsForAgent(ctx, card.slug, 1),
     threadStore.listForAgent(ctx, card.uuid),
     // THIS AGENT'S OWN RUNS, and as many as the sparkline draws. A workspace page filtered here
     // afterwards was how another agent's traffic emptied Recent runs and blanked p50 and p95.
@@ -6585,7 +6587,6 @@ async function agentDetail(ctx: TenantContext, slug: string): Promise<AgentDetai
   const perRun = (usd: number | null, count: number): number | null =>
     usd === null || count <= 0 ? null : usd / count;
 
-  const lastEval = evalRuns.find((e) => e.agent_id === card.slug) ?? null;
   /**
    * §6's "winning provider", which shipped as a hardcoded `null`.
    *

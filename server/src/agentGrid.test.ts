@@ -24,6 +24,7 @@ import { BillingRepository } from "./db/repositories/billing.ts";
 import { ThreadStore } from "./threadStore.ts";
 import { TraceStore } from "./store.ts";
 import { DeployStore } from "./deployStore.ts";
+import { EvalStore } from "./evalStore.ts";
 import { OUTCOME_WINDOW, driftOf, healthOf, missingCredentials } from "./agentHealth.ts";
 import type { Db, Queryable, WriteResult } from "./db/db.ts";
 import type { TenantContext } from "./db/tenant.ts";
@@ -213,6 +214,33 @@ async function seedAgent(
       const fetched = (await store.listRunsForAgent(A, "busy_agent", OUTCOME_WINDOW)).map((r) => r.id).sort();
       check("...and for a busy agent it is exactly the runs its sparkline draws",
         bars.length === OUTCOME_WINDOW && JSON.stringify(bars) === JSON.stringify(fetched));
+    }
+
+    console.log("\n...and its own last eval, however many its neighbours have run");
+    {
+      // THE SAME WINDOW, ONE TAB OVER. "Last eval" was searched for in the workspace's fifty newest
+      // evals, so fifty-five of another agent's took a finished comparison and its winner off the tab.
+      const evals = new EvalStore(db);
+      const rubric = await evals.defaultRubricFor(A, [
+        { id: "correct", label: "Correct", description: "Is it right?", weight: 1 },
+      ]);
+      const run = async (agent: string): Promise<string> => {
+        const dataset = await evals.createDataset(A, agent, `${agent} cases`);
+        return (await evals.createEvalRun(A, {
+          dataset_id: dataset.id, agent_id: agent, rubric_id: rubric.id,
+          targets: [{ provider: "fake", model: "fake-1" }], budget_usd: 1,
+        })).id;
+      };
+      const mine = await run("quiet_agent");
+      // An hour old, so every one of the neighbour's evals is strictly newer and no tie decides it.
+      await db.forWorkspace(A.workspaceId).run(`UPDATE eval_runs SET started_at = ? WHERE id = ?`, [ISO(HOUR), mine]);
+      for (let i = 0; i < 55; i++) await run("noisy_agent");
+      check("a workspace page of fifty holds none of it — the old read's blind spot",
+        !(await evals.listEvalRuns(A, 50)).some((e) => e.id === mine));
+      const [last] = await evals.listEvalRunsForAgent(A, "quiet_agent", 1);
+      check("...while the agent's own read still finds its last eval", last?.id === mine, String(last?.id));
+      check("...and another agent's newest is its own, not this one",
+        (await evals.listEvalRunsForAgent(A, "noisy_agent", 1))[0]?.agent_id === "noisy_agent");
     }
 
     console.log("\nan agent that has failed reads as failing, and the failing STEP is findable");
