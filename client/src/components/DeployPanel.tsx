@@ -48,6 +48,7 @@ import {
 } from "./panelIcons.tsx";
 import { CheckboxField } from "./Checkbox.tsx";
 import { Icon } from "../lib/icons/registry.ts";
+import { useToastFrom } from "./Toast.tsx";
 
 /**
  * The stages of a deploy, in order, with the words used for each tense.
@@ -120,8 +121,9 @@ export function DeployPanel() {
   const serveToken = useDeployStore((s) => s.serveToken);
   const error = useDeployStore((s) => s.error);
   const notice = useDeployStore((s) => s.notice);
-  const setError = useDeployStore((s) => s.setError);
-  const setNotice = useDeployStore((s) => s.setNotice);
+  // A result or a refusal is said in the corner toast, not as a row that pushes the panel down.
+  useToastFrom(notice, () => useDeployStore.setState({ notice: null }));
+  useToastFrom(error, () => useDeployStore.setState({ error: null }), "err");
   const dismissServeToken = useDeployStore((s) => s.dismissServeToken);
   const select = useDeployStore((s) => s.select);
   const selectedId = useDeployStore((s) => s.selectedId);
@@ -172,26 +174,6 @@ export function DeployPanel() {
           </p>
         </div>
       </div>
-
-      {(error || notice) && (
-        <div className="shrink-0 px-4 pt-2">
-          <div
-            className={`flex items-start gap-2 rounded-control border px-2 py-1.5 text-tiny leading-[1.5] ${
-              error ? "border-err/30 text-err" : "border-hair text-muted"
-            }`}
-          >
-            <span className="min-w-0 flex-1 break-words">{error ?? notice}</span>
-            <button
-              className="shrink-0 text-faint hover:text-ink"
-              title="Dismiss"
-              aria-label="Dismiss"
-              onClick={() => (error ? setError(null) : setNotice(null))}
-            >
-              <XIcon size={ICON.xs} />
-            </button>
-          </div>
-        </div>
-      )}
 
       {serveToken && <ServeTokenCard onDismiss={dismissServeToken} />}
 

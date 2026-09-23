@@ -9,7 +9,7 @@
 // that swallowed the click meant for the composer's send button underneath would be a new way for
 // the product to feel broken.
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useUiStore, type ToastTone } from "../store/uiStore.ts";
 
 /**
@@ -55,4 +55,22 @@ export function ToastStack() {
       )}
     </div>
   );
+}
+
+/**
+ * Say a store's transient message in the corner, then spend it.
+ *
+ * For the panels whose `notice` and `error` used to render as a row at their top, which pushed
+ * everything under it down while it was there. `clear` empties the field once it has been said, so
+ * reopening the panel does not say it again — and so the same refusal arriving twice is said twice.
+ */
+export function useToastFrom(message: string | null, clear: () => void, tone: ToastTone = "neutral"): void {
+  // The latest `clear` without making it a dependency: callers pass an arrow, which is new every render.
+  const clearRef = useRef(clear);
+  clearRef.current = clear;
+  useEffect(() => {
+    if (!message) return;
+    useUiStore.getState().showToast(message, tone);
+    clearRef.current();
+  }, [message, tone]);
 }

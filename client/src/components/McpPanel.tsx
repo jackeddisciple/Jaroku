@@ -35,6 +35,7 @@ import { AlertTriangleIcon, EyeIcon, KeyIcon, PlugIcon, RefreshIcon, ShieldAlert
 import { useCanRun } from "../lib/useCapability.ts";
 import type { McpServer, McpTool } from "../types.ts";
 import { Icon } from "../lib/icons/registry.ts";
+import { useToastFrom } from "./Toast.tsx";
 
 /** What each status means, in the words a user would use to decide what to do next. */
 /**
@@ -319,8 +320,9 @@ export function McpPanel() {
   const error = useMcpStore((s) => s.error);
   const notice = useMcpStore((s) => s.notice);
   const addingEndpoint = useMcpStore((s) => s.addingEndpoint);
-  const setError = useMcpStore((s) => s.setError);
-  const setNotice = useMcpStore((s) => s.setNotice);
+  // A result or a refusal is said in the corner toast, not as a row that pushes the panel down.
+  useToastFrom(notice, () => useMcpStore.setState({ notice: null }));
+  useToastFrom(error, () => useMcpStore.setState({ error: null }), "err");
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -364,21 +366,6 @@ export function McpPanel() {
           </p>
         </div>
       </div>
-
-      {(error || notice) && (
-        <div className="shrink-0 px-4 pt-2">
-          <div className={`flex items-start gap-2 rounded-control border px-2 py-1.5 text-tiny leading-[1.5] ${
-            error ? "border-err/30 text-err" : "border-hair text-muted"}`}>
-            <span className="min-w-0 flex-1 break-words">{error ?? notice}</span>
-            <button className="shrink-0 text-faint hover:text-ink"
-              title="Dismiss"
-              aria-label="Dismiss"
-              onClick={() => (error ? setError(null) : setNotice(null))}>
-              <XIcon size={ICON.xs} />
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Server chips */}
       <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-hair px-4 py-2">

@@ -40,6 +40,7 @@ import {
 import type { ConnectionField as ConnectionFieldView, ConnectionView } from "../types.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { IconButton } from "./IconButton.tsx";
+import { useToastFrom } from "./Toast.tsx";
 
 /** What each status means, in the words somebody would use to decide what to do next. */
 const STATUS_COPY: Record<string, { state: "ok" | "error" | "pending" | "neutral"; icon: typeof CheckIcon }> = {
@@ -400,6 +401,9 @@ export function ConnectionsPanel() {
   const loaded = useConnectionStore((s) => s.loaded);
   const error = useConnectionStore((s) => s.error);
   const notice = useConnectionStore((s) => s.notice);
+  // A result or a refusal is said in the corner toast, not as a row that pushes the panel down.
+  useToastFrom(notice, () => useConnectionStore.setState({ notice: null }));
+  useToastFrom(error, () => useConnectionStore.setState({ error: null }), "err");
 
   // Asked for when the panel opens and never on a timer. A connection changes when somebody
   // clicks a button or a provider revokes a grant, and neither is worth a poll per second per
@@ -446,35 +450,6 @@ export function ConnectionsPanel() {
 
   return (
     <div className="space-y-3">
-      {error ? (
-        /* ONE DISMISSAL TREATMENT. These were the word `Dismiss`, twice, while `GitHubPanel`'s
-            notice strip — the same idea, one panel over — closes with an XIcon. Two vocabularies
-            for "close this transient message" is one of them being wrong. */
-        <div className="flex items-start gap-2 rounded-control border border-line px-3 py-2 text-caption text-ink">
-          <span className="min-w-0 flex-1">{error}</span>
-          <button
-            className={`${iconBtn} shrink-0`}
-            title="Dismiss"
-            aria-label="Dismiss"
-            onClick={() => useConnectionStore.getState().setError(null)}
-          >
-            <XIcon size={ICON.xs} />
-          </button>
-        </div>
-      ) : null}
-      {notice ? (
-        <div className="flex items-start gap-2 rounded-control border border-line px-3 py-2 text-caption" style={{ color: TEXT.muted }}>
-          <span className="min-w-0 flex-1">{notice}</span>
-          <button
-            className={`${iconBtn} shrink-0`}
-            title="Dismiss"
-            aria-label="Dismiss"
-            onClick={() => useConnectionStore.getState().setNotice(null)}
-          >
-            <XIcon size={ICON.xs} />
-          </button>
-        </div>
-      ) : null}
 
       {/* `loaded` rather than `connections.length`, deliberately. Before the first snapshot
           lands, "nothing is connected" and "we have not been told yet" look identical, and

@@ -42,12 +42,15 @@ import { useUiStore } from "../store/uiStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useCanRun, useCapability } from "../lib/useCapability.ts";
 import type { AgentDetailView } from "../types.ts";
+import { useToastFrom } from "./Toast.tsx";
 
 export function AccessPanel({ detail }: { detail: AgentDetailView }) {
   const agentUuid = detail.card.uuid;
   const access = useAccessStore((s) => accessFor(s, agentUuid));
   const loading = useAccessStore((s) => s.loading[agentUuid] ?? false);
   const error = useAccessStore((s) => s.error);
+  // A refused grant is said in the corner toast, not as a row that pushes the regions down.
+  useToastFrom(error, () => useAccessStore.setState({ error: null }), "err");
   const exposure = useAccessStore((s) => s.exposure[agentUuid]);
   const sessions = useAccessStore((s) => s.sessions[agentUuid]);
   const history = useAccessStore((s) => s.history[agentUuid]);
@@ -195,17 +198,6 @@ export function AccessPanel({ detail }: { detail: AgentDetailView }) {
           is absent by its own rule rather than by a guard here. */}
       <UpsellCard channel="access" onUpgrade={() => openBilling("billing")} />
 
-      {/* The refusal from a mutation, which is the one error a panel this wide has to surface
-          inline: a grant refused for a note or a ceiling is something the person can fix. */}
-      {error && (
-        <div
-          className="rounded-control border border-hair px-2.5 py-2 text-tiny"
-          style={{ color: STATUS.error }}
-          role="alert"
-        >
-          {error}
-        </div>
-      )}
 
       <CollapsibleRegion
         label="People"

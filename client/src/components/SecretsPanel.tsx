@@ -25,7 +25,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { SecretsGate } from "./SecretsGate.tsx";
 import { SecretsList } from "./SecretsList.tsx";
-import { AlertTriangleIcon, ClockIcon, LockIcon, PlusIcon, XIcon } from "./panelIcons.tsx";
+import { AlertTriangleIcon, ClockIcon, LockIcon, PlusIcon } from "./panelIcons.tsx";
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { ICON } from "../lib/tokens.ts";
 import {
@@ -43,6 +43,7 @@ import { formatRemaining, holdForElevation, isFinalMinute, useSecretsStore } fro
 import { useUiStore } from "../store/uiStore.ts";
 import { useProviderStore } from "../store/providerStore.ts";
 import { useCanReach } from "../lib/useCapability.ts";
+import { useToastFrom } from "./Toast.tsx";
 
 /** How often the gate state is re-read. Also the countdown's correction against the server. */
 const POLL_MS = 15_000;
@@ -108,6 +109,9 @@ export function SecretsPanel() {
   const remainingMs = useSecretsStore((s) => s.remainingMs);
   const error = useSecretsStore((s) => s.error);
   const notice = useSecretsStore((s) => s.notice);
+  // A result or a refusal is said in the corner toast, not as a row that pushes the panel down.
+  useToastFrom(notice, () => useSecretsStore.setState({ notice: null }));
+  useToastFrom(error, () => useSecretsStore.setState({ error: null }), "err");
   const pending = useSecretsStore((s) => s.pending);
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -249,30 +253,6 @@ export function SecretsPanel() {
           <SecretsGate onUnlocked={() => void onUnlocked()} />
         ) : (
           <div className="space-y-3">
-            {error ? (
-              <div className="flex items-start gap-2 rounded-control border border-err/30 px-2 py-1.5 text-tiny text-err">
-                <span className="min-w-0 flex-1 break-words">{error}</span>
-                <button
-                  className="shrink-0 text-faint hover:text-ink"
-                  aria-label="Dismiss"
-                  onClick={() => useSecretsStore.getState().setError(null)}
-                >
-                  <XIcon size={ICON.xs} />
-                </button>
-              </div>
-            ) : null}
-            {notice ? (
-              <div className="flex items-start gap-2 rounded-control border border-hair px-2 py-1.5 text-tiny text-muted">
-                <span className="min-w-0 flex-1 break-words">{notice}</span>
-                <button
-                  className="shrink-0 text-faint hover:text-ink"
-                  aria-label="Dismiss"
-                  onClick={() => useSecretsStore.getState().setNotice(null)}
-                >
-                  <XIcon size={ICON.xs} />
-                </button>
-              </div>
-            ) : null}
             {pending ? (
               <div className="rounded-control border border-hair px-2 py-1.5 text-tiny text-muted">
                 Waiting to finish: {pending.label}
