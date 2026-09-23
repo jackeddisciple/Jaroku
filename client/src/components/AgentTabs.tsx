@@ -286,7 +286,10 @@ function Capabilities({ detail }: { detail: AgentDetailView }) {
         )}
       </Section>
 
-      <Section label="Model">
+      {/* "PROVIDER", BECAUSE THAT IS WHAT IS HERE. It was headed "Model" over `default_provider`,
+          so it read `anthropic` while the card for the same agent read `claude-sonnet-4-5` — two
+          answers to one question. An agent has no model column; the card's is the last run's. */}
+      <Section label="Provider">
         <div className="flex flex-wrap gap-1.5">
           <Chip size="sm" mono tone="muted" title="The provider this agent runs on by default">
             {a.default_provider}
