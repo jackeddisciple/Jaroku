@@ -43,6 +43,7 @@ import { sendSetAgentTools } from "../lib/socket.ts";
 import { useThreadStore } from "../store/threadStore.ts";
 import type { AgentDetailView } from "../types.ts";
 import { Icon } from "../lib/icons/registry.ts";
+import { ProviderMark } from "../lib/icons.tsx";
 
 type TabId = "capabilities" | "health" | "deploy" | "evals" | "threads" | "access";
 
@@ -237,9 +238,13 @@ function Capabilities({ detail }: { detail: AgentDetailView }) {
                       here would be a second thing to learn about the one mark whose whole job is to
                       be recognised instantly. */}
                   <McpBadge variant="compact" />
-                  <Truncate className="min-w-0 flex-1 text-tiny text-ink" title={t.ref}>
-                    {t.ref}
-                  </Truncate>
+                  {/* THE TOOL, THEN WHOSE IT IS. The server already splits every grant into the two,
+                      and printing the raw `server/tool` ref made the thing the agent can DO the
+                      second half of a path. */}
+                  <span className="flex min-w-0 flex-1 items-baseline gap-1.5" title={t.ref}>
+                    <Truncate className="min-w-0 text-tiny text-ink">{t.tool || t.ref}</Truncate>
+                    {t.tool && <span className="shrink-0 text-tiny text-faint">on {t.server}</span>}
+                  </span>
                   {t.impact === "high" && <HighImpactBadge reason={t.reason ?? undefined} />}
                   {/* A REF WHOSE SERVER IS GONE IS SHOWN, NOT DROPPED. It is why a tool the agent's
                       code calls will fail, which is exactly the thing worth seeing here. */}
@@ -611,7 +616,13 @@ function ThreadsAndRuns({ detail }: { detail: AgentDetailView }) {
                   }}
                   aria-hidden
                 />
-                <Truncate className="min-w-0 flex-1 text-tiny text-muted">{r.model}</Truncate>
+                {/* WHAT IT RAN ON: the provider's mark, then the model — the card's own treatment.
+                    `provider` was on every row and never drawn, so three runs on one model read as
+                    three identical lines with only a timestamp between them. */}
+                <span className="flex min-w-0 flex-1 items-center gap-1.5" title={`${r.provider} · ${r.model}`}>
+                  <ProviderMark provider={r.provider || "unknown"} size={ICON.xs} />
+                  <Truncate className="min-w-0 text-tiny text-muted">{r.model}</Truncate>
+                </span>
                 <span className="shrink-0 text-tiny text-faint" title={absTime(r.started_at)}>{relTime(r.started_at)}</span>
               </button>
             ))}

@@ -16,14 +16,16 @@ const at = (day: number): string => new Date(Date.UTC(2026, 7, day)).toISOString
 const version = (
   n: number,
   day: number,
-  stats: [string, number, number][],
+  stats: [string, number, number, ("added" | "modified")?][],
   undoneDay: number | null = null,
 ): AgentVersionView => ({
   version: n,
   source: n === 1 ? "generation" : "edit",
   instruction: null,
   summary: null,
-  file_stats: stats.map(([path, additions, deletions]) => ({ path, status: "modified", additions, deletions })),
+  file_stats: stats.map(([path, additions, deletions, status]) => ({
+    path, status: status ?? "modified", additions, deletions,
+  })),
   total_bytes: 0,
   undone_at: undoneDay === null ? null : at(undoneDay),
   created_at: at(day),
@@ -73,6 +75,22 @@ console.log("\n...and one undone only after the newer end existed is still in it
   const span = changesBetween(stacked, 3, 5);
   check("v4's changes count toward v3 → v5", span.changes.some(([p]) => p === "a.py"));
   check("...and nothing is reported skipped", span.skipped.length === 0, JSON.stringify(span.skipped));
+}
+
+console.log("\na file created inside the span says so, which +n −n cannot");
+{
+  const grown = [
+    version(4, 9, [["tools/new_tool.py", 3, 1]]),
+    version(3, 8, [["tools/new_tool.py", 20, 0, "added"], ["agent.py", 2, 2]]),
+    version(2, 7, [["agent.py", 5, 0, "added"]]),
+  ];
+  const span = changesBetween(grown, 2, 4);
+  check("a file first recorded as added in the span is added",
+    span.changes.find(([p]) => p === "tools/new_tool.py")?.[1].added === true);
+  check("...and one that existed at the older end is not, whatever a later version recorded",
+    span.changes.find(([p]) => p === "agent.py")?.[1].added === false);
+  check("...which a span starting before it was created would say instead",
+    changesBetween(grown, 1, 4).changes.find(([p]) => p === "agent.py")?.[1].added === true);
 }
 
 console.log("\nthe sentence under the comparison");

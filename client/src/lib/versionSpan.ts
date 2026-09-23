@@ -13,6 +13,11 @@ export interface SpanStat {
   deletions: number;
   /** How many versions in the span touched it. */
   touched: number;
+  /**
+   * Whether the file did not exist at the older end — the earliest version in the span that
+   * touched it recorded it as `added`. The one thing a `+n −n` cannot say.
+   */
+  added: boolean;
 }
 
 export interface Span {
@@ -42,6 +47,8 @@ export function changesBetween(versions: readonly AgentVersionView[], from: numb
   const top = versions.find((v) => v.version === hi);
   const madeAt = top ? Date.parse(top.created_at) : Number.POSITIVE_INFINITY;
   const byPath = new Map<string, SpanStat>();
+  /** The lowest version in the span that touched each path, which decides `added`. */
+  const earliest = new Map<string, number>();
   const skipped: number[] = [];
   for (const v of versions) {
     if (v.version <= lo || v.version > hi) continue;
@@ -51,10 +58,14 @@ export function changesBetween(versions: readonly AgentVersionView[], from: numb
       continue;
     }
     for (const stat of v.file_stats) {
-      const at = byPath.get(stat.path) ?? { additions: 0, deletions: 0, touched: 0 };
+      const at = byPath.get(stat.path) ?? { additions: 0, deletions: 0, touched: 0, added: false };
       at.additions += stat.additions;
       at.deletions += stat.deletions;
       at.touched += 1;
+      if (v.version < (earliest.get(stat.path) ?? Number.POSITIVE_INFINITY)) {
+        earliest.set(stat.path, v.version);
+        at.added = stat.status === "added";
+      }
       byPath.set(stat.path, at);
     }
   }

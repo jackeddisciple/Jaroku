@@ -266,6 +266,13 @@ export function AgentVersions({ detail }: { detail: AgentDetailView }) {
                       <Truncate variant="path" className="min-w-0 flex-1 font-mono text-tiny text-muted">
                         {path}
                       </Truncate>
+                      {/* `status` WAS ON EVERY STAT AND NEVER SHOWN, so the comparison could not say
+                          that a file was CREATED between the two rather than edited. */}
+                      {stat.added && (
+                        <Chip size="sm" caps color={STATUS.ok} className="shrink-0" title="Created between these two versions">
+                          new
+                        </Chip>
+                      )}
                       <DiffStat additions={stat.additions} deletions={stat.deletions} />
                       {stat.touched > 1 && (
                         <span className="shrink-0 text-tiny text-faint" title="Versions that touched this file">
