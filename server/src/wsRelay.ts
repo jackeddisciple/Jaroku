@@ -3632,6 +3632,8 @@ export interface AgentDetailView {
   /** Latency over the same window `outcomes` covers. Null rather than zero — see `percentiles`. */
   p50_ms: number | null;
   p95_ms: number | null;
+  /** The names the current deployment was given (`deployments.env_keys`), or null with none. */
+  deployment_env: string[] | null;
   /** Cost per run over the two windows §6's Health tab asks for. Null is unknown, never zero. */
   cost_per_run_7d: number | null;
   cost_per_run_30d: number | null;

@@ -29,7 +29,7 @@ const card = (over: Partial<AgentCardView> & { slug: string }): AgentCardView =>
 });
 
 const detailOf = (c: AgentCardView): AgentDetailView => ({
-  card: c, versions: [], tools: [], credentials: [], p50_ms: null, p95_ms: null,
+  card: c, versions: [], tools: [], credentials: [], p50_ms: null, p95_ms: null, deployment_env: null,
   cost_per_run_7d: null, cost_per_run_30d: null, evals: { datasets: [], last: null },
   threads: [], runs: [],
 });

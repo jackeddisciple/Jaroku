@@ -1534,6 +1534,8 @@ export interface AgentDetailView {
   credentials: { name: string; configured: boolean; scope: string | null }[];
   p50_ms: number | null;
   p95_ms: number | null;
+  /** The names the current deployment was given (`deployments.env_keys`), or null with none. */
+  deployment_env: string[] | null;
   cost_per_run_7d: number | null;
   cost_per_run_30d: number | null;
   evals: {

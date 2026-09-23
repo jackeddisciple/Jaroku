@@ -6554,7 +6554,7 @@ async function agentDetail(ctx: TenantContext, slug: string): Promise<AgentDetai
   if (!card) return undefined;
 
   const since30 = new Date(Date.now() - GRID_WINDOW_30_MS).toISOString();
-  const [versions, tools, refs, datasets, [lastEval], threads, runs, spend30, runs30] = await Promise.all([
+  const [versions, tools, refs, datasets, [lastEval], threads, runs, spend30, runs30, deployment] = await Promise.all([
     // `includeUndone`, BECAUSE THE PANEL IS THE HISTORY. Migration 014 marks an undo rather than
     // deleting it precisely so the undo stays evidence, and the version list has always known how to
     // draw one — dimmed, chipped, still restorable — for a row this read was filtering out.
@@ -6571,6 +6571,9 @@ async function agentDetail(ctx: TenantContext, slug: string): Promise<AgentDetai
     store.listRunsForAgent(ctx, card.slug, OUTCOME_WINDOW),
     billing.spendByAgent(ctx, since30),
     store.runCountSince(ctx, card.slug, since30),
+    // THE DEPLOYMENT'S OWN ROW, for the names it was given. The card carries which deployment is
+    // current and not what it holds, and the Deploy tab is about that deployment.
+    card.deployment ? deployStore.get(ctx, card.deployment.id) : Promise.resolve(null),
   ]);
 
   const byRef = new Map(tools.map((t) => [`${t.server_id}/${t.name}`, t]));
@@ -6654,6 +6657,10 @@ async function agentDetail(ctx: TenantContext, slug: string): Promise<AgentDetai
     })),
     p50_ms: p50,
     p95_ms: p95,
+    // WHAT THE DEPLOYMENT WAS GIVEN, NOT WHAT THE AGENT DECLARES. The Deploy tab printed
+    // `required_env` under a heading that reads as this deployment's environment, and the two differ
+    // exactly when it matters: a credential declared after the deploy, or one unticked at deploy time.
+    deployment_env: deployment ? deployment.env_keys : null,
     cost_per_run_7d: perRun(card.spend_7d, card.runs_7d),
     cost_per_run_30d: perRun(spend30Usd, runs30),
     evals: {

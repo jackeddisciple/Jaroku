@@ -367,6 +367,10 @@ function Health({ detail }: { detail: AgentDetailView }) {
 function Deploy({ detail }: { detail: AgentDetailView }) {
   const a = detail.card;
   const setTab = useUiStore((s) => s.setRightTab);
+  /** Names the agent declares that the deployment was never given. Empty when unrecorded. */
+  const notGiven = detail.deployment_env === null
+    ? []
+    : a.required_env.filter((name) => !detail.deployment_env!.includes(name));
 
   if (!a.deployment) {
     return (
@@ -424,17 +428,25 @@ function Deploy({ detail }: { detail: AgentDetailView }) {
         </div>
       )}
 
-      <Section label="Environment" hint="names only">
-        {a.required_env.length === 0 ? (
+      {/* THE DEPLOYMENT'S NAMES, NOT THE AGENT'S. This printed `required_env`, which is what the
+          agent declares, under a heading inside a tab about one deployment — and the two differ
+          exactly when it matters. What the agent needs and the deployment lacks is said below. */}
+      <Section label="Environment" hint="names this deployment was given — never values">
+        {detail.deployment_env === null ? (
+          <div className="text-tiny text-faint">Not recorded for this deployment.</div>
+        ) : detail.deployment_env.length === 0 ? (
           <div className="text-tiny text-faint">None.</div>
         ) : (
           <div className="flex flex-wrap gap-1.5">
-            {a.required_env.map((name) => (
-              <Chip key={name} size="sm" mono tone={a.missing_env.includes(name) ? "ink" : "faint"}
-                color={a.missing_env.includes(name) ? STATUS.error : undefined}>
-                {name}
-              </Chip>
+            {detail.deployment_env.map((name) => (
+              <Chip key={name} size="sm" mono tone="faint">{name}</Chip>
             ))}
+          </div>
+        )}
+        {notGiven.length > 0 && (
+          <div className="mt-1.5 text-tiny leading-[1.5]" style={{ color: STATUS.error }}>
+            This agent requires {notGiven.join(", ")}, which this deployment was not given. Redeploy to
+            add {notGiven.length === 1 ? "it" : "them"}.
           </div>
         )}
       </Section>
