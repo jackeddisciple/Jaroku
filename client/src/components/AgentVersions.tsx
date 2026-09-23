@@ -7,10 +7,11 @@
 //
 // DIFFING ANY TWO VERSIONS, WITHOUT A DIFF ENGINE. §6 asks for it, and what a version row carries is
 // `file_stats` — what CHANGED in that version — so the honest answer to "what is between v3 and v7"
-// is the union of the stats of v4 through v7. That is a real, exact answer to "which files moved and
-// by how much between these two points", and it is NOT a line-by-line diff: producing one would mean
-// fetching two versions out of the object store and running a differ in the browser, for a question
-// the code viewer already answers per file. So the comparison names the files and the figures, and
+// is the union of the stats of v4 through v7 — less any version an undo took out of v7's lineage,
+// which lib/versionSpan.ts leaves out and names. That is a real, exact answer to "which files moved
+// and by how much between these two points", and it is NOT a line-by-line diff: producing one would
+// mean fetching two versions out of the object store and running a differ in the browser, for a
+// question the code viewer already answers per file. So the comparison names the files and the figures, and
 // the file browser below is where somebody reads the text.
 //
 // RESTORE PUBLISHES FORWARD. The button says so, because the distinction is the whole safety
@@ -25,6 +26,7 @@ import { DiffStat } from "./DiffStat.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { CollapsibleRegion } from "./CollapsibleRegion.tsx";
 import { sendLoadAgentVersion, sendRestoreAgentVersion } from "../lib/socket.ts";
+import { changesBetween, skippedSentence } from "../lib/versionSpan.ts";
 import { fmtBytes } from "../lib/agentFormat.ts";
 import { relTime } from "../lib/format.ts";
 import { ACCENT, ICON, STATUS, TEXT } from "../lib/tokens.ts";
@@ -45,30 +47,6 @@ const SOURCE_COLOR: Record<AgentVersionView["source"], string> = {
 
 /** The two ends of a comparison, or fewer. */
 type Selection = { from: number | null; to: number | null };
-
-/**
- * The union of what changed between two versions, exclusive of the lower one.
- *
- * EXCLUSIVE OF `from` AND INCLUSIVE OF `to`, which is what "between v3 and v7" means to somebody
- * asking: v3's own changes are what got it TO v3 and are not between the two. Summed per path rather
- * than concatenated, because a file touched in three of the four versions is one row with the total.
- */
-function changesBetween(versions: readonly AgentVersionView[], from: number, to: number) {
-  const lo = Math.min(from, to);
-  const hi = Math.max(from, to);
-  const byPath = new Map<string, { additions: number; deletions: number; touched: number }>();
-  for (const v of versions) {
-    if (v.version <= lo || v.version > hi) continue;
-    for (const stat of v.file_stats) {
-      const at = byPath.get(stat.path) ?? { additions: 0, deletions: 0, touched: 0 };
-      at.additions += stat.additions;
-      at.deletions += stat.deletions;
-      at.touched += 1;
-      byPath.set(stat.path, at);
-    }
-  }
-  return [...byPath.entries()].sort(([a], [b]) => a.localeCompare(b));
-}
 
 function VersionRow({
   version,
@@ -195,7 +173,11 @@ export function AgentVersions({ detail }: { detail: AgentDetailView }) {
   };
 
   const both = selection.from !== null && selection.to !== null;
-  const changes = both ? changesBetween(detail.versions, selection.from!, selection.to!) : [];
+  const span = both ? changesBetween(detail.versions, selection.from!, selection.to!) : null;
+  const changes = span?.changes ?? [];
+  // SAID, NOT SILENTLY SUBTRACTED. An undone version inside the span is in the list right beside
+  // this box, and a sum that left it out without a word would read as one that forgot it.
+  const skipped = span ? skippedSentence(span.skipped) : null;
 
   return (
     <div className="border-b border-hair px-4 py-3">
@@ -253,6 +235,7 @@ export function AgentVersions({ detail }: { detail: AgentDetailView }) {
                   ))}
                 </div>
               )}
+              {skipped && <div className="mt-1.5 text-tiny text-faint">{skipped}</div>}
             </div>
           )}
 

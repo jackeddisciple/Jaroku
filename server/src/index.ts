@@ -6551,7 +6551,10 @@ async function agentDetail(ctx: TenantContext, slug: string): Promise<AgentDetai
 
   const since30 = new Date(Date.now() - GRID_WINDOW_30_MS).toISOString();
   const [versions, tools, refs, datasets, [lastEval], threads, runs, spend30, runs30] = await Promise.all([
-    agentRepo.versions(ctx, card.uuid),
+    // `includeUndone`, BECAUSE THE PANEL IS THE HISTORY. Migration 014 marks an undo rather than
+    // deleting it precisely so the undo stays evidence, and the version list has always known how to
+    // draw one — dimmed, chipped, still restorable — for a row this read was filtering out.
+    agentRepo.versions(ctx, card.uuid, true),
     mcpRegistry.allTools(ctx),
     secretRefs.list(ctx),
     evalStore.listDatasets(ctx, card.slug),

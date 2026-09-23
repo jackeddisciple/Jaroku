@@ -1276,6 +1276,7 @@ jobs:
           # this feature that looks deliberate.
           npm run test:agent-faces
           npm run test:agent-tags
+          npm run test:version-span
           npm run test:agent-filter
           npm run test:agent-context
           # THE INBOX BOARD'S ARRANGEMENT RULES, which are the same kind of thing as the four above:
