@@ -296,9 +296,18 @@ export function DatasetBuilder() {
 
   const [newInput, setNewInput] = useState("");
   const [importNote, setImportNote] = useState<string | null>(null);
+  /**
+   * The dataset's new name while it is being typed, or null when nobody is renaming.
+   *
+   * A FIELD IN THE ROW, NOT `window.prompt`. The desktop webview shows no JavaScript dialogs —
+   * `prompt()` returns null there without asking — so Rename did nothing in the desktop app.
+   */
+  const [renaming, setRenaming] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const examples = examplesOf(examplesByDataset, selectedDatasetId);
   const selected = datasets.find((d) => d.id === selectedDatasetId);
+  // A half-typed rename belongs to the dataset it was started on, not to the next one picked.
+  useEffect(() => setRenaming(null), [selectedDatasetId]);
 
   // Datasets are per-agent; re-list whenever the agent (or the connection) changes.
   useEffect(() => {
@@ -382,17 +391,47 @@ export function DatasetBuilder() {
             form toolbar rather than as the actions on a dataset. Every mark here already existed
             in the icon set; the words are the tooltips. */
         <div className="flex shrink-0 items-center gap-1 px-4 pb-2">
+          {renaming !== null ? (
+            <form
+              className="flex min-w-0 flex-1 items-center gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const name = renaming.trim();
+                if (name && name !== selected.name) sendRenameDataset(selected.id, name);
+                setRenaming(null);
+              }}
+            >
+              <input
+                value={renaming}
+                onChange={(e) => setRenaming(e.target.value)}
+                onKeyDown={(e) => {
+                  // The panel's own keys must not fire from a field somebody is typing a name into.
+                  e.stopPropagation();
+                  if (e.key === "Escape") setRenaming(null);
+                }}
+                autoFocus
+                aria-label="Dataset name"
+                className="min-w-0 flex-1 rounded-input border border-edge bg-elevated px-2 py-0.5 text-caption text-ink outline-none focus-visible:shadow-focusring"
+              />
+              <button type="submit" className="shrink-0 text-tiny font-medium text-ink underline underline-offset-2">Rename</button>
+              <button
+                type="button"
+                onClick={() => setRenaming(null)}
+                className="shrink-0 text-tiny font-medium text-muted underline underline-offset-2"
+              >
+                Cancel
+              </button>
+            </form>
+          ) : (
           <button
-            onClick={() => {
-              const name = window.prompt("Rename dataset", selected.name);
-              if (name && name.trim()) sendRenameDataset(selected.id, name.trim());
-            }}
+            onClick={() => setRenaming(selected.name)}
             title="Rename this dataset"
             aria-label="Rename this dataset"
             className="rounded-control p-1 text-faint transition-colors hover:bg-active active:bg-chrome hover:text-ink"
           >
             <Icon.evals.renameDataset size={ICON.xs} />
           </button>
+          )}
           <button
             onClick={() => fileRef.current?.click()}
             title="Import examples from a CSV"
