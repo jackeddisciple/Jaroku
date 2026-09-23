@@ -490,6 +490,16 @@ console.log("\nwhat connected, in two words");
     seen("Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0") === "Firefox on Linux",
     "a real Linux desktop is still Linux",
   );
+  // THE DESKTOP APP ITSELF, as its WKWebView actually introduces itself: Safari's header without
+  // the Safari token, and nothing that says Tauri. It was listed as a bare "macOS".
+  check(
+    seen("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)") === "Jaroku desktop on macOS",
+    "the macOS desktop app is the desktop app, not an unnamed browser",
+  );
+  check(
+    seen("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15") === "Safari on macOS",
+    "...while Safari, which says Safari, is still Safari",
+  );
 
   // AN UNRECOGNISED AGENT IS NULL, NOT A WORD. The panel renders nothing for a null and would
   // render "Unknown" for a string — and "Unknown browser" beside somebody's name reads as a warning

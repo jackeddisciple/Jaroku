@@ -6095,6 +6095,12 @@ export function describeClient(userAgent: string | undefined): string | null {
     // than falling through to a browser, because "Chrome on Windows" for somebody using the
     // desktop app is a wrong answer that looks like a right one.
     : /\bTauri\/|\bwv\b|\bElectron\//.test(ua) ? "Jaroku desktop"
+    // AND THE macOS WRAPPER IS NONE OF THOSE. Its WKWebView sends Safari's User-Agent with the
+    // `Version/… Safari/…` tail left off — `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)
+    // AppleWebKit/605.1.15 (KHTML, like Gecko)`, read off the running app — and no Tauri mark at
+    // all, so the desktop app's own sessions matched no browser and were listed as a bare "macOS".
+    // WebKit on a Mac with no browser token is an embedded view, and ours is the one that connects.
+    : /\bMacintosh\b/.test(ua) && /\bAppleWebKit\//.test(ua) ? "Jaroku desktop"
     : null;
   const os =
     /\bWindows NT\b/.test(ua) ? "Windows"
