@@ -13,17 +13,7 @@
 
 import { useState } from "react";
 import { Chip } from "./Chip.tsx";
-import { agentTagRow, tagColour, type AgentTag, type TagInput } from "../lib/agentTags.ts";
-
-/**
- * SENTENCE CASE, NOT CAPS — the product owner's call, with a reference.
- *
- * The labels are lowercase at the source (`agentTags.ts`) and were uppercased by the chip, so a row
- * read `IDLE UNVERIFIED DRAFT`. Capitalising only the first letter is what the reference shows and
- * is also the only transform that survives a two-word label: CSS `capitalize` would give
- * `High-Impact Tools`, and `high-impact tools` is one thing rather than three.
- */
-const sentence = (label: string): string => label.charAt(0).toUpperCase() + label.slice(1);
+import { agentTagRow, tagColour, tagLabel, type AgentTag, type TagInput } from "../lib/agentTags.ts";
 
 function Tag({ tag }: { tag: AgentTag }) {
   const colour = tagColour(tag);
@@ -44,7 +34,8 @@ function Tag({ tag }: { tag: AgentTag }) {
       // `currentColor` rather than the value again: the chip has already set the text to it.
       icon={<span className="block h-1.5 w-1.5 rounded-full bg-current" />}
     >
-      {sentence(tag.label)}
+      {/* SENTENCE CASE, EXCEPT FOR AN IDENTIFIER — see `tagLabel`. */}
+      {tagLabel(tag.label)}
     </Chip>
   );
 }

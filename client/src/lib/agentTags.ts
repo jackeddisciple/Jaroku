@@ -37,6 +37,24 @@ import { STATUS, TAG_TINT, TEXT } from "./tokens.ts";
 export const TAG_FAMILIES = ["attention", "runtime", "deploy", "health", "lifecycle"] as const;
 export type TagFamily = (typeof TAG_FAMILIES)[number];
 
+/**
+ * A tag's label as the row prints it: SENTENCE CASE, NOT CAPS — the product owner's call.
+ *
+ * The labels are lowercase at the source and were uppercased by the chip, so a row read `IDLE
+ * UNVERIFIED DRAFT`. Capitalising only the first letter is also the only transform that survives a
+ * two-word label: CSS `capitalize` would give `High-Impact Tools`, and `high-impact tools` is one
+ * thing rather than three.
+ *
+ * AN IDENTIFIER IS LEFT AS WRITTEN. The drift tag's label is `v2 → v4`, and capitalising it gave
+ * `V2 → v4` — one spelling on each side of the arrow, beside the card body's `v2 → v4`. A first
+ * word with a digit in it is a name for something, not the start of a sentence.
+ */
+export function tagLabel(label: string): string {
+  const first = label.split(/\s/, 1)[0] ?? "";
+  if (/\d/.test(first)) return label;
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
 /** The five colours, and nothing else. A sixth meaning is a question, not a hex value. */
 export type TagTone = "amber" | "rose" | "green" | "grey";
 

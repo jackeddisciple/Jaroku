@@ -15,7 +15,7 @@
 //   npm run test:agent-tags
 
 import {
-  NEW_WINDOW_MS, TAG_LIMIT, agentTagRow, agentTags, isNew, type TagInput,
+  NEW_WINDOW_MS, TAG_LIMIT, agentTagRow, agentTags, isNew, tagLabel, type TagInput,
 } from "./agentTags.ts";
 
 let fail = 0;
@@ -229,6 +229,14 @@ console.log("\nRuntime and Health never collapse (§5.4's own example)");
   check("...and both are still visible after the row is trimmed to three",
     row.shown.some((t) => t.id === "idle") && row.shown.some((t) => t.id === "failing"),
     row.shown.map((t) => t.id).join(" · "));
+}
+
+console.log("\nthe row prints labels in sentence case, and an identifier as written");
+{
+  check("a word is capitalised", tagLabel("unverified") === "Unverified");
+  check("...and only the first of a phrase", tagLabel("high-impact tools") === "High-impact tools");
+  // THE BUG: `v2 → v4` became `V2 → v4`, beside the card body's `v2 → v4`.
+  check("a version is left as written", tagLabel("v2 → v4") === "v2 → v4", tagLabel("v2 → v4"));
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
