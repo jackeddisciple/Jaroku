@@ -268,8 +268,12 @@ console.log("\nwhat not to build");
   const natives = CODE.filter((f) => /<select\b/.test(f.text)).map((f) => f.path);
   check("no native select, ever", natives.length === 0, natives.join(", "));
 
-  const toasts = CODE.filter((f) => /\btoast\b/i.test(f.text)).map((f) => f.path);
-  check("no toasts", toasts.length === 0, toasts.join(", "));
+  // §15 SAID NO TOASTS, AND THE PRODUCT OWNER REVERSED IT on 2026-09-23: the refusal strip under the
+  // header came and went and moved the fleet and the list each time. Refusals and results are said in
+  // the app's shared corner toast now; a failed job's row still keeps its reason. What this holds is
+  // the rule that replaced it — nothing in the tab comes and goes as a row.
+  const view = CODE.find((f) => f.path === "components/CockpitView.tsx")!.text;
+  check("a refusal is not a strip that moves the list", !/\{error && \(/.test(view));
 
   // NO SECOND TRACE VIEWER. The detail panel links out through `loadRun` and renders no steps.
   const detail = CODE.find((f) => f.path === "components/WorkDetail.tsx")!.text;

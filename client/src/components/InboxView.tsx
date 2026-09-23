@@ -63,6 +63,7 @@ import { sendSnoozeInboxItem } from "../lib/socket.ts";
 import { PersonIcon } from "./inboxIcons.tsx";
 import type { InboxItemView, InboxSeverity } from "../types.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
+import { useToastFrom } from "./Toast.tsx";
 
 /**
  * §5.3's zero state. "Celebrate it. Do not apologise for it, do not offer suggestions, do not fill
@@ -305,6 +306,8 @@ export function InboxView() {
   const cleared = useInboxStore((s) => s.clearedThisWeek);
   const loaded = useInboxStore((s) => s.loaded);
   const error = useInboxStore((s) => s.error);
+  // A refusal is said in the corner toast, not as a strip that moves the board down under it.
+  useToastFrom(error, () => useInboxStore.setState({ error: null }), "err");
   const workspaceName = useSessionStore((s) => s.workspaces.find((w) => w.id === s.workspaceId)?.name ?? null);
   // Whether this view's mutations can actually leave the tab. The composer has read the same thing
   // since it was written, and a dropped write is invisible.
@@ -487,10 +490,6 @@ export function InboxView() {
           size={ICON.xs}
         />
       </div>
-
-      {error && (
-        <div className="shrink-0 border-b border-hair px-5 py-2 text-tiny text-err">{error}</div>
-      )}
 
       {/* §3'S ONE SEAM BETWEEN TWO TABS. A deployed run waiting on an MCP confirmation is blocking
           in this board's sense and waiting on you in the Cockpit's — and it has ONE home, which is

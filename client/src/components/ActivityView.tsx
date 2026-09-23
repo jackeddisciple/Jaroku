@@ -32,6 +32,7 @@ import { useTraceStore } from "../store/traceStore.ts";
 import { Truncate } from "./Truncate.tsx";
 import { Segmented } from "./Segmented.tsx";
 import { Icon } from "../lib/icons/registry.ts";
+import { useToastFrom } from "./Toast.tsx";
 
 /**
  * §1's greeting: the time of day, by the clock on the machine reading it.
@@ -182,6 +183,8 @@ export function ActivityView({ children }: { children?: React.ReactNode }) {
   const range = useActivityStore((s) => s.range);
   const custom = useActivityStore((s) => s.custom);
   const error = useActivityStore((s) => s.error);
+  // A failed read is said in the corner toast, not as a strip that moves every card down under it.
+  useToastFrom(error, () => useActivityStore.setState({ error: null }), "err");
   const setRange = useActivityStore((s) => s.setRange);
   const workspaceId = useSessionStore((s) => s.workspaceId);
   const connected = useTraceStore((s) => s.connection === "open");
@@ -212,11 +215,6 @@ export function ActivityView({ children }: { children?: React.ReactNode }) {
   return (
     <div className="flex h-full flex-col bg-bg">
       <Header />
-      {error && (
-        <div className="shrink-0 border-b border-err/30 bg-err/10 px-5 py-2 text-tiny text-err">
-          {error}
-        </div>
-      )}
       {/* The one scroll container. Cards never scroll individually except the feed, which owns its
           own viewport because it is virtualised. */}
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">

@@ -57,6 +57,7 @@ import { WorkDetail } from "./WorkDetail.tsx";
 import { WorkList } from "./WorkList.tsx";
 import { RocketIcon } from "./panelIcons.tsx";
 import { Icon } from "../lib/icons/registry.ts";
+import { useToastFrom } from "./Toast.tsx";
 
 /**
  * §3A's header bar, which is the Inbox's header — copied literally rather than approximated.
@@ -147,6 +148,11 @@ export function CockpitView() {
   const loaded = useWorkStore((s) => s.loaded);
   const anyLive = useWorkStore((s) => s.anyLive);
   const error = useWorkStore((s) => s.error);
+  // §10's refusal, said in the corner toast. It was a strip under the header on the argument that a
+  // toast disappears before somebody has read which job failed — but the job's own row already keeps
+  // that: `refuseOptimistic` turns it into a failed row carrying the reason, which is what somebody
+  // finds later. The strip moved the fleet and the list down every time it came and went.
+  useToastFrom(error, () => useWorkStore.setState({ error: null }), "err");
   const setFilters = useWorkStore((s) => s.setFilters);
   const takeCockpitAgentIntent = useUiStore((s) => s.takeCockpitAgentIntent);
   const workspaceId = useSessionStore((s) => s.workspaceId);
@@ -175,14 +181,6 @@ export function CockpitView() {
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-canvas">
       <Header />
-
-      {/* §10: ERRORS GO WHERE THE INBOX'S GO — a `text-tiny text-err` strip under the header, with
-          the same bottom hairline. NOT A TOAST: "a toast for a dispatch failure disappears before
-          the user has read which job failed", and four of this tab's verbs spend money or stop
-          something. It stays until the next snapshot clears it. */}
-      {error && (
-        <div className={`shrink-0 border-b border-hair py-2 text-tiny text-err ${SPINE_X}`}>{error}</div>
-      )}
 
       {/* §3B: THE STRIP, DIRECTLY UNDER THE HEADER, and it is `shrink-0` so it never gives up
           height to the list. It renders whatever the fleet holds — including nothing, while the
