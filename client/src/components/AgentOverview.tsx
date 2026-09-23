@@ -154,9 +154,14 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
               <Chip size="sm" mono tone="faint" title="The slug — the directory on disk, and the id every run row names">
                 {a.slug}
               </Chip>
-              <Chip size="sm" tone="faint" title="The version currently live">
-                v{a.current_version}
-              </Chip>
+              {/* ONLY WHEN SOMETHING IS LIVE. `current_version` starts at 1 on every row whether or
+                  not a version exists behind it, so a draft wore a `v1` chip over a history that
+                  said nothing had been published. `version_source` is null exactly then. */}
+              {a.version_source !== null && (
+                <Chip size="sm" tone="faint" title="The version currently live">
+                  v{a.current_version}
+                </Chip>
+              )}
               {/* §6'S CATEGORY, WHERE THE OTHER TWO IDENTIFIERS ARE. `Uncategorized` is left out on
                   the same rule §7 gives the sidebar: an agent nobody has categorised should read as
                   a name, not as a name and a placeholder. The control that SETS it is in the
@@ -291,7 +296,12 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
           />
           <Fact
             label="Live version"
-            value={`v${a.current_version}${a.version_source ? ` · ${a.version_source}` : ""}`}
+            // NOT PUBLISHED IS SAID, the way Health says it, rather than a `v1` that names nothing.
+            value={
+              a.version_source === null
+                ? <span className="text-faint">not published</span>
+                : `v${a.current_version} · ${a.version_source}`
+            }
             // THE HEALTH TAB'S VERDICT, IN ITS SHORT FORM. This was a two-way branch that gave
             // "Published through the validator" to everything that was not an import — including a
             // draft that had published nothing and a deploy version the validator never saw.
