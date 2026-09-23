@@ -189,6 +189,26 @@ console.log("\n§16.1 — every pressable thing is reachable by Tab");
   }
 }
 
+console.log("\nno control waits on a JavaScript dialog the desktop app cannot show");
+{
+  // THE DESKTOP WEBVIEW IMPLEMENTS NONE OF THEM. `confirm()` answers false, `prompt()` answers null
+  // and `alert()` shows nothing, without a window ever appearing — so every control built on one
+  // was dead in the product's main shell and alive in a browser, which is where it got tested. The
+  // agent card's Archive and Rename, a version's Restore, a dataset's Rename and a dirty note's
+  // Cancel all shipped that way. Asked in the interface instead; this keeps it so.
+  //
+  // Every .ts and .tsx, not only components: a helper that wrapped `confirm` would be the same bug
+  // one import away.
+  const sources = readdirSync(SRC, { recursive: true })
+    .map((entry) => String(entry).replace(/\\/g, "/"))
+    .filter((path) => /\.tsx?$/.test(path) && !/\.test\.tsx?$/.test(path))
+    .map((path) => ({ path, text: strip(readFileSync(`${SRC}/${path}`, "utf8")) }));
+  const offenders = sources.flatMap(({ path, text }) =>
+    text.split("\n").flatMap((line, i) =>
+      /(?:\bwindow\.|(?<![\w.])(?:globalThis\.)?)(?:confirm|prompt|alert)\s*\(/.test(line) ? [`${path}:${i + 1}`] : []));
+  check(offenders.length === 0, "nothing calls confirm(), prompt() or alert()", offenders.join(", "));
+}
+
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
 // Reached through globalThis, like every other suite here: the client has no @types/node on
 // purpose, so that a component touching `process` fails to compile rather than fails to run.
