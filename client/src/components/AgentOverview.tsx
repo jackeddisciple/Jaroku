@@ -304,7 +304,7 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
         {a.outcomes.length > 0 && (
           <div className="flex min-w-0 items-center gap-2">
             <span className="shrink-0 text-tiny uppercase tracking-wider text-faint">Recent runs</span>
-            <AgentSparkline outcomes={a.outcomes} height={14} />
+            <AgentSparkline outcomes={a.outcomes} height={14} fromDetail />
           </div>
         )}
       </div>

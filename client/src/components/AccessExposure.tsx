@@ -30,7 +30,9 @@ import { useUiStore } from "../store/uiStore.ts";
 import type { Exposure } from "../store/accessStore.ts";
 
 export function AccessExposure({ exposure }: { exposure: Exposure | undefined }) {
-  const setTab = useUiStore((s) => s.setRightTab);
+  // OUT OF THE AGENT DETAIL, WITH THE WAY BACK — this renders inside its Access tab. See
+  // `uiStore.agentReturn`.
+  const setTab = useUiStore((s) => s.leaveAgentFor);
 
   if (!exposure) {
     return <div className="text-tiny text-faint">Reading what is deployed…</div>;

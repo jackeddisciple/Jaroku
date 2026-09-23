@@ -52,9 +52,12 @@ const LABEL: Record<AgentRunBar["outcome"], string> = {
  * exists. Reaching into `traceStore` directly here would produce the chimera it was written to
  * prevent: this agent's name above another agent's trace.
  */
-function openRun(bar: AgentRunBar): void {
+function openRun(bar: AgentRunBar, fromDetail: boolean): void {
   selectRun(bar.run_id, { fromNav: true });
-  useUiStore.getState().setRightTab("trace");
+  // FROM THE DETAIL, WITH THE WAY BACK — see `uiStore.agentReturn`. From a card in the grid there is
+  // no detail to go back to, so it is an ordinary move to the Trace tab.
+  if (fromDetail) useUiStore.getState().leaveAgentFor("trace");
+  else useUiStore.getState().setRightTab("trace");
   if (bar.failed_step_id) {
     const trace = useTraceStore.getState();
     trace.selectStep(bar.failed_step_id);
@@ -71,11 +74,14 @@ export function AgentSparkline({
   max = 20,
   height = 14,
   className = "",
+  fromDetail = false,
 }: {
   outcomes: readonly AgentRunBar[];
   max?: number;
   height?: number;
   className?: string;
+  /** Drawn inside the agent detail, so a bar that opens a trace leaves a way back to it. */
+  fromDetail?: boolean;
 }) {
   // Oldest first is how the server sends it and how a sparkline is read, so the slice comes off the
   // FRONT — dropping history rather than the runs somebody is asking about.
@@ -135,7 +141,7 @@ export function AgentSparkline({
             // The card behind this opens the AGENT; a bar opens a RUN. Two destinations one pixel
             // apart, which is exactly why the bar has to stop the click rather than let it through.
             e.stopPropagation();
-            openRun(bar);
+            openRun(bar, fromDetail);
           }}
           title={`${LABEL[bar.outcome]} · ${relTime(bar.started_at)}${bar.failed_step_id ? " — opens on the failing step" : ""}`}
           aria-label={`Run ${LABEL[bar.outcome]} ${relTime(bar.started_at)}`}

@@ -32,7 +32,9 @@ import { AgentDetail } from "./AgentDetail.tsx";
 import { useAgentGridStore } from "../store/agentGridStore.ts";
 import { ICON } from "../lib/tokens.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
-import { AlertTriangleIcon, ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, RefreshIcon } from "./panelIcons.tsx";
+import {
+  AlertTriangleIcon, ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, ChevronLeftIcon, RefreshIcon,
+} from "./panelIcons.tsx";
 
 // TEN DESTINATIONS IN 40px OF WIDTH, as glyphs in a vertical rail rather than as ten words in a
 // horizontal strip.
@@ -180,6 +182,32 @@ export function useRightPanelFollow(): void {
   }, [genStatus]);
 }
 
+/**
+ * "Back to <agent>", over a tab the agent detail sent somebody to.
+ *
+ * THE DETAIL IS ONE SLOT OF THIS PANEL, so every link out of it replaced it: the Deploy tab's
+ * rocket, "Run an eval", a sparkline bar, a run. The destinations are right — this is the return
+ * trip they lacked. The rail's Agent cell was always a way back, but an unlabelled glyph among
+ * eleven is not one anybody finds from a build log; this is the same move, said in words, where
+ * they are looking. Only on the tab the detail chose (`agentReturn`), and only while an agent is
+ * open — go anywhere else and it is gone, because then they left on purpose.
+ */
+function BackToAgent({ tab }: { tab: RightTab }) {
+  const agentReturn = useUiStore((s) => s.agentReturn);
+  const name = useAgentGridStore((s) => (s.openAgentId ? (s.detail?.card.name ?? s.openAgentId) : null));
+  if (!name || agentReturn !== tab || tab === "agent") return null;
+  return (
+    <button
+      type="button"
+      onClick={() => useUiStore.getState().setRightTab("agent")}
+      className="flex w-full shrink-0 items-center gap-1 border-b border-hair px-3 py-1.5 text-left text-tiny text-muted transition-colors duration-fast hover:bg-active/40 hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+    >
+      <ChevronLeftIcon size={ICON.xs} />
+      <span className="min-w-0 truncate">Back to {name}</span>
+    </button>
+  );
+}
+
 export function RightPanel() {
   const tab = useShownTab();
 
@@ -192,6 +220,7 @@ export function RightPanel() {
   // creates no scroll container at all, so there is nothing to scroll.
   return (
     <div className="relative flex h-full min-w-0 flex-col overflow-clip bg-bg">
+      <BackToAgent tab={tab} />
       <div className="flex-1 min-h-0">
         {tab === "agent" ? <AgentDetail />
           : tab === "graph" ? <GraphView />

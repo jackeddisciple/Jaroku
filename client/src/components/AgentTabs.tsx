@@ -41,6 +41,7 @@ import { useMcpStore } from "../store/mcpStore.ts";
 import { useCanRun } from "../lib/useCapability.ts";
 import { sendSetAgentTools } from "../lib/socket.ts";
 import { useThreadStore } from "../store/threadStore.ts";
+import { useAgentGridStore } from "../store/agentGridStore.ts";
 import type { AgentDetailView } from "../types.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { ProviderMark } from "../lib/icons.tsx";
@@ -330,7 +331,7 @@ function Health({ detail }: { detail: AgentDetailView }) {
         {a.outcomes.length === 0 ? (
           <div className="text-tiny text-faint">Nothing has run yet.</div>
         ) : (
-          <AgentSparkline outcomes={a.outcomes} height={20} />
+          <AgentSparkline outcomes={a.outcomes} height={20} fromDetail />
         )}
       </Section>
 
@@ -392,7 +393,8 @@ function Health({ detail }: { detail: AgentDetailView }) {
 /** Tab 3 — where it is serving, from which version, and how far behind that is. */
 function Deploy({ detail }: { detail: AgentDetailView }) {
   const a = detail.card;
-  const setTab = useUiStore((s) => s.setRightTab);
+  // OUT OF THE DETAIL, WITH THE WAY BACK — see `uiStore.agentReturn`.
+  const setTab = useUiStore((s) => s.leaveAgentFor);
   /** Names the agent declares that the deployment was never given. Empty when unrecorded. */
   const notGiven = detail.deployment_env === null
     ? []
@@ -500,7 +502,8 @@ function Deploy({ detail }: { detail: AgentDetailView }) {
 
 /** Tab 4 — the datasets this agent is scored against, and the last comparison. */
 function Evals({ detail }: { detail: AgentDetailView }) {
-  const setTab = useUiStore((s) => s.setRightTab);
+  // OUT OF THE DETAIL, WITH THE WAY BACK — see `uiStore.agentReturn`.
+  const setTab = useUiStore((s) => s.leaveAgentFor);
   const { datasets, last } = detail.evals;
 
   if (datasets.length === 0 && !last) {
@@ -575,7 +578,8 @@ function Evals({ detail }: { detail: AgentDetailView }) {
 function ThreadsAndRuns({ detail }: { detail: AgentDetailView }) {
   const selectThread = useThreadStore((s) => s.selectThread);
   const requestResume = useThreadStore((s) => s.requestResume);
-  const setTab = useUiStore((s) => s.setRightTab);
+  // OUT OF THE DETAIL, WITH THE WAY BACK — see `uiStore.agentReturn`.
+  const setTab = useUiStore((s) => s.leaveAgentFor);
 
   return (
     <div className="space-y-5 p-4">
@@ -662,9 +666,13 @@ export function AgentTabs({
    */
   stacked?: boolean;
 }) {
-  // CAPABILITIES IS THE DEFAULT (§6), and the state is per mount rather than global: which tab
-  // somebody last read about ONE agent is not a preference about the next one.
-  const [tab, setTab] = useState<TabId>("capabilities");
+  // CAPABILITIES IS THE DEFAULT (§6), and the choice is per AGENT: which tab somebody last read
+  // about ONE agent is not a preference about the next one. It is kept in the grid store rather than
+  // in this mount, so following a link out of the detail and back returns to the same tab.
+  const slug = detail.card.slug;
+  const tab = (useAgentGridStore((s) => s.detailTabs[slug]) ?? "capabilities") as TabId;
+  const setDetailTab = useAgentGridStore((s) => s.setDetailTab);
+  const setTab = (next: TabId): void => setDetailTab(slug, next);
   const personal = useSessionStore(
     (s) => s.workspaces.find((w) => w.id === s.workspaceId)?.kind === "personal",
   );

@@ -75,7 +75,7 @@ console.log("\nthe bar still opens the run rather than the card behind it");
 {
   // The one behaviour the widening must not break: two destinations a pixel apart.
   check("the click is stopped from the card", SPARKLINE.includes("e.stopPropagation()"));
-  check("...and opens the run", SPARKLINE.includes("openRun(bar)"));
+  check("...and opens the run", /openRun\(bar[,)]/.test(SPARKLINE));
   // The arrow keys must not reach the grid's own j/k cursor either.
   check("the arrow keys are stopped too",
     /moveFocus\(i,/.test(SPARKLINE) && SPARKLINE.split("e.stopPropagation()").length >= 3);

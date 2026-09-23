@@ -73,6 +73,17 @@ interface AgentGridState {
   /** `detailBasis` of the card the open detail was assembled from, or null with nothing open. */
   detailBuiltFrom: string | null;
 
+  /**
+   * Which of the detail's tabs each agent was last read on, by slug.
+   *
+   * PER AGENT, which is what the tab's old per-mount state was protecting — which tab somebody read
+   * about ONE agent is not a preference about the next — and OUTSIDE THE MOUNT, which is what it
+   * lacked: following the Deploy tab's rocket unmounts the detail, and coming back through the rail
+   * reopened it on Capabilities rather than on the tab somebody left from.
+   */
+  detailTabs: Record<string, string>;
+  setDetailTab: (slug: string, tab: string) => void;
+
   /** The version the file browser is showing, and its files. Null before anything is asked for. */
   version: { agentId: string; version: number; files: AgentFileView[] } | null;
   versionLoading: boolean;
@@ -128,6 +139,8 @@ export const useAgentGridStore = create<AgentGridState>((set, get) => ({
   detailLoading: false,
   detailStale: false,
   detailBuiltFrom: null,
+  detailTabs: {},
+  setDetailTab: (slug, tab) => set((s) => ({ detailTabs: { ...s.detailTabs, [slug]: tab } })),
   version: null,
   versionLoading: false,
   exportRequest: null,

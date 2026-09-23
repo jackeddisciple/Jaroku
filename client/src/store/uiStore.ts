@@ -363,6 +363,18 @@ interface UiState {
   /** The panel following something that happened elsewhere: the tab moves, the panel does not. */
   followRightTab: (t: RightTab) => void;
   /**
+   * The tab the open agent's detail sent somebody to, while they are still on it — or null.
+   *
+   * THE WAY BACK. Every link out of the detail — the Deploy tab's rocket, "Run an eval", a bar of
+   * the sparkline, a run row — swaps the right panel's one slot for another tab, and the detail they
+   * were reading was gone behind an unlabelled glyph in the rail. The panel draws "Back to <agent>"
+   * over the tab they landed on while this names it. Any other move to a tab forgets it, because
+   * then they went somewhere of their own accord.
+   */
+  agentReturn: RightTab | null;
+  /** Go to a tab FROM the agent detail, remembering the way back. See `agentReturn`. */
+  leaveAgentFor: (t: RightTab) => void;
+  /**
    * Whether the right panel is open. Chrome, not navigation, and NOT PERSISTED for the reason
    * `sidebarHidden` is not: every launch starts with it closed, the composer taking the width and
    * the rail left at the window's edge. It opens when somebody asks for a tab, or when there is
@@ -637,8 +649,10 @@ export const useUiStore = create<UiState>((set) => ({
     }),
 
   rightTab: "trace",
-  setRightTab: (rightTab) => set({ rightTab, rightPanelOpen: true }),
-  followRightTab: (rightTab) => set({ rightTab }),
+  setRightTab: (rightTab) => set({ rightTab, rightPanelOpen: true, agentReturn: null }),
+  followRightTab: (rightTab) => set({ rightTab, agentReturn: null }),
+  agentReturn: null,
+  leaveAgentFor: (rightTab) => set({ rightTab, rightPanelOpen: true, agentReturn: rightTab }),
   rightPanelOpen: false,
   setRightPanelOpen: (rightPanelOpen) => set({ rightPanelOpen }),
 

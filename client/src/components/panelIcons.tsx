@@ -356,6 +356,11 @@ export function ChevronRightIcon(p: P) {
   return svg(p, <path d="m9 18 6-6-6-6" />);
 }
 
+/** lucide:chevron-left — "back the way you came". Never a `‹` character. */
+export function ChevronLeftIcon(p: P) {
+  return svg(p, <path d="m15 18-6-6 6-6" />);
+}
+
 /** lucide:play — resume a paused run from its durable checkpoint. */
 export function PlayIcon(p: P) {
   return svg(p, <path d="M6 3.6a1 1 0 0 1 1.5-.87l12 8.4a1 1 0 0 1 0 1.74l-12 8.4A1 1 0 0 1 6 20.4z" />);
