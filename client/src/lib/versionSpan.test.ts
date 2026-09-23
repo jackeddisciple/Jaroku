@@ -28,6 +28,7 @@ const version = (
   undone_at: undoneDay === null ? null : at(undoneDay),
   created_at: at(day),
   created_by: null,
+  restored_from: null,
   current: false,
 });
 

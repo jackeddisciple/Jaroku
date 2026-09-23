@@ -3592,6 +3592,8 @@ export interface AgentVersionView {
   undone_at: string | null;
   created_at: string;
   created_by: string | null;
+  /** The version this one restored, when it is a restore (migration 081). Null otherwise. */
+  restored_from: number | null;
   /** True for the version `agents.current_version` points at. */
   current: boolean;
 }

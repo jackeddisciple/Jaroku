@@ -43,6 +43,8 @@ function Fact({ label, value, title }: { label: string; value: React.ReactNode; 
 
 export function AgentOverview({ detail }: { detail: AgentDetailView }) {
   const a = detail.card;
+  /** The version the live one restored, if it is a restore (migration 081). */
+  const restoredFrom = detail.versions.find((v) => v.current)?.restored_from ?? null;
   /** §6's "name your own", for an agent that already exists. Cleared once it has been sent. */
   const [customCategory, setCustomCategory] = useState("");
   /**
@@ -300,12 +302,16 @@ export function AgentOverview({ detail }: { detail: AgentDetailView }) {
             value={
               a.version_source === null
                 ? <span className="text-faint">not published</span>
-                : `v${a.current_version} · ${a.version_source}`
+                // A RESTORE SAYS WHAT IT RESTORED. It carries the copied version's source, and
+                // "v5 · generation" would claim a generation made v5.
+                : restoredFrom !== null
+                  ? `v${a.current_version} · restores v${restoredFrom}`
+                  : `v${a.current_version} · ${a.version_source}`
             }
             // THE HEALTH TAB'S VERDICT, IN ITS SHORT FORM. This was a two-way branch that gave
             // "Published through the validator" to everything that was not an import — including a
             // draft that had published nothing and a deploy version the validator never saw.
-            title={validatorVerdict(a.version_source, a.current_version).short}
+            title={validatorVerdict(a.version_source, a.current_version, restoredFrom).short}
           />
           <Fact
             label="Runs, 7 days"

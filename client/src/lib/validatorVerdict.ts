@@ -23,7 +23,40 @@ export interface Verdict {
   passed: boolean;
 }
 
-export function validatorVerdict(source: VersionSource, version: number): Verdict {
+/**
+ * The verdict on the live version.
+ *
+ * `restoredFrom` IS A RESTORE, which carries the source of the version it copied (migration 081):
+ * the bytes are that version's, so its verdict is theirs — and the sentence says it is a restore
+ * rather than letting the copy pass for the original.
+ */
+export function validatorVerdict(
+  source: VersionSource,
+  version: number,
+  restoredFrom: number | null = null,
+): Verdict {
+  if (source !== null && restoredFrom !== null) {
+    const of = `v${version} restores v${restoredFrom}`;
+    if (source === "import") {
+      return {
+        sentence: `${of}, which was published as-is and never went through the validator.`,
+        short: `Restores v${restoredFrom}, which the validator never saw`,
+        passed: false,
+      };
+    }
+    if (source === "deploy") {
+      return {
+        sentence: `${of}'s deploy artifacts, which were recorded rather than validated.`,
+        short: `Restores v${restoredFrom}'s deploy artifacts, recorded rather than validated`,
+        passed: false,
+      };
+    }
+    return {
+      sentence: `${of}, which passed the validator when it was published.`,
+      short: `Restores v${restoredFrom}, which passed the validator`,
+      passed: true,
+    };
+  }
   if (source === null) {
     return {
       sentence: "Nothing has been published, so nothing has been validated.",

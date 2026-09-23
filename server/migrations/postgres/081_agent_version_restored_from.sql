@@ -1,0 +1,21 @@
+-- 081_agent_version_restored_from — which version a restore copied, as a key rather than as prose.
+--
+-- WHAT WAS WRONG. `restoreAgentVersion` published its copy with `source = 'import'`, the one source
+-- the validator never saw, so restoring a version that HAD passed it marked the agent Unverified and
+-- the Health tab said the live version "was published as-is". The safe, reversible operation the
+-- panel recommends was the one that downgraded an agent — and the history kept the fact that it was
+-- a restore only in the summary text ("restored v1"), which nothing can key on without parsing it.
+--
+-- SO A RESTORE NOW CARRIES THE SOURCE OF THE VERSION IT COPIES, and this column says which version
+-- that was. The bytes are that version's bytes, so what the validator concluded about them is still
+-- true of them; `source` keeps answering the validator question, and `restored_from` is what lets the
+-- history say "restored from v1" instead of pretending a restore was a generation. Migration 049 made
+-- the same choice for a fork's provenance, for the same reason: a key, not a sentence.
+--
+-- NULLABLE AND WITHOUT A DEFAULT, which is what makes this an expand step: the version still serving
+-- during a rolling deploy does not name the column, its INSERTs leave it null, and null is the true
+-- answer for every version that was not a restore. No backfill — the summary text is the only record
+-- of which past versions were restores, and a migration that parsed it would be the thing this column
+-- exists so that nothing has to do.
+
+ALTER TABLE agent_versions ADD COLUMN restored_from INTEGER;

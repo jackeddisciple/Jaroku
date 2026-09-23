@@ -30,5 +30,19 @@ console.log("\n...and nothing else is");
   check("...and names no version it does not have", !/v1/.test(none.sentence + none.short));
 }
 
+console.log("\na restore is the version it copied, and says so");
+{
+  // THE BUG: a restore published as `import`, so restoring a version that had passed the validator
+  // said it "was published as-is". It carries the copied source now, and names the version.
+  const restored = validatorVerdict("generation", 5, 1);
+  check("restoring a version that passed keeps the pass", restored.passed);
+  check("...and says it is a restore of that version", restored.sentence.startsWith("v5 restores v1"), restored.sentence);
+  check("...in the tooltip too", /Restores v1/.test(restored.short), restored.short);
+  check("restoring an import is still not a pass", !validatorVerdict("import", 5, 2).passed);
+  check("restoring a deploy version is not one either", !validatorVerdict("deploy", 5, 4).passed);
+  check("a version that restored nothing reads as before",
+    validatorVerdict("edit", 5, null).sentence === "v5 passed the validator when it was published.");
+}
+
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
 (globalThis as { process?: { exit(code: number): void } }).process?.exit(failures === 0 ? 0 : 1);

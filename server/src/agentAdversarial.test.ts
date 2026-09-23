@@ -339,6 +339,17 @@ const leg = (over: Partial<ProviderMetrics>): ProviderMetrics => ({
         "...and saying which refs were dropped, rather than silently keeping fewer than were asked for",
         /dropped\.length > 0/.test(fn),
       );
+      // A GRANT CHANGE MUST NOT MARK AN AGENT UNVERIFIED. It published as `import`, the one source
+      // the validator never saw, over code that had not changed; it carries the live source now.
+      check("...carrying the live version's source rather than calling it an import",
+        /source: live\?\.source \?\? "import"/.test(fn) && !/source: "import"/.test(fn));
+
+      // AND A RESTORE THE SAME WAY, with the version it copied named (migration 081).
+      const restore = /async function restoreAgentVersion\([\s\S]*?\n\}/.exec(indexSource)?.[0] ?? "";
+      check("restoreAgentVersion exists to be read", restore.length > 0);
+      check("...publishing the restored version's own source, not `import`",
+        /source: row\.source/.test(restore) && !/source: "import"/.test(restore));
+      check("...and recording which version it restored", /restoredFrom: wanted/.test(restore));
     }
   } finally {
     await db.close();

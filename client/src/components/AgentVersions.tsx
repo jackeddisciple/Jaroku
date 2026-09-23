@@ -91,9 +91,24 @@ function VersionRow({
             live
           </Chip>
         )}
-        <Chip size="sm" caps color={SOURCE_COLOR[version.source]} className="shrink-0" title="What made this version">
-          {version.source}
-        </Chip>
+        {/* A RESTORE NAMES WHAT IT RESTORED, instead of its source. It carries the copied version's
+            source so the validator's verdict survives it (migration 081), and a `generation` chip on
+            it would claim a model wrote a version that is somebody pressing Restore. */}
+        {version.restored_from !== null ? (
+          <Chip
+            size="sm"
+            caps
+            color={SOURCE_COLOR[version.source]}
+            className="shrink-0"
+            title={`v${version.restored_from}'s files, published again — its source was ${version.source}`}
+          >
+            restored v{version.restored_from}
+          </Chip>
+        ) : (
+          <Chip size="sm" caps color={SOURCE_COLOR[version.source]} className="shrink-0" title="What made this version">
+            {version.source}
+          </Chip>
+        )}
         {/* AN UNDONE VERSION IS SHOWN RATHER THAN HIDDEN. Migration 014 marks rather than deletes
             precisely so an undo stays evidence — the row is dimmed and says so, and it is still a
             version somebody can restore, because its objects were never touched. */}

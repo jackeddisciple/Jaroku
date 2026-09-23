@@ -278,6 +278,24 @@ console.log("\na version says who published it");
     (await agents.version(A, bot.id, bySystem.version))?.created_by === null);
 }
 
+console.log("\na restore keeps the source of the version it copied, and names that version (081)");
+{
+  const bot = await agents.upsertFromDisk(A, { slug: "restored_bot" });
+  const generated = (await projects.publish(A, bot.id, [{ path: "agent.py", content: "# v\n" }], { source: "generation" })).version;
+  await projects.publish(A, bot.id, [{ path: "agent.py", content: "# later\n" }], { source: "import" });
+  const { version } = await projects.publish(A, bot.id, [{ path: "agent.py", content: "# v\n" }], {
+    source: "generation", restoredFrom: generated, summary: `restored v${generated}`,
+  });
+  const row = await agents.version(A, bot.id, version);
+  check("the restored version reads back which version it restored", row?.restored_from === generated,
+    String(row?.restored_from));
+  check("...with the copied version's source, so health is not downgraded", row?.source === "generation");
+  check("...so the live source the grid reads is the validator's, not `import`",
+    (await agents.currentVersionSources(A)).get(bot.id) === "generation");
+  check("an ordinary version restored nothing",
+    (await agents.version(A, bot.id, generated))?.restored_from === null);
+}
+
 await db.close();
 rmSync(dir, { recursive: true, force: true });
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);

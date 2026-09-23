@@ -14,7 +14,7 @@
 import { randomUUID } from "node:crypto";
 import { UNCATEGORIZED } from "../../agents/category.ts";
 import { faceAt } from "../../agents/faces.ts";
-import { asInt, asBool, jsonFromColumn, type Db, type Queryable } from "../db.ts";
+import { asInt, asBool, asIntOrNull, jsonFromColumn, type Db, type Queryable } from "../db.ts";
 import type { TenantContext } from "../tenant.ts";
 
 /** Same pattern the runner enforces on the Python side. A slug is a directory name. */
@@ -173,6 +173,8 @@ export interface VersionMeta {
   instruction?: string | null;
   summary?: string | null;
   fileStats?: VersionFileStat[];
+  /** The version a restore copied — see migration 081. Absent for everything that is not one. */
+  restoredFrom?: number | null;
 }
 
 export interface AgentVersion {
@@ -193,6 +195,8 @@ export interface AgentVersion {
    * server made on its own behalf (a boot import, a system context), never a guess at a person.
    */
   created_by: string | null;
+  /** The version this one restored, when it is a restore (migration 081). Null otherwise. */
+  restored_from: number | null;
 }
 
 /** What the disk scan produces — the shape jaroku.json plus the directory can describe. */
@@ -760,12 +764,12 @@ export class AgentRepository {
       try {
         await this.q(ctx).run(
           `INSERT INTO agent_versions (id, agent_id, version, manifest, source, instruction,
-             summary, file_stats, total_bytes, created_by, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             summary, file_stats, total_bytes, created_by, created_at, restored_from)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             randomUUID(), agentId, next, JSON.stringify(manifest), meta.source ?? "import",
             meta.instruction ?? null, meta.summary ?? null, JSON.stringify(meta.fileStats ?? []),
-            totalBytes, ctx.actorUserId, new Date().toISOString(),
+            totalBytes, ctx.actorUserId, new Date().toISOString(), meta.restoredFrom ?? null,
           ],
         );
         return next;
@@ -820,7 +824,7 @@ export class AgentRepository {
   async version(ctx: TenantContext, agentId: string, version: number): Promise<AgentVersion | undefined> {
     const row = await this.q(ctx).get<Record<string, unknown>>(
       `SELECT v.id, v.agent_id, v.version, v.manifest, v.source, v.instruction, v.summary,
-              v.file_stats, v.total_bytes, v.undone_at, v.created_at, v.created_by
+              v.file_stats, v.total_bytes, v.undone_at, v.created_at, v.created_by, v.restored_from
          FROM agent_versions v JOIN agents a ON a.id = v.agent_id
         WHERE v.agent_id = ? AND v.version = ? AND a.workspace_id = ?`,
       [agentId, version, ctx.workspaceId],
@@ -871,7 +875,7 @@ export class AgentRepository {
   async versions(ctx: TenantContext, agentId: string, includeUndone = false): Promise<AgentVersion[]> {
     const rows = await this.q(ctx).all<Record<string, unknown>>(
       `SELECT v.id, v.agent_id, v.version, v.manifest, v.source, v.instruction, v.summary,
-              v.file_stats, v.total_bytes, v.undone_at, v.created_at, v.created_by
+              v.file_stats, v.total_bytes, v.undone_at, v.created_at, v.created_by, v.restored_from
          FROM agent_versions v JOIN agents a ON a.id = v.agent_id
         WHERE v.agent_id = ? AND a.workspace_id = ?
           ${includeUndone ? "" : "AND v.undone_at IS NULL"}
@@ -1100,6 +1104,7 @@ export class AgentRepository {
       undone_at: (row["undone_at"] as string | null) ?? null,
       created_at: String(row["created_at"]),
       created_by: (row["created_by"] as string | null) ?? null,
+      restored_from: asIntOrNull(row["restored_from"]),
     };
   }
 }

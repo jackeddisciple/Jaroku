@@ -302,7 +302,11 @@ function Health({ detail }: { detail: AgentDetailView }) {
   const a = detail.card;
   // ONE CLAIM, FROM ONE PLACE. A `deploy` version used to fall into the green branch here, and the
   // validator never sees one — see lib/validatorVerdict.ts.
-  const verdict = validatorVerdict(a.version_source, a.current_version);
+  const verdict = validatorVerdict(
+    a.version_source,
+    a.current_version,
+    detail.versions.find((v) => v.current)?.restored_from ?? null,
+  );
   const settled = a.outcomes.filter((o) => o.outcome === "ok" || o.outcome === "error");
   const errorRate = settled.length === 0 ? null : a.outcomes.filter((o) => o.outcome === "error").length / settled.length;
 

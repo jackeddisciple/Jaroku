@@ -2401,8 +2401,12 @@ async function setAgentTools(ctx: TenantContext, slug: string, refs: unknown): P
     if (files.length > 0) {
       const next = files.filter((f) => f.path !== MANIFEST_FILE);
       next.push({ path: MANIFEST_FILE, content: `${JSON.stringify(manifest, null, 2)}\n` });
+      // THE LIVE VERSION'S SOURCE, NOT `import`. Only the host-owned manifest changed — the agent's
+      // code is the live version's, byte for byte — so what the validator said of that code still
+      // holds, and a grant change must not be the thing that marks an agent Unverified.
+      const live = await agentRepo.version(ctx, agent.id, agent.current_version);
       const { version } = await projects.publish(ctx, agent.id, next, {
-        source: "import",
+        source: live?.source ?? "import",
         summary: granted.length === 0 ? "MCP grants cleared" : `MCP grants set to ${granted.length} tool(s)`,
       });
       await projects.materialise(ctx, agent.id, version, join(agentsDir(RUNTIME_DIR), slug));
@@ -6624,6 +6628,7 @@ async function agentDetail(ctx: TenantContext, slug: string): Promise<AgentDetai
       // field — the stub `winner` was until it was wired — so the history could never say whose
       // version was whose in a team workspace.
       created_by: v.created_by,
+      restored_from: v.restored_from,
       current: v.version === card.current_version,
     })),
     // EVERY GRANTED REF, INCLUDING THE ONES THAT NO LONGER RESOLVE. A grant whose server has been
@@ -6885,9 +6890,15 @@ async function restoreAgentVersion(ctx: TenantContext, slug: string, version: un
   // exists to hold. It also strengthens the property this function was written for: a forward
   // publish that OWNS its objects can no longer be broken by a retention sweep collecting the old
   // version it was pointing at, which was the residual risk in naming somebody else's objects.
+  //
+  // AND IT CARRIES THE COPIED VERSION'S SOURCE, WITH `restoredFrom` SAYING WHICH (migration 081). It
+  // published as `import`, the one source the validator never saw, so restoring a version that had
+  // passed it marked the agent Unverified — the recommended, reversible operation was the one that
+  // downgraded an agent. The bytes are that version's bytes; what the validator said of them holds.
   const restoredFiles = await projects.readVersion(ctx, agent.id, wanted);
   const { version: published } = await projects.publish(ctx, agent.id, restoredFiles, {
-    source: "import",
+    source: row.source,
+    restoredFrom: wanted,
     summary: `restored v${wanted}`,
   });
 
