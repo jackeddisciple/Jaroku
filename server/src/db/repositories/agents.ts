@@ -188,6 +188,11 @@ export interface AgentVersion {
   /** Set when `current_version` was moved back past this one. Off the linear history. */
   undone_at: string | null;
   created_at: string;
+  /**
+   * Who published it — the request's actor, stamped by `reserveVersion`. Null for a publish the
+   * server made on its own behalf (a boot import, a system context), never a guess at a person.
+   */
+  created_by: string | null;
 }
 
 /** What the disk scan produces — the shape jaroku.json plus the directory can describe. */
@@ -815,7 +820,7 @@ export class AgentRepository {
   async version(ctx: TenantContext, agentId: string, version: number): Promise<AgentVersion | undefined> {
     const row = await this.q(ctx).get<Record<string, unknown>>(
       `SELECT v.id, v.agent_id, v.version, v.manifest, v.source, v.instruction, v.summary,
-              v.file_stats, v.total_bytes, v.undone_at, v.created_at
+              v.file_stats, v.total_bytes, v.undone_at, v.created_at, v.created_by
          FROM agent_versions v JOIN agents a ON a.id = v.agent_id
         WHERE v.agent_id = ? AND v.version = ? AND a.workspace_id = ?`,
       [agentId, version, ctx.workspaceId],
@@ -866,7 +871,7 @@ export class AgentRepository {
   async versions(ctx: TenantContext, agentId: string, includeUndone = false): Promise<AgentVersion[]> {
     const rows = await this.q(ctx).all<Record<string, unknown>>(
       `SELECT v.id, v.agent_id, v.version, v.manifest, v.source, v.instruction, v.summary,
-              v.file_stats, v.total_bytes, v.undone_at, v.created_at
+              v.file_stats, v.total_bytes, v.undone_at, v.created_at, v.created_by
          FROM agent_versions v JOIN agents a ON a.id = v.agent_id
         WHERE v.agent_id = ? AND a.workspace_id = ?
           ${includeUndone ? "" : "AND v.undone_at IS NULL"}
@@ -1094,6 +1099,7 @@ export class AgentRepository {
       total_bytes: asInt(row["total_bytes"], 0),
       undone_at: (row["undone_at"] as string | null) ?? null,
       created_at: String(row["created_at"]),
+      created_by: (row["created_by"] as string | null) ?? null,
     };
   }
 }

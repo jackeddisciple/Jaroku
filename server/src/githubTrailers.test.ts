@@ -50,6 +50,7 @@ function version(n: number, patch: Partial<AgentVersion> = {}): AgentVersion {
     total_bytes: 0,
     undone_at: null,
     created_at: new Date(n * 1000).toISOString(),
+    created_by: null,
     ...patch,
   };
 }

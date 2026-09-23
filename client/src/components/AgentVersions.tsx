@@ -32,6 +32,8 @@ import { relTime } from "../lib/format.ts";
 import { ACCENT, ICON, STATUS, TEXT } from "../lib/tokens.ts";
 import type { AgentDetailView, AgentVersionView } from "../types.ts";
 import { Icon } from "../lib/icons/registry.ts";
+import { useAgentGridStore } from "../store/agentGridStore.ts";
+import { useMemberStore } from "../store/memberStore.ts";
 
 /** What made a version, as one word and one colour. Borrowed, never invented. */
 const SOURCE_COLOR: Record<AgentVersionView["source"], string> = {
@@ -51,12 +53,15 @@ type Selection = { from: number | null; to: number | null };
 function VersionRow({
   version,
   selection,
+  publisher,
   onPick,
   onRestore,
   onOpenFiles,
 }: {
   version: AgentVersionView;
   selection: Selection;
+  /** Who published it, by name — team workspaces only, and only for someone who is a member. */
+  publisher: string | null;
   onPick: () => void;
   onRestore: () => void;
   onOpenFiles: () => void;
@@ -100,8 +105,21 @@ function VersionRow({
         {/* §7.2: VERSION PUBLISHED. It also gains the app's one date formatter in its tooltip —
             it was passing the raw ISO string, so the hover on this row read `2026-03-04T09:12:44.201Z`
             while every other timestamp in the product read "4 March, 09:12". */}
-        <span className="ml-auto shrink-0">
+        <span className="ml-auto flex shrink-0 items-center gap-1.5">
           <DateChip at={version.created_at} />
+          {/* WHO PUBLISHED IT, as the card says who created the agent: the same initial, the same
+              rounded square, the name on hover. Team workspaces only — in a personal one it is a
+              picture of the only person who could have. */}
+          {publisher && (
+            <span
+              className="flex h-5 w-5 shrink-0 items-center justify-center rounded-control bg-active text-tiny text-ink"
+              title={`Published by ${publisher}`}
+              role="img"
+              aria-label={`Published by ${publisher}`}
+            >
+              {publisher.slice(0, 1).toUpperCase()}
+            </span>
+          )}
         </span>
       </div>
 
@@ -158,6 +176,14 @@ function VersionRow({
 
 export function AgentVersions({ detail }: { detail: AgentDetailView }) {
   const [open, setOpen] = useState(true);
+  const team = useAgentGridStore((s) => s.team);
+  const members = useMemberStore((s) => s.members);
+  /** A member's name for a version's `created_by`, or null — never "?" for a server-made publish. */
+  const publisherOf = (userId: string | null): string | null => {
+    if (!team || !userId) return null;
+    const m = members.find((x) => x.user_id === userId);
+    return m ? (m.display_name || m.email || null) : null;
+  };
   const [selection, setSelection] = useState<Selection>({ from: null, to: null });
 
   const pick = (version: number): void => {
@@ -244,6 +270,7 @@ export function AgentVersions({ detail }: { detail: AgentDetailView }) {
               key={v.version}
               version={v}
               selection={selection}
+              publisher={publisherOf(v.created_by)}
               onPick={() => pick(v.version)}
               onRestore={() => {
                 if (

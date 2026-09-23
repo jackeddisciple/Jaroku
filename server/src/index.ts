@@ -6620,7 +6620,10 @@ async function agentDetail(ctx: TenantContext, slug: string): Promise<AgentDetai
       total_bytes: v.total_bytes,
       undone_at: v.undone_at,
       created_at: v.created_at,
-      created_by: null,
+      // WHO PUBLISHED IT, which the row has held all along. This was a hardcoded `null` on a typed
+      // field — the stub `winner` was until it was wired — so the history could never say whose
+      // version was whose in a team workspace.
+      created_by: v.created_by,
       current: v.version === card.current_version,
     })),
     // EVERY GRANTED REF, INCLUDING THE ONES THAT NO LONGER RESOLVE. A grant whose server has been

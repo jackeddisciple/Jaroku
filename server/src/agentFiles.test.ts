@@ -261,6 +261,23 @@ console.log("\nper-file blame is about the version being browsed, not the newest
       && !(await agents.fileBlame(A, bot.id)).has("tools/city_time.py"));
 }
 
+console.log("\na version says who published it");
+{
+  // `created_by` WAS ON THE ROW AND NEVER READ, and the detail sent a hardcoded null in its place.
+  const userId = randomUUID();
+  await db.run(`INSERT INTO users (id, external_id, email, created_at) VALUES (?, ?, ?, ?)`,
+    [userId, `ext-${userId}`, "publisher@example.invalid", new Date().toISOString()]);
+  const bot = await agents.upsertFromDisk(A, { slug: "signed_bot" });
+  const { version } = await projects.publish({ ...A, actorUserId: userId }, bot.id,
+    [{ path: "agent.py", content: "# signed\n" }], { source: "edit" });
+  check("the person who published it is read back", (await agents.version(A, bot.id, version))?.created_by === userId);
+  check("...by the list the detail reads too",
+    (await agents.versions(A, bot.id, true)).find((v) => v.version === version)?.created_by === userId);
+  const bySystem = await projects.publish(A, bot.id, [{ path: "agent.py", content: "# boot\n" }], { source: "import" });
+  check("...and a publish the server made on its own behalf names nobody",
+    (await agents.version(A, bot.id, bySystem.version))?.created_by === null);
+}
+
 await db.close();
 rmSync(dir, { recursive: true, force: true });
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
