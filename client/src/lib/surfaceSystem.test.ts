@@ -220,7 +220,7 @@ console.log("\n§07: where each level is allowed to appear");
   // §07 means except the one a `position` property can state.
   const FLOATS = /\b!?(?:absolute|fixed|inset-0|backdrop-blur)\b|role="dialog"/;
   /**
-   * THE TWO SURFACES THAT FLOAT BY SOMETHING OTHER THAN A CLASS, named rather than pattern-matched
+   * THE SURFACES THAT FLOAT BY SOMETHING OTHER THAN A CLASS, named rather than pattern-matched
    * because a pattern wide enough to cover them would cover every card in the app as well.
    *
    * THE TWO SHELLS ARE THE APP ITSELF, lifted off `bg-void` by the 8px inset around them — the one
@@ -231,6 +231,9 @@ console.log("\n§07: where each level is allowed to appear");
   const FLOATS_WITHOUT_SAYING_SO = new Set([
     "App.tsx",
     "components/onboarding/OnboardingSurface.tsx",
+    // THE INBOX'S UNDO TOAST, which floats by its PARENT too: it renders through a portal into the
+    // fixed corner `ToastStack` owns, the way a dialog's surface is a plain box inside its scrim.
+    "components/InboxUndoToast.tsx",
   ]);
   /**
    * THE IN-FLOW SURFACES THAT REST LIFTED, AND EACH IS A DECISION RATHER THAN A SLIP — the product

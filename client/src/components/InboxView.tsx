@@ -596,8 +596,8 @@ export function InboxView() {
         </div>
       </div>
 
-      {/* §3's toast, above the tray and in the flow rather than floating: a floating card covers the
-          bottom of the board, which is where somebody who has just dismissed something is looking. */}
+      {/* §3's toast. Mounted here because ⌘Z is this board's chord; it renders in the corner every
+          toast shares, so it no longer pushes the board up while it is showing. */}
       <InboxUndoToast />
 
       {/* §5.4's strip, which is what keeps snooze from being a slower dismissal. It is also the one

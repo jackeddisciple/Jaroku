@@ -11,13 +11,16 @@
 // and pressing undo after it has gone is not possible rather than silently doing nothing — the one
 // failure a safety net must not have.
 //
-// A BAR RATHER THAN A FLOATING CARD, in the flow above the tray, which is the same decision §3.4's
-// archive notice made on the Threads list: a floating toast covers the bottom of the board, and the
-// bottom of the board is where somebody who has just dismissed something is looking.
+// A FLOATING CARD IN THE CORNER, NOT A BAR IN THE FLOW. It was a bar above the tray, on the argument
+// that a floating card covers the bottom of the board — but a bar that arrived with every dismissal
+// pushed the board up and dropped it back five seconds later, under the eyes of somebody triaging it.
+// It renders into the corner every toast shares (`ToastStack`), and it is still mounted by the Inbox
+// alone, because ⌘Z is the Inbox's chord and the hint beside the button would be a lie anywhere else.
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { sendUndoInboxAction } from "../lib/socket.ts";
-import { MOTION, SURFACE } from "../lib/tokens.ts";
+import { TOAST_STACK_ID } from "./Toast.tsx";
 import { useInboxStore } from "../store/inboxStore.ts";
 import { keyHint } from "../lib/modKey.ts";
 import { Icon } from "../lib/icons/registry.ts";
@@ -37,6 +40,10 @@ export function InboxUndoToast() {
   const undo = useInboxStore((s) => s.undo);
   const setUndo = useInboxStore((s) => s.setUndo);
   const [visible, setVisible] = useState(false);
+  // Looked up once mounted rather than during render: the stack is the application's, and the Inbox
+  // can render before the shell has committed it.
+  const [stack, setStack] = useState<HTMLElement | null>(null);
+  useEffect(() => setStack(document.getElementById(TOAST_STACK_ID)), []);
 
   /**
    * The five seconds, as one timer per toast.
@@ -62,13 +69,13 @@ export function InboxUndoToast() {
     return () => clearTimeout(timer);
   }, [undo?.token, setUndo]);
 
-  if (!undo || !visible) return null;
+  if (!undo || !visible || !stack) return null;
 
   const verb = VERB[undo.action] ?? "Done";
-  return (
+  return createPortal(
     <div
-      className="flex shrink-0 items-center gap-2 border-t px-5 py-1.5 text-tiny text-muted animate-panel-in motion-reduce:animate-none"
-      style={{ borderColor: SURFACE.chrome, background: SURFACE.active, animationDuration: `${MOTION.fast}ms` }}
+      key={undo.token}
+      className="pointer-events-auto flex animate-slide-in items-center gap-2 rounded-card border border-edge bg-elevated py-1 pl-3 pr-1.5 text-tiny text-muted shadow-overlay motion-reduce:animate-none"
       role="status"
       // POLITE, not assertive: this reports something the person just did, and interrupting a screen
       // reader mid-sentence to say so would be the audio equivalent of a modal.
@@ -84,6 +91,7 @@ export function InboxUndoToast() {
         Undo
       </button>
       <span className="shrink-0 text-tiny text-faint">{keyHint("⌘Z")}</span>
-    </div>
+    </div>,
+    stack,
   );
 }

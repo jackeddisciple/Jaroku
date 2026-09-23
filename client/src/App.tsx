@@ -28,7 +28,7 @@ import {
   SIDEBAR_DEFAULT_MIN_PCT, SIDEBAR_MAX_PCT, SIDEBAR_MIN_PX, pixelFloorPercent,
 } from "./lib/paneFloor.ts";
 import { RoleRefusal } from "./components/RoleRefusal.tsx";
-import { Toast } from "./components/Toast.tsx";
+import { ToastStack } from "./components/Toast.tsx";
 import { InviteNotice } from "./components/InviteNotice.tsx";
 import { redeemPendingInvite } from "./lib/invite.ts";
 import { switchWorkspace } from "./lib/socket.ts";
@@ -709,7 +709,7 @@ export function App() {
           rendered a control for a role that cannot use it. */}
       <RoleRefusal />
       {/* Connection lost, and back — in the corner rather than as a row, so nothing moves. */}
-      <Toast />
+      <ToastStack />
       {/* §5.1 — the lock over the shell while a workspace switch is in flight. Above the workspace
           panel and below the MCP modal: it must cover the panel it just closed, and it must not
           cover a run halted mid-graph waiting for an answer. */}
