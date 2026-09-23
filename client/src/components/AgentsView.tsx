@@ -306,6 +306,23 @@ export function AgentsView() {
    */
   useEffect(() => () => useAgentGridStore.getState().setNotice(null), []);
 
+  /**
+   * A RESULT OR A REFUSAL IS A CORNER TOAST, not a row over the grid. Both used to take a row above
+   * the cards, and the whole grid moved down while it was there and back up when it went.
+   *
+   * The notice is spent as it is shown. The error is left in the store, because the detail panel
+   * renders the same refusal in place when it could not open an agent, and the next snapshot clears
+   * it as before.
+   */
+  useEffect(() => {
+    if (!notice) return;
+    useUiStore.getState().showToast(notice);
+    useAgentGridStore.getState().setNotice(null);
+  }, [notice]);
+  useEffect(() => {
+    if (error) useUiStore.getState().showToast(error, "err");
+  }, [error]);
+
   const visible = useMemo(() => visibleAgents(cards, filters, sort), [cards, filters, sort]);
   const connectors = useMemo(() => connectorOptions(cards), [cards]);
   // FROM THE CARDS, NOT FROM THE PRESETS — see `categoryOptions`. One option is not a filter, so the
@@ -518,22 +535,6 @@ export function AgentsView() {
           <Icon.agents.new size={ICON.sm} />
         </button>
       </div>
-
-      {/* A refusal is shown rather than swallowed, and it is dismissed by the next snapshot. */}
-      {error && <div className="shrink-0 border-b border-hair px-5 py-2 text-tiny text-err">{error}</div>}
-      {notice && (
-        <div className="flex shrink-0 items-center gap-2 border-b border-hair bg-active/40 px-5 py-1.5 text-tiny text-muted">
-          <span>{notice}</span>
-          <button
-            onClick={() => useAgentGridStore.getState().setNotice(null)}
-            title="Dismiss"
-            aria-label="Dismiss"
-            className="ml-auto shrink-0 text-faint transition-colors hover:text-ink"
-          >
-            <Icon.global.dismissNotice size={ICON.xs} />
-          </button>
-        </div>
-      )}
 
       {/* §4.1'S ONE CANVAS, OVER THE GRID — and it wraps the SCROLLER rather than the scrolled
           content, which is the difference between a canvas the size of the viewport and one the

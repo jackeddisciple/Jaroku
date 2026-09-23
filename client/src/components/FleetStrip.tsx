@@ -30,6 +30,7 @@ import { factsOf, fleetSentence, healthLine } from "../lib/fleetSentence.ts";
 import { sendCreateThread, sendKillAgent, sendListWork, sendReconnectAgent } from "../lib/socket.ts";
 import { ICON } from "../lib/tokens.ts";
 import { CARD_HEIGHT, CARD_WIDTH, SPINE_X } from "../lib/cockpitLayout.ts";
+import { useUiStore } from "../store/uiStore.ts";
 import { useWorkStore } from "../store/workStore.ts";
 import type { FleetCardView } from "../types.ts";
 import { LogPane } from "./AgentOps.tsx";
@@ -531,6 +532,16 @@ export function FleetStrip() {
   const agents = useBuildStore((s) => s.agents);
   const marks = useMemo(() => pictureBySlug(agents), [agents]);
   const notice = useWorkStore((s) => s.notice);
+  /**
+   * WHAT A RECONNECT OR A KILL ACTUALLY DID, which is not the same as what was asked for — Part 1's
+   * commands return the difference, and it is said in the corner toast. It was a row under the
+   * strip that pushed the list below it down until something replaced it.
+   */
+  useEffect(() => {
+    if (!notice) return;
+    useUiStore.getState().showToast(notice);
+    useWorkStore.getState().setNotice(null);
+  }, [notice]);
   const { ref, fade } = useEdgeFade();
 
   return (
@@ -582,14 +593,6 @@ export function FleetStrip() {
           either; the numbers were true when they were sent. What used to sit here was a row saying
           so, and it pushed the list below it down on every drop and back up on every return. The
           corner toast says the connection went; a frozen figure needs nothing more. */}
-
-      {/* WHAT A RECONNECT OR A KILL ACTUALLY DID, which is not the same as what was asked for —
-          Part 1's commands return the difference and this is where it is read. It stays until
-          something replaces it rather than fading, because "the service is restarting" is a
-          sentence somebody may want to still be there when they look back. */}
-      {notice && (
-        <div className={`border-t border-hair py-1.5 text-tiny text-muted ${SPINE_X}`}>{notice}</div>
-      )}
     </div>
   );
 }
