@@ -6321,13 +6321,15 @@ const GRID_WINDOW_30_MS = 30 * 24 * 60 * 60 * 1000;
 /**
  * What the dispatch chain hands to `handleAgentCommand`.
  *
- * A NAME MISSING HERE IS DROPPED WITHOUT A WORD, which is how `setAgentTools` shipped: the relay
- * forwarded it, the handler knew it, and the chain between them fell off the end — so the
- * Capabilities tab's Save closed its editor over a grant that never changed.
+ * A NAME MISSING HERE IS DROPPED WITHOUT A WORD, which is how `setAgentTools` and `deleteAgent`
+ * shipped: the relay forwarded them, the handler knew them, and the chain between them fell off
+ * the end — so the Capabilities tab's Save closed its editor over a grant that never changed, and
+ * a delete somebody had typed the slug to confirm left the agent exactly where it was.
+ * `test:channels` now holds this set to the relay's channel map, as it does the others.
  */
 const AGENT_COMMAND_NAMES = new Set([
   "archiveAgent", "restoreAgent", "renameAgent", "forkAgent", "restoreAgentVersion",
-  "setAgentCategory", "createDraftAgent", "setAgentTools",
+  "setAgentCategory", "createDraftAgent", "setAgentTools", "deleteAgent",
 ]);
 
 /** A refusal on the agents channel, to the socket that earned it and nobody else. */

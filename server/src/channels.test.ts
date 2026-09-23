@@ -463,6 +463,10 @@ console.log("\nevery command reaches the handler its channel implies");
     // name in COMMAND_CHANNEL but not here falls through to `handleEvalCommand` and returns
     // silently, which is exactly how `generateGithubMessage` shipped broken.
     access: "ACCESS_COMMAND_NAMES",
+    // THE CHANNEL THAT WAS NOT HERE, and it cost two commands. `setAgentTools` and `deleteAgent`
+    // were classified `agents` and missing from the set, so both were dropped without a refusal —
+    // a grant editor that saved nothing and a typed-name delete that deleted nothing.
+    agents: "AGENT_COMMAND_NAMES",
   };
 
   /**
@@ -484,6 +488,10 @@ console.log("\nevery command reaches the handler its channel implies");
     // is no third party to ask and no refusal to make — a report about a machine is either
     // well-formed or dropped.
     "reportProviderHost",
+    // §4 and §6's three reads, answered to the asking socket from the relay's own handler table —
+    // `listAgentGrid` beside `listThreads` for the same reason, and the two loads because opening
+    // one agent is one client's navigation.
+    "listAgentGrid", "loadAgentDetail", "loadAgentVersion",
   ]);
 
   for (const [channel, setName] of Object.entries(DISPATCH_SETS)) {
