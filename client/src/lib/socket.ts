@@ -81,6 +81,17 @@ let attempt = 0;
  * "this attempt belongs to an era that has ended" does not.
  */
 let generation = 0;
+/**
+ * Whether the connection is down for a reason nobody chose, and the toast has already said so.
+ *
+ * Set by the first reconnect an outage schedules and cleared by the socket that opens again, so an
+ * outage is one toast going down and one coming back however many attempts it takes. An explicit
+ * stop clears it without a word: a workspace switch or a sign-out closes the socket on purpose, and
+ * "connection lost" over a switch somebody just asked for would be a lie.
+ */
+let outage = false;
+/** Whether a socket has opened in this tab at all — what decides between "lost" and "can't reach". */
+let everOpen = false;
 
 function dispatch(msg: ServerMessage): void {
   const s = useTraceStore.getState();
@@ -789,6 +800,11 @@ async function connect(): Promise<void> {
     attempt = 0;
     useTraceStore.getState().setConnection("open");
     useSessionStore.getState().setStatus("ready");
+    everOpen = true;
+    if (outage) {
+      outage = false;
+      useUiStore.getState().showToast("Reconnected", "ok");
+    }
     // §5.1 STEP 7 — UNLOCK, AND HERE RATHER THAN AFTER THE SNAPSHOTS. `onopen` is the moment the
     // relay has accepted the ticket and the Origin, which is the last thing that can refuse this
     // switch; the snapshots that follow are data arriving into stores the UI already renders
@@ -877,6 +893,14 @@ async function connect(): Promise<void> {
  */
 function scheduleReconnect(): void {
   if (stopped) return;
+  // Both ways into an outage — a socket that closed and an attempt that could not get a ticket —
+  // arrive here, so this is where it is announced. Once, not once per attempt.
+  if (!outage) {
+    outage = true;
+    // FEW WORDS, because the corner it sits in is also where the composer's send button is, and a
+    // longer sentence reached across it. The red dot says it is a problem; the words say which.
+    useUiStore.getState().showToast(everOpen ? "Reconnecting…" : "Can't reach Jaroku", "err");
+  }
   const backoff = Math.min(RECONNECT_MS * 2 ** attempt, MAX_RECONNECT_MS);
   attempt++;
   // Jitter, or every client that dropped together comes back together.
@@ -950,6 +974,7 @@ export function stopSocket(): void {
   stopped = true;
   started = false;
   attempt = 0;
+  outage = false;
   // The deadline belongs to the attempt this is ending. `switchWorkspace` re-arms it immediately
   // afterwards; every other caller — sign out, a plain restart — has no switch to time out.
   disarmSwitchDeadline();

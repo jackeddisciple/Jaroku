@@ -388,10 +388,10 @@ given, and a millisecond clock on each startup step measured from the window app
 in a release build and on in a debug one. It is a variable the shell **reads**; it is never put
 into the backend's environment, and `test:desktop-contract` asserts that.
 
-The window says which failure it is. `backend stopped` in the status strip, or a panel on the
-sign-in screen carrying the shell's own sentence and the log's path, means the supervisor has
-given up — quitting from the tray and reopening starts it over. `disconnected` means the ordinary
-retry loop, which recovers on its own.
+The window says which failure it is. A panel on the sign-in screen carrying the shell's own
+sentence and the log's path means the supervisor has given up — quitting from the tray and
+reopening starts it over. A "Reconnecting…" toast in the bottom-right corner means the ordinary
+retry loop, which recovers on its own and says "Reconnected" when it does.
 
 ---
 

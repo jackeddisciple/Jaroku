@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelHandle } from "react-resizable-panels";
 import { Sidebar } from "./components/Sidebar.tsx";
 import { RightPanel, RightPanelRail, useRightPanelFollow } from "./components/RightPanel.tsx";
-import { StatusBar } from "./components/StatusBar.tsx";
 import { CommandPalette } from "./components/CommandPalette.tsx";
 import { ProviderKeysDialog } from "./components/ProviderKeysDialog.tsx";
 import { BuildPane } from "./components/BuildPane.tsx";
@@ -29,6 +28,7 @@ import {
   SIDEBAR_DEFAULT_MIN_PCT, SIDEBAR_MAX_PCT, SIDEBAR_MIN_PX, pixelFloorPercent,
 } from "./lib/paneFloor.ts";
 import { RoleRefusal } from "./components/RoleRefusal.tsx";
+import { Toast } from "./components/Toast.tsx";
 import { InviteNotice } from "./components/InviteNotice.tsx";
 import { redeemPendingInvite } from "./lib/invite.ts";
 import { switchWorkspace } from "./lib/socket.ts";
@@ -688,9 +688,6 @@ export function App() {
             </div>
           </Panel>
         </PanelGroup>
-
-        {/* the run control now lives inside the single composer (BuildPane) via its Chat/Test toggle */}
-        <StatusBar />
       </div>
 
       {/* Outside the shell on purpose: all three are fixed-position and cover the viewport, and
@@ -711,6 +708,8 @@ export function App() {
       {/* §8.3 — the safety net under §8s guards. It should never appear; when it does, a surface
           rendered a control for a role that cannot use it. */}
       <RoleRefusal />
+      {/* Connection lost, and back — in the corner rather than as a row, so nothing moves. */}
+      <Toast />
       {/* §5.1 — the lock over the shell while a workspace switch is in flight. Above the workspace
           panel and below the MCP modal: it must cover the panel it just closed, and it must not
           cover a run halted mid-graph waiting for an answer. */}

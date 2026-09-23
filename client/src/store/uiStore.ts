@@ -199,6 +199,23 @@ export type HintId = "trace";
 /** The prefix every per-user onboarding record shares. */
 export const ONBOARDING_KEY_PREFIX = "jaroku.onboarding.";
 
+/** How long a toast stays: long enough to read a few words, short enough to be gone before it is in the way. */
+export const TOAST_MS = 2000;
+
+/** The dot beside a toast's words. `neutral` has none. */
+export type ToastTone = "neutral" | "ok" | "err";
+
+export interface Toast {
+  id: number;
+  message: string;
+  tone: ToastTone;
+  ms: number;
+  /** When it was raised, so a toast raised behind a screen that did not show it is not shown late. */
+  at: number;
+}
+
+let toastSeq = 0;
+
 const onboardingKey = (userId: string | null): string => `${ONBOARDING_KEY_PREFIX}${userId ?? "_"}`;
 
 interface OnboardingProgress {
@@ -558,6 +575,22 @@ interface UiState {
   refusedRole: string | null;
   setRefusedRole: (role: string | null) => void;
 
+  /**
+   * The one toast in the bottom-right corner — see `Toast.tsx`.
+   *
+   * A FLOATING CARD RATHER THAN A ROW. Every transient state this app used to announce with a row
+   * that appeared and disappeared — the connection strip at the foot of the window was the loudest
+   * — moved everything around it twice: once to make room and once to take it back. A toast covers
+   * a corner for two seconds and moves nothing.
+   *
+   * ONE SLOT. A second toast replaces the first rather than stacking under it; the newer sentence is
+   * the one still true. Here rather than in a store of its own for `refusedRole`'s reason: a toast
+   * is about something that just happened, and a workspace switch must not blank it.
+   */
+  toast: Toast | null;
+  showToast: (message: string, tone?: ToastTone, ms?: number) => void;
+  dismissToast: (id: number) => void;
+
   // First run. WHETHER it is over is `sessionStore.user.onboarded`, not here — see the note
   // above the reader. `onboardingStep` is only consulted while that is false, and exists so a
   // reload mid-flow resumes where the user was rather than starting them over at Welcome.
@@ -757,6 +790,12 @@ export const useUiStore = create<UiState>((set) => ({
 
   refusedRole: null,
   setRefusedRole: (refusedRole) => set({ refusedRole }),
+
+  toast: null,
+  showToast: (message, tone = "neutral", ms = TOAST_MS) =>
+    set({ toast: { id: ++toastSeq, message, tone, ms, at: Date.now() } }),
+  // By id, so a timer left over from a toast that has since been replaced cannot clear the new one.
+  dismissToast: (id) => set((s) => (s.toast?.id === id ? { toast: null } : {})),
 
   onboardingStep: onboarding.step,
   onboardingHintsShown: onboarding.hintsShown,
