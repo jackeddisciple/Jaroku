@@ -74,12 +74,19 @@ function Overflow({
   /** Who created it, by name, for §7.5's archive confirmation. Null outside a team workspace. */
   creator: string | null;
   onFork: () => void;
-  onRename: () => void;
+  onRename: (name: string) => void;
   onExport: () => void;
   onArchive: () => void;
   onRestore: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  /**
+   * The rename, AS A FIELD IN THE MENU rather than `window.prompt` — which the desktop webview
+   * never shows, so it returned null and Rename did nothing. The sidebar's row menu renames in its
+   * own panel already; this is the same form.
+   */
+  const [renaming, setRenaming] = useState(false);
+  const [name, setName] = useState(agent.name);
   /**
    * The archive confirmation, IN THE MENU, rather than `window.confirm`.
    *
@@ -97,8 +104,11 @@ function Overflow({
   useAnchoredMenu(open, ref, panelRef);
   // A menu reopened on a half-answered confirmation remembers a decision somebody walked away from.
   useEffect(() => {
-    if (!open) setConfirming(false);
-  }, [open]);
+    if (open) return;
+    setConfirming(false);
+    setRenaming(false);
+    setName(agent.name);
+  }, [open, agent.name]);
 
   const item = (
     label: string,
@@ -164,7 +174,36 @@ function Overflow({
             onClick={(e) => e.stopPropagation()}
             className="fixed left-0 top-0 z-50 w-52 animate-slide-in rounded-card border border-edge bg-elevated p-1 shadow-floating motion-reduce:animate-none"
           >
-            {confirming ? (
+            {renaming ? (
+              <form
+                className="flex flex-col gap-1 p-1"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const next = name.trim();
+                  if (next && next !== agent.name) onRename(next);
+                  setOpen(false);
+                }}
+              >
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setRenaming(false); } }}
+                  autoFocus
+                  aria-label={`Rename ${agent.name}`}
+                  className="w-full rounded-input border border-edge bg-panel px-2 py-1 text-caption text-ink outline-none focus-visible:shadow-focusring"
+                />
+                <div className="flex gap-3 px-1 pb-0.5">
+                  <button type="submit" className="text-caption font-medium text-ink underline underline-offset-2">Rename</button>
+                  <button
+                    type="button"
+                    onClick={() => setRenaming(false)}
+                    className="text-caption font-medium text-muted underline underline-offset-2"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            ) : confirming ? (
               // §7.5's CONFIRMATION, NAMING THE CREATOR, as the collaborative-workspace safety net —
               // said here, where the button was pressed, and answered with a button rather than a
               // dialog the desktop app cannot show.
@@ -195,7 +234,7 @@ function Overflow({
               ? item("Restore", Icon.agents.restore, onRestore)
               : [
                   item("Fork", GitForkIcon, onFork),
-                  item("Rename", Icon.agentDetail.rename, onRename),
+                  item("Rename", Icon.agentDetail.rename, () => setRenaming(true), false, true),
                   // EXPORT IS ONLY OFFERED WHEN THERE IS A VERSION TO EXPORT.
                   //
                   // WHAT IT DID ON A DRAFT. The entry sets a one-shot intent and asks the server
@@ -249,7 +288,7 @@ export interface AgentCardProps {
   onOpen: () => void;
   onNewThread: () => void;
   onFork: () => void;
-  onRename: () => void;
+  onRename: (name: string) => void;
   onExport: () => void;
   onArchive: () => void;
   onRestore: () => void;
@@ -316,6 +355,11 @@ export function AgentCard({
       tabIndex={-1}
       onClick={onOpen}
       onKeyDown={(e) => {
+        // THE CARD'S OWN KEYS ONLY. React carries a keydown up to here from every control inside
+        // the card — and through the portal from its menu — so Enter in the menu's rename field
+        // opened the agent and `preventDefault` swallowed the submit, and Enter or Space on any
+        // button in the card did the same instead of pressing it.
+        if (e.target !== e.currentTarget) return;
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           onOpen();

@@ -622,14 +622,10 @@ export function AgentsView() {
                 onOpen={() => openCard(agent)}
                 onNewThread={() => newThread(agent)}
                 onFork={() => sendForkAgent(agent.slug)}
-                onRename={() => {
-                  // The rename is a prompt rather than an inline field, and only here. The sidebar
-                  // already renames in place on the row, which is where somebody who has picked an
-                  // agent does it; a second inline editor on a card in a grid would be a second
-                  // place the same edit can be half-finished.
-                  const next = window.prompt(`Rename ${agent.name}`, agent.name);
-                  if (next && next.trim()) sendRenameAgent(agent.slug, next.trim());
-                }}
+                // ASKED IN THE CARD'S MENU, as the sidebar's row menu asks — see `Overflow`. It was
+                // `window.prompt`, which the desktop webview never shows: it returned null and the
+                // rename did nothing there at all.
+                onRename={(name) => sendRenameAgent(agent.slug, name)}
                 onExport={() => {
                   // The intent first, then the request: on a warm store the answer can land in the
                   // same tick, and an intent set afterwards would be one nothing consumes.
