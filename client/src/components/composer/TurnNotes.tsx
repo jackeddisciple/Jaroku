@@ -46,15 +46,32 @@ export function NoteControl({ turnId, disabled = false }: { turnId: string; disa
   const deleteNote = useTurnInteractionStore((s) => s.deleteNote);
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
+  /**
+   * §5.2's "confirm if dirty", asked IN THE POPOVER rather than with `window.confirm`.
+   *
+   * THE DESKTOP APP HAS NO `window.confirm` — its webview shows no JavaScript dialogs, and
+   * `confirm()` answers false without asking. With a note typed, that turned "confirm if dirty"
+   * into "never close": Escape, Cancel and a click outside all returned early, and the only way out
+   * of the popover was to delete the text by hand.
+   */
+  const [discarding, setDiscarding] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
+
+  const discard = (): void => {
+    setDraft("");
+    setDiscarding(false);
+    setOpen(false);
+  };
 
   const close = (): void => {
     // §5.2: "Esc cancels (confirm if dirty)." A note somebody has typed and not saved is exactly
     // the thing an accidental Escape should not take, and this popover closes on outside clicks
-    // too — so the confirm covers both.
-    if (draft.trim() && !window.confirm("Discard this note?")) return;
-    setDraft("");
-    setOpen(false);
+    // too — so the question covers both. A second close while it is being asked is the answer.
+    if (draft.trim() && !discarding) {
+      setDiscarding(true);
+      return;
+    }
+    discard();
   };
 
   const save = (): void => {
@@ -62,6 +79,7 @@ export function NoteControl({ turnId, disabled = false }: { turnId: string; disa
     if (!body) return;
     void addNote(turnId, body);
     setDraft("");
+    setDiscarding(false);
     setOpen(false);
   };
 
@@ -91,6 +109,21 @@ export function NoteControl({ turnId, disabled = false }: { turnId: string; disa
             placeholder="This plan looks right but it drops the retry on 429."
             className="w-full resize-none rounded-input border border-edge bg-elevated px-2 py-1.5 text-caption text-ink outline-none placeholder:text-faint focus-visible:shadow-focusring"
           />
+          {discarding && (
+            <div className="mt-1.5 flex items-center gap-2 px-1 text-tiny">
+              <span className="text-muted">Discard this note?</span>
+              <button type="button" onClick={discard} className="font-medium text-err underline underline-offset-2">
+                Discard
+              </button>
+              <button
+                type="button"
+                onClick={() => setDiscarding(false)}
+                className="font-medium text-muted underline underline-offset-2"
+              >
+                Keep writing
+              </button>
+            </div>
+          )}
           <div className="mt-1.5 flex items-center justify-end gap-1.5">
             <button
               type="button"
