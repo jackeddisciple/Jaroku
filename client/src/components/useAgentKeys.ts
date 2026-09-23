@@ -64,6 +64,10 @@ export function useAgentKeys({
       // ⌘K is the palette's, always. It is named in §5.5 as the fuzzy jump, and the palette is where
       // that lives — this hook must not swallow it.
       if (mod || useUiStore.getState().paletteOpen || isTypingTarget(e.target)) return;
+      // NOR FROM INSIDE A MENU. A card's menu is portalled out of the card and takes focus when it
+      // opens; Enter on one of its items would otherwise ALSO open the card under the cursor, and
+      // J and K would walk the grid behind a menu somebody is reading.
+      if ((e.target as HTMLElement | null)?.closest?.('[role="menu"]')) return;
 
       const move = (delta: 1 | -1): void => {
         if (cards.length === 0) return;

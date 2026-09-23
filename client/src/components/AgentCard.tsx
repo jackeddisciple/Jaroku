@@ -31,6 +31,7 @@ import { faceFor } from "../lib/agentFaces.ts";
 import { showsCategory } from "../lib/agentCategories.ts";
 import { absTime, fmtCost } from "../lib/format.ts";
 import { useAnchoredMenu } from "../lib/anchoredMenu.ts";
+import { useMenuFocus } from "../lib/menuFocus.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { ProviderMark } from "../lib/icons.tsx";
 import { ICON, STATUS } from "../lib/tokens.ts";
@@ -102,6 +103,16 @@ function Overflow({
   // lib/anchoredMenu.ts puts the portalled panel back under its trigger, flipping up when the card
   // is low in the window, and follows it when the grid scrolls.
   useAnchoredMenu(open, ref, panelRef);
+  // AND DRIVABLE FROM THE KEYBOARD, which it was not: no Escape, no arrows, focus left on the trigger
+  // — so a keyboard user who opened it had no way out. lib/menuFocus.ts moves focus onto the first
+  // item and back to the trigger on close; the listener below is Escape, as the sidebar's menu has it.
+  useMenuFocus(open, panelRef, ref);
+  useEffect(() => {
+    if (!open) return;
+    const key = (e: KeyboardEvent): void => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("keydown", key);
+    return () => document.removeEventListener("keydown", key);
+  }, [open]);
   // A menu reopened on a half-answered confirmation remembers a decision somebody walked away from.
   useEffect(() => {
     if (open) return;
@@ -121,13 +132,14 @@ function Overflow({
     <button
       key={label}
       type="button"
+      role="menuitem"
       onClick={(e) => {
         e.stopPropagation();
         if (!stay) setOpen(false);
         onPick();
       }}
-      className={`flex w-full items-center gap-2 rounded-control px-2.5 py-1.5 text-left text-caption transition-colors duration-fast hover:bg-active active:bg-chrome ${
-        danger ? "text-err hover:text-err" : "text-muted hover:text-ink"
+      className={`flex w-full items-center gap-2 rounded-control px-2.5 py-1.5 text-left text-caption transition-colors duration-fast hover:bg-active active:bg-chrome focus:bg-active focus:outline-none ${
+        danger ? "text-err hover:text-err" : "text-muted hover:text-ink focus:text-ink"
       }`}
     >
       <Icon size={ICON.xs} />
@@ -147,6 +159,7 @@ function Overflow({
         // is a worse button than a text button.
         title="More actions"
         aria-label={`More actions for ${agent.name}`}
+        aria-haspopup="menu"
         aria-expanded={open}
         className="rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active active:bg-chrome hover:text-ink"
       >
@@ -171,6 +184,8 @@ function Overflow({
               through a portal to the card, whose click opens the agent. */}
           <div
             ref={panelRef}
+            role="menu"
+            aria-label={`Actions for ${agent.name}`}
             onClick={(e) => e.stopPropagation()}
             className="fixed left-0 top-0 z-50 w-52 animate-slide-in rounded-card border border-edge bg-elevated p-1 shadow-floating motion-reduce:animate-none"
           >
