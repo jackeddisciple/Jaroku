@@ -650,7 +650,11 @@ export const useUiStore = create<UiState>((set) => ({
 
   rightTab: "trace",
   setRightTab: (rightTab) => set({ rightTab, rightPanelOpen: true, agentReturn: null }),
-  followRightTab: (rightTab) => set({ rightTab, agentReturn: null }),
+  // FORGOTTEN ONLY IF THE FOLLOW MOVES THE TAB. Opening a run from the detail's sparkline selects
+  // it and turns to Trace in one breath, and the panel's own follow-the-new-run then asks for the same
+  // Trace a render later — clearing on that echo lost the way back it had just been given.
+  followRightTab: (rightTab) =>
+    set((s) => ({ rightTab, agentReturn: s.rightTab === rightTab ? s.agentReturn : null })),
   agentReturn: null,
   leaveAgentFor: (rightTab) => set({ rightTab, rightPanelOpen: true, agentReturn: rightTab }),
   rightPanelOpen: false,
