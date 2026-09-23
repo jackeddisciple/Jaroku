@@ -115,14 +115,17 @@ export function Truncate({
   const source = typeof children === "string" ? children : null;
   const body =
     variant === "path" && source ? truncatePath(source, budget) : children;
+  /** Whether the path on screen is not the whole path — the only time repeating it helps. */
+  const cut = variant === "path" && source !== null && body !== source;
 
   return (
     <span
       ref={ref}
-      // The full path on hover, always, for the variant whose whole job is to remove some of it.
-      // §A.3 is explicit that the tooltip carries the disambiguating context a tier-3 truncation
-      // gave up.
-      title={title ?? (variant === "path" && source ? source : undefined)}
+      // The full path on hover WHEN SOME OF IT WAS REMOVED, for the variant whose whole job is to
+      // remove some of it. §A.3 is explicit that the tooltip carries the disambiguating context a
+      // tier-3 truncation gave up — and a path that fits gave up nothing: hovering `agent.py` in a
+      // wide file list popped a tooltip reading `agent.py`, on every row.
+      title={title ?? (cut ? source : undefined)}
       // `min-w-0` is what lets this shrink at all inside a flex row; without it the element is
       // sized by its content and never overflows, so nothing ever fades.
       // `text-ellipsis` for prose, and nothing for a path — the two treatments are alternatives,
