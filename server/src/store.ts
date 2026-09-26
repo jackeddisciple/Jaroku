@@ -432,6 +432,10 @@ export class TraceStore {
 
       const idMap = new Map<string, string>();
       for (const r of rows) idMap.set(r["id"] as string, randomUUID());
+      // THROUGH `j`, AS `insertStep` WRITES THEM. Postgres hands the json columns back parsed, so
+      // re-inserting the raw value sent a string payload as bare text and every fork failed there.
+      const d = this.db.dialect;
+      const payload = (v: unknown): string | null => TraceStore.j(jsonFromColumn(d, v));
 
       for (const r of rows) {
         const oldParent = r["parent_step_id"] as string | null;
@@ -444,8 +448,8 @@ export class TraceStore {
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             idMap.get(r["id"] as string)!, ctx.workspaceId, newRunId, r["seq"], r["type"],
-            r["name"], r["input"], r["output"], r["state_before"], r["state_after"],
-            r["tokens"], r["cost"], r["latency_ms"], r["error"], newParent,
+            r["name"], payload(r["input"]), payload(r["output"]), payload(r["state_before"]),
+            payload(r["state_after"]), r["tokens"], r["cost"], r["latency_ms"], r["error"], newParent,
             r["started_at"], r["checkpoint_id"],
           ],
         );

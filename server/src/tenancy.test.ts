@@ -927,6 +927,31 @@ async function remainder(db: Db): Promise<void> {
   }
   check(branchRefused, "copyRunPrefix refuses to fork B's run");
 
+  // A FORK OF ONE'S OWN RUN, WITH PAYLOADS POSTGRES READS BACK AS VALUES. The copy re-inserted what
+  // the driver had parsed, so a string payload arrived as bare text and every branch on Postgres
+  // failed with "invalid input syntax for type json".
+  const shaped: Step = {
+    id: randomUUID(), run_id: A.runId, seq: 1, type: "tool_call", name: "http_request",
+    input: "GET https://example.com", output: ["one", 2], state_before: { stories: [] },
+    state_after: { stories: [{ id: 1 }] }, tokens: 0, cost: 0, latency_ms: 1, error: null,
+    parent_step_id: null, started_at: new Date().toISOString(),
+  };
+  await trace.insertStep(A.ctx, shaped);
+  const forkId = randomUUID();
+  let forkError = "";
+  try {
+    await trace.copyRunPrefix(A.ctx, A.runId, forkId, 1, 1);
+  } catch (err) {
+    forkError = (err as Error).message;
+  }
+  check(forkError === "", `copyRunPrefix forks a run whose payloads are a string and an array${forkError ? ` — ${forkError}` : ""}`);
+  const copied = (await trace.stepsForRun(A.ctx, forkId)).find((s) => s.seq === 1);
+  check(
+    JSON.stringify([copied?.input, copied?.output, copied?.state_after]) ===
+      JSON.stringify([shaped.input, shaped.output, shaped.state_after]),
+    "...and the copied payloads read back exactly as they were written",
+  );
+
   await evals.updateExample(A.ctx, B.exampleId, { input: "by A" });
   check(
     (await evals.getExample(B.ctx, B.exampleId))?.input.startsWith("hello") === true,
