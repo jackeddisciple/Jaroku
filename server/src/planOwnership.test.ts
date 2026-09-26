@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 
 import { Planner } from "./planner.ts";
+import { emptyUsage } from "./claude.ts";
 
 const SERVER_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const RUNTIME_DIR = resolve(SERVER_DIR, "..", "runtime");
@@ -111,5 +112,33 @@ console.log("\nanother workspace planning beside yours");
 }
 
 delete process.env.JAROKU_PLAN_FIXTURE;
+
+// A deployment with no ANTHROPIC_API_KEY refused every plan with "planning needs the same key
+// generation does", although the plan was thinking on the user's own subscription and never read one.
+console.log("\na plan on the subscription, on a server with no key");
+{
+  const savedKey = process.env.ANTHROPIC_API_KEY;
+  delete process.env.ANTHROPIC_API_KEY;
+  let asked = 0;
+  const onSubscription = new Planner();
+  const outcome = await new Promise<{ planId?: string; error?: string }>((done) => {
+    onSubscription.once("plan", (p) => done({ planId: p.planId }));
+    onSubscription.once("error", (e) => done({ error: e.message }));
+    void onSubscription.plan({
+      runtimeDir: RUNTIME_DIR,
+      workspaceId: A,
+      prompt: "a support bot",
+      ask: async () => {
+        asked++;
+        return { raw: readFileSync(FIXTURE, "utf8"), usage: emptyUsage() };
+      },
+    });
+  });
+  check(outcome.error === undefined, "the plan is not refused for want of a key", outcome.error);
+  check(typeof outcome.planId === "string", "...a plan arrives");
+  check(asked === 1, "...and the subscription answered it", `${asked} asks`);
+  if (savedKey !== undefined) process.env.ANTHROPIC_API_KEY = savedKey;
+}
+
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);

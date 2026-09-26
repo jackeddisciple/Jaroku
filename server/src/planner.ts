@@ -327,12 +327,9 @@ export class Planner extends EventEmitter<PlannerEvents> {
         raw = readFileSync(fixture, "utf8");
         await replayPlan(raw, (chunk) => this.emit("delta", { text: chunk }));
       } else {
-        if (!process.env.ANTHROPIC_API_KEY) {
-          throw new Error(
-            "ANTHROPIC_API_KEY is not set (expected in runtime/.env) — planning needs the " +
-              "same key generation does",
-          );
-        }
+        // NO KEY CHECK HERE. A plan thinks on the subscription `opts.ask` carries, which needs no
+        // key on this server — a deployment with none refused every plan while the call below it
+        // never read one. The API path refuses on its own in `anthropicClient` when it has no key.
         raw = await this.streamPlan(
           all,
           {
