@@ -42,7 +42,7 @@ import re
 
 from langchain_core.tools import tool
 
-from . import require_enabled
+from ._connector_guard import require_enabled
 
 REQUIRED_ENV = ["DATABASE_URL"]
 

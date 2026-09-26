@@ -80,6 +80,7 @@ const HOST_OWNED = new Set([
   "__init__.py",
   "mcp_tools.json",
   "tools/mcp_bridge.py",
+  "tools/_connector_guard.py",
   ...DEPLOY_ARTIFACTS,
 ]);
 
@@ -142,6 +143,9 @@ export function readOnlyReason(path: string, connectorFiles: string[]): string |
   }
   if (path === "mcp_tools.json" || path === "tools/mcp_bridge.py") {
     return "this is the agent's MCP grant and the reviewed code that honours it — editing it would widen its reach without anyone approving it";
+  }
+  if (path === "tools/_connector_guard.py") {
+    return "the reviewed check every connector template calls, copied in beside them and audited as written";
   }
   if (HOST_OWNED.has(path)) return "host-owned project metadata, written by Jaroku rather than by a model";
   if (connectorFiles.includes(path)) return "a reviewed connector template, copied in verbatim and audited as written";

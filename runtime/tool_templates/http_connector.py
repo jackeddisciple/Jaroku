@@ -95,7 +95,7 @@ from http.client import HTTPSConnection
 
 from langchain_core.tools import tool
 
-from . import require_enabled
+from ._connector_guard import require_enabled
 
 REQUIRED_ENV = ["HTTP_ALLOWED_DOMAINS"]
 AUTH_HEADER_ENV = "HTTP_AUTH_HEADER"

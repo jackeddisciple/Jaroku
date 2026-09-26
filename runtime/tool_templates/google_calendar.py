@@ -70,7 +70,7 @@ import os
 
 from langchain_core.tools import tool
 
-from . import require_enabled
+from ._connector_guard import require_enabled
 
 REQUIRED_ENV = ["GCAL_CLIENT_ID", "GCAL_CLIENT_SECRET", "GCAL_REFRESH_TOKEN"]
 ACCESS_TOKEN_ENV = "GCAL_ACCESS_TOKEN"

@@ -71,6 +71,15 @@ export function templatesDir(runtimeDir: string): string {
   return join(runtimeDir, "tool_templates");
 }
 
+/**
+ * The enablement check every connector template imports, copied in beside them.
+ *
+ * Its own file because a generated project's `tools/__init__.py` is the model's: a template that
+ * imported the check from the package failed to import in every generated project.
+ */
+export const CONNECTOR_GUARD_TEMPLATE = "_connector_guard.py";
+export const CONNECTOR_GUARD_FILE = `tools/${CONNECTOR_GUARD_TEMPLATE}`;
+
 export function loadConnectors(runtimeDir: string): Connector[] {
   const path = join(templatesDir(runtimeDir), "catalog.json");
   if (!existsSync(path)) return [];

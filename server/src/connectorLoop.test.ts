@@ -36,9 +36,10 @@ import { LocalMasterKeyProvider } from "./secrets/masterKey.ts";
 import { SecretsManager } from "./secrets/manager.ts";
 import { ConnectorSecrets, parseAllowedDomains } from "./connectorSecrets.ts";
 import {
-  configuredUserSecretConnectors, connectionSuppliedEnv, loadConnectors, optionalEnv,
-  requiredEnv, resolveSelected, templatesDir, userSuppliedEnv,
+  CONNECTOR_GUARD_FILE, configuredUserSecretConnectors, connectionSuppliedEnv, loadConnectors,
+  optionalEnv, requiredEnv, resolveSelected, templatesDir, userSuppliedEnv,
 } from "./connectors.ts";
+import { readOnlyPaths } from "./projectFs.ts";
 import { buildEgressPolicy, type Resolver } from "./sandbox/egressPolicy.ts";
 import { isSecretName } from "./secrets/secretStore.ts";
 
@@ -366,15 +367,21 @@ console.log("\n9. a connector disabled for the conversation is off in all three 
   // "Stripe is not configured", which sends somebody to the Connections panel to repair a
   // credential that is perfectly fine. It is a different problem with a different fix, one tile
   // away — and it RAISES rather than returning, or the trace records a refusal as a green step.
-  const templates = readFileSync(join(ROOT, "runtime", "tool_templates", "__init__.py"), "utf8");
+  const templates = readFileSync(join(ROOT, "runtime", "tool_templates", "_connector_guard.py"), "utf8");
   check(/def require_enabled\(/.test(templates), "the templates package has a shared enablement guard");
   check(/raise RuntimeError\(/.test(templates), "...which raises rather than returning its reason as an answer");
   check(/if allowed is None:/.test(templates), "...and an absent variable means no restriction, as the MCP sentinel does");
   check(/allowed\.strip\(\) == "-"/.test(templates), "...while the sentinel means nothing is allowed, which an empty string could not carry");
   for (const file of ["gmail", "google_calendar", "slack", "postgres", "http_connector", "stripe_connector"]) {
     const source = readFileSync(join(ROOT, "runtime", "tool_templates", file + ".py"), "utf8");
-    check(/^from \. import require_enabled$/m.test(source) && /require_enabled\(/.test(source), `${file} consults it`);
+    check(/^from \._connector_guard import require_enabled$/m.test(source) && /require_enabled\(/.test(source), `${file} consults it`);
   }
+  // FROM ITS OWN FILE, NOT THE PACKAGE. A generated project's tools/__init__.py is the model's, and
+  // `from . import require_enabled` failed to import in every generation that carried a connector.
+  const generator = readFileSync(join(ROOT, "server", "src", "generator.ts"), "utf8");
+  check(/path: CONNECTOR_GUARD_FILE, content: readFileSync\(guard, "utf8"\)/.test(generator),
+    "the generator copies the guard in beside the templates, byte for byte");
+  check(readOnlyPaths([]).has(CONNECTOR_GUARD_FILE), "...and nothing a model writes can replace it");
 
   // THE DISPATCH ITSELF, read as text: one narrowed list feeding all three consumers. Three call
   // sites reading `agent.connectors` again would be three chances to forget one.

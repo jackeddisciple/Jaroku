@@ -60,7 +60,7 @@ from email.message import EmailMessage
 
 from langchain_core.tools import tool
 
-from . import require_enabled
+from ._connector_guard import require_enabled
 
 REQUIRED_ENV = ["GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN"]
 ACCESS_TOKEN_ENV = "GMAIL_ACCESS_TOKEN"

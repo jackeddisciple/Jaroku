@@ -25,8 +25,8 @@ import type { EffortPlan } from "./effort.ts";
 import type { AskModel } from "./askModel.ts";
 import { anthropicClient, emptyUsage, summarizeUsage, type UsageSummary } from "./claude.ts";
 import {
-  connectionSuppliedEnv, loadConnectors, optionalEnv, requiredEnv, resolveSelected, templatesDir,
-  type Connector,
+  CONNECTOR_GUARD_FILE, CONNECTOR_GUARD_TEMPLATE, connectionSuppliedEnv, loadConnectors, optionalEnv,
+  requiredEnv, resolveSelected, templatesDir, type Connector,
 } from "./connectors.ts";
 import { FileProtocolParser, type ProtocolEvent } from "./fileProtocol.ts";
 import { round8 } from "./pricing.ts";
@@ -536,6 +536,11 @@ export class Generator extends EventEmitter<GeneratorEvents> {
       const src = join(templatesDir(runtimeDir), c.file);
       if (!existsSync(src)) continue;
       out.push({ path: `tools/${c.file}`, content: readFileSync(src, "utf8") }); // never re-rendered
+    }
+    // Every template imports its enablement check from here, so it travels with any of them.
+    const guard = join(templatesDir(runtimeDir), CONNECTOR_GUARD_TEMPLATE);
+    if (out.length && existsSync(guard)) {
+      out.push({ path: CONNECTOR_GUARD_FILE, content: readFileSync(guard, "utf8") });
     }
     return out;
   }
