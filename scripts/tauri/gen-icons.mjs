@@ -1,11 +1,11 @@
 // The desktop app's icon set, rendered from the two PNGs in `assets/`.
 //
-// TWO PIECES OF ARTWORK, BECAUSE TWO PLACES WANT DIFFERENT THINGS. `mainlogo.png` is the logo:
-// the mark on its orange plate, and what belongs in the dock, the Finder, the installer and the
-// window. `mono.png` is the same animal as one flat silhouette on transparency, and it is what
-// belongs in the macOS menu bar — where an icon is a TEMPLATE, recoloured by the system to match
-// a light or dark bar and whatever the user has done to their accent colour. A plate in the menu
-// bar is a coloured rectangle sitting in a row of glyphs; it is not a smaller version of the dock
+// TWO PIECES OF ARTWORK, BECAUSE TWO PLACES WANT DIFFERENT THINGS. `thenewlogo.png` is the logo:
+// the drawing on a white tile, and what belongs in the dock, the Finder, the installer and the
+// window. `thenewmenubar.png` is the same portrait as one flat silhouette on transparency, and it
+// is what belongs in the macOS menu bar — where an icon is a TEMPLATE, recoloured by the system to
+// match a light or dark bar and whatever the user has done to their accent colour. A tile in the
+// menu bar is a white rectangle sitting in a row of glyphs; it is not a smaller version of the dock
 // icon, it is the wrong thing. So there are two sources here and the tray gets its own file.
 //
 // WHY THE SOURCE IS A RASTER NOW. It used to be `client/public/favicon.svg`, on the reasoning that
@@ -16,8 +16,8 @@
 // vector because a favicon genuinely wants one; see `client/public/favicon.svg`.
 //
 // AND WHY IT IS NOT `tauri icon`. That command is the ordinary way to do this and it works; it
-// also would not know about the menu bar's template icon, would not strip the black the artwork
-// carries outside its plate, and would hand macOS 26 an icon with alpha in it — see the note on
+// also would not know about the menu bar's template icon, would not lift the drawing off its
+// paper onto a tile, and would hand macOS 26 an icon with alpha in it — see the note on
 // `ICNS` for what Tahoe does with one of those. Everything below is
 // `node:zlib` and arithmetic: no dependency, no install step, and it runs on a machine with no
 // Rust toolchain, which is the machine most of this wrapper was written on.
@@ -32,8 +32,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const LOGO = join(ROOT, "assets", "mainlogo.png");
-const MONO = join(ROOT, "assets", "mono.png");
+const LOGO = join(ROOT, "assets", "thenewlogo.png");
+const MENU_BAR = join(ROOT, "assets", "thenewmenubar.png");
 const OUT = join(ROOT, "src-tauri", "icons");
 
 // ---------------------------------------------------------------------------------------------
@@ -121,49 +121,68 @@ function decodePng(file) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The plate.
+// The tile.
 //
-// `mainlogo.png` is drawn edge to edge with SOLID BLACK in the four corners the rounded plate does
-// not reach — which is correct in a design tool on a white board and is a black square in a dock.
-// So the plate's own outline is measured off the artwork and everything outside it is cut to
-// transparent. Measuring rather than hard-coding a radius means a redrawn plate with a different
-// corner still produces a clean icon.
+// `thenewlogo.png` is a drawing on paper rather than a mark on a plate: black ink and a halftone on
+// white, with no edge of its own, and a bust that stops in a flat cut under the neck. So the tile
+// is made here. The ink is lifted off the paper, cropped to itself, and set on a white square with
+// the cut ON THE TILE'S BOTTOM EDGE, so the portrait rises out of the edge the way a bust does
+// instead of floating mid-tile with its neck sliced off.
 // ---------------------------------------------------------------------------------------------
 
-/** How far in the plate's edge sits on each row of its top-left quadrant. The mark never reaches
- *  that corner, so the profile there is the plate and nothing else; the other three are mirrors
- *  of it, which is also what makes the result symmetrical when the artwork is not quite. */
-function cornerProfile({ width, height, rgba }) {
-  const plateish = (x, y) => {
-    const at = (y * width + x) * 4;
-    // The plate, whatever colour it is: anything that is not the near-black surround.
-    return rgba[at] + rgba[at + 1] + rgba[at + 2] > 210;
-  };
+/** The paper and the ink, as the export draws them. The paper is not one value: it carries noise
+ *  from 244 up to 255, which set as it is on a pure-white tile is a faint grey box around the
+ *  drawing. So everything at `PAPER` or above is paper, everything at `INK` or below is solid, and
+ *  the antialiasing between the two keeps its ramp. */
+const PAPER = 244;
+const INK = 12;
 
-  const limit = Math.floor(Math.min(width, height) / 3);
-  const profile = [];
-  for (let y = 0; y < limit; y++) {
-    let x = 0;
-    while (x < limit && !plateish(x, y)) x++;
-    if (x >= limit) throw new Error("mainlogo.png: no plate edge in the top-left quadrant");
-    profile.push(x);
-    if (x === 0) break;
+/** How much ink each pixel of the logo carries, 0-255, cropped to the drawing. */
+function inked() {
+  const src = decodePng(LOGO);
+  const ink = Buffer.alloc(src.width * src.height);
+
+  let minX = src.width;
+  let minY = src.height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < src.height; y++) {
+    for (let x = 0; x < src.width; x++) {
+      const at = (y * src.width + x) * 4;
+      const lum = (src.rgba[at] + src.rgba[at + 1] + src.rgba[at + 2]) / 3;
+      const value = lum >= PAPER ? 0 : lum <= INK ? 255 : Math.round(((PAPER - lum) / (PAPER - INK)) * 255);
+      ink[y * src.width + x] = value;
+      if (value < 128) continue;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
   }
-  if (profile.length < 2) throw new Error("mainlogo.png: the plate has no rounded corner to measure");
-  return profile;
+  if (maxX < 0) throw new Error("thenewlogo.png: no ink, so there is no drawing to put on the tile");
+
+  const width = maxX - minX + 1;
+  const height = maxY - minY + 1;
+  const cropped = Buffer.alloc(width * height);
+  for (let y = 0; y < height; y++) {
+    ink.copy(cropped, y * width, (y + minY) * src.width + minX, (y + minY) * src.width + maxX + 1);
+  }
+  return { width, height, ink: cropped };
 }
 
-/** Coverage of the plate at a point, supersampled so the corner is antialiased rather than
- *  stepped — the corner is the only curved edge in the whole image and the only place it shows. */
-function plateCoverage(profile, width, height, x, y, factor) {
+/** Coverage of a rounded square at a pixel, supersampled so the corner is antialiased rather than
+ *  stepped — the corners are the only curved edge the tile has and the only place it shows. */
+function tileCoverage(side, radius, x, y, factor) {
+  const straight = (v) => v >= radius && v + 1 <= side - radius;
+  if (straight(x) || straight(y)) return 1;
   let hits = 0;
   for (let sy = 0; sy < factor; sy++) {
     for (let sx = 0; sx < factor; sx++) {
       const px = x + (sx + 0.5) / factor;
       const py = y + (sy + 0.5) / factor;
-      const row = py < profile.length ? Math.floor(py) : py >= height - profile.length ? Math.floor(height - 1 - py) : -1;
-      const inset = row >= 0 && row < profile.length ? profile[row] : 0;
-      if (px >= inset && px <= width - inset) hits++;
+      const dx = Math.max(radius - px, 0, px - (side - radius));
+      const dy = Math.max(radius - py, 0, py - (side - radius));
+      if (dx * dx + dy * dy <= radius * radius) hits++;
     }
   }
   return hits / (factor * factor);
@@ -224,35 +243,36 @@ function resample(src, width, height) {
   return out;
 }
 
-/** The logo in two finishes, at the artwork's own resolution: `rounded` keeps the plate's shape
- *  and cuts the black surround to transparency, `opaque` extends the plate colour into the corners
- *  so the image is a solid square. Which one a platform wants is the comment above `OPAQUE_MACOS`. */
-function plated() {
-  const src = decodePng(LOGO);
-  if (src.width !== src.height) throw new Error("mainlogo.png: the logo is not square");
-  const profile = cornerProfile(src);
+/** The logo in two finishes, at the drawing's own resolution: `rounded` cuts the tile's corners to
+ *  transparency, `opaque` leaves the tile a solid white square. Which one a platform wants is the
+ *  comment above `ICNS`. */
+function tiled() {
+  const drawing = inked();
+  const side = Math.round(Math.max(drawing.width, drawing.height) / LOGO_INK);
+  const left = Math.round((side - drawing.width) / 2);
+  const top = side - drawing.height;
+  const radius = side * CORNER;
 
-  // The plate's own colour, read from the top edge between the two corners — which is plate and
-  // nothing else — rather than named here, so a replate does not need this file edited.
-  const mid = ((3 * src.width) + (src.width >> 1)) * 4;
-  const plate = [src.rgba[mid], src.rgba[mid + 1], src.rgba[mid + 2]];
-
-  const rounded = Buffer.from(src.rgba);
-  const opaque = Buffer.from(src.rgba);
-  for (let y = 0; y < src.height; y++) {
-    for (let x = 0; x < src.width; x++) {
-      const coverage = plateCoverage(profile, src.width, src.height, x, y, 4);
-      if (coverage === 1) continue;
-      const at = (y * src.width + x) * 4;
-      rounded[at + 3] = Math.round(coverage * 255);
-      // The corner, filled rather than cut: blend the surround out at the plate's own edge so the
-      // seam is not a hard line where the antialiasing used to be.
-      for (let c = 0; c < 3; c++) opaque[at + c] = plate[c];
-      opaque[at + 3] = 255;
+  const opaque = Buffer.alloc(side * side * 4, 255);
+  for (let y = 0; y < drawing.height; y++) {
+    for (let x = 0; x < drawing.width; x++) {
+      const tone = 255 - drawing.ink[y * drawing.width + x];
+      const at = ((top + y) * side + left + x) * 4;
+      opaque[at] = tone;
+      opaque[at + 1] = tone;
+      opaque[at + 2] = tone;
     }
   }
-  const base = { width: src.width, height: src.height };
-  return { rounded: { ...base, rgba: rounded }, opaque: { ...base, rgba: opaque }, corner: profile[0] / src.width };
+
+  const rounded = Buffer.from(opaque);
+  for (let y = 0; y < side; y++) {
+    for (let x = 0; x < side; x++) {
+      const coverage = tileCoverage(side, radius, x, y, 4);
+      if (coverage < 1) rounded[(y * side + x) * 4 + 3] = Math.round(coverage * 255);
+    }
+  }
+  const base = { width: side, height: side };
+  return { rounded: { ...base, rgba: rounded }, opaque: { ...base, rgba: opaque }, side, drawing };
 }
 
 /** The menu bar's mark: the silhouette alone, as a template image. Every pixel is black and only
@@ -262,15 +282,16 @@ function plated() {
  *  CROPPED TO THE INK AND THEN PADDED BACK, which is the whole reason this is not just a resize.
  *  `tray-icon` draws whatever it is given at a FIXED 18pt tall with the width scaled to match (its
  *  macOS backend hard-codes `icon_height: f64 = 18.0`), so the ONLY control over how big the mark
- *  looks is its share of the image. mono.png's own margins — the mark is 828 of 1254 tall — spent
- *  nearly half the slot on nothing and drew a mark around 10pt, visibly smaller than the WiFi and
- *  battery glyphs next to it. Cropping to the ink and padding by a known amount replaces an
- *  accident of the export with a number: `TRAY_INK` is that number.
+ *  looks is its share of the image. An export's own margins are an accident — the previous mark
+ *  was 828 of its 1254 tall, spent nearly half the slot on nothing and drew around 10pt, visibly
+ *  smaller than the WiFi and battery glyphs next to it; thenewmenubar.png's is 920 of 1254. Cropping
+ *  to the ink and padding by a known amount replaces that accident with a number: `TRAY_INK`.
  *
- *  It also means this image is WIDER THAN IT IS TALL, as the animal is; the bar is sized by height
- *  and takes whatever width it is given, and the spacing between items is the system's. */
+ *  It also means this image takes the silhouette's own width, a little wider than it is tall; the
+ *  bar is sized by height and takes whatever width it is given, and the spacing between items is
+ *  the system's. */
 function template(height, inkShare) {
-  const src = decodePng(MONO);
+  const src = decodePng(MENU_BAR);
 
   let minX = src.width;
   let minY = src.height;
@@ -285,7 +306,7 @@ function template(height, inkShare) {
       if (y > maxY) maxY = y;
     }
   }
-  if (maxX < 0) throw new Error("mono.png: no opaque pixels, so there is no mark to crop to");
+  if (maxX < 0) throw new Error("thenewmenubar.png: no opaque pixels, so there is no mark to crop to");
 
   const cw = maxX - minX + 1;
   const ch = maxY - minY + 1;
@@ -404,16 +425,25 @@ function icns(entries) {
 
 // A LEGACY .icns ON macOS 26 MUST BE FULLY OPAQUE. Tahoe composites an app icon it is given into
 // its own squircle and draws the shadow itself — but only when the image fills the canvas. Hand it
-// anything with alpha, including nothing more than the plate's own rounded corners, and it decides
+// anything with alpha, including nothing more than a tile's own rounded corners, and it decides
 // the icon is a small graphic rather than an icon and drops it onto a light backing plate: the mark
 // shrinks, gains a white border, and reads noticeably smaller than every icon beside it. Verified
 // on 26.6.2 — inset-to-Apple's-grid and full-bleed-with-rounded-corners BOTH plate; only the solid
-// square fills the tile. So the corners go to the plate colour and macOS rounds them back.
+// square fills the tile. So the tile goes out as a solid white square and macOS rounds it.
 //
-// WINDOWS AND LINUX DO NOT MASK, so their icons keep the plate's own rounded corners and the
+// WINDOWS AND LINUX DO NOT MASK, so their icons keep the tile's own rounded corners and the
 // transparency outside them — a solid square there would be a square icon.
 const ICNS = "opaque";
 const OTHERS = "rounded";
+
+// The drawing's share of the tile, across its wider side — the portrait is a little wider than it
+// is tall. The rest is white: margin either side, and headroom above, since the bust sits on the
+// bottom edge. Wide enough that the hair clears the corner macOS rounds off the tile.
+const LOGO_INK = 0.84;
+
+// The rounding the Windows and Linux tiles get, as a share of the side. It is the corner the old
+// orange plate measured, so those platforms keep the icon's silhouette while its face changes.
+const CORNER = 0.095;
 
 // The menu bar's mark is sized by `tray-icon` at a fixed 18pt tall; see `template`. Rendering the
 // 1x at 18 and the 2x at 36 means the bitmap lands on whole pixels on both kinds of display.
@@ -424,7 +454,7 @@ const TRAY_HEIGHT = 18;
 // they do not fill theirs either — so it sits a little inside instead, at about 15pt of the 18.
 const TRAY_INK = 0.85;
 
-const logo = plated();
+const logo = tiled();
 mkdirSync(OUT, { recursive: true });
 
 const SIZES = [32, 64, 128, 256, 512, 1024];
@@ -454,5 +484,5 @@ for (const [name, data] of files) {
   writeFileSync(join(OUT, name), data);
   console.log(`${name.padEnd(18)} ${String(data.length).padStart(8)} bytes`);
 }
-console.log(`\nplate corner measured at ${(logo.corner * 100).toFixed(1)}% of the artwork's width`);
+console.log(`\ndrawing ${logo.drawing.width}x${logo.drawing.height} on a ${logo.side}px tile, sitting on its bottom edge`);
 console.log(`menu bar mark ${tray2x.width}x${tray2x.height} at 2x, drawn ${(TRAY_HEIGHT * TRAY_INK).toFixed(1)}pt of a ${TRAY_HEIGHT}pt slot`);

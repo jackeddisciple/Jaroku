@@ -39,11 +39,11 @@ pub fn install(app: &AppHandle) -> tauri::Result<bool> {
     // THE MENU BAR IS NOT A SMALL DOCK, and this is the one place the logo is deliberately not the
     // logo. macOS draws a tray icon as a TEMPLATE: it discards the colours, keeps the coverage, and
     // redraws it in the bar's own ink — which is how an icon follows a light bar, a dark bar, and
-    // the inverted ink it gets while its own menu is open. Hand that the orange plate and macOS
-    // renders a solid rounded rectangle. So macOS gets `assets/mono.png`'s silhouette, which is the
-    // piece of artwork drawn for exactly this, by way of `icons/tray@2x.png`.
+    // the inverted ink it gets while its own menu is open. Hand that the white tile and macOS
+    // renders a solid rounded rectangle. So macOS gets `assets/thenewmenubar.png`'s silhouette, which
+    // is the piece of artwork drawn for exactly this, by way of `icons/tray@2x.png`.
     //
-    // EVERY OTHER PLATFORM GETS THE PLATE. Windows and Linux composite a tray icon as it is, over a
+    // EVERY OTHER PLATFORM GETS THE TILE. Windows and Linux composite a tray icon as it is, over a
     // notification area whose colour they do not tell us; a black-on-transparent glyph there is
     // invisible against half the themes in existence. Those keep the window icon, as before.
     #[cfg(target_os = "macos")]
