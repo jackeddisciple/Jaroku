@@ -126,8 +126,9 @@ function decodePng(file) {
 // `thenewlogo.png` is a drawing on paper rather than a mark on a plate: black ink and a halftone on
 // white, with no edge of its own, and a bust that stops in a flat cut under the neck. So the tile
 // is made here. The ink is lifted off the paper, cropped to itself, and set on a white square with
-// the cut ON THE TILE'S BOTTOM EDGE, so the portrait rises out of the edge the way a bust does
-// instead of floating mid-tile with its neck sliced off.
+// THE SAME MARGIN BELOW IT AS EITHER SIDE. It used to stand on the tile's bottom edge, the bust
+// rising out of it; in the dock that read as the drawing slipping off the tile, so the cut under
+// the neck now sits as far from the bottom as the hair and the profile sit from the sides.
 // ---------------------------------------------------------------------------------------------
 
 /** The paper and the ink, as the export draws them. The paper is not one value: it carries noise
@@ -250,7 +251,9 @@ function tiled() {
   const drawing = inked();
   const side = Math.round(Math.max(drawing.width, drawing.height) / LOGO_INK);
   const left = Math.round((side - drawing.width) / 2);
-  const top = side - drawing.height;
+  // The bottom margin is the side margin; the top takes what is left, which is a little more
+  // because the drawing is wider than it is tall.
+  const top = side - drawing.height - left;
   const radius = side * CORNER;
 
   const opaque = Buffer.alloc(side * side * 4, 255);
@@ -272,7 +275,7 @@ function tiled() {
     }
   }
   const base = { width: side, height: side };
-  return { rounded: { ...base, rgba: rounded }, opaque: { ...base, rgba: opaque }, side, drawing };
+  return { rounded: { ...base, rgba: rounded }, opaque: { ...base, rgba: opaque }, side, drawing, margin: left };
 }
 
 /** The menu bar's mark: the silhouette alone, as a template image. Every pixel is black and only
@@ -437,8 +440,8 @@ const ICNS = "opaque";
 const OTHERS = "rounded";
 
 // The drawing's share of the tile, across its wider side — the portrait is a little wider than it
-// is tall. The rest is white: margin either side, and headroom above, since the bust sits on the
-// bottom edge. Wide enough that the hair clears the corner macOS rounds off the tile.
+// is tall. The rest is white: one margin either side and below, and a little more above. Narrow
+// enough that the hair clears the corners macOS rounds off the tile.
 const LOGO_INK = 0.84;
 
 // The rounding the Windows and Linux tiles get, as a share of the side. It is the corner the old
@@ -484,5 +487,5 @@ for (const [name, data] of files) {
   writeFileSync(join(OUT, name), data);
   console.log(`${name.padEnd(18)} ${String(data.length).padStart(8)} bytes`);
 }
-console.log(`\ndrawing ${logo.drawing.width}x${logo.drawing.height} on a ${logo.side}px tile, sitting on its bottom edge`);
+console.log(`\ndrawing ${logo.drawing.width}x${logo.drawing.height} on a ${logo.side}px tile, ${logo.margin}px clear to the sides and below`);
 console.log(`menu bar mark ${tray2x.width}x${tray2x.height} at 2x, drawn ${(TRAY_HEIGHT * TRAY_INK).toFixed(1)}pt of a ${TRAY_HEIGHT}pt slot`);
