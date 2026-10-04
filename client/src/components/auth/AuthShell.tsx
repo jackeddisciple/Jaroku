@@ -22,7 +22,7 @@
 //   are. Full-bleed and evenly lit here rather than masked to an ellipse: these screens are a
 //   page, and a vignette on a page reads as a spotlight nobody asked for.
 //
-//   THE MARK. The same three contours as everywhere else, at `BRAND.screen`, in ink.
+//   THE MARK. The same traced path as everywhere else, at `BRAND.screen`, in ink.
 //
 //   THE TITLE, on `display` — §02's top rung, 32px at 600. It was set in a serif of its own on the
 //   argument that a display face is what makes these screens read as a product rather than as a
