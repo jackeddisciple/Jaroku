@@ -28,6 +28,7 @@ import { DESTRUCTIVE, DETAIL, FAILURE_SENTENCE, GATE, NOT_SENT, REFUSAL, REFUSED
 import { cockpitAbsolute, cockpitCost, cockpitDuration, cockpitTokens } from "../lib/cockpitFormat.ts";
 import { selectRun } from "../lib/selection.ts";
 import { sendCancelWork, sendLoadRun, sendRetryWork } from "../lib/socket.ts";
+import { DETAIL_WIDTH } from "../lib/cockpitLayout.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { useCanRun } from "../lib/useCapability.ts";
 import { workLink } from "../lib/workLink.ts";
@@ -225,7 +226,13 @@ function Figure({ label, figure }: { label: string; figure: { text: string; titl
   );
 }
 
-export function WorkDetail() {
+export function WorkDetail({ docked = true }: {
+  /**
+   * Beside the list (true) or over the whole work region (false) — the view decides from its own
+   * width; see `DOCK_MIN_WIDTH` in `CockpitView`.
+   */
+  docked?: boolean;
+}) {
   const item = useWorkStore((s) => s.open);
   const openingId = useWorkStore((s) => s.openingId);
   const close = useWorkStore((s) => s.closeItem);
@@ -311,27 +318,38 @@ export function WorkDetail() {
   };
 
   return (
-    // §3D, and every value in this class list is one of its clauses.
+    // §3D, AND WHERE IT SITS. It used to slide OVER the work list at 420px, covering the filter chip
+    // that says what the list is narrowed to, the composer's Dispatch button, and at the minimum
+    // window half of every row. Now:
     //
-    // `z-30` IS `LAYER.menu`, the popover rung §3D names. `bg-elevated` AND `border-l border-edge`
-    // AND `shadow-floating` TOGETHER, never the shadow alone: `tokens.ts` states that rule and §3D
-    // restates it, and it is "the difference between 'floating' and 'a drawn rectangle'".
+    //   DOCKED — beside the list, in the flow. It takes its width from the region rather than lying
+    //   over it, and the list narrows to make room. The width animates both ways at `duration-base`,
+    //   because §11 requires the close to take as long as the open; the content is held at its own
+    //   width inside, so nothing in it reflows while the edge moves. In the flow it is a pane, not a
+    //   floating surface, so it has an edge and no shadow.
     //
-    // `max-w-[92%]` IS §13'S NARROW BEHAVIOUR and `w-[420px]` is §3D's "comfortable reading measure,
-    // capped so that on a wide monitor it does not become a second page". At the narrowest supported
-    // width the cap wins and the panel is effectively full-width over the list, which is what §13
-    // asks for in place of "a slide-over at a fraction of a narrow column".
+    //   OVER — when the region is too narrow for both. It covers the whole region rather than half of
+    //   it, translated in and out, floating with `bg-elevated` + `border-l` + `shadow-floating`.
     //
-    // NO SCRIM AND NO FOCUS TRAP — §3D and §12 both. `duration-base` BOTH WAYS, because §11 requires
-    // the close to take as long as the open: "an asymmetric close reads as a glitch."
+    // NO SCRIM AND NO FOCUS TRAP either way — §3D and §12.
     <div
-      className={`absolute top-0 right-0 bottom-0 z-30 flex w-[420px] max-w-[92%] flex-col border-l border-edge bg-elevated shadow-floating transition-transform duration-base ease-state ${
-        open ? "translate-x-0" : "pointer-events-none translate-x-full"
-      }`}
+      className={docked
+        ? `relative z-10 flex h-full shrink-0 flex-col overflow-hidden bg-elevated transition-[width] duration-base ease-state ${
+            open ? "border-l border-edge" : "pointer-events-none"
+          }`
+        : `absolute inset-0 z-30 flex flex-col border-l border-edge bg-elevated shadow-floating transition-transform duration-base ease-state ${
+            open ? "translate-x-0" : "pointer-events-none translate-x-full"
+          }`}
+      style={docked ? { width: open ? DETAIL_WIDTH : 0 } : undefined}
+      // INERT WHILE CLOSED: a zero-width or off-screen panel still holds buttons, and Tab must not
+      // walk into controls nobody can see.
+      inert={!open}
       aria-hidden={!open}
       role="complementary"
       aria-label={DETAIL.label}
     >
+      {/* HELD AT ITS OWN WIDTH while docked, so the content does not reflow as the edge animates. */}
+      <div className="flex h-full min-h-0 flex-col" style={docked ? { width: DETAIL_WIDTH } : undefined}>
       {/* §7's HEADER: the agent's name, the status glyph, and a close control. The NAME rather than
           the word "Job", because the panel is about a job somebody already chose and what they are
           checking is which agent ran it. */}
@@ -541,6 +559,7 @@ export function WorkDetail() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

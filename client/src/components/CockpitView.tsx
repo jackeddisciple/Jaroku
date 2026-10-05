@@ -39,10 +39,10 @@
 // skeleton and "there is nothing" renders one of §10's three zero states — collapsing them would
 // put "Nothing has been asked of them yet" in front of somebody whose jobs are still on the wire.
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import { EMPTY, HEADER, OFFLINE } from "../lib/cockpitCopy.ts";
-import { CARD_HEIGHT, CARD_WIDTH, ROW_HEIGHT, SPINE_X } from "../lib/cockpitLayout.ts";
+import { CARD_HEIGHT, CARD_WIDTH, DETAIL_WIDTH, ROW_HEIGHT, SPINE_X } from "../lib/cockpitLayout.ts";
 import { selectAgent } from "../lib/selection.ts";
 import { sendListFleet, sendListWork, sendLoadWorkItem } from "../lib/socket.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
@@ -181,6 +181,13 @@ function NothingLive({ hasHistory }: {
   );
 }
 
+/**
+ * The narrowest work region the detail docks beside the list in: its own width and enough left over
+ * for a list row that still reads — the input, the status and the time. Narrower than this, the
+ * panel covers the region instead of halving it.
+ */
+const DOCK_MIN_WIDTH = DETAIL_WIDTH + 460;
+
 export function CockpitView() {
   const loaded = useWorkStore((s) => s.loaded);
   const anyLive = useWorkStore((s) => s.anyLive);
@@ -199,6 +206,17 @@ export function CockpitView() {
   const takeCockpitAgentIntent = useUiStore((s) => s.takeCockpitAgentIntent);
   const workspaceId = useSessionStore((s) => s.workspaceId);
   const connected = useTraceStore((s) => s.connection === "open");
+  /** The work region's width, which decides whether the detail docks beside the list or covers it. */
+  const [region, setRegion] = useState<HTMLDivElement | null>(null);
+  const [regionWidth, setRegionWidth] = useState(0);
+  useEffect(() => {
+    if (!region || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => { if (entry) setRegionWidth(entry.contentRect.width); });
+    observer.observe(region);
+    return () => observer.disconnect();
+  }, [region]);
+  // UNMEASURED IS TREATED AS ROOMY — the server render and the first frame — which is the common case.
+  const docked = regionWidth === 0 || regionWidth >= DOCK_MIN_WIDTH;
 
   // ONE ASK PER (WORKSPACE, CONNECTION), which is `ActivityView`'s rule and is here for the reason
   // its own note gives: a reconnect leaves this tab holding a fleet from before the drop with no
@@ -242,7 +260,15 @@ export function CockpitView() {
           the header and the strip as well — so the glance the strip exists to be disappeared
           behind the panel opened FROM it. The sidebar is untouched either way, because a
           full-screen destination is contained by §2's layout law rather than by the viewport. */}
-      <div className="relative flex min-h-0 flex-1 flex-col">
+      {/* THE WORK REGION IS A ROW: the list and its composer, then the detail BESIDE them when there
+          is room for both. The panel used to slide OVER the list, so every job it opened covered the
+          right of the region — the "Only <agent>" chip that says what the list is narrowed to, the
+          composer's half and its Dispatch button — and at the minimum window it cut half the list's
+          rows off mid-word. Docked, the list narrows instead and sheds its columns the way it does
+          for any narrower window. Where there is not room for both, the panel covers the whole
+          region rather than half of it — see `DOCK_MIN_WIDTH`. */}
+      <div ref={setRegion} className="relative flex min-h-0 flex-1">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {!loaded ? (
           <CockpitSkeleton />
         ) : !anyLive && hasHistory ? (
@@ -273,7 +299,8 @@ export function CockpitView() {
             outside the three branches above for a second reason: a citation opens a job by id,
             with no list in between, and a panel that lived inside the `anyLive` branch could not
             be opened in a workspace whose last agent had just been killed. */}
-        <WorkDetail />
+        </div>
+        <WorkDetail docked={docked} />
       </div>
     </div>
   );

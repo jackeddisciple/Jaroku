@@ -32,6 +32,7 @@ import { MOTION, SPACE } from "../lib/tokens.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { useWorkStore } from "../store/workStore.ts";
 import type { WorkItemView } from "../types.ts";
+import { WorkDetail } from "./WorkDetail.tsx";
 import { WorkList } from "./WorkList.tsx";
 
 let fail = 0;
@@ -305,6 +306,26 @@ console.log("\nthe new-rows pill and the pinned day hang from the frame, not the
   check("the pill is drawn", html.includes(LIVE.pill(1)));
   check("...outside the scrolling element, so it cannot scroll out of view",
     scroller.length > 0 && !scroller.includes(LIVE.pill(1)), scroller.slice(0, 200));
+}
+
+console.log("\nthe job panel does not lie over the list, the filters or the composer");
+{
+  // IT SLID OVER THE WORK REGION AT 420px: the "Only <agent>" chip, the composer's Dispatch button and
+  // — at the minimum window — half of every row were under it. With room it now docks beside the
+  // list, in the flow; without, it covers the whole region rather than half.
+  const open = { ...job("w-open"), input: "a job", output: null };
+  seed(useWorkStore, { open, openingId: null });
+  const docked = markup(createElement(WorkDetail, { docked: true }));
+  const panelTag = (html: string): string => html.slice(0, html.indexOf(">") + 1);
+  check("docked, the panel is in the flow rather than positioned over the list",
+    !/\babsolute\b/.test(panelTag(docked)) && /width:420px/.test(panelTag(docked)), panelTag(docked));
+  const over = markup(createElement(WorkDetail, { docked: false }));
+  check("where there is no room, it covers the whole region rather than half of it",
+    /absolute inset-0/.test(panelTag(over)), panelTag(over));
+  seed(useWorkStore, { open: null });
+  const closed = markup(createElement(WorkDetail, { docked: true }));
+  check("closed, it takes no width and nothing in it can be reached", /width:0/.test(panelTag(closed)) && /inert/.test(panelTag(closed)),
+    panelTag(closed));
 }
 
 console.log("\nrelative times keep moving");

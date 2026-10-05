@@ -101,3 +101,10 @@ export const CARD_HEIGHT = 86;
  * virtualiser both read.
  */
 export const ROW_HEIGHT = 44;
+
+/**
+ * The detail panel's width — §3D's "comfortable reading measure, capped so that on a wide monitor it
+ * does not become a second page". Here rather than in the panel so the view can decide, from its own
+ * width, whether there is room for the panel beside the list.
+ */
+export const DETAIL_WIDTH = 420;
