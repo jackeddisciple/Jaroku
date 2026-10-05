@@ -7326,7 +7326,10 @@ async function handleWorkCommand(ctx: TenantContext, cmd: WorkCommand): Promise<
           // the row would sit at `queued` for ever, which is the worst of the three outcomes —
           // worse than vanishing, because it claims a job is waiting that nothing will ever run.
           if (out.stage === "failed") await broadcastWorkItem(ctx, out.item);
-          return fail(out.detail, undefined, clientRef);
+          // AND THE ROW IT WROTE, when it wrote one, so the client puts that row where its
+          // placeholder was rather than keeping both: the broadcast above is the real failed job,
+          // and turning the placeholder into a second failed row showed one job twice.
+          return fail(out.detail, out.stage === "failed" ? out.item.id : undefined, clientRef);
         }
         // TO THE ASKER, because it is navigation — the composer clears and the detail panel opens
         // on the new job. Broadcasting it would move every open Cockpit in the workspace.

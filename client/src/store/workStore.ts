@@ -28,7 +28,7 @@
 import { create } from "zustand";
 
 import {
-  OPTIMISTIC_PREFIX, admitPending, mergeDelta, refuseOptimistic, settleOptimistic,
+  OPTIMISTIC_PREFIX, admitPending, dropOptimistic, mergeDelta, refuseOptimistic, settleOptimistic,
 } from "../lib/workLive.ts";
 import type {
   FleetCardView, WorkCounts, WorkFilters, WorkItemDetailView, WorkItemView, WorkStatus,
@@ -141,6 +141,8 @@ interface WorkState {
   settleOptimistic: (ref: string, real: WorkItemView) => void;
   /** §19: the server refused — the placeholder becomes a failed row rather than vanishing. */
   refuseOptimistic: (ref: string, reason: string) => void;
+  /** The dispatch failed after writing its row, which arrived as a delta: the placeholder goes. */
+  dropOptimistic: (ref: string) => void;
   setFleet: (fleet: FleetCardView[], anyLive: boolean) => void;
   openItem: (item: WorkItemDetailView) => void;
   /**
@@ -348,7 +350,7 @@ export const useWorkStore = create<WorkState>((set, get) => ({
   settleOptimistic: (ref, real) =>
     set((prev) => {
       const placeholder = prev.items.find((i) => i.id === `${OPTIMISTIC_PREFIX}${ref}`);
-      const held = prev.items.some((i) => i.id === real.id);
+      const held = prev.items.some((i) => i.id === real.id) || prev.pending.some((i) => i.id === real.id);
       const merged = settleOptimistic({ items: prev.items, pending: prev.pending }, ref, real);
       const known = remember(prev.known, [real]);
       if (!placeholder) return { items: merged.items, pending: merged.pending, known };
@@ -381,6 +383,18 @@ export const useWorkStore = create<WorkState>((set, get) => ({
         workspaceCounts: moved
           ? { ...prev.workspaceCounts, queued: Math.max(0, prev.workspaceCounts.queued - 1) }
           : prev.workspaceCounts,
+      };
+    }),
+
+  dropOptimistic: (ref) =>
+    set((prev) => {
+      const merged = dropOptimistic({ items: prev.items, pending: prev.pending }, ref);
+      if (merged.items === prev.items) return {};
+      return {
+        items: merged.items,
+        pending: merged.pending,
+        counts: { ...prev.counts, queued: Math.max(0, prev.counts.queued - 1) },
+        workspaceCounts: { ...prev.workspaceCounts, queued: Math.max(0, prev.workspaceCounts.queued - 1) },
       };
     }),
 

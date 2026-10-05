@@ -18,7 +18,7 @@
 //   npm run test:cockpit-optimistic
 
 import {
-  isOptimistic, mergeDelta, optimisticRow, refuseOptimistic, settleOptimistic, type LiveList,
+  dropOptimistic, isOptimistic, mergeDelta, optimisticRow, refuseOptimistic, settleOptimistic, type LiveList,
 } from "./workLive.ts";
 import type { WorkItemView } from "../types.ts";
 
@@ -100,6 +100,26 @@ console.log("\nit was already in the right position");
   // row may already be on the page.
   const already = settleOptimistic({ items: [job("w-new"), job("w-1")], pending: [] }, "gone", job("w-new"));
   check("a row the page already holds is not added twice", already.items.length === 2, ids(already.items));
+}
+
+// --- 2b. one job is one row, whichever answer arrives first -------------------------------------
+
+console.log("\none job is one row");
+{
+  // A DELTA CAN BEAT THE DISPATCH'S ANSWER — the job's first transition broadcast while the dispatch
+  // is still being answered — and settling the placeholder with it then showed the job twice.
+  const before = afterPress();
+  const delta = { items: [job("w-real", { status: "running" }), ...before.items], pending: before.pending };
+  const settled = settleOptimistic(delta, "ref-1", job("w-real", { status: "running" }));
+  check("a job whose row arrived first is not added again when its answer lands",
+    settled.items.filter((i) => i.id === "w-real").length === 1 && !settled.items.some((i) => isOptimistic(i)),
+    ids(settled.items));
+  // AND A DISPATCH THAT FAILED AFTER WRITING ITS ROW: the real failed row arrives as a delta, and the
+  // placeholder used to become a second failed row beside it.
+  const failed = { items: [job("w-real", { status: "failed" }), ...before.items], pending: before.pending };
+  const dropped = dropOptimistic(failed, "ref-1");
+  check("a failure that wrote a row leaves that row alone, not a second one",
+    dropped.items.length === failed.items.length - 1 && !dropped.items.some((i) => isOptimistic(i)), ids(dropped.items));
 }
 
 // --- 3. on refusal it does not vanish --------------------------------------------------------------

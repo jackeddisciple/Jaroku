@@ -234,12 +234,26 @@ export function optimisticRow(input: {
 export function settleOptimistic(list: LiveList, ref: string, real: WorkItemView): LiveList {
   const id = `${OPTIMISTIC_PREFIX}${ref}`;
   const at = list.items.findIndex((i) => i.id === id);
+  const have = list.items.some((i) => i.id === real.id) || list.pending.some((i) => i.id === real.id);
   if (at < 0) {
-    const have = list.items.some((i) => i.id === real.id);
     return have ? list : { items: [real, ...list.items], pending: list.pending };
   }
+  // THE REAL ROW CAN ARRIVE FIRST — a delta for the job, broadcast while the dispatch was still being
+  // answered — and replacing the placeholder with it then would put the same job on the list twice.
+  // The placeholder simply goes; the row the delta brought is the job.
+  if (have) return dropOptimistic(list, ref);
   const items = [...list.items];
   items[at] = real;
+  return { items, pending: list.pending };
+}
+
+/** The placeholder goes, because the real row it stood for is on the list already. */
+export function dropOptimistic(list: LiveList, ref: string): LiveList {
+  const id = `${OPTIMISTIC_PREFIX}${ref}`;
+  const at = list.items.findIndex((i) => i.id === id);
+  if (at < 0) return list;
+  const items = [...list.items];
+  items.splice(at, 1);
   return { items, pending: list.pending };
 }
 

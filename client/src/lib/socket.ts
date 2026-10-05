@@ -704,7 +704,11 @@ function dispatch(msg: ServerMessage): void {
         // above the list says it too, because §10 requires the refusal to be somewhere that does
         // not scroll away; the row is what somebody finds later.
         if (msg.clientRef) {
-          w.refuseOptimistic(msg.clientRef, msg.message);
+          // A FAILURE THAT WROTE A ROW names it, and that row has just arrived as a delta: the
+          // placeholder goes rather than becoming a second failed row for the same job. A refusal
+          // with no row keeps the placeholder as the record of the press — see `NOT_SENT`.
+          if (msg.itemId) w.dropOptimistic(msg.clientRef);
+          else w.refuseOptimistic(msg.clientRef, msg.message);
           scheduleWorkCounts();
         }
       }
