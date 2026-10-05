@@ -25,13 +25,14 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createElement } from "react";
 
-import { LIVE } from "../lib/cockpitCopy.ts";
+import { LIVE, RETRY } from "../lib/cockpitCopy.ts";
 import { CARD_HEIGHT, CARD_WIDTH, ROW_HEIGHT, SPINE, SPINE_X } from "../lib/cockpitLayout.ts";
 import { markup, seed } from "../lib/testRender.ts";
 import { MOTION, SPACE } from "../lib/tokens.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { useWorkStore } from "../store/workStore.ts";
-import type { WorkItemView } from "../types.ts";
+import { useSessionStore } from "../store/sessionStore.ts";
+import type { FleetCardView, WorkItemView } from "../types.ts";
 import { WorkDetail } from "./WorkDetail.tsx";
 import { WorkList } from "./WorkList.tsx";
 
@@ -377,6 +378,30 @@ console.log("\na press the server refused is not a failed job");
   useWorkStore.getState().refuseOptimistic("ref-2", "no");
   check("...and the chips count it nowhere", useWorkStore.getState().counts.failed === 0
     && useWorkStore.getState().counts.queued === 0, JSON.stringify(useWorkStore.getState().counts));
+}
+
+console.log("\nretry is offered only where the job can go");
+{
+  // EVERY OLD ROW OF A KILLED AGENT OFFERED RETRY, titled "on whatever is live now", and pressing it
+  // was refused: the server re-dispatches to the same agent's live deployment, and there was none.
+  seed(useSessionStore, {
+    status: "ready", workspaceId: "ws-a",
+    workspaces: [{ id: "ws-a", slug: "a", name: "Alpha", kind: "team", role: "owner", plan: { id: "free", label: "Free" } }],
+  } as never);
+  const failed = job("w-old", { status: "failed", agent_id: "uuid-bruno", agent_name: "Bruno", error: "boom" });
+  const gone = renderList([failed]);
+  check("a failed job of an agent that is no longer live offers no Retry", !gone.includes(RETRY.label));
+  const bruno = { agent_id: "uuid-bruno", agent_name: "Bruno", connection: "connected" } as unknown as FleetCardView;
+  seed(useWorkStore, { fleet: [bruno] });
+  const back = markup(createElement(WorkList));
+  check("...and offers it once the agent is live again", back.includes(RETRY.label));
+  check("...saying it goes to that agent's live deployment", back.includes(RETRY.title("Bruno")));
+
+  seed(useWorkStore, { fleet: [], open: { ...failed, input: "a job", output: null } });
+  const detail = markup(createElement(WorkDetail, { docked: true }));
+  check("the detail says why it cannot be retried, rather than refusing after the press",
+    detail.includes(RETRY.notLive("Bruno")));
+  seed(useWorkStore, { open: null, fleet: [] });
 }
 
 console.log("\na job waiting on a person does not lock the window");

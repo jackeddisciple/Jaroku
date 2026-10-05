@@ -78,6 +78,14 @@ export function needsReconnect(connection: FleetConnection): boolean {
 }
 
 /**
+ * Whether a job can be sent to this agent now: it has a live card the composer could point at.
+ * The one rule the composer's picker and Retry share, so neither offers what the other would not.
+ */
+export function agentCanTakeWork(fleet: readonly FleetCardView[], agentId: string | null): boolean {
+  return agentId !== null && fleet.some((c) => c.agent_id === agentId && !needsReconnect(c.connection));
+}
+
+/**
  * The app's existing separator, and not a new one.
  *
  * A SPACED MIDDOT, which is what every other composed line in this client joins with — the fleet

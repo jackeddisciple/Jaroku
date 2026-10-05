@@ -26,7 +26,8 @@ import { pictureBySlug } from "../lib/agentPicture.ts";
 import { categoryBySlug } from "../lib/agentCategory.ts";
 import { AgentFace, FACE_SIZE } from "./AgentFace.tsx";
 
-import { DESTRUCTIVE, EMPTY, FAILURE_SENTENCE, FILTERS, HEADER, LIVE, NOT_SENT, REFUSED, STATUS_WORD } from "../lib/cockpitCopy.ts";
+import { DESTRUCTIVE, EMPTY, FAILURE_SENTENCE, FILTERS, HEADER, LIVE, NOT_SENT, REFUSED, RETRY, STATUS_WORD } from "../lib/cockpitCopy.ts";
+import { agentCanTakeWork } from "../lib/fleetSentence.ts";
 import { cockpitCost, cockpitTime } from "../lib/cockpitFormat.ts";
 import { rowColumns, type RowColumns } from "../lib/workRow.ts";
 import { dayAt, flattenWork, workWindow } from "../lib/workWindow.ts";
@@ -95,6 +96,9 @@ function Row({ item, columns, marks, categories }: {
   // A PRESS THE SERVER REFUSED BEFORE ANY JOB EXISTED — see `NOT_SENT`. Its id is still the client's
   // own, so there is nothing on the server to open, stop or retry.
   const notSent = isOptimistic(item) && item.status === "failed";
+  // RETRY ONLY WHERE IT CAN GO: the server re-dispatches to this agent's live deployment, so an old
+  // row of an agent that has since been killed offered a press that could only be refused.
+  const retryable = useWorkStore((s) => agentCanTakeWork(s.fleet, item.agent_id));
   const cost = cockpitCost(item.cost_usd, item.cost_complete);
   const when = cockpitTime(item.created_at);
   // §14's category, by slug for the reason the portrait is — see below.
@@ -284,7 +288,7 @@ function Row({ item, columns, marks, categories }: {
         <div className="flex w-[68px] shrink-0 items-center justify-end pr-1 opacity-0 transition-opacity duration-fast focus-within:opacity-100 group-hover:opacity-100">
           {/* Keyed apart, like the detail panel's pair — see there. Nothing at all for a press that was
               never sent: there is no job to stop or to ask again. */}
-          {notSent ? null : live ? (
+          {notSent || (!live && !retryable) ? null : live ? (
             <Capable key="stop" cmd="cancelWork">
               <button
                 type="button"
@@ -305,8 +309,8 @@ function Row({ item, columns, marks, categories }: {
                 type="button"
                 onClick={() => sendRetryWork(item.id)}
                 className="rounded-control px-2 py-0.5 text-tiny text-muted transition-colors duration-fast hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
-                title="Ask the same thing again, as a new job, on whatever is live now"
-                aria-label="Retry this work item"
+                title={RETRY.title(item.agent_name)}
+                aria-label={RETRY.label}
               >
                 <Icon.cockpitWork.retry size={ICON.xs} />
               </button>

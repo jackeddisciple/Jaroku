@@ -358,6 +358,20 @@ export const REFUSAL = {
 } as const;
 
 /**
+ * Retry: the same question again, as a new job, on the SAME agent's live deployment — which is what
+ * the server does. The title used to promise "on whatever is live now", and an old row of an agent
+ * that had been killed offered it anyway, to be refused with "this agent is not live".
+ */
+export const RETRY = {
+  label: "Retry this work item",
+  title: (agentName: string | null): string =>
+    `Ask the same thing again, as a new job, on ${agentName ?? "this agent"}’s live deployment`,
+  /** Why the detail's Retry is disabled: there is nothing of this agent's to send it to. */
+  notLive: (agentName: string | null): string =>
+    `${agentName ?? "This agent"} is not live — deploy it again from the Deploy panel to retry this`,
+} as const;
+
+/**
  * §7's detail panel, and §17's em-dash tooltip.
  *
  * "UNKNOWN IS AN EM DASH WITH A TOOLTIP SAYING WHY." An em dash with no explanation is a figure

@@ -24,7 +24,8 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { DESTRUCTIVE, DETAIL, FAILURE_SENTENCE, GATE, NOT_SENT, REFUSAL, REFUSED } from "../lib/cockpitCopy.ts";
+import { DESTRUCTIVE, DETAIL, FAILURE_SENTENCE, GATE, NOT_SENT, REFUSAL, REFUSED, RETRY } from "../lib/cockpitCopy.ts";
+import { agentCanTakeWork } from "../lib/fleetSentence.ts";
 import { cockpitAbsolute, cockpitCost, cockpitDuration, cockpitTokens } from "../lib/cockpitFormat.ts";
 import { selectRun } from "../lib/selection.ts";
 import { sendCancelWork, sendLoadRun, sendRetryWork } from "../lib/socket.ts";
@@ -298,7 +299,12 @@ export function WorkDetail({ docked = true }: {
   const canCancel = useCanRun("cancelWork", item?.agent_id ?? null);
   const canRetry = useCanRun("retryWork", item?.agent_id ?? null);
   const cancelState: DisabledState = canCancel ? ENABLED : { reason: REFUSAL.cancel };
-  const retryState: DisabledState = canRetry ? ENABLED : { reason: REFUSAL.retry };
+  // AND NOTHING TO SEND IT TO is the other reason, said rather than refused after the press: the
+  // server re-dispatches to this agent's live deployment, and an agent that has been killed has none.
+  const agentTakesWork = useWorkStore((s) => agentCanTakeWork(s.fleet, item?.agent_id ?? null));
+  const retryState: DisabledState = !canRetry
+    ? { reason: REFUSAL.retry }
+    : agentTakesWork ? ENABLED : { reason: RETRY.notLive(item?.agent_name ?? null) };
 
   /**
    * The trace, down the ordinary path.
@@ -511,8 +517,8 @@ export function WorkDetail({ docked = true }: {
                   onClick={() => sendRetryWork(item.id)}
                   disabled={Boolean(retryState.reason)}
                   className="rounded-control border border-hair px-2.5 py-1 text-tiny text-muted transition-colors duration-fast hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring disabled:pointer-events-none disabled:text-disabled"
-                  title="Ask the same thing again, as a new job, on whatever is live now"
-                  aria-label="Retry this work item"
+                  title={RETRY.title(item.agent_name)}
+                  aria-label={RETRY.label}
                 >
                   <Icon.cockpitWork.retry size={ICON.sm} />
                 </button>
