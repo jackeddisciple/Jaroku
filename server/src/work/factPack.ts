@@ -277,6 +277,7 @@ export async function buildFactPack(
     ended_at: r["ended_at"] === null || r["ended_at"] === undefined ? null : String(r["ended_at"]),
     created_seq: asInt(r["created_seq"]),
     tool_refusals: parseRefusals(r["tool_refusals"]),
+    stop_requested_at: null,
   }));
 
   // COST FROM `steps`, NEVER `runs.cost` — §10, and `cost.ts`'s header opens with the reason. The

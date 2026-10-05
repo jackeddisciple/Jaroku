@@ -303,5 +303,13 @@ console.log("\nthe phrases three documents quote");
     /person/.test(REFUSED.outcome.denied) && /nobody/.test(REFUSED.outcome.timed_out));
 }
 
+// STOP SAYS WHAT IT WILL DO. "At its next node boundary" was the whole promise, and for a
+// single-node agent that boundary is the end of the job — so Stop never stopped anything.
+{
+  check("Stop's title says it is ended outright if it cannot stop at a step",
+    /ended outright/.test(DESTRUCTIVE.stop.title) && !/^Ask the agent to stop at its next node boundary$/.test(DESTRUCTIVE.stop.title));
+  check("...and there are words for a job that finished before it could stop", /finished before/.test(DESTRUCTIVE.stop.finishedFirst));
+}
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 (globalThis as { process?: { exit(code: number): void } }).process?.exit(fail === 0 ? 0 : 1);

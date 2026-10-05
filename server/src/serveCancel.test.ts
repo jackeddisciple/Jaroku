@@ -190,6 +190,53 @@ async function settle(control: Awaited<ReturnType<typeof startControlPlane>>, ru
   h.project.cleanup();
 }
 
+// --- 3. a run that cannot reach a boundary is stopped all the same ------------------------------
+//
+// A CANCEL IS READ BETWEEN NODES, so a single-node agent — or any node that runs long — never got
+// there before it finished: Stop was promised, the job ran to completion and was billed. Past a
+// short grace the container ends the process, closes the run out as cancelled, and says it stopped
+// mid-step. Here the run is held short of its boundary for far longer than that grace.
+
+{
+  const control = await startControlPlane();
+  const project = deployedProject();
+  const provider = await startMockProvider(SCRIPT);
+  const served = await startServe({
+    project, provider, env: { JAROKU_STEP_DELAY_MS: "60000", JAROKU_CANCEL_GRACE_S: "1" },
+  });
+  const dispatcher = new DeployDispatcher({
+    runs: control.runs,
+    endpoint: async () => ({ url: served.url, serveToken: served.token }),
+  });
+  const runId = randomUUID();
+  await dispatcher.start({
+    deploymentId: "dep-1", workspaceId: control.workspaceId, agentId: project.agentId,
+    runId, input: "run for a while", controlPlaneUrl: control.url,
+  });
+  const deadline = Date.now() + 120_000;
+  while (control.eventsFor(runId).filter((e) => e.kind === "step").length < 1 && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  const askedAt = Date.now();
+  await dispatch(served, { run_id: runId }, "/cancel");
+  const events = await settle(control, runId);
+  const end = events.find((e) => e.kind === "run_end");
+
+  check("a run stuck short of its boundary is stopped anyway, well before its node would end",
+    end !== undefined && Date.now() - askedAt < 30_000, `${Date.now() - askedAt}ms, ${traceShape(events).join(" ")}`);
+  check("...closed out as cancelled, saying it was ended mid-step",
+    end?.kind === "run_end" && (end.run.error ?? "").startsWith("Cancelled:") && /mid-step/.test(end.run.error ?? ""),
+    end?.kind === "run_end" ? end.run.error ?? "" : "");
+  check("...and told the control plane it was cancelled, so the job is not filed as a crash",
+    control.controlFor(runId).some((c) => c["ctrl"] === "cancelled" && c["forced"] === true),
+    control.controlFor(runId).map((c) => String(c["ctrl"])).join(", "));
+
+  await served.stop();
+  await provider.close();
+  await control.close();
+  project.cleanup();
+}
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 process.exitCode = fail === 0 ? 0 : 1;
 

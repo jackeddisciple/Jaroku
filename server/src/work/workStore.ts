@@ -117,6 +117,8 @@ export interface WorkItem {
   created_seq: number;
   /** Tool calls the job was refused or nobody answered. Empty for nearly every job. */
   tool_refusals: ToolRefusal[];
+  /** When somebody pressed Stop — migration 083. Null for a job nobody tried to stop. */
+  stop_requested_at: string | null;
 }
 
 /**
@@ -216,14 +218,15 @@ const nowIso = (): string => new Date().toISOString();
 // Explicit rather than `SELECT *`: `workspace_id` is on every row and belongs on none of the
 // snapshots a client receives, exactly as the thread and inbox stores list their columns out.
 const COLUMNS = `id, agent_id, deployment_id, run_id, created_by, input, status, output, error,
-                 failure_kind, created_at, started_at, ended_at, created_seq, tool_refusals`;
+                 failure_kind, created_at, started_at, ended_at, created_seq, tool_refusals,
+                 stop_requested_at`;
 
 export class WorkStore {
   /** Shares the trace store's database: same file, single writer. See TraceStore.database(). */
   constructor(private db: Db) {}
 
-  // No `init()`. The table arrives with migration 063 on both drivers, and its one later column
-  // (`tool_refusals`, 082) with a numbered migration on both, which an existing database runs.
+  // No `init()`. The table arrives with migration 063 on both drivers, and its later columns
+  // (`tool_refusals`, 082; `stop_requested_at`, 083) with numbered migrations on both.
 
   private q(ctx: TenantContext): Queryable {
     return this.db.forWorkspace(ctx.workspaceId);
@@ -246,6 +249,8 @@ export class WorkStore {
       ended_at: row.ended_at === null || row.ended_at === undefined ? null : String(row.ended_at),
       created_seq: asInt(row.created_seq),
       tool_refusals: parseRefusals(row.tool_refusals),
+      stop_requested_at: row.stop_requested_at === null || row.stop_requested_at === undefined
+        ? null : String(row.stop_requested_at),
     };
   }
 
@@ -290,6 +295,7 @@ export class WorkStore {
       ended_at: null,
       created_seq: 0,
       tool_refusals: [],
+      stop_requested_at: null,
     };
 
     // The sequence read and the insert are ONE TRANSACTION, for the reason `deployStore.create`
@@ -659,6 +665,24 @@ export class WorkStore {
           outcome.status, boundOutput(outcome.output), boundError(outcome.error),
           outcome.failureKind ?? null, at, at, id, ctx.workspaceId,
         ],
+      ),
+    );
+    return res.changes > 0;
+  }
+
+  /**
+   * Somebody pressed Stop. Kept on the job, because the job can still end any way at all after it —
+   * at its next boundary as `cancelled`, ended by the container if it cannot get there, or
+   * `succeeded` because it finished first — and the record has to say a stop was asked for.
+   *
+   * THE FIRST PRESS IS KEPT, and only on a job still in flight: pressing again moves nothing.
+   */
+  async markStopRequested(ctx: TenantContext, id: string, at = nowIso()): Promise<boolean> {
+    const res = await this.db.scoped(ctx.workspaceId, (tx) =>
+      tx.run(
+        `UPDATE work_items SET stop_requested_at = COALESCE(stop_requested_at, ?)
+          WHERE id = ? AND workspace_id = ? AND status IN ('queued', 'running', 'waiting')`,
+        [at, id, ctx.workspaceId],
       ),
     );
     return res.changes > 0;

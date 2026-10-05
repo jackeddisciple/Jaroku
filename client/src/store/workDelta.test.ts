@@ -66,6 +66,7 @@ const item = (patch: Partial<WorkItemView> & { id: string }): WorkItemView => ({
   duration_ms: null,
   cost_complete: true,
   tool_refusals: [],
+  stop_requested_at: null,
   ...patch,
 });
 

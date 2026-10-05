@@ -213,8 +213,9 @@ export function optimisticRow(input: {
     tokens: null,
     duration_ms: null,
     cost_complete: true,
-    // Nothing has been asked of a tool yet, let alone refused.
+    // Nothing has been asked of a tool yet, let alone refused, and nobody has pressed Stop.
     tool_refusals: [],
+    stop_requested_at: null,
   };
 }
 

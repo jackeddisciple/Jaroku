@@ -259,7 +259,16 @@ export const GATE = {
  * one consequence teach the reader that neither is precise.
  */
 export const DESTRUCTIVE = {
-  stop: { label: "Stop", title: "Ask the agent to stop at its next node boundary" },
+  stop: {
+    label: "Stop",
+    // WHAT IT WILL DO, which is no longer only "at its next node boundary": for a single-node agent
+    // that boundary is the end, so the container ends a run that cannot reach one within seconds.
+    title: "Stop this job — it stops when its current step ends, or is ended outright within a few seconds",
+    /** On a job somebody has already asked to stop. */
+    asked: "Stopping — asked to stop",
+    /** On a job that ended its own way after Stop was pressed. */
+    finishedFirst: "It was asked to stop, but finished before it could.",
+  },
   reconnect: {
     label: "Reconnect",
     title: "Reconnect this agent",

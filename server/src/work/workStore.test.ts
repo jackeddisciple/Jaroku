@@ -328,6 +328,30 @@ async function refusals(label: string, db: Db): Promise<void> {
 await refusals("sqlite", await openTestSqlite());
 await withScratchPostgres((pg) => refusals("postgres", pg));
 
+// --- 5c. a stop that was asked for is kept on the job ------------------------------------------
+//
+// Stop pressed on a single-node job used to leave no trace at all: the job ran to completion,
+// ended `succeeded`, and the record said nobody had tried to stop it.
+async function stops(label: string, db: Db): Promise<void> {
+  const { ctx, agentId, deploymentId } = await fixture(db);
+  const store = new WorkStore(db);
+  const job = await store.create(ctx, { agentId, deploymentId, runId: randomUUID(), input: "a long job" });
+  check(`${label}: a job nobody tried to stop says so`, job.stop_requested_at === null);
+  await store.markRunning(ctx, job.id);
+  check(`${label}: a stop is recorded on a job in flight`,
+    (await store.markStopRequested(ctx, job.id, "2026-10-04T10:00:00.000Z")) === true);
+  await store.markStopRequested(ctx, job.id, "2026-10-04T10:00:09.000Z");
+  const stopped = await store.get(ctx, job.id);
+  check(`${label}: ...the first press is the one kept`,
+    Date.parse(stopped?.stop_requested_at ?? "") === Date.parse("2026-10-04T10:00:00.000Z"), stopped?.stop_requested_at ?? "");
+  await store.finish(ctx, job.id, { status: "succeeded", output: "finished first" });
+  check(`${label}: ...and it survives the job finishing before it could stop`,
+    (await store.get(ctx, job.id))?.stop_requested_at !== null);
+  check(`${label}: an ended job takes no new stop`, (await store.markStopRequested(ctx, job.id)) === false);
+}
+await stops("sqlite", await openTestSqlite());
+await withScratchPostgres((pg) => stops("postgres", pg));
+
 // --- 6. the page ceiling holds ------------------------------------------------------------------
 
 console.log("\nthe page ceiling");

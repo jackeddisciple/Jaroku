@@ -95,6 +95,7 @@ export class WorkActions {
     // THE WORKSPACE TRAVELS WITH THE REQUEST, because reading the deployment's endpoint is a SCOPED
     // read and the only honest source of the scope is the context that is cancelling.
     const asked = await this.deps.dispatch.cancel(item.deployment_id, item.run_id, ctx.workspaceId);
+    if (asked.ok) await this.deps.work.markStopRequested(ctx, item.id);
     if (!asked.ok) {
       // THE JOB IS LEFT ALONE. Jaroku could not reach the container, which says nothing about
       // whether the job is still running — and closing the row on a failed request would claim a
@@ -106,11 +107,14 @@ export class WorkActions {
     return {
       ok: true,
       kind: "requested",
-      item,
+      item: (await this.deps.work.get(ctx, item.id)) ?? item,
+      // WHAT WILL ACTUALLY HAPPEN, which is no longer "at its next node boundary" alone: for a
+      // single-node agent that boundary is the end, so the container ends a run that has not reached
+      // one within a few seconds of being asked.
       detail:
         item.status === "waiting"
           ? "the agent has been asked to stop — the tool call it was waiting on is denied, so it stops once that step ends"
-          : "the agent has been asked to stop at its next node boundary",
+          : "the agent has been asked to stop — it stops when its current step ends, or is ended outright within a few seconds",
     };
   }
 

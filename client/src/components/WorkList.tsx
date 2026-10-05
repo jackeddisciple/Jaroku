@@ -151,6 +151,16 @@ function Row({ item, columns, marks, categories }: {
           {/* A TOOL IT WAS REFUSED, IN THE SAME SLOT. Such a job usually ends `succeeded`, with an
               apology for an answer — and a list showing only the tick read nine refused jobs as
               nine successes. Said whatever the status, because the status cannot say it. */}
+          {/* AND A STOP SOMEBODY ASKED FOR, while the job is still going. Stop used to be a press
+              with nothing to show for it until the job ended — which, for a single-node agent,
+              was as `succeeded`. */}
+          {live && item.stop_requested_at && (
+            <Truncate className="hidden min-w-0 max-w-[28ch] shrink text-caption text-muted md:block"
+              title={DESTRUCTIVE.stop.title}>
+              {DESTRUCTIVE.stop.asked}
+            </Truncate>
+          )}
+
           {!item.failure_kind && (item.tool_refusals ?? []).length > 0 && (
             <Truncate className="hidden min-w-0 max-w-[28ch] shrink text-caption text-muted md:block"
               title={`${REFUSED.row(item.tool_refusals)}. ${REFUSED.note}`}>
@@ -252,8 +262,9 @@ function Row({ item, columns, marks, categories }: {
 
         {/* THE VERB SLOT, whose WIDTH IS ALWAYS THERE — §Craft 4. See this component's header. */}
         <div className="flex w-[68px] shrink-0 items-center justify-end pr-1 opacity-0 transition-opacity duration-fast focus-within:opacity-100 group-hover:opacity-100">
+          {/* Keyed apart, like the detail panel's pair — see there. */}
           {live ? (
-            <Capable cmd="cancelWork">
+            <Capable key="stop" cmd="cancelWork">
               <button
                 type="button"
                 onClick={() => sendCancelWork(item.id)}
@@ -268,7 +279,7 @@ function Row({ item, columns, marks, categories }: {
               </button>
             </Capable>
           ) : (
-            <Capable cmd="retryWork">
+            <Capable key="retry" cmd="retryWork">
               <button
                 type="button"
                 onClick={() => sendRetryWork(item.id)}

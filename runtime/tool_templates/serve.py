@@ -370,6 +370,44 @@ def _died_reason(code: int) -> str:
     )
 
 
+# How long a cancelled run has to reach its next node boundary before its process is ended.
+#
+# A cancel is read BETWEEN nodes, so for a single-node agent — or any node that runs long — the next
+# boundary is the end of the run: Stop was promised, the job ran to completion and was billed, and
+# nothing said a stop had been asked for. Waiting a little first keeps the honest version for every
+# run that can give it (the node in flight finishes, its step and cost are on the trace); past this,
+# the process is ended and the run is closed out as cancelled mid-step, saying exactly that.
+CANCEL_GRACE_S = _num_env("JAROKU_CANCEL_GRACE_S", 5)
+
+FORCED_STOP = (
+    "Cancelled: stopped at your request. It had not reached a node boundary within "
+    f"{CANCEL_GRACE_S:g}s, so its process was ended mid-step — any model call in flight may "
+    "still be billed by the provider, and steps already on this trace really happened."
+)
+
+
+def _push_control(record: dict, ctrl: dict) -> None:
+    """One control line to the control plane, from out here. Best-effort, like `_push_run_end`."""
+    url = record.get("control_plane_url")
+    token = record.get("run_token")
+    if not url or not token:
+        return
+    import urllib.error
+    import urllib.request
+
+    req = urllib.request.Request(
+        f"{url.rstrip('/')}/v1/runs/{record['run_id']}/control",
+        data=json.dumps({"ctrl": ctrl}).encode("utf-8"),
+        method="POST",
+        headers={"content-type": "application/json", "authorization": f"Bearer {token}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10):  # noqa: S310 - fixed scheme, run-scoped token
+            pass
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+        log(f"[serve] {record['run_id'][:8]} could not report a control line: {exc}")
+
+
 def _push_run_end(record: dict, error: str) -> None:
     """Close a run out from OUT HERE, because the run itself could not.
 
@@ -503,9 +541,38 @@ class AgentService:
             return False
         with self._lock:
             record = self._live.get(run_id)
-            if record is not None:
+            if record is not None and not record["cancelled"]:
                 record["cancelled"] = True
+                threading.Thread(
+                    target=self._stop_if_stuck, args=(record,), daemon=True, name=f"stop-{run_id[:8]}"
+                ).start()
             return record is not None
+
+    def _stop_if_stuck(self, record: dict) -> None:
+        """End a cancelled run's process if it has not reached a boundary within the grace.
+
+        THE SAME CLOSE-OUT AN OOM KILL GETS, said as what it is. The runner's own `finally` cannot
+        run under SIGTERM, so `_reap` closes the run from out here — with `forced` set, it says the
+        run was stopped at somebody's request rather than that it died. The `cancelled` control line
+        goes first, so the control plane files the job as cancelled rather than as a crash.
+        """
+        proc = record.get("proc")
+        if proc is None:
+            return
+        try:
+            proc.wait(timeout=CANCEL_GRACE_S)
+            return  # It reached a boundary (or ended) on its own — the honest version happened.
+        except subprocess.TimeoutExpired:
+            pass
+        run_id = record["run_id"]
+        log(f"[serve] {run_id[:8]} did not stop within {CANCEL_GRACE_S:g}s of a cancel — ending it")
+        record["forced"] = True
+        _push_control(record, {"ctrl": "cancelled", "run_id": run_id, "forced": True})
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
 
     def _start(
         self,
@@ -632,7 +699,7 @@ class AgentService:
             status = record.get("status") or "?"
             log(f"[serve] {run_id[:8]} run finished (exit {code}, {status if closed else 'no result reported'})")
             if not closed:
-                _push_run_end(record, _died_reason(code))
+                _push_run_end(record, FORCED_STOP if record.get("forced") else _died_reason(code))
             # THE CHECKPOINT GOES WITH THE RUN, UNLESS THE RUN IS PAUSED. A paused run's whole
             # value is that its checkpoint is durable and a resume continues from it; every other
             # outcome leaves a SQLite file per request with nothing to clear it but a redeploy.

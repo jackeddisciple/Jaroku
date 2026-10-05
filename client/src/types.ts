@@ -2861,6 +2861,8 @@ export interface WorkItemView {
    * Such a job usually ends `succeeded` with an apology for an answer, so this is what says why.
    */
   tool_refusals: ToolRefusalView[];
+  /** When somebody pressed Stop on it. Null for a job nobody tried to stop. */
+  stop_requested_at: string | null;
 }
 
 /** One tool call a job was refused. */

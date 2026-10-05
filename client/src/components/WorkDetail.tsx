@@ -24,7 +24,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { DETAIL, FAILURE_SENTENCE, GATE, REFUSAL, REFUSED, STATUS_WORD } from "../lib/cockpitCopy.ts";
+import { DESTRUCTIVE, DETAIL, FAILURE_SENTENCE, GATE, REFUSAL, REFUSED } from "../lib/cockpitCopy.ts";
 import { cockpitAbsolute, cockpitCost, cockpitDuration, cockpitTokens } from "../lib/cockpitFormat.ts";
 import { selectRun } from "../lib/selection.ts";
 import { sendCancelWork, sendLoadRun, sendRetryWork } from "../lib/socket.ts";
@@ -358,6 +358,19 @@ export function WorkDetail() {
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pt-3 pb-5">
           <MetadataLine item={item} />
 
+          {/* A STOP THAT WAS ASKED FOR, said where somebody checking the job will look. While it is
+              going it is stopping; once over, it either stopped or finished first — and the second
+              is the one that used to leave no trace a stop had been asked for at all. */}
+          {item.stop_requested_at && (
+            <p className="text-caption leading-[1.5] text-muted">
+              {live
+                ? `${DESTRUCTIVE.stop.asked} at ${cockpitAbsolute(item.stop_requested_at).text}.`
+                : item.status === "cancelled"
+                  ? `Stopped at your request — asked at ${cockpitAbsolute(item.stop_requested_at).text}.`
+                  : `${DESTRUCTIVE.stop.finishedFirst} (asked at ${cockpitAbsolute(item.stop_requested_at).text})`}
+            </p>
+          )}
+
           {/* 1. WHAT WAS ASKED. */}
           <TextBlock label={DETAIL.asked} text={item.input} />
 
@@ -444,21 +457,24 @@ export function WorkDetail() {
             {/* 6. THE ACTIONS. §21: Stop is inline and a single press, because it is scoped to one
                    item and the item is on screen. Retry is the same weight — it creates a new job
                    rather than destroying one. */}
+            {/* KEYED APART, so Stop and Retry are two elements rather than one that changes its
+                props: a job that ended under the pointer kept Stop's tooltip — "running — it stops
+                at its next node boundary" — over what had become the Retry button. */}
             {live ? (
-              <DisabledReason state={cancelState}>
+              <DisabledReason key="stop" state={cancelState}>
                 <button
                   type="button"
                   onClick={() => sendCancelWork(item.id)}
                   disabled={Boolean(cancelState.reason)}
                   className="rounded-control border border-hair px-2.5 py-1 text-tiny text-muted transition-colors duration-fast hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring disabled:pointer-events-none disabled:text-disabled"
-                  title={`${STATUS_WORD[item.status]} — ${DESTRUCTIVE_STOP_TITLE}`}
+                  title={item.stop_requested_at ? DESTRUCTIVE.stop.asked : DESTRUCTIVE.stop.title}
                   aria-label="Stop this job"
                 >
                   <Icon.cockpitWork.stop size={ICON.sm} />
                 </button>
               </DisabledReason>
             ) : (
-              <DisabledReason state={retryState}>
+              <DisabledReason key="retry" state={retryState}>
                 <button
                   type="button"
                   onClick={() => sendRetryWork(item.id)}
@@ -501,6 +517,3 @@ export function WorkDetail() {
     </div>
   );
 }
-
-/** §21's wording for Stop, which is the same sentence the row's control carries. */
-const DESTRUCTIVE_STOP_TITLE = "it stops at its next node boundary";

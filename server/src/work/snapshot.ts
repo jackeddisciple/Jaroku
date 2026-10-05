@@ -81,6 +81,8 @@ export interface WorkItemView {
    * ends `succeeded` with an apology for an answer, so the row has to say this as well as the status.
    */
   tool_refusals: ToolRefusal[];
+  /** When somebody pressed Stop, so the row can say so — migration 083. */
+  stop_requested_at: string | null;
 }
 
 /** One job in full, for the detail panel. The same shape plus what a row does not carry. */
@@ -559,6 +561,7 @@ function view(
     duration_ms: cost?.duration_ms ?? null,
     cost_complete: cost?.cost_complete ?? true,
     tool_refusals: item.tool_refusals,
+    stop_requested_at: item.stop_requested_at,
   };
 }
 

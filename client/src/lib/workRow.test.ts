@@ -37,7 +37,7 @@ const item = (createdAt: string, patch: Partial<WorkItemView> = {}): WorkItemVie
   created_by: "u", created_by_name: "Tester", input_preview: "refund order 4471",
   status: "succeeded", output_preview: null, error: null, failure_kind: null,
   created_at: createdAt, started_at: createdAt, ended_at: createdAt,
-  cost_usd: 0.0031, tokens: 900, duration_ms: 4200, cost_complete: true, tool_refusals: [],
+  cost_usd: 0.0031, tokens: 900, duration_ms: 4200, cost_complete: true, tool_refusals: [], stop_requested_at: null,
   ...patch,
 });
 
