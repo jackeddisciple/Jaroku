@@ -648,8 +648,11 @@ export interface McpConfirmRequest {
   nonce: string;
   server: string;
   tool: string;
-  /** Why the tool was classified high-impact — so the ask can be argued with, not just obeyed. */
-  impactReason: string;
+  /**
+   * Why the tool was classified high-impact — so the ask can be argued with, not just obeyed.
+   * Null when the ask did not say, which a container built before the bridge sent it does not.
+   */
+  impactReason: string | null;
   /** The arguments the model produced, as JSON text. Already capped by the bridge. */
   args: string;
   /** Seconds the runner waits before denying. It never allows on timeout. */

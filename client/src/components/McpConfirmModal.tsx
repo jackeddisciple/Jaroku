@@ -141,7 +141,11 @@ export function McpConfirmModal() {
 
           <p className="mt-1.5 text-tiny leading-[1.5] text-muted">
             <span className="text-ink">This runs on a third-party server Jaroku has not reviewed.</span>{" "}
-            It was classified high-impact because {request.impactReason}.
+            {/* THE REASON THE MANIFEST GAVE, or nothing. A placeholder here read "classified
+                high-impact because it is classified high-impact". */}
+            {request.impactReason
+              ? `It was classified high-impact because ${request.impactReason}.`
+              : "It was classified high-impact."}
           </p>
         </div>
 

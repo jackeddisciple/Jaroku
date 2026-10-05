@@ -272,8 +272,15 @@ def _http_confirm(
             "impact": impact, "first_call_in_run": first_call,
         }
     )
+    # The reason, the impact and whether this is the run's first call travel with the ask, as they
+    # do on the local control line above. Without them the hosted dialog could only say a tool
+    # "was classified high-impact because it is classified high-impact".
     body = json.dumps(
-        {"nonce": nonce, "server": server_id, "tool": name, "args": payload, "timeout_s": CONFIRM_TIMEOUT_S}
+        {
+            "nonce": nonce, "server": server_id, "tool": name, "args": payload,
+            "timeout_s": CONFIRM_TIMEOUT_S, "impact_reason": reason, "impact": impact,
+            "first_call_in_run": first_call,
+        }
     ).encode("utf-8")
     req = urllib.request.Request(
         f"{base_url}/v1/runs/{run_id}/mcp-confirm",

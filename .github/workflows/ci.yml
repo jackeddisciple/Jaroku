@@ -1996,6 +1996,11 @@ jobs:
       - name: the server's credentials stay out of a run
         run: npm run test:runner-env
 
+      # THE HOSTED CONFIRMATION GATE, driven through the real bridge: the verdicts, the timeout that
+      # denies, and the reason the dialog shows — which the hosted ask used to leave behind.
+      - name: a deployed agent's tool confirmations
+        run: npm run test:mcp-confirm-http
+
       - name: a deployed agent, driven for real
         run: |
           # POST /run answers before the graph finishes — and the framing discipline the old

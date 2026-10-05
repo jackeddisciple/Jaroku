@@ -2174,8 +2174,9 @@ export type McpEvent =
       nonce: string;
       server: string;
       tool: string;
-      /** Why the tool was classified high-impact, so the ask can be argued with. */
-      impactReason: string;
+      /** Why the tool was classified high-impact, so the ask can be argued with. Null when the
+       *  ask did not say — a container built before the bridge sent it. */
+      impactReason: string | null;
       /** The arguments the model produced, as JSON text. Capped by the bridge. */
       args: string;
       /** Seconds the runner will wait before denying. */

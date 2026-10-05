@@ -34,6 +34,7 @@ const router = new Router({ log: () => {}, quiet: () => true });
 // separate /control push (mcp_bridge.py's own stderr @@JAROKU_CTRL@@ line is local-only; only
 // debug.py's boundary/pause lines are additionally pushed over HTTP — see controlplane_http.py).
 const noncesByRun = new Map<string, string>();
+const payloadsByRun = new Map<string, Record<string, unknown>>();
 registerControlPlaneRoutes(router, {
   bus,
   signingKey,
@@ -41,6 +42,7 @@ registerControlPlaneRoutes(router, {
   backpressure: new BackpressureTracker(),
   onMcpConfirmRequested: (runId, payload) => {
     if (typeof payload.nonce === "string") noncesByRun.set(runId, payload.nonce);
+    payloadsByRun.set(runId, payload);
   },
 });
 
@@ -61,7 +63,7 @@ async function confirmWith(
   mode: undefined | string,
   timeoutS: number,
   verdict: "run" | "once" | "deny" | "timeout",
-): Promise<{ stdout: string; stderr: string }> {
+): Promise<{ stdout: string; stderr: string; payload?: Record<string, unknown> }> {
   const runId = `mcp-${Math.random().toString(36).slice(2)}`;
   bus.register(runId);
   const token = mintRunToken(signingKey, runId, "ws-1", 3600);
@@ -101,12 +103,23 @@ except B.ToolNotApproved as e:
     }
     if (nonce) bus.resolveMcpConfirm(runId, nonce, verdict);
   }
-  return pending;
+  const out = await pending;
+  return { ...out, payload: payloadsByRun.get(runId) };
 }
 
 {
   const r = await confirmWith(undefined, 20, "run");
   check("a resolved 'run' verdict proceeds", r.stdout.includes("PROCEEDED"), r.stderr.slice(0, 300));
+}
+{
+  // THE REASON TRAVELS WITH THE ASK. The hosted POST carried the nonce, the tool and the arguments
+  // and nothing else, so the dialog could only say a tool "was classified high-impact because it
+  // is classified high-impact" while the manifest held the real sentence.
+  const r = await confirmWith(undefined, 20, "deny");
+  check("the hosted ask carries the manifest's reason", r.payload?.["impact_reason"] === "starts with send",
+    JSON.stringify(r.payload));
+  check("...and the impact and whether it is the run's first call",
+    r.payload?.["impact"] === "high" && r.payload?.["first_call_in_run"] === true, JSON.stringify(r.payload));
 }
 {
   const r = await confirmWith(undefined, 20, "once");

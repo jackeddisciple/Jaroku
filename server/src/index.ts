@@ -2945,13 +2945,24 @@ registerControlPlaneRoutes(router, {
   onMcpConfirmSettled: (runId, nonce, verdict) => clearConfirms(runId, verdict, nonce),
 });
 
+/**
+ * Why a tool was held for a person, as the manifest put it — or null when the ask did not say.
+ *
+ * NULL RATHER THAN A PLACEHOLDER. The placeholder was "it is classified high-impact", which the
+ * dialog completes as "classified high-impact because it is classified high-impact". A container
+ * built before the bridge sent the reason still asks without one, and saying nothing is honest.
+ */
+function reasonOf(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
 function handleHostedMcpConfirmRequest(runId: string, payload: Record<string, unknown>): void {
   const nonce = typeof payload.nonce === "string" ? payload.nonce : "";
   if (!nonce) return;
   const runCtx = contextForRun(runId);
   const server = String(payload.server ?? "unknown");
   const tool = String(payload.tool ?? "unknown");
-  const impactReason = String(payload.impact_reason ?? "it is classified high-impact");
+  const impactReason = reasonOf(payload.impact_reason);
   const args = String(payload.args ?? "{}");
   const timeoutS = typeof payload.timeout_s === "number" ? payload.timeout_s : 120;
   pendingConfirms.set(confirmKey(runId, nonce), {
@@ -5555,7 +5566,7 @@ interface PendingConfirm {
    * socket in the workspace the moment the run halted; what changes is that a tab which was not
    * open then can be told too. `args` is capped by the bridge before it ever reaches this file.
    */
-  impactReason: string;
+  impactReason: string | null;
   args: string;
   timeoutS: number;
   requestedAt: number;
@@ -11489,7 +11500,7 @@ onBothPools("control", ({ runId: slotRunId, ctrl }) => {
         relay.broadcastMcp(runCtx, { type: "confirmResolved", runId, nonce, verdict: "run" });
       });
 
-      const impactReason = String(ctrl.impact_reason ?? "it is classified high-impact");
+      const impactReason = reasonOf(ctrl.impact_reason);
       const args = String(ctrl.args ?? "{}");
       const timeoutS = typeof ctrl.timeout_s === "number" ? ctrl.timeout_s : 120;
       pendingConfirms.set(confirmKey(runId, nonce), {
