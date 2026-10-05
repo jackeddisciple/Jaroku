@@ -343,6 +343,21 @@ console.log("\nthe statement count");
   check(`a page of fifty costs the same as a page of one (${page} vs ${oneRow})`, page === oneRow, `${page} vs ${oneRow}`);
 }
 
+// --- every job that is written is broadcast, however it was started -------------------------------
+//
+// A RETRY THAT FAILED AFTER ITS ROW WAS WRITTEN was never broadcast — the dispatch handler did it and
+// the retry handler, through the same dispatcher, did not — so the failed job existed and no open
+// Cockpit showed it until a reload. Read from the handler, because it is one line that is easy to lose.
+
+console.log("\nevery job that is written is broadcast");
+{
+  const { readFileSync } = await import("node:fs");
+  const index = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
+  const retry = index.slice(index.indexOf('case "retryWork": {'), index.indexOf('case "reconnectAgent": {'));
+  check("a retry that failed with a row written broadcasts that row",
+    /out\.dispatch\.stage === "failed"[\s\S]{0,200}broadcastWorkItem\(ctx, out\.dispatch\.item\)/.test(retry));
+}
+
 await base.close();
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 process.exitCode = fail === 0 ? 0 : 1;

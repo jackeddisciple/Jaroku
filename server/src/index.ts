@@ -7403,7 +7403,16 @@ async function handleWorkCommand(ctx: TenantContext, cmd: WorkCommand): Promise<
         if (typeof cmd.itemId !== "string") return fail("that is not a job id");
         const out = await workActions.retry(ctx, cmd.itemId);
         if (out.dispatch) noteCredentialOutcome(out.dispatch);
-        if (!out.ok) return fail(out.detail, cmd.itemId);
+        if (!out.ok) {
+          // A RETRY THAT FAILED AFTER ITS ROW WAS WRITTEN IS A NEW JOB, and it was never broadcast: the
+          // row existed, read `failed`, and no open Cockpit ever showed it until a reload. The
+          // dispatch path above already does this; the retry path, through the same dispatcher, did not.
+          if (out.dispatch && !out.dispatch.ok && out.dispatch.stage === "failed") {
+            await broadcastWorkItem(ctx, out.dispatch.item);
+            await relay.broadcastFleet();
+          }
+          return fail(out.detail, cmd.itemId);
+        }
         // THE DETAIL, NOT THE ROW. This event OPENS the detail panel, which renders what was asked and
         // what came back — two fields a row deliberately does not carry, because a page of fifty
         // rows carrying full inputs and outputs is a page of fifty customer emails on the wire.
