@@ -455,7 +455,9 @@ function FleetCard({ card, picture, tabIndex, onArrow }: {
           without the reserved box a card would grow by fourteen pixels the moment its first run
           landed, and the whole strip would step down with it. */}
       <div className="relative z-10 flex h-[14px] items-end">
-        <AgentSparkline outcomes={card.outcomes} />
+        {/* ELEVEN PIXELS A BAR, REACHING FIVE ABOVE AND BELOW: twenty runs still fit the card's
+            224px, and each bar is an 11×24 target rather than the 6×14 it was. */}
+        <AgentSparkline outcomes={card.outcomes} pitch={11} reach={5} />
       </div>
 
       {/* THE OVERFLOW, IN THE CORNER AND OUT OF THE FLOW. Absolutely positioned so it costs the

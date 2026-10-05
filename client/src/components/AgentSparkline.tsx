@@ -73,12 +73,25 @@ export function AgentSparkline({
   /** How many bars fit. The strip drops the OLDEST when there is not room for all of them. */
   max = 20,
   height = 14,
+  pitch = 5,
+  reach = 0,
   className = "",
   fromDetail = false,
 }: {
   outcomes: readonly AgentRunBar[];
   max?: number;
   height?: number;
+  /**
+   * Each bar's width, gap included — its button's width. Five on the dense grids; a surface with
+   * the room passes more, since the button IS the target and 5px is hard to land a pointer on.
+   */
+  pitch?: number;
+  /**
+   * How far each button's target reaches above and below the strip, without moving anything: the
+   * fleet card's strip is 14px tall, and its bars were 6×14 targets. Zero where a neighbour would
+   * be covered.
+   */
+  reach?: number;
   className?: string;
   /** Drawn inside the agent detail, so a bar that opens a trace leaves a way back to it. */
   fromDetail?: boolean;
@@ -145,14 +158,18 @@ export function AgentSparkline({
           }}
           title={`${LABEL[bar.outcome]} · ${relTime(bar.started_at)}${bar.failed_step_id ? " — opens on the failing step" : ""}`}
           aria-label={`Run ${LABEL[bar.outcome]} ${relTime(bar.started_at)}`}
-          className="group/bar flex h-full w-[5px] shrink-0 items-stretch justify-center rounded-[1px] focus-visible:outline-none focus-visible:shadow-focusring focus-visible:ring-1 focus-visible:ring-grip"
+          className="group/bar flex shrink-0 items-end justify-center rounded-[1px] focus-visible:outline-none focus-visible:shadow-focusring focus-visible:ring-1 focus-visible:ring-grip"
+          // THE REACH IS PADDING CANCELLED BY A NEGATIVE MARGIN: the button grows past the strip on
+          // both sides while the bars, and everything around them, stay exactly where they were.
+          style={{ width: pitch, height: height + 2 * reach, paddingTop: reach, paddingBottom: reach, marginTop: -reach, marginBottom: -reach }}
         >
           <span
             aria-hidden
-            // `pointer-events-none` so the 3px mark never takes a click the 5px button should have
-            // — the same reason PaneDivider's line carries it.
-            className="pointer-events-none w-[3px] rounded-[1px] transition-[opacity,transform] duration-fast group-hover/bar:scale-y-110 motion-reduce:group-hover/bar:scale-y-100"
+            // `pointer-events-none` so the mark never takes a click the wider button should have —
+            // the same reason PaneDivider's line carries it.
+            className="pointer-events-none h-full rounded-[1px] transition-[opacity,transform] duration-fast group-hover/bar:scale-y-110 motion-reduce:group-hover/bar:scale-y-100"
             style={{
+              width: Math.max(3, Math.round(pitch * 0.4)),
               background: BAR_COLOR[bar.outcome],
               // A settled bar sits back; the pointer brings it forward. Opacity rather than a second
               // colour, because the colours already mean four different things and a fifth shade of

@@ -32,8 +32,9 @@ const check = (name: string, ok: boolean, detail = ""): void => {
 
 console.log("\nthe hit area and the painted mark are different elements");
 {
-  check("the button is 5px, the pitch of the strip", /w-\[5px\]/.test(SPARKLINE));
-  check("the mark inside it is still the 3px bar", /w-\[3px\]/.test(SPARKLINE));
+  check("the button is the pitch of the strip, 5px unless a surface has room for more",
+    /pitch = 5,/.test(SPARKLINE) && /width: pitch,/.test(SPARKLINE));
+  check("the mark inside it is still at least the 3px bar", /width: Math\.max\(3, Math\.round\(pitch \* 0\.4\)\)/.test(SPARKLINE));
   // The half that makes the separation real: a mark that still took clicks would leave the button's
   // extra two pixels as decoration.
   check("the mark takes no pointer events", SPARKLINE.includes("pointer-events-none"));
@@ -47,7 +48,23 @@ console.log("\nthe strip did not get wider — the gap moved inside the button")
   // `gap-[2px]` plus a 3px bar was a 5px pitch. The button IS the pitch now, so the bars land where
   // they always did and nothing on the card reflows.
   check("the flex gap is gone", !/gap-\[2px\]/.test(SPARKLINE), "the strip still spaces with a gap");
-  check("...because the button spans the pitch", /w-\[5px\]/.test(SPARKLINE));
+  check("...because the button spans the pitch", /width: pitch,/.test(SPARKLINE));
+}
+
+console.log("\nthe fleet card's bars are targets a pointer can land on");
+{
+  // THEY WERE 6×14. The card has the room the dense grids do not: twenty bars at eleven pixels fit
+  // its inner width, and each button reaches five pixels above and below the strip without moving it.
+  const STRIP = readFileSync(`${HERE}FleetStrip.tsx`, "utf8");
+  const LAYOUT = readFileSync(`${HERE}../lib/cockpitLayout.ts`, "utf8");
+  const pitch = Number(/<AgentSparkline outcomes=\{card\.outcomes\} pitch=\{(\d+)\} reach=\{(\d+)\}/.exec(STRIP)?.[1]);
+  const reach = Number(/<AgentSparkline outcomes=\{card\.outcomes\} pitch=\{\d+\} reach=\{(\d+)\}/.exec(STRIP)?.[1]);
+  const cardWidth = Number(/export const CARD_WIDTH = (\d+)/.exec(LAYOUT)?.[1]);
+  check("each bar is at least 10px wide", pitch >= 10, String(pitch));
+  check("...and at least 24px tall, counting its reach", 14 + 2 * reach >= 24, String(reach));
+  check("...and twenty of them still fit inside the card's padding", 20 * pitch <= cardWidth - 24, `${20 * pitch} vs ${cardWidth - 24}`);
+  check("the reach moves nothing: it is padding cancelled by a negative margin",
+    /marginTop: -reach, marginBottom: -reach/.test(SPARKLINE));
 }
 
 console.log("\none tab stop for the strip, not one per run");
