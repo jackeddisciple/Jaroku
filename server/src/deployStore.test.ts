@@ -231,6 +231,33 @@ async function burst(store: DeployStore, label: string): Promise<void> {
 await burst(await freshStore(), "sqlite");
 await withScratchPostgres(async (pg) => burst(new DeployStore(pg), "postgres"));
 
+// --- 6c. what occupies a live-deployment slot ------------------------------------------------
+//
+// The Free plan allows one, and it used to be counted as "the latest row per agent, whatever its
+// status" — so one failed deploy used the slot, and the workspace could not even retry it.
+{
+  const store = await freshStore();
+  const failed = await seed(store, "failed-one");
+  await store.patch(ctx, failed.id, { status: "failed", error: "Railway said no" });
+  const interrupted = await seed(store, "interrupted-one");
+  await store.patch(ctx, interrupted.id, { status: "interrupted" });
+  const removed = await seed(store, "killed-one");
+  await store.patch(ctx, removed.id, { status: "removed" });
+  check("a failed, interrupted or removed deploy occupies no slot",
+    (await store.servingAgents(ctx)).size === 0, [...(await store.servingAgents(ctx))].join(","));
+
+  const live = await seed(store, "bruno");
+  await store.patch(ctx, live.id, { status: "live", url: "https://bruno.up.railway.app" });
+  const failedRedeploy = await seed(store, "bruno");
+  await store.patch(ctx, failedRedeploy.id, { status: "failed" });
+  const building = await seed(store, "margot");
+  await store.patch(ctx, building.id, { status: "building" });
+  const serving = await store.servingAgents(ctx);
+  check("a live agent occupies one, even when a later redeploy of it failed", serving.has("bruno"));
+  check("...and one on its way up occupies one too", serving.has("margot"));
+  check("...one slot per agent, however many rows it has", serving.size === 2, [...serving].join(","));
+}
+
 // --- 7. what the sidebar reads ------------------------------------------------------------------
 {
   const store = await freshStore();

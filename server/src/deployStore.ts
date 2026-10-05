@@ -505,6 +505,23 @@ export class DeployStore {
   }
 
   /**
+   * The agents with something serving, or on its way up — what the live-deployments limit counts.
+   *
+   * NOT `currentByAgent`, which is the latest row per agent WHATEVER ITS STATUS. Counting that made
+   * a failed or interrupted deploy occupy the Free plan's one slot, so after a single failure the
+   * workspace could not even retry the same agent; the only way out was Forget, which orphans the
+   * half-made Railway project. A failed, cancelled, interrupted, superseded or removed row is
+   * history, and none of them is serving anything.
+   */
+  async servingAgents(ctx: TenantContext): Promise<Set<string>> {
+    const agents = new Set<string>();
+    for (const d of await this.list(ctx)) {
+      if (ACTIVE.has(d.status) || isInFlight(d.status)) agents.add(d.agent_id);
+    }
+    return agents;
+  }
+
+  /**
    * The Railway project and service this agent was last deployed into, if any.
    *
    * A redeploy belongs in the SAME service. Creating a new project every time leaves the

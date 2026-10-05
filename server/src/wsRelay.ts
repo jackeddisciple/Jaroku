@@ -4072,8 +4072,11 @@ export interface RelayOptions {
    *
    * Absent means unrestricted, which is what a suite that stands the relay up on its own wants:
    * those are testing the socket, not the pricing.
+   *
+   * `agentId` IS THE ONE THE COMMAND NAMES, or null. A redeploy replaces what the agent is already
+   * serving rather than adding to it, and only the command says which agent it is about.
    */
-  entitles?: (ctx: TenantContext, cmd: string) => Promise<{ message: string; refusal: unknown } | null>;
+  entitles?: (ctx: TenantContext, cmd: string, agentId: string | null) => Promise<{ message: string; refusal: unknown } | null>;
   /**
    * May this person do this to THIS agent?
    *
@@ -4357,7 +4360,7 @@ export class WsRelay {
   private revalidator?: ReturnType<typeof setInterval>;
   private store: TraceStore;
   private onCommand?: (cmd: ForwardedCommand, ctx: TenantContext) => void;
-  private entitles?: (ctx: TenantContext, cmd: string) => Promise<{ message: string; refusal: unknown } | null>;
+  private entitles?: (ctx: TenantContext, cmd: string, agentId: string | null) => Promise<{ message: string; refusal: unknown } | null>;
   private resolvesAgent?: RelayOptions["resolvesAgent"];
 
   constructor(private opts: RelayOptions) {
@@ -4779,7 +4782,7 @@ export class WsRelay {
     // and where to go — and the client renders that as an inline card rather than a bare string.
     // On the command's OWN channel rather than a new one, so the panel that asked still gets an
     // error it already knows how to show if it has no card to render.
-    const refusal = this.entitles ? await this.entitles(ctx, cmd) : null;
+    const refusal = this.entitles ? await this.entitles(ctx, cmd, agentId) : null;
     if (refusal) {
       this.sendTo(ws, {
         channel: channelFor(cmd),

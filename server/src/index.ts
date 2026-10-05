@@ -5074,7 +5074,7 @@ const relay = new WsRelay({
   // every handler reached for the server's own instead. With one workspace the two are the
   // same object, which is exactly why it would have gone unnoticed until it was not.
   onCommand: (cmd: ForwardedCommand, ctx: TenantContext) => void dispatchCommand(cmd, ctx),
-  entitles: (ctx: TenantContext, cmd: string) => entitlementRefusalFor(ctx, cmd),
+  entitles: (ctx: TenantContext, cmd: string, agentId: string | null) => entitlementRefusalFor(ctx, cmd, agentId),
   // The per-agent half of the same question — see the option's own doc, and
   // `agentAccessRefusalFor`, which is the only thing in this file that touches a grant.
   resolvesAgent: agentAccessRefusalFor,
@@ -5094,13 +5094,13 @@ const relay = new WsRelay({
  * delete this product deliberately does not offer. `includeArchived` defaults to false, so this is
  * the plain call rather than a filter.
  *
- * LIVE DEPLOYMENTS ARE THE ONES CURRENTLY SERVING, which is what `currentByAgent` answers: one
- * entry per agent that has something up. A superseded deployment is history and is not occupying
- * the slot the tier limits.
+ * LIVE DEPLOYMENTS ARE THE AGENTS WITH SOMETHING SERVING OR ON ITS WAY UP — `servingAgents`, not
+ * the latest row per agent. A failed, interrupted or superseded deployment is history and does not
+ * occupy the slot the tier limits; counting it locked a Free workspace out after one failed deploy.
  */
 const entitlementCounts: EntitlementCounts = {
   agents: async (ctx) => (await agentRepo.list(ctx)).length,
-  liveDeployments: async (ctx) => (await deployStore.currentByAgent(ctx)).size,
+  liveDeployments: async (ctx) => (await deployStore.servingAgents(ctx)).size,
   mcpServers: async (ctx) => (await mcpStore.listServers(ctx)).length,
   members: async (ctx) => (await identityRepo.listMembers(ctx)).length,
   workspacesForUser: async (ctx) =>
@@ -5124,6 +5124,7 @@ const entitlementCounts: EntitlementCounts = {
 async function entitlementRefusalFor(
   ctx: TenantContext,
   cmd: string,
+  agentId: string | null = null,
 ): Promise<{ message: string; refusal: unknown } | null> {
   const check = entitlementFor(cmd);
   if (!check || check === NO_ENTITLEMENT) return null;
@@ -5132,7 +5133,20 @@ async function entitlementRefusalFor(
     const balance = await billing.balance(ctx);
     const tier = workspace?.plan ?? "free";
     const entitlements = entitlementsForPlan(tier, balance.limit_overrides);
-    const refusal = await requireEntitlement(check, ctx, tier, entitlements, entitlementCounts);
+    // A REDEPLOY TAKES THE SLOT IT ALREADY HAS. Counting the agent's own live deployment against
+    // its replacement meant a Free workspace could never ship a new version of its one live agent
+    // without Kill first, and Kill loses the URL and the service.
+    const counts: EntitlementCounts = check === "canDeploy" && agentId
+      ? {
+          ...entitlementCounts,
+          liveDeployments: async (c) => {
+            const serving = await deployStore.servingAgents(c);
+            serving.delete(agentId);
+            return serving.size;
+          },
+        }
+      : entitlementCounts;
+    const refusal = await requireEntitlement(check, ctx, tier, entitlements, counts);
     if (!refusal) return null;
 
     // THE BYPASS, AND IT IS THE LAST THING ASKED RATHER THAN THE FIRST.
