@@ -367,6 +367,9 @@ jobs:
           # AND THE RECORD UNDER ALL OF THEM, here for its Postgres half: a burst of build-log lines
           # took one seq twice under READ COMMITTED and the rejection exited the backend mid-upload.
           npm run test:deploy-store
+          # AND THE FORM'S PRE-CHECK, which must ask the deploy's own question of the asking
+          # workspace: it read another registry, and another workspace's credentials.
+          npm run test:deploy-plan
 
       # THE SUITES THAT SHIPPED WITH v0.2.15 AND CI HAS NEVER RUN. They were written, they passed,
       # and nothing but the person who wrote them ever executed them — the same gap the client job's

@@ -79,14 +79,23 @@ export interface DeployManagerDeps {
    */
   token: (ctx: TenantContext) => Promise<string | null | undefined>;
   /**
-   * The credential NAMES this workspace has configured. Never a value — see ADR-026.
+   * Which of these credential NAMES this workspace has a value for. Never a value — see ADR-026.
    *
-   * Absent means fall back to this process's environment, which is right for the local path and
-   * is what this did everywhere before. Hosted, the two are different questions: reading the
-   * environment asks whether the SERVER has a variable, when what decides a deploy is whether this
-   * WORKSPACE has the credential.
+   * THE SAME SOURCE `secretValues` READS, and that is the whole requirement. The check used to
+   * read the Secrets tab's registry while the deploy read the process environment, so a key in
+   * `runtime/.env` was reported "not set" and then sent anyway once "Deploy anyway" was ticked.
+   *
+   * Absent means fall back to this process's environment, which is what a suite without a store
+   * wants and is the same fallback `secretValues` takes.
    */
-  configuredNames?: () => Promise<ReadonlySet<string>>;
+  configuredNames?: (ctx: TenantContext, names: string[]) => Promise<ReadonlySet<string>>;
+  /**
+   * The values a deploy hands to the container, by name, for the deploying workspace.
+   *
+   * Absent means this process's environment. Hosted, that is the SERVER's environment rather than
+   * the tenant's credentials, which is why index.ts supplies the workspace's store here.
+   */
+  secretValues?: (ctx: TenantContext, names: string[]) => Promise<Map<string, string>>;
   /** True while a run or an eval job is reading this agent's files. Blocks packaging. */
   agentBusy: (agentId: string) => boolean;
   onStage: (e: { deploymentId: string; stage: DeployStage; status: DeployStatus }) => void;
@@ -169,6 +178,12 @@ const DEPLOYABLE_PROVIDERS: readonly string[] = ["anthropic", "openai", "meta"];
 export async function planDeploy(
   deps: DeployManagerDeps,
   req: StartDeployRequest,
+  /**
+   * THE ASKING WORKSPACE, passed rather than read off `deps.context()`. That is the context of the
+   * deploy in flight — or the server's own when none is — so a plan asked for by workspace B was
+   * checking A's credentials and A's Railway token.
+   */
+  ctx: TenantContext = deps.context(),
 ): Promise<DeployPlan> {
   const problems: string[] = [];
   const warnings: string[] = [];
@@ -195,11 +210,17 @@ export async function planDeploy(
   }
 
   const meta = readAgentMeta(deps.runtimeDir, req.agentId);
-  const secrets = requiredSecrets({
+  const declared = {
     requiredEnv: meta.required_env ?? [],
     mcpServers: meta.mcp_servers ?? [],
     provider: req.provider,
-    configuredNames: await deps.configuredNames?.(),
+  };
+  // The names first, then which of them this workspace can supply — asked of the same store the
+  // deploy will read the values from.
+  const names = requiredSecrets({ ...declared, configuredNames: new Set() }).map((s) => s.name);
+  const secrets = requiredSecrets({
+    ...declared,
+    configuredNames: deps.configuredNames ? await deps.configuredNames(ctx, names) : undefined,
   });
 
   const missing = secrets.filter((s) => s.required && !s.configured).map((s) => s.name);
@@ -208,13 +229,13 @@ export async function planDeploy(
     // is a deploy that goes green and is dead. Overridable, because the user may intend to set
     // it in Railway by hand — but not the default.
     const message =
-      `not set on this machine: ${missing.join(", ")}. The agent's tools raise without them, ` +
+      `not set for this workspace: ${missing.join(", ")}. The agent's tools raise without them, ` +
       `so it would deploy successfully and then fail every request.`;
     if (req.allowMissing) warnings.push(message);
     else problems.push(message);
   }
 
-  if (!(await deps.token(deps.context()))) {
+  if (!(await deps.token(ctx))) {
     problems.push(
       `no Railway token. Add one in the deploy panel — it is kept for this workspace alone and ` +
       `only ever leaves as the Authorization header on a call to Railway.`,
@@ -247,7 +268,7 @@ export async function planDeploy(
     secrets,
     problems,
     warnings,
-    redeploy: (await deps.store.reusableTarget(deps.context(), req.agentId)) !== null,
+    redeploy: (await deps.store.reusableTarget(ctx, req.agentId)) !== null,
     cliVersion: cli.version,
   };
 }
@@ -285,7 +306,7 @@ export class DeployManager {
   async start(req: StartDeployRequest): Promise<{ deploymentId: string } | { error: string }> {
     if (this.active) return { error: "a deploy is already running" };
 
-    const plan = await planDeploy(this.deps, req);
+    const plan = await planDeploy(this.deps, req, this.deps.context());
     if (plan.problems.length) return { error: plan.problems.join(" · ") };
 
     const token = await this.deps.token(this.deps.context());
@@ -395,7 +416,9 @@ export class DeployManager {
 
     // 🔴 The one read of credential values in the deploy path. Held from here to the finally
     // below, for two purposes and no others: the variables mutation, and the scrubber.
-    const secretValues = resolveSecretValues(envKeys);
+    const secretValues = this.deps.secretValues
+      ? await this.deps.secretValues(this.deps.context(), envKeys)
+      : resolveSecretValues(envKeys);
     const serveToken = req.publicEndpoint ? null : randomBytes(24).toString("base64url");
     const host = hostEnv({ provider: req.provider, model: req.model, serveToken });
     // Credentials only. Scrubbing every host value used to redact the provider name and the

@@ -2461,8 +2461,10 @@ const deployDeps: DeployManagerDeps = {
   // makes the two visible side by side, which is what turned a latent divergence into one somebody
   // would report: a workspace whose key is plainly listed as configured, and a deploy refusing to
   // start because it could not see it.
-  configuredNames: async () =>
-    new Set((await secrets.listNames(contextForDeploy())).map((s) => s.name)),
+  configuredNames: (ctx, names) => secrets.configuredOf(ctx, names),
+  // AND THE VALUES FROM THE SAME PLACE, so the check and the deploy cannot disagree — see
+  // `DeployManagerDeps.configuredNames`. Hosted, this is the tenant's vault, never the server's env.
+  secretValues: async (ctx, names) => new Map(Object.entries(await secrets.getForDeploy(ctx, names))),
   // The same pool-aware check the editor uses, and for a sharper version of the reason:
   // deploying WRITES into the project, so doing it while a subprocess is importing those
   // files would change code out from under a run in flight.
@@ -10741,7 +10743,7 @@ async function handleDeployCommand(ctx: TenantContext, cmd: DeployChannelCommand
           provider: typeof cmd.provider === "string" ? cmd.provider : "",
           model: typeof cmd.model === "string" ? cmd.model : "",
           envKeys: [],
-        });
+        }, ctx);
         relay.broadcastDeploy(ctx, {
           type: "plan",
           agentId: plan.agentId,

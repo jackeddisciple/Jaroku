@@ -37,7 +37,7 @@ import {
 } from "./masterKey.ts";
 import { RAILWAY_ENV_KEY } from "../railwayApi.ts";
 import {
-  NEVER_FOR_A_RUN, assertSecretName, unstorableReason, type RunWorkspaceResolver, type SecretRef,
+  NEVER_FOR_A_RUN, SECRET_NAME, assertSecretName, unstorableReason, type RunWorkspaceResolver, type SecretRef,
   type SecretStore, type SetResult,
 } from "./secretStore.ts";
 
@@ -217,6 +217,22 @@ export class KmsSecretStore implements SecretStore {
    */
   async setServeToken(ctx: TenantContext, serviceId: string, token: string): Promise<SetResult> {
     return this.seal(ctx.workspaceId, serveTokenEnvKeyFor(serviceId), token);
+  }
+
+  /** See `SecretStore.getForDeploy`. This workspace's sealed values, through the usual door. */
+  async getForDeploy(ctx: TenantContext, names: string[]): Promise<Record<string, string>> {
+    return this.decryptInto(ctx.workspaceId, names.filter((n) => !NEVER_FOR_A_RUN.has(n)));
+  }
+
+  /** See `SecretStore.configuredOf`. Which rows exist; no ciphertext is selected, let alone opened. */
+  async configuredOf(ctx: TenantContext, names: string[]): Promise<Set<string>> {
+    const wanted = names.filter((n) => !NEVER_FOR_A_RUN.has(n) && SECRET_NAME.test(n));
+    if (!wanted.length) return new Set();
+    const rows = await this.q(ctx.workspaceId).all<{ name: string }>(
+      `SELECT name FROM workspace_secrets WHERE workspace_id = ? AND name IN (${wanted.map(() => "?").join(", ")})`,
+      [ctx.workspaceId, ...wanted],
+    );
+    return new Set(rows.map((r) => r.name));
   }
 
   /**

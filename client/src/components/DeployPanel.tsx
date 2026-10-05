@@ -290,7 +290,7 @@ function DeployForm({
     .filter((s) => s.required && s.configured && excluded.has(s.name))
     .map((s) => s.name);
   const blocking = (plan?.problems ?? []).filter(
-    (p) => !allowMissing || !p.startsWith("not set on this machine"),
+    (p) => !allowMissing || !p.startsWith("not set for this workspace"),
   );
   const canDeploy = Boolean(plan) && blocking.length === 0 && (allowMissing || withheld.length === 0);
 
@@ -365,9 +365,9 @@ function DeployForm({
         )}
         {/* The same promise the MCP panel and the provider form make, in the same words. */}
         <p className="mt-1.5 text-tiny leading-[1.5] text-faint">
-          Values are read from <span className="font-mono">runtime/.env</span> at the moment
-          they are sent, go straight into an HTTPS request body to Railway, and are never
-          logged, written to Jaroku's database, or sent back to this page. Only the names are.
+          Values are read from this workspace's credentials — the same place this check looks —
+          at the moment they are sent, go straight into an HTTPS request body to Railway, and are
+          never logged or sent back to this page. Only the names are.
         </p>
       </div>
 
@@ -392,7 +392,7 @@ function DeployForm({
         </div>
       ) : null}
 
-      {(withheld.length > 0 || plan?.problems.some((p) => p.startsWith("not set on this machine"))) && (
+      {(withheld.length > 0 || plan?.problems.some((p) => p.startsWith("not set for this workspace"))) && (
         <CheckboxField checked={allowMissing} onChange={() => setAllowMissing(!allowMissing)}>
           Deploy anyway — I will set the rest in Railway myself
         </CheckboxField>

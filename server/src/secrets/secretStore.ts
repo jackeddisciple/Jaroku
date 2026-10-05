@@ -173,6 +173,25 @@ export interface SecretStore {
   setServeToken(ctx: TenantContext, serviceId: string, token: string): Promise<SetResult>;
 
   /**
+   * The values a DEPLOY hands to this workspace's own container, by name.
+   *
+   * THE SAME VALUES A RUN WOULD RECEIVE, scoped by the asking context because a deploy has no run
+   * id. It used to read the server's process environment, which locally is the right file and
+   * hosted is the SERVER's environment — not this tenant's credentials. Like `getForRun`, a name
+   * with no value is absent, and the platform's own Railway token is never among them.
+   */
+  getForDeploy(ctx: TenantContext, names: string[]): Promise<Record<string, string>>;
+
+  /**
+   * Which of these names this workspace has a value for, right now. Names only, never a value.
+   *
+   * What the deploy form's pre-check reads, and it must be the same question `getForDeploy`
+   * answers. It was `listNames`, a registry that knows only what the Secrets tab wrote — so a key
+   * in `runtime/.env` was "not set on this machine" while the deploy sent it anyway.
+   */
+  configuredOf(ctx: TenantContext, names: string[]): Promise<Set<string>>;
+
+  /**
    * The workspace's own Railway account token, for the deploy path and nothing else.
    *
    * THE FIFTH DOOR, AND IT EXISTS BECAUSE THE TOKEN WAS BEHIND NONE. It was written to

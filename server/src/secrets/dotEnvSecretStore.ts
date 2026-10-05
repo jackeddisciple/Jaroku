@@ -169,6 +169,16 @@ export class DotEnvSecretStore implements SecretStore {
     return written;
   }
 
+  /** See `SecretStore.getForDeploy`. Locally the process environment, exactly as for a run. */
+  async getForDeploy(_ctx: TenantContext, names: string[]): Promise<Record<string, string>> {
+    return this.getForRun("", names);
+  }
+
+  /** See `SecretStore.configuredOf`. The same reading `getForDeploy` makes, without the values. */
+  async configuredOf(_ctx: TenantContext, names: string[]): Promise<Set<string>> {
+    return new Set(names.filter((n) => !NEVER_FOR_A_RUN.has(n) && (process.env[n] ?? "").length > 0));
+  }
+
   /**
    * See `SecretStore.getRailwayToken`.
    *

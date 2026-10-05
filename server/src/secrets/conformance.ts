@@ -68,6 +68,20 @@ export async function runSecretConformance(
     "a name with no value is absent rather than an empty string, here too",
   );
 
+  // --- what a deploy sends, and what its pre-check says --------------------------------
+  //
+  // The two must be one question. The check used to read the registry while the deploy read the
+  // process environment, so a key could be "not set" and sent anyway.
+  check(
+    (await store.getForDeploy(ctx, [NAME]))[NAME] === VALUE,
+    "a deploy is handed the workspace's value, byte for byte",
+  );
+  check(
+    (await store.configuredOf(ctx, [NAME, "JAROKU_MCP_NEVER_SET_TOKEN"])).has(NAME)
+      && !(await store.configuredOf(ctx, [NAME, "JAROKU_MCP_NEVER_SET_TOKEN"])).has("JAROKU_MCP_NEVER_SET_TOKEN"),
+    "...and the pre-check calls exactly the names a deploy would be handed configured",
+  );
+
   // --- the fourth door: a deployed agent's own bearer token ----------------------------
   //
   // NARROWER THAN THE THREE ABOVE, AND THE ASSERTIONS ARE MOSTLY ABOUT THAT. It takes a SERVICE
