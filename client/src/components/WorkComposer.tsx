@@ -38,6 +38,8 @@ import { sendDispatchWork } from "../lib/socket.ts";
 import { ICON } from "../lib/tokens.ts";
 import { useCanRun } from "../lib/useCapability.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
+import { useTraceStore } from "../store/traceStore.ts";
+import { useUiStore } from "../store/uiStore.ts";
 import { useWorkStore } from "../store/workStore.ts";
 import { WorkGate } from "./WorkGate.tsx";
 import { DisabledReason, ENABLED, type DisabledState } from "./DisabledReason.tsx";
@@ -60,6 +62,14 @@ import { ArrowUpIcon } from "./panelIcons.tsx";
  * version of this flow."
  */
 const MAX_INPUT_BYTES = 65_536;
+
+/**
+ * How long a dispatch may go unanswered before the composer stops waiting for it.
+ *
+ * Past the server's own worst case — three attempts inside a 45-second retry budget, each allowed
+ * thirty to be accepted — so a slow dispatch that is still being tried is never given up on early.
+ */
+const ANSWER_TIMEOUT_MS = 90_000;
 
 /** In bytes, because that is what the boundary counts — a four-byte emoji is one character. */
 function byteLength(text: string): number {
@@ -104,6 +114,35 @@ export function WorkComposer() {
     setSending(false);
     boxRef.current?.focus();
   }, [error]);
+
+  /**
+   * A FLIGHT THAT CAN NO LONGER BE ANSWERED ENDS, rather than saying "Sending…" for ever.
+   *
+   * Over a server that had hung, the composer sat at "Sending it now." with no end, and when the
+   * server woke the buffered job ran — so somebody who gave up and sent again got two jobs. A socket
+   * that drops (the heartbeat now notices a hung server) cannot carry this dispatch's answer, and a
+   * dispatch unanswered for `ANSWER_TIMEOUT_MS` is past anything the server's own retry budget can
+   * take. Either way the text comes back, and the sentence says the job may still have reached the
+   * agent — the list is where it shows if it did.
+   */
+  const connected = useTraceStore((s) => s.connection === "open");
+  const giveUp = (why: string): void => {
+    if (!inFlight.current) return;
+    inFlight.current = null;
+    setSending(false);
+    setInput((now) => now || held.current);
+    useUiStore.getState().showToast(why, "err");
+  };
+  useEffect(() => {
+    if (!connected) giveUp("No answer — it may still run; check the list");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected]);
+  useEffect(() => {
+    if (!sending) return;
+    const timer = setTimeout(() => giveUp("No answer yet — it may still run; check the list"), ANSWER_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sending]);
 
   // AND AN ACKNOWLEDGEMENT ENDS THE FLIGHT. The panel opening on the new job is what says the
   // dispatch landed; `open` changing to a row we do not hold is that event, seen from here.

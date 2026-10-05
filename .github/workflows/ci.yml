@@ -1140,6 +1140,9 @@ jobs:
           # ever UPDATED is a page that ages and a list of what once matched — both of which look
           # like a working board.
           npm run test:work-delta
+          # AND A SERVER THAT HANGS IS A DROPPED CONNECTION. A frozen backend kept its sockets open, so the
+          # client showed "connected" and a dispatch sat at "Sending…" until the server woke and ran it.
+          npm run test:socket-heartbeat
           # THE FLEET CARD'S ONE LINE, WHICH BOTH SPECIFICATIONS CALL THE HARDEST DESIGN IN THE
           # FEATURE, and the reason is what happens when it is wrong: a strip of twenty cards all
           # reading "Deployed", which is what the Railway dashboard already gives and is why

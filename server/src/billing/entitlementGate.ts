@@ -328,6 +328,7 @@ export const COMMAND_ENTITLEMENT: Record<string, EntitlementKind | typeof NO_ENT
   setByok: NO_ENTITLEMENT,
   setOwnKeyForPlatform: NO_ENTITLEMENT,
   loadEnforcement: NO_ENTITLEMENT,
+  ping: NO_ENTITLEMENT,
   appealEnforcement: NO_ENTITLEMENT,
   listThreads: NO_ENTITLEMENT,
   loadThread: NO_ENTITLEMENT,

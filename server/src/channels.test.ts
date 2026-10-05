@@ -160,13 +160,14 @@ const TENANT_CHANNELS = new Set([
 ]);
 
 /**
- * The one channel that is NOT workspace data, and must not be scoped like it.
+ * The channels that are NOT workspace data, and must not be scoped like it.
  *
  * `session` is about the CONNECTION — expiring, revoked, role_changed. It is addressed to one
  * socket by identity, never broadcast, and scoping it by workspace would be meaningless: the
  * message exists precisely because that socket's membership may no longer be what it was.
+ * `heartbeat` is the pong to that socket's own ping, carrying nothing but the fact it arrived.
  */
-const CONNECTION_CHANNELS = new Set(["session"]);
+const CONNECTION_CHANNELS = new Set(["session", "heartbeat"]);
 
 const unclassified = ALL_CHANNELS.filter(
   (c) => !TENANT_CHANNELS.has(c) && !CONNECTION_CHANNELS.has(c),

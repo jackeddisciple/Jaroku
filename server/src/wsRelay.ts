@@ -1831,6 +1831,7 @@ export type ClientCommand =
   | ListInboxCommand
   | InboxCommand
   | ListWorkCommand
+  | PingCommand
   | LoadWorkItemCommand
   | ListFleetCommand
   | WorkCommand
@@ -3163,6 +3164,17 @@ export type InboxEvent =
 // NOTHING SCHEMA-V1 RIDES ON THIS CHANNEL. Only `trace` carries the frozen schema. A work item
 // LINKS to its run; it does not carry its steps, and `loadRun` is what opens the trace — which is
 // also what stamps a failure as reviewed for the Inbox.
+/**
+ * "Are you still there?" — answered with a pong on the `heartbeat` channel, and nothing else.
+ *
+ * A HUNG SERVER IS INVISIBLE WITHOUT IT. A process that stops answering keeps its TCP connections
+ * open, so the socket never closes and the client goes on showing "connected": with the backend
+ * frozen for over a minute the Cockpit kept its refresh enabled, raised no notice, and left a
+ * dispatch at "Sending…" for ever. A browser cannot see WebSocket ping frames, so the client asks
+ * in the protocol it can see, and treats a long enough silence as a dropped connection.
+ */
+export type PingCommand = { cmd: "ping" };
+
 export type ListWorkCommand = {
   cmd: "listWork";
   /** `mine` is the default — see §8. It is a filter, never a permission. */
@@ -3913,6 +3925,8 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   grantAccess: "access", modifyGrant: "access", revokeGrant: "access",
   loadSessions: "access", endSession: "access", loadAccessHistory: "access",
   loadEnforcement: "enforcement", appealEnforcement: "enforcement",
+  // A refused ping would only be the socket's role changing mid-flight; it goes where a pong goes.
+  ping: "heartbeat",
   // All six on `threads`, the reads included. The channel HAS an error shape, so unlike
   // `loadAgentFiles` there is nowhere better for a refusal to go — and a refusal about a rename
   // that landed in the status bar instead of the list would leave the row it was about still
@@ -5022,6 +5036,9 @@ export class WsRelay {
                 type: "error", message: "the activity feed is not available",
               }),
             }), live, (message) => ({ channel: "activity", type: "error", message }));
+          } else if (msg.cmd === "ping") {
+            // The answer IS the point, and it costs nothing: no read, no context, no broadcast.
+            this.sendTo(ws, { channel: "heartbeat", type: "pong" });
           } else if (msg.cmd === "listWork" && msg.countsOnly === true) {
             // THE COUNTS ALONE, to the asking socket — see `ListWorkCommand.countsOnly`.
             const command = msg;

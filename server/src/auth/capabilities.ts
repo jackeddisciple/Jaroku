@@ -537,6 +537,9 @@ export function requireCapability(ctx: TenantContext, capability: Capability): v
  * is the same hole in a year when somebody adds a command and cannot work out why it 403s.
  */
 export const COMMAND_CAPABILITY: Record<string, Capability> = {
+  // THE LIVENESS PING, at the floor every role holds. It reads nothing and changes nothing; it is
+  // gated only because no command is ungated. See `PingCommand`.
+  ping: "agent:read",
   // reads
   loadRun: "agent:read",
   // A bigger window on the same list the connect snapshot already sends. See LoadHistoryCommand.

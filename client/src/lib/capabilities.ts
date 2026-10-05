@@ -265,6 +265,8 @@ export const COMMAND_CAPABILITY: Record<string, string> = {
   loadUsage: "billing:read",
   setSpendCeiling: "billing:manage",
   setByok: "billing:manage",
+  // The liveness ping — see the server's table.
+  ping: "agent:read",
   loadEnforcement: "enforcement:appeal",
   appealEnforcement: "enforcement:appeal",
   listMembers: "member:read",

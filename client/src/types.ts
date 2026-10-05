@@ -2084,6 +2084,8 @@ export type ServerMessage =
   // from the Inbox — a snapshot is NOT broadcast, because it carries the asking client's filter,
   // and only a single-item delta ever goes to the workspace.
   | ({ channel: "work" } & WorkMessage)
+  /** The answer to `ping`. Its arrival is the whole of its meaning. */
+  | { channel: "heartbeat"; type: "pong" }
   // `complete` and `window` are present only on the answer to `loadHistory` — a growing WINDOW
   // rather than a cursor, so the channel keeps its full-snapshot discipline and `applyHistory` keeps
   // merging by run id. A broadcast that carries neither leaves the flags alone.
@@ -2203,6 +2205,8 @@ export type ClientCommand =
   // other, because the modal must not be able to tell which kind of run it is answering.
   // `countsOnly` asks for the counts alone, with no page — re-read after deltas the client cannot count.
   | { cmd: "listWork"; scope?: "mine" | "all"; status?: WorkStatus; agentId?: string; cursor?: string | null; countsOnly?: boolean }
+  // "Are you still there?" — the liveness ping a hung server cannot answer. See `lib/socket.ts`.
+  | { cmd: "ping" }
   | { cmd: "loadWorkItem"; itemId: string }
   | { cmd: "listFleet" }
   // `threadId` ON A DISPATCH IS A NOTE ABOUT WHERE IT CAME FROM, never a route: an operate thread's

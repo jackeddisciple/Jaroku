@@ -93,6 +93,67 @@ let outage = false;
 /** Whether a socket has opened in this tab at all — what decides between "lost" and "can't reach". */
 let everOpen = false;
 
+/**
+ * THE HEARTBEAT, and why there is one. A server that hangs — frozen, deadlocked, its event loop
+ * blocked — keeps its TCP connections open, so the socket never closes and nothing here ever learned
+ * the server had gone: the Cockpit showed "connected" for over a minute, kept its refresh enabled,
+ * and left a dispatch at "Sending…" until the server woke and ran the buffered job for real.
+ *
+ * So an open socket pings every `HEARTBEAT_MS`, any frame at all counts as an answer, and a ping
+ * left unanswered for `STALL_MS` is a dropped connection: the socket is abandoned and the ordinary
+ * reconnect takes over, with its "Reconnecting…" and its disabled controls. Measured from the PING
+ * rather than from the last frame, because a background tab's timers are throttled and a quiet
+ * workspace sends nothing — a clock from the last frame would call every idle tab dead.
+ */
+const HEARTBEAT_MS = 10_000;
+const STALL_MS = 25_000;
+let heartbeat: ReturnType<typeof setInterval> | null = null;
+/** When the oldest unanswered ping went out, or null when every ping has been answered. */
+let awaitingSince: number | null = null;
+
+function stopHeartbeat(): void {
+  if (heartbeat) clearInterval(heartbeat);
+  heartbeat = null;
+  awaitingSince = null;
+}
+
+function startHeartbeat(socket: WebSocket): void {
+  stopHeartbeat();
+  heartbeat = setInterval(() => {
+    if (ws !== socket) { stopHeartbeat(); return; }
+    if (awaitingSince !== null && Date.now() - awaitingSince > STALL_MS) {
+      abandonStalled(socket);
+      return;
+    }
+    try {
+      socket.send(JSON.stringify({ cmd: "ping" }));
+      awaitingSince ??= Date.now();
+    } catch {
+      /* a socket that cannot send is about to close on its own */
+    }
+  }, HEARTBEAT_MS);
+}
+
+/**
+ * Give up on a socket whose server has stopped answering, and reconnect.
+ *
+ * NOT `socket.close()` ALONE. Closing waits for the server's half of the closing handshake, and a
+ * hung server will not send it — so the close event, and the reconnect it drives, could be as late
+ * as the server's own recovery. The socket is detached first, and this does what its close would.
+ */
+function abandonStalled(socket: WebSocket): void {
+  stopHeartbeat();
+  socket.onopen = null;
+  socket.onmessage = null;
+  socket.onclose = null;
+  socket.onerror = null;
+  if (ws === socket) ws = null;
+  try { socket.close(); } catch { /* already closing */ }
+  useTraceStore.getState().setConnection("closed");
+  useChatStore.getState().replyInterrupted();
+  if (!stopped) scheduleReconnect();
+}
+
 function dispatch(msg: ServerMessage): void {
   const s = useTraceStore.getState();
 
@@ -558,6 +619,9 @@ function dispatch(msg: ServerMessage): void {
       else if (msg.type === "notice") console.info("[inbox]", msg.message);
       break;
     }
+    case "heartbeat":
+      // Nothing to do: arriving at all is what `onmessage` counts. See `startHeartbeat`.
+      break;
     case "work": {
       // A SNAPSHOT REPLACES AND A DELTA TOUCHES ONE ROW, and here the delta is the common case
       // rather than the exception: §5 makes a transition a single item precisely because a work
@@ -809,6 +873,7 @@ async function connect(): Promise<void> {
     useTraceStore.getState().setConnection("open");
     useSessionStore.getState().setStatus("ready");
     everOpen = true;
+    startHeartbeat(socket);
     if (outage) {
       outage = false;
       useUiStore.getState().showToast("Reconnected", "ok");
@@ -843,6 +908,8 @@ async function connect(): Promise<void> {
     // Dispatching from a superseded socket would apply another workspace's broadcasts to this
     // one's stores, and would double every event a duplicate connection received.
     if (superseded()) return;
+    // ANY FRAME ANSWERS THE OUTSTANDING PING — the server is evidently alive.
+    awaitingSince = null;
     try {
       dispatch(JSON.parse(ev.data as string) as ServerMessage);
     } catch {
@@ -854,6 +921,7 @@ async function connect(): Promise<void> {
     // AND IT ONLY NULLS ITS OWN. This used to clear the shared `ws` unconditionally, so an orphan
     // closing took the LIVE socket's handle with it and every `send` afterwards was dropped.
     if (ws === socket) ws = null;
+    if (heartbeat && ws === null) stopHeartbeat();
     if (superseded()) return;
     useTraceStore.getState().setConnection("closed");
     // §5: AN ANSWER THAT WAS ARRIVING STOPPED ARRIVING, and the turn has to say so.
@@ -989,6 +1057,7 @@ export function stopSocket(): void {
   // Every reconnect armed before this moment, and every connect attempt mid-await, now belongs to
   // an era that has ended. See `generation`.
   generation++;
+  stopHeartbeat();
   const open = ws;
   ws = null;
   try {
