@@ -801,11 +801,16 @@ export function WorkList() {
 function ZeroState() {
   const filters = useWorkStore((s) => s.filters);
   const setFilters = useWorkStore((s) => s.setFilters);
-  // WHAT COUNTS AS FILTERED INCLUDES THE DEFAULT SCOPE, which is the subtle half. §8 defaults to
-  // `mine`, so a member of a busy workspace who has never touched a control is looking at a
-  // FILTERED list — and telling them "nothing has been asked of them yet" over forty of a
-  // colleague's jobs is the exact confusion §10 asks the three states to prevent.
-  const filtered = filters.scope === "mine" || filters.status !== null || filters.agentId !== null;
+  // Whether the workspace has any job at all — its own counts, which no filter moves.
+  const workspaceHasJobs = useWorkStore((s) => Object.values(s.workspaceCounts).some((n) => n > 0));
+  // THE DEFAULT SCOPE COUNTS AS A FILTER ONLY WHEN IT HIDES SOMETHING, which is the subtle half. §8
+  // defaults to `mine`, so a member of a busy workspace who has never touched a control is looking
+  // at a filtered list — "nothing has been asked of them yet" over forty of a colleague's jobs is
+  // the confusion §10 asks the three states to prevent. But in a workspace with no jobs at all it
+  // hides nothing, and calling it a filter told a first-time user they had filtered something they
+  // never touched: "Nothing here matches this filter. — Show everything".
+  const filtered = filters.status !== null || filters.agentId !== null
+    || (filters.scope === "mine" && workspaceHasJobs);
 
   // §10's SECOND STATE: live agents, nothing asked of them. A `line`, because the composer directly
   // below it is the answer and a full-height illustration over a control that fixes it is theatre.

@@ -43,6 +43,7 @@ function render(state: {
   loaded: boolean;
   anyLive: boolean;
   filters: WorkFilters;
+  workspaceCounts?: typeof NO_COUNTS;
 }, which: "view" | "list"): string {
   seed(useWorkStore, {
     items: [], pending: [], atTop: true, nextCursor: null,
@@ -142,10 +143,19 @@ console.log("\nthe state a member of a busy workspace actually sees");
   // §8 DEFAULTS THE SCOPE TO `mine`, so somebody who has never touched a control is looking at a
   // filtered list — and the wrong sentence here is the expensive one: an operator told nothing has
   // been asked of their agents, over a workspace full of a colleague's jobs, goes and deploys.
-  const defaults = render({ loaded: true, anyLive: true, filters: filters({ scope: "mine" }) }, "list");
-  check("the default scope counts as a filter", defaults.includes(EMPTY.filtered.title),
+  const defaults = render({
+    loaded: true, anyLive: true, filters: filters({ scope: "mine" }),
+    workspaceCounts: { ...NO_COUNTS, succeeded: 40 },
+  }, "list");
+  check("in a busy workspace the default scope counts as a filter", defaults.includes(EMPTY.filtered.title),
     EMPTY.filtered.title);
   check("...and is not told nothing has been asked", !defaults.includes(EMPTY.noWork.title));
+
+  // BUT IN A WORKSPACE WITH NO JOBS AT ALL IT HIDES NOTHING. A first-time user, having touched
+  // nothing, was told "Nothing here matches this filter — Show everything".
+  const fresh = render({ loaded: true, anyLive: true, filters: filters({ scope: "mine" }) }, "list");
+  check("a brand-new workspace is told nothing has been asked yet, not that it filtered",
+    fresh.includes(EMPTY.noWork.title) && !fresh.includes(EMPTY.filtered.title));
 
   // AND AN AGENT FILTER SET BY A FLEET CARD COUNTS TOO.
   const byAgent = render({ loaded: true, anyLive: true, filters: filters({ agentId: "a" }) }, "list");
