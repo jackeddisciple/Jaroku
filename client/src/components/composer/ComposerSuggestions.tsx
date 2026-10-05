@@ -42,13 +42,25 @@ export function commandOf(sentence: string): string {
   return sentence.trim().split(/\s+/, 1)[0] ?? "";
 }
 
+/**
+ * The draft a card leaves in the composer: its command AND A SPACE, with the caret after both.
+ *
+ * The bare word left the caret against it, so what somebody typed next was glued on — "PlanA
+ * personal assistant…" — and the plan took that as the agent's name and slug.
+ */
+export function draftOf(sentence: string): string {
+  const command = commandOf(sentence);
+  return command ? `${command} ` : "";
+}
+
 export function ComposerSuggestions({
   hidden,
   onPick,
   className = "",
 }: {
   hidden: boolean;
-  onPick: (command: string) => void;
+  /** Given the draft to leave in the composer — see `draftOf`. */
+  onPick: (draft: string) => void;
   className?: string;
 }) {
   /**
@@ -98,7 +110,7 @@ export function ComposerSuggestions({
           <Reveal key={sentence} delay={i * 60} className="flex">
             <button
               type="button"
-              onClick={() => onPick(commandOf(sentence))}
+              onClick={() => onPick(draftOf(sentence))}
               // LIFTED AT REST, ON PURPOSE. Everywhere else in the client a card rests flat; these four
               // are the only things on an otherwise empty screen, and flat they read as part of the page
               // rather than as something to press. So they sit on the card surface at E2 — the product's

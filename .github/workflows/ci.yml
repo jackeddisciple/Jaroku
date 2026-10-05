@@ -1550,6 +1550,9 @@ jobs:
           # reviewed a dozen times at one width. So the rules live in a pure module and the suite
           # holds them, rather than living in a class string nobody can assert against.
           npm run test:composer-bar
+          # A SUGGESTION CARD LEAVES ITS WORD AND A SPACE. "Plan" with the caret against it glued the
+          # brief on — "PlanA personal assistant…" became the agent's name.
+          npm run test:composer-suggestions
           # WHERE A TYPED MESSAGE GOES, which is the one composer rule whose wrong answer costs
           # money rather than layout. Its two halves pull against each other on purpose: `chat` has
           # to claim what belongs to it, and the five routes that predate it have to be unchanged —

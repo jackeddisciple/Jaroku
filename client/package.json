@@ -30,6 +30,7 @@
     "test:thinking-indicator": "tsx src/components/thinkingIndicator.test.ts",
     "test:chat-route": "tsx src/lib/chatRoute.test.ts",
     "test:composer-bar": "tsx src/lib/composerBar.test.ts",
+    "test:composer-suggestions": "tsx src/components/composer/composerSuggestions.test.ts",
     "test:recent-agent": "tsx src/lib/recentAgent.test.ts",
     "test:effort-levels": "tsx src/lib/effortLevels.test.ts",
     "test:connector-deck": "tsx src/lib/connectorDeck.test.ts",

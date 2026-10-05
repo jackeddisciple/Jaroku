@@ -1622,17 +1622,18 @@ export function BuildPane({
     }
   }, [chatPrefillNonce, setComposerMode]);
 
-  // A suggestion card's command goes INTO the composer — the first word of its sentence, with the
-  // caret after it — and nothing is sent: where the message goes is decided by the composer's own
-  // rules, exactly as if the word had been typed. Cards are only offered on an empty Chat draft, so
-  // the word is the whole draft. The caret is placed a frame later, once the textarea holds it.
-  const insertCommand = (command: string): void => {
-    setChatDraft(command);
+  // A suggestion card's command goes INTO the composer — the first word of its sentence and a space,
+  // with the caret after them (`draftOf`) — and nothing is sent: where the message goes is decided by
+  // the composer's own rules, exactly as if the word had been typed. Cards are only offered on an
+  // empty Chat draft, so this is the whole draft. The caret is placed a frame later, once the
+  // textarea holds it.
+  const insertCommand = (draft: string): void => {
+    setChatDraft(draft);
     requestAnimationFrame(() => {
       const el = composerRef.current;
       if (!el) return;
       el.focus();
-      el.setSelectionRange(command.length, command.length);
+      el.setSelectionRange(draft.length, draft.length);
     });
   };
 
