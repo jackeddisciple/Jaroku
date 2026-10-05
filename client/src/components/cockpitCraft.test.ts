@@ -259,6 +259,22 @@ console.log("\na region that announces every transition is one nobody can use");
   check("...and only while the tab is backgrounded", /backgrounded\(\)/.test(app));
 }
 
+console.log("\na job waiting on a person does not lock the window");
+{
+  // THE CONFIRMATION WAS A MODAL OVER EVERYTHING, and that was the bug: the waiting row, its Stop,
+  // the Inbox pointer and the composer were all behind a scrim that could only be answered, and the
+  // first key typed after it appeared — Return, a space, Escape — denied the tool. Read from the
+  // source because each of these is one attribute or one listener away from coming back.
+  const tray = readFileSync(`${SRC}/components/McpConfirmModal.tsx`, "utf8")
+    .split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*|\{\/\*)/.test(l)).join("\n");
+  check("the confirmation is not modal", !/aria-modal/.test(tray) && !/role="alertdialog"/.test(tray));
+  check("...has no scrim over the window", !/fixed inset-0/.test(tray));
+  check("...never takes focus on its own", !/autoFocus/.test(tray));
+  check("...and no key anywhere in the window answers it", !/window\.addEventListener\(\s*"keydown"/.test(tray));
+  check("every waiting ask is on screen, not only the first", !/confirms\[0\]/.test(tray) && /ordered\.map\(/.test(tray));
+  check("...and a deployed job's can be stopped from it", /sendCancelWork\(/.test(tray));
+}
+
 // --- 7. §15: what the tab must not contain --------------------------------------------------------
 
 console.log("\nwhat not to build");

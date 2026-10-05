@@ -241,15 +241,13 @@ function Row({ item, columns, marks, categories }: {
           </span>
         </button>
 
-        {/* §14: A WAITING JOB IS ANSWERED IN THE EXISTING MODAL, UNCHANGED, and the row's job is
-            to say WHICH question rather than to ask it again. The modal is mounted at the
-            application root and is already on screen for anyone in this workspace.
+        {/* §14: A WAITING JOB IS ANSWERED IN THE ONE TRAY, and the row's job is to say WHICH
+            question rather than to ask it again. The tray is mounted at the application root and
+            is already on screen for anyone in this workspace; pressing this opens it on this ask.
 
-            THERE IS DELIBERATELY NO "ANSWER" BUTTON HERE. A second control that opened a second
-            copy of the dialog would be two places one question can be answered — §15's "no second
-            confirmation dialog beside the existing MCP modal" — and it is worse than a duplicated
-            surface, because the two would race for one nonce and the loser would report a failure
-            for a question that had been answered correctly. */}
+            THERE IS DELIBERATELY NO SECOND COPY OF THE ASK HERE. Two places one question can be
+            answered would race for one nonce, and the loser would report a failure for a question
+            that had been answered correctly. */}
         {item.status === "waiting" && <WaitingFor item={item} />}
 
         {/* THE VERB SLOT, whose WIDTH IS ALWAYS THERE — §Craft 4. See this component's header. */}
@@ -333,16 +331,19 @@ function DayHeading({ label }: { label: string }) {
  */
 function WaitingFor({ item }: { item: WorkItemView }) {
   const ask = useMcpStore((s) => s.confirms.find((c) => c.runId === item.run_id));
+  const reveal = useMcpStore((s) => s.revealConfirm);
+  if (!ask) return <span className="hidden shrink-0 text-tiny text-muted sm:inline">waiting on somebody</span>;
+  // A WAY TO THE ONE PLACE IT IS ANSWERED, not a second copy of it. The tray never takes focus on
+  // its own — that is what let a stray key deny a tool — so this is how a keyboard reaches it.
   return (
-    <span className="hidden shrink-0 text-tiny text-muted sm:inline">
-      {ask ? (
-        <>
-          waiting on <span className="text-ink">{ask.server}/{ask.tool}</span>
-        </>
-      ) : (
-        "waiting on somebody"
-      )}
-    </span>
+    <button
+      type="button"
+      onClick={() => reveal(ask.nonce)}
+      title="Open this question in the tray at the top of the window"
+      className="hidden shrink-0 rounded-control px-1 text-tiny text-muted transition-colors duration-fast hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring sm:inline"
+    >
+      waiting on <span className="text-ink">{ask.server}/{ask.tool}</span>
+    </button>
   );
 }
 

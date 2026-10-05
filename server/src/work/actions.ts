@@ -67,11 +67,10 @@ export class WorkActions {
    *   A `running` OR `waiting` JOB IS ASKED, and the answer is that the request was accepted —
    *   never that the job stopped. See the header.
    *
-   * A `waiting` JOB IS ASKED ALL THE SAME, and what it costs is worth stating: the container is
-   * parked inside a node on the confirmation gate, and a cancel is read BETWEEN nodes — so nothing
-   * happens until somebody answers the confirmation or it times out and denies. Refusing the
-   * cancel instead would be worse: the operator would have to answer a question about a job they
-   * have already decided to stop, in order to be allowed to stop it.
+   * A `waiting` JOB IS ASKED ALL THE SAME, and the container is parked inside a node on the
+   * confirmation gate while a cancel is read BETWEEN nodes — so the caller denies the asks it is
+   * parked on once this returns, and the node finishes without the tool. Making the operator answer
+   * a question about a job they have already decided to stop, in order to stop it, was the bug.
    */
   async cancel(ctx: TenantContext, itemId: string): Promise<CancelOutcome> {
     const item = await this.deps.work.get(ctx, itemId);
@@ -110,7 +109,7 @@ export class WorkActions {
       item,
       detail:
         item.status === "waiting"
-          ? "the agent has been asked to stop — it will do so once the confirmation in front of it is answered"
+          ? "the agent has been asked to stop — the tool call it was waiting on is denied, so it stops once that step ends"
           : "the agent has been asked to stop at its next node boundary",
     };
   }

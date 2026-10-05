@@ -640,8 +640,9 @@ export interface McpServer {
 /**
  * A run has HALTED before a high-impact MCP tool's first call and is waiting for an answer.
  *
- * The only message on any channel that describes a blocked process, which is why the client
- * renders it as a modal rather than a notification.
+ * The only message on any channel that describes a blocked process. It is rendered in a tray that
+ * stays on screen until it is answered — and that does NOT block the rest of the window, because a
+ * modal here locked the very controls (the waiting row, Stop, the Inbox pointer) a person needed.
  */
 export interface McpConfirmRequest {
   runId: string;
@@ -655,9 +656,12 @@ export interface McpConfirmRequest {
   impactReason: string | null;
   /** The arguments the model produced, as JSON text. Already capped by the bridge. */
   args: string;
-  /** Seconds the runner waits before denying. It never allows on timeout. */
+  /** Seconds the runner waits before denying, from `requestedAt`. It never allows on timeout. */
   timeoutS: number;
   requestedAt: string;
+  /** The deployed job this run is, and its agent — absent for a local run, which is no job. */
+  workItemId?: string | null;
+  agentName?: string | null;
 }
 
 export type McpConfirmVerdict = "once" | "run" | "deny";

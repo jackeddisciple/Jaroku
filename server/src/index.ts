@@ -2965,6 +2965,33 @@ function reasonOf(value: unknown): string | null {
 }
 
 /**
+ * Answer one pending ask, as a person — the Allow and Deny buttons, and Stop on a waiting job.
+ *
+ * Both mechanisms, unconditionally rather than branching on which kind of run this is: a local run
+ * has no bus entry to resolve (resolveMcpConfirm is a no-op returning false), and a hosted run has
+ * no approval file anybody is polling for. Writing to whichever one the run is NOT using costs one
+ * harmless call.
+ */
+function answerConfirm(ctx: TenantContext, pending: PendingConfirm, verdict: "run" | "once" | "deny"): void {
+  pendingConfirms.delete(confirmKey(pending.runId, pending.nonce));
+  writeApproval(pending.runId, pending.nonce, verdict);
+  runEventBus.resolveMcpConfirm(pending.runId, pending.nonce, verdict);
+  console.log(`[mcp] ${pending.server}/${pending.tool} — ${verdict}`);
+  relay.broadcastMcp(ctx, { type: "confirmResolved", runId: pending.runId, nonce: pending.nonce, verdict });
+  // A DENIAL IS RECORDED ON THE JOB — see `noteToolRefused`.
+  if (verdict === "deny") noteToolRefused(pending, "denied");
+  // AND THE JOB IS RUNNING AGAIN, which nothing said for a person's answer: `clearConfirms` finds
+  // the ask already gone, so the row sat at `waiting` until the run ended.
+  void workLifecycle.onConfirmResolved(ctx, pending.runId)
+    .then((item) => broadcastWorkItem(ctx, item))
+    .catch((err) => console.error("[work] could not resume a waiting job:", (err as Error).message));
+  scheduleFleetRefresh(ctx);
+  // The thread stops being blocked the moment this is answered, and §3.3 reads the confirm queue
+  // live — so the fact changes here and the list has to hear about it.
+  scheduleListRefresh(ctx);
+}
+
+/**
  * A tool call a job asked for and did not get, written onto the job and broadcast.
  *
  * A job refused its tool carries on without it and usually ends `succeeded`, with an apology for
@@ -2987,33 +3014,66 @@ function handleHostedMcpConfirmRequest(runId: string, payload: Record<string, un
   const impactReason = reasonOf(payload.impact_reason);
   const args = String(payload.args ?? "{}");
   const timeoutS = typeof payload.timeout_s === "number" ? payload.timeout_s : 120;
-  pendingConfirms.set(confirmKey(runId, nonce), {
+  const requestedAt = Date.now();
+  const pending: PendingConfirm = {
     runId, workspaceId: runCtx.workspaceId, nonce, server, tool,
-    impactReason, args, timeoutS, requestedAt: Date.now(),
-  });
+    impactReason, args, timeoutS, requestedAt, workItemId: null, agentName: null,
+  };
+  pendingConfirms.set(confirmKey(runId, nonce), pending);
   console.log(`[mcp] ${runId} is waiting for confirmation of ${server}/${tool} (hosted)`);
-  // §4'S `waiting`, WHICH IS THE STATE THE WHOLE STATUS SET EXISTS FOR — and this is the path it
-  // is reachable by. A deployed run parked on the confirmation gate is a job blocked on a person,
-  // and it is the only thing the Cockpit's badge counts. Fired here rather than beside the local
-  // twin as well as it, because only a deployed run can be a work item and this is where one
-  // arrives.
-  void workLifecycle.onConfirmRequested(runCtx, runId)
-    .then((item) => broadcastWorkItem(runCtx, item))
-    .catch((err) => console.error("[work] could not park a job on a confirmation:", (err as Error).message));
-  // AND THE CARD ABOVE THE ROW. `running` → `waiting` is the transition §9 built the strip's one
-  // ink fragment for; the card is counted on the server, so it does not move unless it is told.
-  scheduleFleetRefresh(runCtx);
-  relay.broadcastMcp(runCtx, {
-    type: "confirmRequest",
-    runId,
-    nonce,
-    server,
-    tool,
-    impactReason,
-    args,
-    timeoutS,
-    requestedAt: new Date().toISOString(),
-  });
+  void (async () => {
+    // §4'S `waiting`, WHICH IS THE STATE THE WHOLE STATUS SET EXISTS FOR — and this is the path it
+    // is reachable by. A deployed run parked on the confirmation gate is a job blocked on a person,
+    // and it is the only thing the Cockpit's badge counts. Fired here rather than beside the local
+    // twin as well as it, because only a deployed run can be a work item and this is where one
+    // arrives.
+    try {
+      await broadcastWorkItem(runCtx, await workLifecycle.onConfirmRequested(runCtx, runId));
+    } catch (err) {
+      console.error("[work] could not park a job on a confirmation:", (err as Error).message);
+    }
+    // WHOSE JOB IT IS, so the ask can name the agent and offer to stop the job rather than only to
+    // answer it. Read after the park so a job that was already waiting is named too.
+    try {
+      const item = await workStore.byRun(runCtx, runId);
+      if (item) {
+        pending.workItemId = item.id;
+        const agent = await agentRepo.byId(runCtx, item.agent_id);
+        pending.agentName = agent?.display_name ?? agent?.slug ?? null;
+      }
+    } catch (err) {
+      console.error("[work] could not name the job a confirmation belongs to:", (err as Error).message);
+    }
+    // AND THE CARD ABOVE THE ROW. `running` → `waiting` is the transition §9 built the strip's one
+    // ink fragment for; the card is counted on the server, so it does not move unless it is told.
+    scheduleFleetRefresh(runCtx);
+    // Unless it was answered or ran out while the job was being looked up.
+    if (!pendingConfirms.has(confirmKey(runId, nonce))) return;
+    relay.broadcastMcp(runCtx, confirmRequestOf(pending));
+  })();
+}
+
+/**
+ * The ask as it goes on the wire — the first time, and to a tab that connects later.
+ *
+ * ONE SHAPE FOR BOTH, and the clock is the ORIGINAL one: `requestedAt` and the full `timeoutS`,
+ * which the client counts down from. The replay used to send what was LEFT against the original
+ * start, so a tab that connected a minute in showed 0:00 a minute before the runner would deny.
+ */
+function confirmRequestOf(p: PendingConfirm) {
+  return {
+    type: "confirmRequest" as const,
+    runId: p.runId,
+    nonce: p.nonce,
+    server: p.server,
+    tool: p.tool,
+    impactReason: p.impactReason,
+    args: p.args,
+    timeoutS: p.timeoutS,
+    requestedAt: new Date(p.requestedAt).toISOString(),
+    workItemId: p.workItemId,
+    agentName: p.agentName,
+  };
 }
 
 // AUTHENTICATION.
@@ -4765,21 +4825,9 @@ const relay = new WsRelay({
       // every workspace's blocked runs; the workspace id is on the record precisely so answering
       // one can be checked against who is answering, and the same field is what filters this.
       .filter((p) => p.workspaceId === ctx.workspaceId)
-      .map((p) => ({
-        type: "confirmRequest" as const,
-        runId: p.runId,
-        nonce: p.nonce,
-        server: p.server,
-        tool: p.tool,
-        impactReason: p.impactReason,
-        args: p.args,
-        // THE TIMER IS WHAT IS LEFT OF IT, not what it started at. The runner denies on its own
-        // clock, so a replay that restated the original ceiling would show a fresh two minutes to
-        // somebody who has thirty seconds — a countdown that is wrong in the direction that makes
-        // people take their time.
-        timeoutS: Math.max(0, p.timeoutS - Math.floor((Date.now() - p.requestedAt) / 1000)),
-        requestedAt: new Date(p.requestedAt).toISOString(),
-      })),
+      // THE ORIGINAL CLOCK — see `confirmRequestOf`. The client counts down from `requestedAt` plus
+      // `timeoutS`, so sending what was left against the original start counted the wait twice.
+      .map(confirmRequestOf),
 
   // §4's grid, with every card's tags already derived — see `agentGridSnapshot` for why deriving
   // them here rather than in the browser is a correctness requirement and not an optimisation.
@@ -5592,6 +5640,9 @@ interface PendingConfirm {
   args: string;
   timeoutS: number;
   requestedAt: number;
+  /** The deployed job this run is, once looked up. Null for a local run, which is no job. */
+  workItemId: string | null;
+  agentName: string | null;
 }
 const pendingConfirms = new Map<string, PendingConfirm>();
 const confirmKey = (runId: string, nonce: string): string => `${runId}.${nonce}`;
@@ -5744,26 +5795,7 @@ async function handleMcpCommand(ctx: TenantContext, cmd: McpCommand): Promise<vo
           });
           return;
         }
-        pendingConfirms.delete(key);
-        // Both, unconditionally rather than branching on which kind of run this is: a local
-        // run has no bus entry to resolve (resolveMcpConfirm is a no-op returning false), and a
-        // hosted run has no approval file anybody is polling for. Writing to whichever
-        // mechanism the run is NOT using costs one harmless call.
-        writeApproval(cmd.runId, cmd.nonce, verdict);
-        runEventBus.resolveMcpConfirm(cmd.runId, cmd.nonce, verdict);
-        console.log(`[mcp] ${pending.server}/${pending.tool} — ${verdict}`);
-        relay.broadcastMcp(ctx, { type: "confirmResolved", runId: cmd.runId, nonce: cmd.nonce, verdict });
-        // A DENIAL IS RECORDED ON THE JOB — see `noteToolRefused`.
-        if (verdict === "deny") noteToolRefused(pending, "denied");
-        // AND THE JOB IS RUNNING AGAIN, which nothing said for a person's answer: `clearConfirms`
-        // finds the ask already gone, so the row sat at `waiting` until the run ended.
-        void workLifecycle.onConfirmResolved(ctx, cmd.runId)
-          .then((item) => broadcastWorkItem(ctx, item))
-          .catch((err) => console.error("[work] could not resume a waiting job:", (err as Error).message));
-        scheduleFleetRefresh(ctx);
-        // The thread stops being blocked the moment this is answered, and §3.3 reads the confirm
-        // queue live — so the fact changes here and the list has to hear about it.
-        scheduleListRefresh(ctx);
+        answerConfirm(ctx, pending, verdict);
         return;
       }
 
@@ -7324,6 +7356,17 @@ async function handleWorkCommand(ctx: TenantContext, cmd: WorkCommand): Promise<
         if (typeof cmd.itemId !== "string") return fail("that is not a job id");
         const out = await workActions.cancel(ctx, cmd.itemId);
         if (!out.ok) return fail(out.detail, cmd.itemId);
+        // A JOB WAITING ON A CONFIRMATION CANNOT REACH ITS STOP. The cancel is read between nodes
+        // and the run is parked inside one, so Stop meant answering the question first — or waiting
+        // two minutes for it to time out. Asked to stop first, then the asks it is parked on are
+        // denied, so the node finishes without the tool and the run stops at the boundary after it.
+        if (out.kind === "requested" && out.item.status === "waiting" && out.item.run_id) {
+          for (const pending of [...pendingConfirms.values()]) {
+            if (pending.runId === out.item.run_id && pending.workspaceId === ctx.workspaceId) {
+              answerConfirm(ctx, pending, "deny");
+            }
+          }
+        }
         // THE REQUEST WAS ACCEPTED, WHICH IS NOT THE SAME AS THE JOB HAVING STOPPED — see
         // `WorkActions.cancel`. The notice says which of the two happened; the row only changes
         // when the run's own `run_end` arrives, except for a queued job, which had nothing running.
@@ -11533,22 +11576,13 @@ onBothPools("control", ({ runId: slotRunId, ctrl }) => {
       const impactReason = reasonOf(ctrl.impact_reason);
       const args = String(ctrl.args ?? "{}");
       const timeoutS = typeof ctrl.timeout_s === "number" ? ctrl.timeout_s : 120;
-      pendingConfirms.set(confirmKey(runId, nonce), {
+      const local: PendingConfirm = {
         runId, workspaceId: runCtx.workspaceId, nonce, server, tool,
-        impactReason, args, timeoutS, requestedAt: Date.now(),
-      });
+        impactReason, args, timeoutS, requestedAt: Date.now(), workItemId: null, agentName: null,
+      };
+      pendingConfirms.set(confirmKey(runId, nonce), local);
       console.log(`[mcp] ${runId} is waiting for confirmation of ${server}/${tool}`);
-      relay.broadcastMcp(runCtx, {
-        type: "confirmRequest",
-        runId,
-        nonce,
-        server,
-        tool,
-        impactReason,
-        args,
-        timeoutS,
-        requestedAt: new Date().toISOString(),
-      });
+      relay.broadcastMcp(runCtx, confirmRequestOf(local));
       // A halted graph waiting on a person is §3.3's `needs_you`, and the derivation reads
       // `pendingConfirms` live — so the fact is already true and nothing was telling the list.
       // The row turns amber while the run is blocked, and back when `clearConfirms` fires.

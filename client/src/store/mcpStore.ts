@@ -38,8 +38,15 @@ interface McpState {
    * — a combined "approve all of these" prompt is a prompt nobody reads.
    */
   confirms: McpConfirmRequest[];
+  /**
+   * The ask somebody asked to see — a waiting row's "waiting on …" control sets it, and the tray
+   * opens on that ask and takes focus. Null once the tray has done so.
+   */
+  revealNonce: string | null;
 
   setServers: (servers: McpServer[]) => void;
+  /** Open the tray on one ask, by its nonce. */
+  revealConfirm: (nonce: string | null) => void;
   addConfirm: (req: McpConfirmRequest) => void;
   resolveConfirm: (runId: string, nonce: string) => void;
   setDiscovering: (serverId: string | null, endpoint: string) => void;
@@ -50,6 +57,7 @@ interface McpState {
 export const useMcpStore = create<McpState>((set) => ({
   servers: [],
   confirms: [],
+  revealNonce: null,
   discovering: {},
   addingEndpoint: null,
   error: null,
@@ -77,6 +85,8 @@ export const useMcpStore = create<McpState>((set) => ({
 
   resolveConfirm: (runId, nonce) =>
     set((s) => ({ confirms: s.confirms.filter((c) => !(c.runId === runId && c.nonce === nonce)) })),
+
+  revealConfirm: (revealNonce) => set({ revealNonce }),
 
   setError: (error) => set({ error }),
   setNotice: (notice) => set({ notice }),

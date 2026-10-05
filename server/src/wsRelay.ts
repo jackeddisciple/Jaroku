@@ -2179,9 +2179,15 @@ export type McpEvent =
       impactReason: string | null;
       /** The arguments the model produced, as JSON text. Capped by the bridge. */
       args: string;
-      /** Seconds the runner will wait before denying. */
+      /** Seconds the runner will wait before denying, counted from `requestedAt`. */
       timeoutS: number;
       requestedAt: string;
+      /**
+       * The deployed job this run is, and its agent's name — null for a local run, which is no job.
+       * What lets the ask say WHOSE it is and offer to stop the job rather than only answer it.
+       */
+      workItemId?: string | null;
+      agentName?: string | null;
     }
   // The request is over: answered, or the run died, or the runner gave up waiting.
   | { type: "confirmResolved"; runId: string; nonce: string; verdict: string };

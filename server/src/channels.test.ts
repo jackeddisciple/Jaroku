@@ -406,7 +406,8 @@ console.log("\nevery transition §3.3 derives from refreshes the list");
     { fact: "a run that never started", start: 'onBothPools("spawnError"' },
     { fact: "an MCP confirmation opening", start: 'ctrl.ctrl === "tool_confirm"' },
     { fact: "an MCP confirmation being cleared", start: "function clearConfirms" },
-    { fact: "an MCP confirmation being answered", start: 'case "resolveMcpConfirm"' },
+    // Answered through `answerConfirm`, which Stop on a waiting job shares — see the check below.
+    { fact: "an MCP confirmation being answered", start: "function answerConfirm" },
     { fact: "a plan being discarded", start: 'planner.on("discarded"' },
     { fact: "an eval finishing", start: "onFinished: (e) => {", chars: 3000 },
     { fact: "a deployment settling", start: "onFinished: (d) => {" },
@@ -420,6 +421,11 @@ console.log("\nevery transition §3.3 derives from refreshes the list");
       body.length === 0 ? `handler not found: ${start}` : "no list refresh in the handler",
     );
   }
+
+  check(
+    /answerConfirm\(ctx, pending, verdict\)/.test(bodyFrom('case "resolveMcpConfirm"')),
+    "the resolveMcpConfirm handler answers through answerConfirm, so the refresh above is its own",
+  );
 
   // AND NOT PER PROGRESS TICK. §7.1's protocol note refuses turning a full-snapshot channel into a
   // polling one, and an eval's per-job progress is exactly the shape that would do it — the moving
