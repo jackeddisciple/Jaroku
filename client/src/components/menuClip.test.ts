@@ -166,5 +166,16 @@ console.log("\nthe anchoring hook does what the portal owes the row");
   check("scrolling repositions rather than closes", !/setOpen\(false\)/.test(hook));
 }
 
+console.log("\nthe fleet card's menu leaves the card");
+{
+  // THE COCKPIT'S CARD IS `overflow-hidden` INSIDE A STRIP THAT SCROLLS SIDEWAYS, and its menu was
+  // `absolute` inside it: only "Today" and a sliver of Logs, Reconnect and Kill showed, and the log
+  // pane not at all. Same rule as the list menus above — portalled out and anchored by hand.
+  const strip = withoutComments(read("components/FleetStrip.tsx"));
+  check("the fleet card's menu is portalled out of the card", /createPortal\(/.test(strip));
+  check("...and placed against its trigger", /useAnchoredMenu\(open, ref, panelRef\)/.test(strip));
+  check("...and is not positioned inside the card", !/role="menu"[\s\S]{0,400}absolute right-0 top-full/.test(strip));
+}
+
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
 (globalThis as { process?: { exit(code: number): void } }).process?.exit(failures === 0 ? 0 : 1);

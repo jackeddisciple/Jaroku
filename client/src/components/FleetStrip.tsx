@@ -21,6 +21,8 @@
 // warned about is how a control plane loses trust in one click."
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useAnchoredMenu } from "../lib/anchoredMenu.ts";
 import { useMenuFocus } from "../lib/menuFocus.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 
@@ -122,13 +124,22 @@ function CardMenu({ card }: { card: FleetCardView }) {
   const [logs, setLogs] = useState(false);
   const [confirming, setConfirming] = useState<"reconnect" | "kill" | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const health = healthLine(card);
   const spend = cockpitCost(card.spend_today, card.spend_complete);
+  // THE PANEL LEAVES THE CARD. It opened inside it, and the card is `overflow-hidden` inside a strip
+  // that scrolls sideways — an `overflow` ancestor clips an absolutely-positioned descendant whatever
+  // its `z-index`. All that showed was "Today" and the top few pixels of Logs, Reconnect and Kill,
+  // clickable only through that sliver, and the log pane was entirely off screen. Portalled into the
+  // body and placed against its trigger, as the agent card's and the sidebar's menus already are.
+  useAnchoredMenu(open, ref, panelRef);
 
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent): void => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (ref.current?.contains(target) || panelRef.current?.contains(target)) return;
+      setOpen(false);
     };
     const onKey = (e: KeyboardEvent): void => { if (e.key === "Escape") setOpen(false); };
     document.addEventListener("mousedown", onDoc);
@@ -141,7 +152,7 @@ function CardMenu({ card }: { card: FleetCardView }) {
 
   // See lib/menuFocus.ts — the fifth menu in the app to declare `role="menu"` and handle neither
   // the arrow keys that role promises nor the focus Escape destroys. Found by `test:menu-keys`.
-  useMenuFocus(open, ref);
+  useMenuFocus(open, panelRef, ref);
 
   return (
     <div ref={ref} className="relative z-20">
@@ -160,14 +171,18 @@ function CardMenu({ card }: { card: FleetCardView }) {
         <Icon.cockpit.agentMore size={ICON.xs} />
       </button>
 
-      {open && (
+      {open && createPortal(
         <div
+          ref={panelRef}
           // ITS BUTTONS ARE `menuitem` NOW. This declared `role="menu"` and contained none — a menu
           // with no items, which assistive technology announces as exactly that, and which left
           // `useMenuFocus` with nothing to move between. The facts above them stay unmarked: they
           // are content inside the menu, not things you can choose.
           role="menu"
-          className="absolute right-0 top-full z-30 mt-1 w-[240px] rounded-card border border-edge bg-elevated p-1 shadow-floating"
+          aria-label={`More for ${card.agent_name}`}
+          // `top-0 left-0` IS THE STARTING POINT, NOT THE POSITION — `useAnchoredMenu` places it
+          // before paint. Wider than the card, because the log pane lives in it.
+          className="fixed left-0 top-0 z-50 w-[320px] rounded-card border border-edge bg-elevated p-1 shadow-floating"
         >
           {/* THE FACTS FIRST, THE VERBS AFTER. Somebody opening this menu is usually answering
               "what is wrong with this agent" rather than reaching for a control, and putting the
@@ -237,7 +252,8 @@ function CardMenu({ card }: { card: FleetCardView }) {
               <LogPane card={card} />
             </div>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
 
       {/* §21's TWO DIALOGS, both through the app's own — see `CockpitDialog`. They live outside the
