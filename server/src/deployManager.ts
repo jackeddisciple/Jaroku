@@ -383,7 +383,7 @@ export class DeployManager {
     envKeys: string[],
     plan: DeployPlan,
   ): Promise<void> {
-    for (const warning of plan.warnings) this.log(id, "checking", "jaroku", warning);
+    for (const warning of plan.warnings) await this.log(id, "checking", "jaroku", warning);
 
     // 🔴 The one read of credential values in the deploy path. Held from here to the finally
     // below, for two purposes and no others: the variables mutation, and the scrubber.
@@ -563,7 +563,7 @@ export class DeployManager {
       if (deployment.status !== lastStatus) {
         lastStatus = deployment.status;
         await this.log(id, "building", "jaroku", `Railway: ${deployment.status.toLowerCase()}`);
-        if (deployment.status.toUpperCase() === "DEPLOYING") this.stage(id, "building", "deploying");
+        if (deployment.status.toUpperCase() === "DEPLOYING") await this.stage(id, "building", "deploying");
       }
 
       // Build output the CLI did not already stream — a build Railway retried, or a tail that
@@ -715,9 +715,21 @@ export class DeployManager {
     this.deps.onStage({ deploymentId: id, stage, status });
   }
 
+  /**
+   * One line of the deploy's log, persisted and broadcast.
+   *
+   * IT NEVER THROWS. Several callers float it — the CLI streams build output faster than a write
+   * completes — and a rejected write there was an unhandled rejection that exited the whole
+   * backend, dropping every socket and leaving the deploy half-made in somebody's Railway account.
+   * A log line that could not be kept is worth a console line, never the process.
+   */
   private async log(id: string, stage: string, stream: string, text: string): Promise<void> {
-    const seq = await this.deps.store.appendLog(this.deps.context(), id, stage, stream, text);
-    this.deps.onLog({ deploymentId: id, seq, stage, stream, text });
+    try {
+      const seq = await this.deps.store.appendLog(this.deps.context(), id, stage, stream, text);
+      this.deps.onLog({ deploymentId: id, seq, stage, stream, text });
+    } catch (err) {
+      console.error(`[deploy] could not record a log line for ${id}: ${(err as Error)?.message ?? err}`);
+    }
   }
 
   private async settle(id: string, status: DeployStatus, error: string | null): Promise<void> {

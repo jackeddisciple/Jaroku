@@ -14,7 +14,7 @@
 
 import { createServer, type Server } from "node:http";
 
-import { openTestSqlite, testContext } from "./db/testDb.ts";
+import { openTestSqlite, testContext, withScratchPostgres } from "./db/testDb.ts";
 import { newRequestId, systemContext } from "./db/tenant.ts";
 
 import { DeployStore, isInFlight, type DeployStatus } from "./deployStore.ts";
@@ -207,6 +207,27 @@ const seed = (store: DeployStore, agentId = "a1", envKeys: string[] = []) =>
     (await store.logs(ctx, other.id)).length === 1 && (await store.logs(ctx, other.id))[0]?.seq === 0);
   check("...and does not appear in the first one's", (await store.logs(ctx, d.id)).length === 3);
 }
+
+// --- 6b. a burst of lines does not collide, on either driver ---------------------------------
+//
+// The build log arrives faster than one write completes, and the deploy floats each line. On
+// Postgres two writes read the same MAX(seq) and the second died on the primary key — an
+// unhandled rejection that exited the backend mid-upload. Fired together here, on purpose.
+async function burst(store: DeployStore, label: string): Promise<void> {
+  const d = await seed(store, `burst-${label}`);
+  const seqs = await Promise.all(
+    Array.from({ length: 40 }, (_, i) => store.appendLog(ctx, d.id, "building", "build", `line ${i}`)),
+  );
+  check(`${label}: forty concurrent lines all land`, (await store.logs(ctx, d.id)).length === 40);
+  check(`${label}: ...each with its own seq, 0 to 39`,
+    [...seqs].sort((a, b) => a - b).join(",") === Array.from({ length: 40 }, (_, i) => i).join(","),
+    seqs.join(","));
+  check(`${label}: ...in the order they were asked for`,
+    (await store.logs(ctx, d.id)).map((l) => l.text).join("|")
+      === Array.from({ length: 40 }, (_, i) => `line ${i}`).join("|"));
+}
+await burst(await freshStore(), "sqlite");
+await withScratchPostgres(async (pg) => burst(new DeployStore(pg), "postgres"));
 
 // --- 7. what the sidebar reads ------------------------------------------------------------------
 {

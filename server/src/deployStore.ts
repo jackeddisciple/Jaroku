@@ -177,6 +177,14 @@ const DEPLOY_COLUMNS = `id, agent_id, target, status, url, provider, model, env_
 /** How much of a deploy's log is kept. A build log is diagnostic, not an archive. */
 const LOG_CAP = 2000;
 
+/** A primary-key collision, in either driver's words. */
+function isDuplicateKey(err: unknown): boolean {
+  const e = err as { code?: unknown; message?: unknown };
+  if (e?.code === "23505") return true;
+  const message = typeof e?.message === "string" ? e.message : "";
+  return /duplicate key value|UNIQUE constraint failed|SQLITE_CONSTRAINT_PRIMARYKEY/.test(message);
+}
+
 export class DeployStore {
   // Shares the trace store's database: same file, single writer. See TraceStore.database().
   constructor(private db: Db) {}
@@ -336,8 +344,50 @@ export class DeployStore {
     stream: string,
     text: string,
   ): Promise<number> {
-    // Read-then-insert in one transaction: build output arrives in bursts and two lines
-    // racing for the same seq would collide on the (deployment_id, seq) primary key.
+    // ONE WRITER PER DEPLOYMENT AT A TIME. Build output arrives in bursts, and the transaction
+    // below only serialises on SQLite: under Postgres's READ COMMITTED two of them read the same
+    // MAX(seq), both insert it, and the second dies on the (deployment_id, seq) primary key. That
+    // rejection escaped the deploy and took the whole backend down mid-upload. A deploy is driven
+    // by one process, so chaining its writes here is the whole fix; the retry below is for the
+    // case nothing in this process can see, a second writer somewhere else.
+    const key = `${ctx.workspaceId}\u0000${deploymentId}`;
+    const write = (this.logTails.get(key) ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(() => this.insertLog(ctx, deploymentId, stage, stream, text));
+    this.logTails.set(key, write);
+    try {
+      return await write;
+    } finally {
+      if (this.logTails.get(key) === write) this.logTails.delete(key);
+    }
+  }
+
+  /** The tail of each deployment's chain of log writes. See `appendLog`. */
+  private logTails = new Map<string, Promise<number>>();
+
+  private async insertLog(
+    ctx: TenantContext,
+    deploymentId: string,
+    stage: string,
+    stream: string,
+    text: string,
+  ): Promise<number> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.insertLogOnce(ctx, deploymentId, stage, stream, text);
+      } catch (err) {
+        if (attempt >= 3 || !isDuplicateKey(err)) throw err;
+      }
+    }
+  }
+
+  private async insertLogOnce(
+    ctx: TenantContext,
+    deploymentId: string,
+    stage: string,
+    stream: string,
+    text: string,
+  ): Promise<number> {
     return this.db.scoped(ctx.workspaceId, async (tx: Queryable) => {
       const row = await tx.get<{ max_seq: unknown }>(
         "SELECT MAX(seq) AS max_seq FROM deployment_logs WHERE deployment_id = ? AND workspace_id = ?",

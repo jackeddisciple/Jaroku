@@ -364,6 +364,9 @@ jobs:
           # what it ASKED FOR tells somebody they stopped paying for something they have not, and
           # a reconnect that does not mention the restart it causes is how trust goes in one click.
           npm run test:deploy-ops
+          # AND THE RECORD UNDER ALL OF THEM, here for its Postgres half: a burst of build-log lines
+          # took one seq twice under READ COMMITTED and the rejection exited the backend mid-upload.
+          npm run test:deploy-store
 
       # THE SUITES THAT SHIPPED WITH v0.2.15 AND CI HAS NEVER RUN. They were written, they passed,
       # and nothing but the person who wrote them ever executed them — the same gap the client job's
