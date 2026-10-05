@@ -17,7 +17,9 @@
 
 import { COMPOSER } from "./cockpitCopy.ts";
 import { GATE_PREVIEW_LINES, gatePreview } from "../components/WorkGate.tsx";
-import { cockpitComposer, type CockpitSituation } from "./cockpitComposer.ts";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { atWorkCap, cockpitComposer, type CockpitSituation } from "./cockpitComposer.ts";
 
 let fail = 0;
 const check = (name: string, ok: boolean, detail = ""): void => {
@@ -169,6 +171,24 @@ console.log("\nnothing that was always going to be refused reaches a confirmatio
   ] as [string, CockpitSituation][]) {
     check(`${name} is refused before the gate`, !cockpitComposer(s).ready, name);
   }
+}
+
+// AT CAPACITY WAS NEVER TRUE. The composer passed `atCapacity: false` whatever the workspace held,
+// so a job over the cap went through the gate and was refused after it. The cap is the server's —
+// queued, running and waiting together, across the workspace — and the snapshot now carries it.
+console.log("\nthe composer knows the workspace's cap");
+{
+  const counts = (queued: number, running: number, waiting: number) =>
+    ({ queued, running, waiting, succeeded: 9, failed: 3, cancelled: 1 });
+  check("at the cap, counting queued, running and waiting together", atWorkCap(counts(1, 2, 1), 4));
+  check("...and over it", atWorkCap(counts(0, 5, 0), 4));
+  check("below it, not", !atWorkCap(counts(1, 1, 1), 4));
+  check("...and finished jobs do not count toward it", !atWorkCap(counts(0, 0, 0), 1));
+  check("with no cap said yet, nothing is refused", !atWorkCap(counts(9, 9, 9), null));
+  const composer = readFileSync(fileURLToPath(new URL("../components/WorkComposer.tsx", import.meta.url)), "utf8");
+  check("the composer asks rather than saying false", !/atCapacity: false/.test(composer) && /atWorkCap\(/.test(composer));
+  const full = cockpitComposer(situation({ atCapacity: true }));
+  check("...and says so before the gate", !full.ready && full.status === COMPOSER.status.busy, JSON.stringify(full));
 }
 
 // THE GATE SHOWS WHAT IS ABOUT TO BE SENT. It showed the first line only, and a job pasted with a

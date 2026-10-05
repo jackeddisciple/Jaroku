@@ -103,6 +103,7 @@ const snapshots = new WorkSnapshots({
   hasServeToken: async (_c, serviceId) => serveTokens.has(serviceId),
   credentialRefused: (deploymentId) => refused.has(deploymentId),
   scoped: (c) => db.forWorkspace(c.workspaceId),
+  concurrency: () => 4,
 });
 
 /** Deployments whose token the container has refused — what index.ts records from a 401. */
@@ -171,6 +172,10 @@ console.log("\na transition is a delta");
     JSON.stringify(Object.keys(delta).sort()) === JSON.stringify(Object.keys(inList).sort()),
     `${Object.keys(delta).length} vs ${Object.keys(inList).length}`);
   check("...with the same values", JSON.stringify(delta) === JSON.stringify(inList));
+
+  // AND THE CAP RIDES WITH IT, so the composer can refuse a fifth job before the gate rather than
+  // after — it used to have no way to know the workspace was full.
+  check("the snapshot says the workspace's in-flight cap", snapshot.cap === 4, String(snapshot.cap));
 }
 
 // --- 3. a snapshot carries its filter, so it cannot be broadcast ------------------------------------

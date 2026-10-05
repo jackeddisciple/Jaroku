@@ -7178,6 +7178,8 @@ for (const ctx of workspaceContexts) {
 
 const workSnapshots = new WorkSnapshots({
   work: workStore,
+  // THE SAME READ THE DISPATCHER MAKES, so the composer refuses at exactly the cap the insert does.
+  concurrency: () => workConcurrencyFromEnv(),
   agentNames: async (ctx) => {
     const rows = await agentRepo.list(ctx, { includeArchived: true });
     return new Map(rows.map((a) => [a.id, a.display_name ?? a.slug]));

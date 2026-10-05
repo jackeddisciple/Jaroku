@@ -238,14 +238,14 @@ export const COMPOSER = {
   placeholder: {
     noAgent: "Pick an agent first",
     unconnected: "This agent is not connected",
-    busy: "This agent is at capacity",
+    busy: "This workspace is at its job limit",
     forbidden: "You cannot dispatch work in this workspace",
     inFlight: "Sending…",
     ready: (agentName: string): string => `Give ${agentName} a real job…`,
   },
   status: {
     unconnected: "Reconnect it before giving it work.",
-    busy: "It is already running as many jobs as it allows.",
+    busy: "It is running as many jobs at once as it may — send this when one finishes.",
     forbidden: "Dispatching a job needs the run:execute capability.",
     inFlight: "Sending it now.",
   },

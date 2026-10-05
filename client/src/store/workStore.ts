@@ -74,6 +74,11 @@ interface WorkState {
    * being true while nobody is looking at the tab is the one thing a badge is for.
    */
   workspaceCounts: WorkCounts;
+  /**
+   * The most jobs this workspace may have in flight at once, as the server enforces it — null until
+   * a snapshot has said. What lets the composer refuse a job over the cap BEFORE the gate.
+   */
+  cap: number | null;
   /** The filters the page in hand answers for, echoed by the server. */
   filters: WorkFilters;
   fleet: FleetCardView[];
@@ -117,7 +122,7 @@ interface WorkState {
   /** The last thing that went right, for the sentence a reconnect or a kill has to say. */
   notice: string | null;
 
-  setSnapshot: (s: { items: WorkItemView[]; nextCursor: string | null; counts: WorkCounts; workspaceCounts: WorkCounts; filters: WorkFilters }) => void;
+  setSnapshot: (s: { items: WorkItemView[]; nextCursor: string | null; counts: WorkCounts; workspaceCounts: WorkCounts; cap?: number | null; filters: WorkFilters }) => void;
   /**
    * The counts re-read from the server, with no page. Applied only while the page is still under
    * the filters they were counted for — a late answer about another filter would be wrong chips.
@@ -201,6 +206,7 @@ export const useWorkStore = create<WorkState>((set, get) => ({
   nextCursor: null,
   counts: NO_COUNTS,
   workspaceCounts: NO_COUNTS,
+  cap: null,
   filters: DEFAULT_FILTERS,
   fleet: [],
   fleetReceivedAt: 0,
@@ -229,6 +235,8 @@ export const useWorkStore = create<WorkState>((set, get) => ({
       nextCursor: s.nextCursor,
       counts: s.counts,
       workspaceCounts: s.workspaceCounts,
+      // A snapshot nothing answered carries no cap, which says nothing about the one in hand.
+      cap: s.cap ?? get().cap,
       // THE SERVER'S ECHO WINS OVER WHAT THE CLIENT ASKED FOR, and that is what makes a late
       // snapshot droppable rather than confusing: the page in hand is described by the filters it
       // was built under, not by whatever the person has since clicked.

@@ -57,6 +57,7 @@ export type CockpitMoment = {
 };
 
 import { COMPOSER } from "./cockpitCopy.ts";
+import type { WorkCounts } from "../types.ts";
 
 /**
  * Precedence, most specific first — and each rung is here because it answers a different question.
@@ -116,4 +117,12 @@ export function cockpitComposer(s: CockpitSituation): CockpitMoment {
   }
   // §23: THE STATUS IS NULL WHEN NOTHING IS HAPPENING. "A composer that reports 'idle' is noise."
   return { placeholder: COMPOSER.placeholder.ready(agent), status: null, ready: true };
+}
+
+/**
+ * Whether the workspace is already running as many jobs as it may — the cap counts queued, running
+ * and waiting together, exactly as the server's insert does. Unknown (no cap yet) is not "full".
+ */
+export function atWorkCap(counts: WorkCounts, cap: number | null): boolean {
+  return cap !== null && counts.queued + counts.running + counts.waiting >= cap;
 }

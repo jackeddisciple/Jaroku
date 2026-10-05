@@ -227,6 +227,14 @@ export interface WorkSnapshotPayload {
    */
   workspaceCounts: Record<WorkStatus, number>;
   /**
+   * The most jobs this workspace may have in flight at once — the cap `WorkStore.create` enforces.
+   *
+   * SENT SO THE COMPOSER CAN SAY SO BEFORE THE GATE, which §19 asks of every refusal knowable before
+   * a dispatch. Without it the composer had no capacity state at all: a fifth job went through the
+   * confirmation and was then refused. Null when nothing said what the cap is.
+   */
+  cap: number | null;
+  /**
    * The filters this page ANSWERS FOR, echoed back.
    *
    * For the reason every Activity message carries its range: snapshots can arrive after somebody
@@ -252,6 +260,8 @@ export interface FleetPayload {
 /** What the snapshot builder needs, without knowing where any of it comes from. */
 export interface WorkSnapshotDeps {
   work: WorkStore;
+  /** The workspace's in-flight cap, as the dispatcher reads it. Absent sends `cap: null`. */
+  concurrency?: () => number;
   /** Agent uuid → display name. One read for the page, not one per row. */
   agentNames: (ctx: TenantContext) => Promise<Map<string, string>>;
   /** Agent uuid → slug, for the row's `agent_slug`. One read for the page. Absent leaves it null. */
@@ -335,6 +345,7 @@ export class WorkSnapshots {
       nextCursor: page.nextCursor,
       counts,
       workspaceCounts: workspaceCounts ?? counts,
+      cap: this.deps.concurrency?.() ?? null,
       filters: {
         scope: filters.scope === "all" ? "all" : "mine",
         status: filters.status ?? null,

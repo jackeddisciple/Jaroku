@@ -30,7 +30,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { COMPOSER } from "../lib/cockpitCopy.ts";
-import { cockpitComposer } from "../lib/cockpitComposer.ts";
+import { atWorkCap, cockpitComposer } from "../lib/cockpitComposer.ts";
 import { SPINE_X } from "../lib/cockpitLayout.ts";
 import { needsReconnect } from "../lib/fleetSentence.ts";
 import { optimisticRow } from "../lib/workLive.ts";
@@ -79,6 +79,7 @@ function byteLength(text: string): number {
 export function WorkComposer() {
   const fleet = useWorkStore((s) => s.fleet);
   const draw = useWorkStore((s) => s.drawOptimistic);
+  const atCapacity = useWorkStore((s) => atWorkCap(s.workspaceCounts, s.cap));
   const viewer = useSessionStore((s) => s.user);
   const [agentId, setAgentId] = useState<string | null>(null);
   const [input, setInput] = useState("");
@@ -184,10 +185,10 @@ export function WorkComposer() {
     // still passed rather than hard-coded, because the filter above is a rendering decision and
     // this is the rule — and the two are allowed to diverge without the sentence going wrong.
     connected: chosen ? !needsReconnect(chosen.connection) : false,
-    // AT CAPACITY IS THE AGENT'S OWN COUNT, not Jaroku's cap. What the card reports is what the
-    // container has told us it is running; a composer that refused on Jaroku's workspace-wide cap
-    // would be refusing on a number about somebody else's jobs.
-    atCapacity: false,
+    // AT CAPACITY IS THE WORKSPACE'S CAP, because that is the only one anything enforces: the
+    // server refuses the insert once queued, running and waiting reach it, whoever's jobs they are.
+    // This was hard-coded false, so a job over the cap went through the gate and was refused after.
+    atCapacity,
     permitted,
     inFlight: sending,
     overCap: bytes > MAX_INPUT_BYTES,

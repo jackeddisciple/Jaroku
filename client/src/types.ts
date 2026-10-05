@@ -2956,6 +2956,8 @@ export type WorkMessage =
       counts: WorkCounts;
       /** The same six for the whole workspace — the sidebar badge, which no filter may move. */
       workspaceCounts: WorkCounts;
+      /** The most jobs the workspace may have in flight at once. Absent or null: not said. */
+      cap?: number | null;
       filters: WorkFilters;
     }
   /**
