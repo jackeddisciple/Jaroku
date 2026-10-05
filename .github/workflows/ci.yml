@@ -1145,6 +1145,8 @@ jobs:
           npm run test:socket-heartbeat
           # AND A SHARED JOB LINK OPENS THE JOB. It was copied to the clipboard and received by nothing.
           npm run test:work-link
+          # AND THE PALETTE'S "DISPATCH TO" ENDS IN A COMPOSER WITH THE CARET IN IT, even with the tab open.
+          npm run test:palette-dispatch
           # THE FLEET CARD'S ONE LINE, WHICH BOTH SPECIFICATIONS CALL THE HARDEST DESIGN IN THE
           # FEATURE, and the reason is what happens when it is wrong: a strip of twenty cards all
           # reading "Deployed", which is what the Railway dashboard already gives and is why

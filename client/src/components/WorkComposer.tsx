@@ -97,6 +97,19 @@ export function WorkComposer() {
     if (!chosen && agentId) setAgentId(null);
   }, [chosen, agentId]);
 
+  // THE PALETTE'S "DISPATCH TO <agent>" ENDS HERE: pointed at that agent, caret in the box. Taken
+  // once, so coming back to the tab later does not re-aim a composer somebody has since re-pointed.
+  const aim = useUiStore((s) => s.composerAim);
+  useEffect(() => {
+    if (aim === null) return;
+    useUiStore.setState({ composerAim: null });
+    setAgentId(aim);
+    // A FRAME LATER, once the palette has gone: its focus trap is still mounted when this runs, and
+    // sends focus moved outside it straight back in. Not cancelled on cleanup — taking the aim
+    // re-runs this effect at once, and the focus is the point of it.
+    requestAnimationFrame(() => boxRef.current?.focus());
+  }, [aim]);
+
   /**
    * §19: THE COMPOSER CLEARS ON PRESS AND THE TEXT COMES BACK IF THE DISPATCH WAS REFUSED.
    *

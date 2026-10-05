@@ -22,6 +22,7 @@ import {
 import { useThreadStore } from "../store/threadStore.ts";
 import { useAgentGridStore } from "../store/agentGridStore.ts";
 import { useWorkStore } from "../store/workStore.ts";
+import { needsReconnect } from "../lib/fleetSentence.ts";
 import { openThread } from "../lib/threadNav.ts";
 import { chatTitle } from "../lib/chatTitle.ts";
 import { openAgentDetail } from "../lib/agentNav.ts";
@@ -111,6 +112,7 @@ export function CommandPalette() {
   // that are already deployed, and offering to dispatch to a draft would be an entry that opens a
   // composer with nothing to send to.
   const fleet = useWorkStore((s) => s.fleet);
+  const dispatchable = fleet.filter((c) => !needsReconnect(c.connection));
   // §4.7: reaching a thread never requires opening the tab at all. The list is the store's own
   // snapshot, so what the palette offers and what the tab shows can never be two different lists.
   // ACTIVE ROWS ONLY. The snapshot deliberately carries archived threads so the Archived chip has
@@ -432,12 +434,14 @@ export function CommandPalette() {
                     The palette does not send the job — §8's gate is between the composer and the
                     container for a reason, and a palette entry that dispatched would be a way to
                     spend money without ever seeing what it was about to run on. */}
-                {query.trim() && fleet.length > 0 && (
+                {/* ONLY WHAT CAN TAKE A JOB. An agent waiting on a reconnect is not offered: the
+                    composer cannot point at it, so the entry would lead to a box aimed at nothing. */}
+                {query.trim() && dispatchable.length > 0 && (
                   <>
-                    {fleet.slice(0, 5).map((card) => (
+                    {dispatchable.slice(0, 5).map((card) => (
                       <Item
                         key={`cockpit-${card.agent_id}`}
-                        onSelect={run(() => useUiStore.getState().openCockpitForAgent(card.agent_id))}
+                        onSelect={run(() => useUiStore.getState().dispatchToAgent(card.agent_id))}
                       >
                         Dispatch to <Truncate>{card.agent_name}</Truncate>
                       </Item>

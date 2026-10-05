@@ -243,6 +243,15 @@ export function CockpitView() {
       if (item) sendLoadWorkItem(item);
     }
   }, [takeCockpitAgentIntent, setFilters, workspaceId, connected]);
+  // AND ONE ASKED FOR WHILE THE TAB IS ALREADY OPEN. The read above runs on mount, so the palette's
+  // "Dispatch to <agent>" chosen from inside the Cockpit closed the palette and changed nothing.
+  // The store is read rather than the rendered value: on mount the read above has already taken it.
+  const agentIntent = useUiStore((s) => s.cockpitAgentIntent);
+  useEffect(() => {
+    if (useUiStore.getState().cockpitAgentIntent === undefined) return;
+    setFilters({ agentId: takeCockpitAgentIntent(), scope: "all" });
+    sendListWork();
+  }, [agentIntent, takeCockpitAgentIntent, setFilters]);
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-canvas">

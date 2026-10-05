@@ -323,6 +323,17 @@ interface UiState {
   openCockpitForAgent: (agentId: string | null) => void;
   takeCockpitAgentIntent: () => string | null;
   /**
+   * The palette's "Dispatch to <agent>": the Cockpit narrowed to that agent, AND its composer
+   * pointed at it with the caret in the box. Opening the list alone made "Dispatch to" lead to a
+   * list rather than a dispatch.
+   */
+  dispatchToAgent: (agentId: string) => void;
+  /**
+   * The agent the Cockpit's composer should be pointed at and focused on, once — consumed by the
+   * composer, which may not be mounted yet when it is asked for (the fleet can still be on the wire).
+   */
+  composerAim: string | null;
+  /**
    * Open the Cockpit on one job — what a pasted job link asks for (`lib/workLink.ts`).
    *
    * AN INTENT FOR THE SAME REASON AS THE AGENT'S: the link may first switch workspace, which empties
@@ -645,6 +656,9 @@ export const useUiStore = create<UiState>((set) => ({
     set({ inboxAgentIntent: agentId, navView: "inbox", navSection: "inbox" }),
   openCockpitForAgent: (agentId) =>
     set({ cockpitAgentIntent: agentId, navView: "work", navSection: "work" }),
+  dispatchToAgent: (agentId) =>
+    set({ cockpitAgentIntent: agentId, composerAim: agentId, navView: "work", navSection: "work" }),
+  composerAim: null,
   takeCockpitAgentIntent: () => {
     // READ AND CLEARED IN ONE `set`, exactly as the Inbox's is and for the same reason: two
     // mounts racing during the navigation would otherwise both see the intent, and the second
