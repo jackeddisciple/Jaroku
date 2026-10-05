@@ -35,6 +35,12 @@
 export type OperateRoute = {
   kind: "question" | "command";
   confidence: "strong" | "weak";
+  /**
+   * What to send as the job, when it is not the whole message — set only when the message said
+   * outright that it was a job ("give Bruno this job: what is 17 times 23?"), so the agent is asked
+   * the job rather than the sentence handing it over.
+   */
+  job?: string;
 };
 
 /**
@@ -116,6 +122,22 @@ const ABOUT_THE_RECORD = [
   /\banything\s+(?:waiting|failed|failing|blocked|outstanding|pending)\b/i,
 ];
 
+/**
+ * A message that SAYS it is a job, with what follows being the job.
+ *
+ * WHY THIS IS NEEDED AT ALL. For a question-answering agent every real job IS a question — "what is
+ * 17 times 23?" — so no verb list can tell one from a question about the agent's record, and the
+ * card's own promise ("ask it what it has been doing, or give it a job") was unkeepable: "Give Bruno
+ * this job: what is 17 times 23?" was read as a question, and the answer was that dispatching a job
+ * could not be done from here. Saying "job" outright is unambiguous, so it decides; and the toggle
+ * beside the label decides everything else.
+ */
+const EXPLICIT_JOB = [
+  /^(?:give|hand)\s+(?:it|him|her|them|[\p{L}][\p{L}\p{N}_-]*)\s+(?:this|a|the|one|another)\s+(?:job|task)\b\s*[:,—–-]?\s*/iu,
+  /^(?:new\s+)?(?:job|task)\s*[:—–-]\s*/i,
+  /^(?:here(?:'s| is)\s+)?(?:a|your)\s+(?:job|task)\s*[:—–-]\s*/i,
+];
+
 /** Strip a vocative: `Tracey, send the invoice` is the same instruction without the name. */
 const VOCATIVE = /^[\p{L}][\p{L}\p{N}_ -]{0,40}?,\s+/u;
 
@@ -148,6 +170,19 @@ export function classifyOperate(text: string): OperateRoute {
   // The vocative is stripped for CLASSIFICATION only. "Tracey, did you send it?" and "did you send
   // it?" are the same question, and "Tracey, send it" and "send it" are the same instruction.
   const body = raw.replace(VOCATIVE, "").trim() || raw;
+
+  // 1b. SAID OUTRIGHT TO BE A JOB, which outranks every other reading — see `EXPLICIT_JOB`. What
+  // follows the hand-over is the job; with nothing after it, the whole message is.
+  // Against the RAW message as well as the body: "give it a task, list three colours" ends its
+  // hand-over in a comma, which the vocative rule above takes for a name and strips.
+  for (const text of [raw, body]) {
+    for (const said of EXPLICIT_JOB) {
+      const m = said.exec(text);
+      if (!m) continue;
+      const job = text.slice(m[0].length).trim();
+      return job ? { kind: "command", confidence: "strong", job } : { kind: "command", confidence: "strong" };
+    }
+  }
 
   for (const wrapper of POLITE) {
     const m = wrapper.exec(body);
@@ -205,4 +240,16 @@ export function classifyOperate(text: string): OperateRoute {
  */
 export function operateLabel(route: OperateRoute, agentName: string): string {
   return route.kind === "command" ? `This will run ${agentName}` : "This reads the record";
+}
+
+/**
+ * The send control's words, which must say what the label above it says.
+ *
+ * IT SAID SOMETHING ELSE. In an operate thread the button kept the build composer's routes —
+ * "Send — edit this agent", "Send — answer, without building anything" — under a label reading "This
+ * will run Bruno". A button and a preview that disagree is the defect the build composer already
+ * paid for once.
+ */
+export function operateSendLabel(route: OperateRoute, agentName: string): string {
+  return route.kind === "command" ? `Send — run ${agentName} for real` : "Send — read the record";
 }

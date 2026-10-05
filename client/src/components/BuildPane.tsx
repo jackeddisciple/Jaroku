@@ -30,7 +30,7 @@ import { AgentTray } from "./composer/AgentTray.tsx";
 import { fixPrompt, routeLabel, routeMessage } from "../lib/intent.ts";
 // PART 3'S SECOND CLASSIFIER — two outcomes, its own module. See its header for why it is not an
 // extension of the table above it.
-import { classifyOperate, operateLabel } from "../lib/operateIntent.ts";
+import { classifyOperate, operateLabel, operateSendLabel, type OperateRoute } from "../lib/operateIntent.ts";
 import { WorkGate } from "./WorkGate.tsx";
 import { useWorkStore } from "../store/workStore.ts";
 import { threadById } from "../store/threadStore.ts";
@@ -1971,7 +1971,20 @@ export function BuildPane({
    * label has to be on screen WHILE somebody types, which is what rules out anything with a round
    * trip in it.
    */
-  const operateRoute = classifyOperate(text);
+  const classifiedRoute = classifyOperate(text);
+  /**
+   * THE PERSON'S OWN CHOICE OF DESTINATION, when the guess is wrong — the label above the composer
+   * is a toggle. There was no way to override the guess at all, and for an agent whose every job is
+   * a question the guess is always "question". Forgotten when the box empties, so the next message
+   * is classified afresh. A command chosen here still meets the pre-flight gate.
+   */
+  const [routeOverride, setRouteOverride] = useState<"question" | "command" | null>(null);
+  useEffect(() => {
+    if (!text.trim()) setRouteOverride(null);
+  }, [text]);
+  const operateRoute: OperateRoute = routeOverride && routeOverride !== classifiedRoute.kind
+    ? { kind: routeOverride, confidence: "strong" }
+    : classifiedRoute;
   /** Open when a command is waiting for §6's pre-flight confirmation. */
   const [operateGated, setOperateGated] = useState(false);
 
@@ -2534,7 +2547,9 @@ export function BuildPane({
    * a route — the server binds it as a `work` item AFTER the dispatch it would have made anyway.
    */
   const dispatchOperate = (): void => {
-    const trimmed = text.trim();
+    // THE JOB ITSELF when the message handed one over ("give Bruno this job: …"), so the agent is
+    // asked the job rather than the sentence about it.
+    const trimmed = (operateRoute.job ?? text).trim();
     // The card's uuid, for the same reason `submit` uses it — see the note there.
     const agentId = operateCard?.agent_id ?? null;
     if (!trimmed || !agentId) return;
@@ -3326,9 +3341,20 @@ export function BuildPane({
                     {keyHint("⌘↵")}
                   </kbd>
                 )}
-                <span className={operateRoute.kind === "command" ? "text-accent" : "text-faint"}>
+                {/* A TOGGLE, NOT ONLY A LABEL: pressing it sends this message the other way. See
+                    `routeOverride`. */}
+                <button
+                  type="button"
+                  onClick={() => setRouteOverride(operateRoute.kind === "command" ? "question" : "command")}
+                  title={operateRoute.kind === "command"
+                    ? "Press to ask about its record instead"
+                    : `Press to give ${activeThread?.agent_name ?? "this agent"} this as a job instead`}
+                  className={`rounded-control px-1 underline-offset-2 transition-colors duration-fast hover:underline focus-visible:outline-none focus-visible:shadow-focusring ${
+                    operateRoute.kind === "command" ? "text-accent" : "text-faint hover:text-ink"
+                  }`}
+                >
                   {operateLabel(operateRoute, activeThread?.agent_name ?? "this agent")}
-                </span>
+                </button>
               </span>
             )}
             {composerMode === "chat" && !operating && text.trim() && (
@@ -3898,8 +3924,8 @@ export function BuildPane({
                     // NOT CONNECTED IS CHECKED FIRST, ahead of the key and the mode: it is the one
                     // state where none of the other labels is true yet, and a tooltip promising a
                     // route on a button that cannot dispatch is the mismatch §3.4 already paid for.
-                    aria-label={!connected ? OFFLINE_SEND : noSubscription ? SUBSCRIPTION_ASK : missingKey ? keyAsk : composerMode === "test" ? "Run the agent on this input" : `Send — ${routeLabel(intent, routing.planEvidence)}`}
-                    title={!connected ? OFFLINE_SEND : noSubscription ? SUBSCRIPTION_ASK : missingKey ? keyAsk : composerMode === "test" ? "Run the agent on this input" : `Send — ${routeLabel(intent, routing.planEvidence)} (${keyHint("⌘↵")})`}
+                    aria-label={!connected ? OFFLINE_SEND : noSubscription ? SUBSCRIPTION_ASK : missingKey ? keyAsk : composerMode === "test" ? "Run the agent on this input" : operating ? operateSendLabel(operateRoute, activeThread?.agent_name ?? "this agent") : `Send — ${routeLabel(intent, routing.planEvidence)}`}
+                    title={!connected ? OFFLINE_SEND : noSubscription ? SUBSCRIPTION_ASK : missingKey ? keyAsk : composerMode === "test" ? "Run the agent on this input" : operating ? `${operateSendLabel(operateRoute, activeThread?.agent_name ?? "this agent")} (${keyHint("⌘↵")})` : `Send — ${routeLabel(intent, routing.planEvidence)} (${keyHint("⌘↵")})`}
                     // The one ink-filled control on the screen, and the only one in this bar that
                     // is not a glyph on open background.
                     //
@@ -3934,7 +3960,7 @@ export function BuildPane({
       {operating && operateCard && (
         <WorkGate
           card={operateCard}
-          input={text}
+          input={operateRoute.job ?? text}
           open={operateGated}
           onCancel={() => setOperateGated(false)}
           onConfirm={dispatchOperate}

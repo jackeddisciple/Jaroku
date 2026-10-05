@@ -30,7 +30,7 @@
 //
 //   npm run test:thread-classify
 
-import { classifyOperate, operateLabel } from "./operateIntent.ts";
+import { classifyOperate, operateLabel, operateSendLabel } from "./operateIntent.ts";
 
 let fail = 0;
 const check = (name: string, ok: boolean, detail = ""): void => {
@@ -262,6 +262,23 @@ console.log("\nthe edges");
     classifyOperate("the invoice you sent yesterday").kind === "question");
   check("...even with no question mark",
     classifyOperate("that refund from last week").kind === "question");
+}
+
+console.log("\na message that says it is a job is one");
+{
+  // FOR A QUESTION-ANSWERING AGENT EVERY JOB IS A QUESTION, so no verb could route one: "Give Bruno
+  // this job: what is 17 times 23?" was read as a question about the record and answered "I can't
+  // dispatch from here". Saying "job" outright decides it, and the job is what follows.
+  const said = classifyOperate("Give Bruno this job: what is 17 times 23?");
+  check("\"give Bruno this job: …\" is a job", said.kind === "command" && said.confidence === "strong", JSON.stringify(said));
+  check("...and what is sent is the job, not the sentence handing it over", said.job === "what is 17 times 23?", said.job ?? "");
+  check("\"job: …\" is a job too", classifyOperate("job: summarise the latest release").job === "summarise the latest release");
+  check("\"give it a task, …\" too", classifyOperate("give it a task, list three colours").kind === "command");
+  check("...but a question merely mentioning a job is still a question",
+    classifyOperate("what was the last job you did?").kind === "question");
+  check("the send button says what the label says",
+    operateSendLabel({ kind: "command", confidence: "strong" }, "Bruno").includes("run Bruno")
+      && operateSendLabel({ kind: "question", confidence: "weak" }, "Bruno") === "Send — read the record");
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
