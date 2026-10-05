@@ -381,6 +381,15 @@ console.log("\na press the server refused is not a failed job");
     && useWorkStore.getState().counts.queued === 0, JSON.stringify(useWorkStore.getState().counts));
 }
 
+console.log("\nthe waiting announcement is said and then let go");
+{
+  // THE HIDDEN LIVE REGION STILL SAID "Margot is waiting on you." AFTER NOTHING WAS, and a second job
+  // of the same agent set the same text into the same node, which a screen reader is not told about.
+  const list = CODE.find((f) => f.path === "components/WorkList.tsx")!.text;
+  check("the region is emptied once its sentence has been said", /setTimeout\(\(\) => setSaid\(null\)/.test(list));
+  check("...and each sentence is a new node, so a repeat is still announced", /key=\{said\.n\}/.test(list));
+}
+
 console.log("\nretry is offered only where the job can go");
 {
   // EVERY OLD ROW OF A KILLED AGENT OFFERED RETRY, titled "on whatever is live now", and pressing it

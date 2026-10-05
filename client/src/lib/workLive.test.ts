@@ -19,7 +19,7 @@
 //
 //   npm run test:work-live
 
-import { admitPending, mergeDelta, resetPending, type LiveList } from "./workLive.ts";
+import { admitPending, mergeDelta, resetPending, waitingAnnouncement, type LiveList } from "./workLive.ts";
 import type { WorkItemView, WorkStatus } from "../types.ts";
 
 let fail = 0;
@@ -196,6 +196,25 @@ console.log("\na fresh page is a different question");
   const fresh = resetPending([job("a"), job("b")]);
   check("the page is what the server sent", ids(fresh.items) === "a,b", ids(fresh.items));
   check("...and nothing is held over from the last one", fresh.pending.length === 0);
+}
+
+console.log("\nthe live region says a job has started waiting, once, and then lets go");
+{
+  // IT KEPT "Margot is waiting on you." AFTER NOTHING WAS: never cleared, so the same agent's next job
+  // set the same sentence and a screen reader was told nothing. The component now clears it once said
+  // and puts each sentence in a new node; this is the rule for what to say.
+  const say = { one: (n: string) => `${n} is waiting on you.`, many: (c: number) => `${c} jobs are waiting on you.` };
+  const waitingJob = (id: string, agent: string): WorkItemView => ({ ...job(id, "waiting"), agent_name: agent });
+  const first = waitingAnnouncement([waitingJob("w-1", "Margot")], new Set(), say);
+  check("a job that starts waiting is said", first.sentence === "Margot is waiting on you.", String(first.sentence));
+  const again = waitingAnnouncement([waitingJob("w-1", "Margot")], first.announced, say);
+  check("...once, not on every delta after", again.sentence === null);
+  const over = waitingAnnouncement([job("w-1", "running")], again.announced, say);
+  check("a job that stops waiting is forgotten", over.sentence === null && over.announced.size === 0);
+  const second = waitingAnnouncement([waitingJob("w-2", "Margot")], over.announced, say);
+  check("...so the same agent's next job is said too", second.sentence === "Margot is waiting on you.");
+  const two = waitingAnnouncement([waitingJob("w-3", "Bruno"), waitingJob("w-4", "Margot")], new Set(), say);
+  check("two at once are said as two, not as the first", two.sentence === "2 jobs are waiting on you.", String(two.sentence));
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

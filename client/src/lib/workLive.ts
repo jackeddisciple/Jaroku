@@ -280,3 +280,26 @@ export function refuseOptimistic(list: LiveList, ref: string, reason: string): L
   items[at] = { ...items[at]!, status: "failed", error: reason, ended_at: new Date().toISOString() };
   return { items, pending: list.pending };
 }
+
+/**
+ * What the Cockpit's polite live region should say now — §12: `waiting`, and only as it happens.
+ *
+ * A pure function of the rows and of the ids already announced, so the rule can be held by a suite.
+ * `sentence` is null when nothing has newly started waiting; `announced` is what to remember. A job
+ * that stops waiting is forgotten, so the same job blocking a second time is said again.
+ */
+export function waitingAnnouncement(
+  items: readonly WorkItemView[],
+  announced: ReadonlySet<string>,
+  say: { one: (agentName: string) => string; many: (count: number) => string },
+): { sentence: string | null; announced: Set<string> } {
+  const waiting = items.filter((i) => i.status === "waiting");
+  const fresh = waiting.filter((i) => !announced.has(i.id));
+  const now = new Set(waiting.map((i) => i.id));
+  if (fresh.length === 0) return { sentence: null, announced: now };
+  return {
+    // TWO AT ONCE ARE SAID AS TWO, not as the first of them: the second was otherwise never said.
+    sentence: fresh.length === 1 ? say.one(fresh[0]!.agent_name ?? "An agent") : say.many(fresh.length),
+    announced: now,
+  };
+}

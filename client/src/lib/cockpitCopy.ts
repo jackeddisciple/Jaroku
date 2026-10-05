@@ -413,4 +413,5 @@ export const HEADER = {
   refresh: "Ask for the fleet and the list again",
   /** §12's live region announces `waiting` and nothing else. This is what it announces. */
   announce: (agentName: string): string => `${agentName} is waiting on you.`,
+  announceMany: (count: number): string => `${count} jobs are waiting on you.`,
 } as const;

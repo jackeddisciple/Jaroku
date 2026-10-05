@@ -31,7 +31,7 @@ import { agentCanTakeWork } from "../lib/fleetSentence.ts";
 import { cockpitCost, cockpitTime } from "../lib/cockpitFormat.ts";
 import { rowColumns, type RowColumns } from "../lib/workRow.ts";
 import { dayAt, flattenWork, workWindow } from "../lib/workWindow.ts";
-import { isOptimistic } from "../lib/workLive.ts";
+import { isOptimistic, waitingAnnouncement } from "../lib/workLive.ts";
 import { useNow } from "../lib/useNow.ts";
 import { sendCancelWork, sendListWork, sendLoadWorkItem, sendRetryWork } from "../lib/socket.ts";
 import { ROW_HEIGHT, SPINE_X } from "../lib/cockpitLayout.ts";
@@ -549,30 +549,36 @@ function Filters() {
  */
 function WaitingAnnouncer() {
   const items = useWorkStore((s) => s.items);
-  const [announced, setAnnounced] = useState<Set<string>>(new Set());
-  const [sentence, setSentence] = useState("");
+  const announced = useRef<Set<string>>(new Set());
+  /** The sentence, and a count that makes each one a new node — see below. */
+  const [said, setSaid] = useState<{ sentence: string; n: number } | null>(null);
 
   useEffect(() => {
-    const nowWaiting = items.filter((i) => i.status === "waiting");
-    const fresh = nowWaiting.filter((i) => !announced.has(i.id));
-    if (fresh.length === 0) {
-      // A JOB THAT STOPS WAITING IS FORGOTTEN, so that the same job blocking twice announces twice.
-      // Without this the set grows for the life of the session and the second confirmation on a
-      // long-running agent is silent.
-      const stillWaiting = new Set(nowWaiting.map((i) => i.id));
-      if ([...announced].some((id) => !stillWaiting.has(id))) setAnnounced(stillWaiting);
-      return;
-    }
-    setSentence(HEADER.announce(fresh[0]!.agent_name ?? "An agent"));
-    setAnnounced(new Set(nowWaiting.map((i) => i.id)));
-  }, [items, announced]);
+    const next = waitingAnnouncement(items, announced.current, { one: HEADER.announce, many: HEADER.announceMany });
+    announced.current = next.announced;
+    if (next.sentence) setSaid((prev) => ({ sentence: next.sentence!, n: (prev?.n ?? 0) + 1 }));
+    // NOTHING WAITING, NOTHING SAID. The region kept "Margot is waiting on you." long after.
+    else if (next.announced.size === 0) setSaid(null);
+  }, [items]);
+
+  // CLEARED ONCE SAID, so the region holds nothing stale for a screen reader to find later.
+  useEffect(() => {
+    if (!said) return;
+    const t = setTimeout(() => setSaid(null), ANNOUNCE_HOLD_MS);
+    return () => clearTimeout(t);
+  }, [said]);
 
   return (
     <div role="status" aria-live="polite" className="sr-only">
-      {sentence}
+      {/* A NEW NODE FOR EACH SENTENCE. The same agent's second job set the same text into the same
+          node, which changes nothing a screen reader is told about. */}
+      {said && <span key={said.n}>{said.sentence}</span>}
     </div>
   );
 }
+
+/** How long an announcement stays in the live region after it has been said. */
+const ANNOUNCE_HOLD_MS = 5_000;
 
 /** How often the rows' relative times are worked out again. See `useNow`. */
 const CLOCK_MS = 10_000;
