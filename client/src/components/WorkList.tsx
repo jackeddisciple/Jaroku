@@ -287,12 +287,17 @@ function Row({ item, columns, marks, categories }: {
         {/* THE VERB SLOT, whose WIDTH IS ALWAYS THERE — §Craft 4. See this component's header. */}
         <div className="flex w-[68px] shrink-0 items-center justify-end pr-1 opacity-0 transition-opacity duration-fast focus-within:opacity-100 group-hover:opacity-100">
           {/* Keyed apart, like the detail panel's pair — see there. Nothing at all for a press that was
-              never sent: there is no job to stop or to ask again. */}
+              never sent: there is no job to stop or to ask again.
+
+              OUT OF THE TAB ORDER: a pointer's shortcut. Every row was two Tab stops, so eight jobs
+              were sixteen between the filters and the composer. The row's own Enter opens the job,
+              whose panel carries the same Stop and Retry as reachable controls. */}
           {notSent || (!live && !retryable) ? null : live ? (
             <Capable key="stop" cmd="cancelWork">
               <button
                 type="button"
                 onClick={() => sendCancelWork(item.id)}
+                tabIndex={-1}
                 className="rounded-control px-2 py-0.5 text-tiny text-muted transition-colors duration-fast hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
                 // §21: STOP IS INLINE, A SINGLE PRESS, NO DIALOG — "it is scoped to one item and
                 // the item is on screen". The title says what it actually does rather than
@@ -308,6 +313,7 @@ function Row({ item, columns, marks, categories }: {
               <button
                 type="button"
                 onClick={() => sendRetryWork(item.id)}
+                tabIndex={-1}
                 className="rounded-control px-2 py-0.5 text-tiny text-muted transition-colors duration-fast hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
                 title={RETRY.title(item.agent_name)}
                 aria-label={RETRY.label}

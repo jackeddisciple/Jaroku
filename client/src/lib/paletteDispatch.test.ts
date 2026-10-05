@@ -41,7 +41,7 @@ console.log("\nthe palette asks for a dispatch, not a list");
   const s = useUiStore.getState();
   check(s.navView === "work", "it opens the Cockpit");
   check(s.cockpitAgentIntent === "agent-bruno", "...narrowed to the agent");
-  check(s.composerAim === "agent-bruno", "...with the composer pointed at it");
+  check(s.composerAim?.agentId === "agent-bruno", "...with the composer pointed at it");
   check(s.takeCockpitAgentIntent() === "agent-bruno" && useUiStore.getState().cockpitAgentIntent === undefined,
     "the narrowing is taken once");
 
@@ -49,6 +49,25 @@ console.log("\nthe palette asks for a dispatch, not a list");
   useUiStore.setState({ composerAim: null });
   useUiStore.getState().openCockpitForAgent("agent-margot");
   check(useUiStore.getState().composerAim === null, "a pointer that only opens the list aims nothing");
+}
+
+console.log("\nthe composer is one key away");
+{
+  // EIGHT JOBS WERE SIXTEEN TAB STOPS between the filters and the composer, with no way to jump.
+  useUiStore.setState({ composerAim: null });
+  useUiStore.getState().openNav("agents");
+  useUiStore.getState().focusWorkComposer();
+  const s = useUiStore.getState();
+  check(s.navView === "work" && s.composerAim !== null && s.composerAim.agentId === null,
+    "\"Write a job\" opens the Cockpit with the caret in the composer, leaving its agent as it was");
+  const composer = source("../components/WorkComposer.tsx");
+  check(/export const COMPOSER_KEY = "c"/.test(composer) && /viewOwnsBareKey\(e,/.test(composer),
+    "C puts the caret there on the Cockpit, under the rule every view's bare letters follow");
+  check(/onTop\(box\)/.test(composer), "...but not from under a dialog or a panel lying over it");
+  check(/aria-keyshortcuts=/.test(composer), "...and the box says so to assistive tech");
+  const list = source("../components/WorkList.tsx");
+  check((list.match(/tabIndex=\{-1\}/g) ?? []).length >= 2, "a row's Stop and Retry are not extra Tab stops");
+  useUiStore.setState({ composerAim: null });
 }
 
 console.log("\nchosen with the Cockpit already open");
@@ -68,7 +87,7 @@ console.log("\nthe composer is where it ends");
   const effect = composer.slice(at, at + 900);
   check(at > 0, "the composer reads the aim");
   check(/composerAim: null/.test(effect), "...takes it once, so a later visit is not re-aimed");
-  check(/setAgentId\(aim\)/.test(effect), "...points at the agent");
+  check(/setAgentId\(aim\.agentId\)/.test(effect), "...points at the agent");
   check(/requestAnimationFrame\(\(\) => boxRef\.current\?\.focus\(\)\)/.test(effect),
     "...and puts the caret in the box once the palette's focus trap has gone");
   check(!/cancelAnimationFrame/.test(effect), "...which taking the aim does not cancel");

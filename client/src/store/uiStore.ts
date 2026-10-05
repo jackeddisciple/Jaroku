@@ -328,11 +328,13 @@ interface UiState {
    * list rather than a dispatch.
    */
   dispatchToAgent: (agentId: string) => void;
+  /** The Cockpit, with the caret in its composer and the agent left as it was. */
+  focusWorkComposer: () => void;
   /**
-   * The agent the Cockpit's composer should be pointed at and focused on, once — consumed by the
-   * composer, which may not be mounted yet when it is asked for (the fleet can still be on the wire).
+   * Put the caret in the Cockpit's composer, once — pointed at `agentId` when there is one. Consumed
+   * by the composer, which may not be mounted yet when it is asked for (the fleet can be on the wire).
    */
-  composerAim: string | null;
+  composerAim: { agentId: string | null } | null;
   /**
    * Open the Cockpit on one job — what a pasted job link asks for (`lib/workLink.ts`).
    *
@@ -657,7 +659,8 @@ export const useUiStore = create<UiState>((set) => ({
   openCockpitForAgent: (agentId) =>
     set({ cockpitAgentIntent: agentId, navView: "work", navSection: "work" }),
   dispatchToAgent: (agentId) =>
-    set({ cockpitAgentIntent: agentId, composerAim: agentId, navView: "work", navSection: "work" }),
+    set({ cockpitAgentIntent: agentId, composerAim: { agentId }, navView: "work", navSection: "work" }),
+  focusWorkComposer: () => set({ composerAim: { agentId: null }, navView: "work", navSection: "work" }),
   composerAim: null,
   takeCockpitAgentIntent: () => {
     // READ AND CLEARED IN ONE `set`, exactly as the Inbox's is and for the same reason: two

@@ -23,6 +23,7 @@ import { useThreadStore } from "../store/threadStore.ts";
 import { useAgentGridStore } from "../store/agentGridStore.ts";
 import { useWorkStore } from "../store/workStore.ts";
 import { needsReconnect } from "../lib/fleetSentence.ts";
+import { COMPOSER_KEY } from "./WorkComposer.tsx";
 import { openThread } from "../lib/threadNav.ts";
 import { chatTitle } from "../lib/chatTitle.ts";
 import { openAgentDetail } from "../lib/agentNav.ts";
@@ -428,6 +429,14 @@ export function CommandPalette() {
                   })}
                 >
                   Show what is waiting
+                </Item>
+                {/* THE COMPOSER, BY NAME AND BY KEY. The keycap is the Cockpit's `C`, which works on
+                    that screen; from anywhere else this entry goes there and puts the caret in. */}
+                <Item
+                  onSelect={run(() => useUiStore.getState().focusWorkComposer())}
+                  kbd={COMPOSER_KEY.toUpperCase()}
+                >
+                  Write a job
                 </Item>
                 {/* AND DISPATCHING TO A NAMED AGENT, which is a NAVIGATION rather than a dispatch:
                     it opens the Cockpit filtered to that agent, with the composer pointed at it.

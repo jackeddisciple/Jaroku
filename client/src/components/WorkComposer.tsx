@@ -32,6 +32,7 @@ import { useEffect, useRef, useState } from "react";
 import { COMPOSER } from "../lib/cockpitCopy.ts";
 import { atWorkCap, cockpitComposer } from "../lib/cockpitComposer.ts";
 import { SPINE_X } from "../lib/cockpitLayout.ts";
+import { viewOwnsBareKey } from "../lib/bareKeys.ts";
 import { needsReconnect } from "../lib/fleetSentence.ts";
 import { optimisticRow } from "../lib/workLive.ts";
 import { sendDispatchWork } from "../lib/socket.ts";
@@ -70,6 +71,17 @@ const MAX_INPUT_BYTES = 65_536;
  * thirty to be accepted — so a slow dispatch that is still being tried is never given up on early.
  */
 const ANSWER_TIMEOUT_MS = 90_000;
+
+/** The bare key that puts the caret in the composer. Shown in the palette beside "Write a job". */
+export const COMPOSER_KEY = "c";
+
+/** Whether `el` is what a pointer at its centre would hit — nothing is lying over it. */
+function onTop(el: HTMLElement): boolean {
+  const r = el.getBoundingClientRect();
+  if (r.width === 0 || r.height === 0) return false;
+  const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  return hit !== null && (hit === el || el.contains(hit));
+}
 
 /** In bytes, because that is what the boundary counts — a four-byte emoji is one character. */
 function byteLength(text: string): number {
@@ -110,12 +122,28 @@ export function WorkComposer() {
   useEffect(() => {
     if (aim === null) return;
     useUiStore.setState({ composerAim: null });
-    setAgentId(aim);
+    if (aim.agentId) setAgentId(aim.agentId);
     // A FRAME LATER, once the palette has gone: its focus trap is still mounted when this runs, and
     // sends focus moved outside it straight back in. Not cancelled on cleanup — taking the aim
     // re-runs this effect at once, and the focus is the point of it.
     requestAnimationFrame(() => boxRef.current?.focus());
   }, [aim]);
+
+  // `C` PUTS THE CARET HERE — the Cockpit's one bare letter. Eight jobs were sixteen Tab stops between
+  // the filters and this box, with no way to jump. Only when the box is what is on top at its own
+  // centre, so neither a dialog's scrim nor a job panel lying over the list loses its focus to it.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== COMPOSER_KEY || e.shiftKey) return;
+      if (!viewOwnsBareKey(e, { paletteOpen: useUiStore.getState().paletteOpen })) return;
+      const box = boxRef.current;
+      if (!box || !onTop(box)) return;
+      e.preventDefault();
+      box.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   /**
    * §19: THE COMPOSER CLEARS ON PRESS AND THE TEXT COMES BACK IF THE DISPATCH WAS REFUSED.
@@ -319,6 +347,7 @@ export function WorkComposer() {
           title={blocked.reason ?? COMPOSER.send}
           aria-label={COMPOSER.send}
           aria-describedby={statusLine ? "work-composer-status" : undefined}
+          aria-keyshortcuts={COMPOSER_KEY.toUpperCase()}
         >
           <ArrowUpIcon size={ICON.sm} />
         </button>
