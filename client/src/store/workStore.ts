@@ -96,6 +96,16 @@ interface WorkState {
   loaded: boolean;
   /** Whichever job the detail panel is open on, in full. Null when it is closed. */
   open: WorkItemDetailView | null;
+  /**
+   * Every job this tab has been told about, by id — whatever page, filter or panel it came through.
+   *
+   * WHAT AN OPERATE CONVERSATION RENDERS A JOB FROM. Its thread holds only a reference, and the job
+   * it gave the agent may be on no page the Cockpit is showing — so the conversation showed "Gave the
+   * agent a job" and nothing of what was asked or what came back. Kept here, from the same deltas
+   * that move the Cockpit's rows, it is one copy rather than a second one that goes stale. Bounded:
+   * the oldest are forgotten past `KNOWN_JOBS`.
+   */
+  known: Record<string, WorkItemView | WorkItemDetailView>;
   /** The id the panel is opening on, before its detail has landed. */
   openingId: string | null;
   /** One container's runtime log window, and the cursor that continues it. */
@@ -180,7 +190,7 @@ export function matchesScope(item: WorkItemView, filters: WorkFilters, viewerId:
   return true;
 }
 
-export const useWorkStore = create<WorkState>((set) => ({
+export const useWorkStore = create<WorkState>((set, get) => ({
   items: [],
   pending: [],
   atTop: true,
@@ -192,6 +202,7 @@ export const useWorkStore = create<WorkState>((set) => ({
   anyLive: false,
   loaded: false,
   open: null,
+  known: {},
   openingId: null,
   logs: null,
   error: null,
@@ -217,6 +228,7 @@ export const useWorkStore = create<WorkState>((set) => ({
       // snapshot droppable rather than confusing: the page in hand is described by the filters it
       // was built under, not by whatever the person has since clicked.
       filters: s.filters,
+      known: remember(get().known, s.items),
       loaded: true,
       // A fresh snapshot clears the refusal, because the board being right again is what makes the
       // message stale — the same rule the thread and inbox lists follow.
@@ -240,6 +252,7 @@ export const useWorkStore = create<WorkState>((set) => ({
       return {
         items: [...prev.items, ...s.items.filter((i) => !have.has(i.id))],
         nextCursor: s.nextCursor,
+        known: remember(prev.known, s.items),
       };
     }),
 
@@ -295,7 +308,10 @@ export const useWorkStore = create<WorkState>((set) => ({
         item,
         { belongs, atTop: prev.atTop },
       );
-      return { items: merged.items, pending: merged.pending, open, counts, workspaceCounts };
+      return {
+        items: merged.items, pending: merged.pending, open, counts, workspaceCounts,
+        known: remember(prev.known, [item]),
+      };
     }),
 
   admitPending: () =>
@@ -334,7 +350,8 @@ export const useWorkStore = create<WorkState>((set) => ({
       const placeholder = prev.items.find((i) => i.id === `${OPTIMISTIC_PREFIX}${ref}`);
       const held = prev.items.some((i) => i.id === real.id);
       const merged = settleOptimistic({ items: prev.items, pending: prev.pending }, ref, real);
-      if (!placeholder) return { items: merged.items, pending: merged.pending };
+      const known = remember(prev.known, [real]);
+      if (!placeholder) return { items: merged.items, pending: merged.pending, known };
       const move = (counts: WorkCounts, add: boolean): WorkCounts => {
         const next = { ...counts, [placeholder.status]: Math.max(0, counts[placeholder.status] - 1) };
         if (add) next[real.status] = next[real.status] + 1;
@@ -345,6 +362,7 @@ export const useWorkStore = create<WorkState>((set) => ({
         pending: merged.pending,
         counts: move(prev.counts, !held),
         workspaceCounts: move(prev.workspaceCounts, !held),
+        known,
       };
     }),
 
@@ -373,12 +391,15 @@ export const useWorkStore = create<WorkState>((set) => ({
   setAtTop: (atTop) => set({ atTop }),
 
   setFleet: (fleet, anyLive) => set({ fleet, anyLive }),
-  openItem: (open) => set({ open, openingId: null }),
+  openItem: (open) => set((prev) => ({ open, openingId: null, known: remember(prev.known, [open]) })),
   receiveDetail: (item) =>
     set((prev) => {
       const asked = prev.openingId === item.id;
       const reread = prev.openingId === null && prev.open?.id === item.id;
-      return asked || reread ? { open: item, openingId: null } : {};
+      // REMEMBERED WHETHER OR NOT IT OPENS THE PANEL: a conversation asks for a job's detail
+      // without opening anything — see `sendPeekWorkItem`.
+      const known = remember(prev.known, [item]);
+      return asked || reread ? { open: item, openingId: null, known } : { known };
     }),
   openingItem: (openingId) => set({ openingId }),
   closeItem: () => set({ open: null, openingId: null, logs: null }),
@@ -387,6 +408,29 @@ export const useWorkStore = create<WorkState>((set) => ({
   setNotice: (notice) => set({ notice }),
   setFilters: (patch) => set((prev) => ({ filters: { ...prev.filters, ...patch } })),
 }));
+
+/** How many jobs `known` holds before it forgets the oldest. */
+export const KNOWN_JOBS = 400;
+
+/**
+ * Jobs added to what this tab knows. A detail is never replaced by a row of the same job — a row has
+ * no `input` or `output`, and an operate conversation is rendering both — only merged into it.
+ */
+function remember(
+  known: WorkState["known"],
+  items: readonly (WorkItemView | WorkItemDetailView)[],
+): WorkState["known"] {
+  if (items.length === 0) return known;
+  const next = { ...known };
+  for (const item of items) {
+    const had = next[item.id];
+    delete next[item.id];
+    next[item.id] = had && "input" in had && !("input" in item) ? { ...had, ...item } : item;
+  }
+  const ids = Object.keys(next);
+  for (let i = 0; i < ids.length - KNOWN_JOBS; i++) delete next[ids[i]!];
+  return next;
+}
 
 type LogWindow = NonNullable<WorkState["logs"]>;
 

@@ -27,7 +27,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { LOG_LINES_KEPT, matchesFilters, mergeLogs, useWorkStore } from "./workStore.ts";
+import { KNOWN_JOBS, LOG_LINES_KEPT, matchesFilters, mergeLogs, useWorkStore } from "./workStore.ts";
 import type { WorkCounts, WorkFilters, WorkItemDetailView, WorkItemView } from "../types.ts";
 
 let failures = 0;
@@ -296,6 +296,25 @@ console.log("\na late answer does not reopen a panel somebody closed\n");
   w().receiveDetail({ ...detail("job-b"), output: "done" });
   check("...and a re-read of the open job refreshes it", w().open?.output === "done");
   w().closeItem();
+}
+
+console.log("\nwhat a conversation can show of a job it gave\n");
+{
+  // AN OPERATE THREAD HOLDS A REFERENCE ONLY, and the job may be on no page the Cockpit shows — so
+  // it showed "Gave the agent a job" and neither what was asked nor what came back.
+  const w = () => useWorkStore.getState();
+  seed([], { scope: "mine", status: "failed", agentId: null });
+  w().noteItem(item({ id: "job-t", status: "running", created_by: THEM }), ME);
+  check("a job off every page is still known", w().known["job-t"]?.status === "running");
+  w().receiveDetail({ ...item({ id: "job-t", status: "succeeded" }), input: "what is 17 times 23?", output: "391" } as WorkItemDetailView);
+  check("its detail is kept without opening the panel", w().open === null && (w().known["job-t"] as WorkItemDetailView).output === "391");
+  w().noteItem(item({ id: "job-t", status: "succeeded", output_preview: "391" }), ME);
+  const kept = w().known["job-t"] as WorkItemDetailView;
+  check("a later row of the same job does not throw away what was asked and answered",
+    kept.input === "what is 17 times 23?" && kept.output === "391", JSON.stringify(kept));
+  for (let i = 0; i < KNOWN_JOBS + 20; i++) w().noteItem(item({ id: `bulk-${i}` }), ME);
+  check(`at most ${KNOWN_JOBS} are kept, forgetting the oldest`,
+    Object.keys(w().known).length === KNOWN_JOBS && !w().known["job-t"] && Boolean(w().known[`bulk-${KNOWN_JOBS + 19}`]));
 }
 
 console.log(failures === 0 ? "\nALL CORRECT\n" : `\n${failures} FAILED\n`);

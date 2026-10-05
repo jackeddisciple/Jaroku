@@ -2576,6 +2576,15 @@ export function sendLoadWorkItem(itemId: string): void {
 }
 
 /**
+ * One job's detail, for a surface that shows it WITHOUT opening the panel — an operate conversation
+ * rendering what it asked and what came back. The answer lands in `known` and opens nothing, because
+ * no `openingId` was set for it.
+ */
+export function sendPeekWorkItem(itemId: string): void {
+  send({ cmd: "loadWorkItem", itemId });
+}
+
+/**
  * `clientRef` IS §19's OPTIMISTIC HANDLE and it is optional here for one reason: a caller that does
  * not draw a row does not need one. The composer always passes it; a future caller that dispatches
  * without a placeholder gets the old behaviour, where the answer joins the list as an ordinary

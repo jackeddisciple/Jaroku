@@ -22,7 +22,7 @@ import { isRunnable, modelName, providerLabelOf, runProviders, useProviderStore 
 import {
   sendApplyEdit, sendAskRecord, sendBranchRun, sendChat, sendDiscardEdit, sendDiscardPlan, sendDispatchWork,
   sendCreateThread, sendEditTurn, sendSelectVariant, sendStopChat,
-  sendEdit, sendExplain, sendLoadWorkItem, sendPlanAgent, sendPromoteTestInput, sendRun, reportHostProviders} from "../lib/socket.ts";
+  sendEdit, sendExplain, sendLoadWorkItem, sendPeekWorkItem, sendPlanAgent, sendPromoteTestInput, sendRun, reportHostProviders} from "../lib/socket.ts";
 import { useEvalStore } from "../store/evalStore.ts";
 import { UpsellCard } from "./UpsellCard.tsx";
 import { composerMoment } from "../lib/composerMoment.ts";
@@ -33,6 +33,8 @@ import { fixPrompt, routeLabel, routeMessage } from "../lib/intent.ts";
 import { classifyOperate, operateLabel, operateSendLabel, type OperateRoute } from "../lib/operateIntent.ts";
 import { WorkGate } from "./WorkGate.tsx";
 import { useWorkStore } from "../store/workStore.ts";
+import { FAILURE_SENTENCE, REFUSED } from "../lib/cockpitCopy.ts";
+import { WorkGlyph } from "./WorkGlyph.tsx";
 import { threadById } from "../store/threadStore.ts";
 import { fmtCost, fmtTokens } from "../lib/format.ts";
 import { isProviderId, type ProviderModel } from "../types.ts";
@@ -294,25 +296,74 @@ function CitationChip({ cite }: { cite: { id: string; status: string; agent_name
 }
 
 /**
- * A job this conversation gave a deployed agent — Part 3 §5.
+ * A job this conversation gave a deployed agent — Part 3 §5 — and what became of it.
  *
- * ONE LINE AND A CHIP, deliberately, and it is the strongest example of §11's absence rule: the
- * conversation is not where a job's status lives. The Cockpit's row is, kept live by the work
- * channel, and a card here that rendered a status would be a second answer that goes stale between
- * the answer arriving and somebody reading it.
+ * IT WAS ONE LINE AND A CHIP, "Gave the agent a job. [Open the job]", and the conversation lost both
+ * halves of what happened in it: the person's own message was not shown, and neither was the answer.
+ * Somebody who gave an agent a job from its conversation had to leave the conversation to see either.
+ *
+ * NOT A SECOND COPY OF THE JOB. What is drawn here is the job row the work channel keeps live for the
+ * Cockpit — `known`, in the work store — so this and the Cockpit's row cannot disagree. The thread
+ * holds a reference only; when the row is not in hand (a reload, a job off every page) it is asked
+ * for, quietly, without opening the Cockpit's panel.
  */
 function WorkTurnView({ turn }: { turn: WorkTurn }) {
+  const job = useWorkStore((s) => s.known[turn.workItemId]);
+  const detail = job && "input" in job ? job : null;
+  const ended = Boolean(job?.ended_at);
+  // ASKED FOR WHEN IT IS MISSING, AND AGAIN ONCE IT HAS ENDED: a delta carries one line of the
+  // answer, and this shows the whole of it.
+  useEffect(() => {
+    if (!detail || (ended && detail.output === null && detail.status === "succeeded")) {
+      sendPeekWorkItem(turn.workItemId);
+    }
+  }, [turn.workItemId, Boolean(detail), ended]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const asked = turn.input ?? detail?.input ?? job?.input_preview ?? null;
+  const status = job?.status ?? "queued";
+  const name = job?.agent_name ?? "The agent";
+  const answer = detail?.output ?? job?.output_preview ?? null;
+  const said = !job
+    ? "Gave the agent a job."
+    : status === "succeeded"
+      ? `${name} answered:`
+      : status === "failed"
+        ? (job.failure_kind ? FAILURE_SENTENCE[job.failure_kind] : `${name} could not do it.`)
+        : status === "cancelled"
+          ? `${name} was stopped before it finished.`
+          : status === "waiting"
+            ? `${name} is waiting on you — a tool it wants needs an answer.`
+            : `${name} is working on it.`;
+
   return (
-    <div className="flex flex-wrap items-baseline gap-1.5 text-label text-muted">
-      <span>Gave the agent a job.</span>
-      <button
-        type="button"
-        onClick={() => sendLoadWorkItem(turn.workItemId)}
-        className="inline-flex items-center gap-1 rounded-control border border-hair bg-elevated px-1.5 py-0.5 text-tiny text-muted transition-colors duration-fast hover:border-edge hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
-      >
-        <Glyph icon={Icon.attach.run} size={ICON.xs} className="shrink-0 text-faint" />
-        <span>Open the job</span>
-      </button>
+    <div className="flex flex-col gap-2">
+      {/* THE PERSON'S OWN MESSAGE, in the bubble every other message of theirs is drawn in. */}
+      {asked && (
+        <div className="flex justify-end">
+          <span className="max-w-[80%] whitespace-pre-wrap break-words rounded-xl bg-bubble px-3.5 py-2 text-label text-ink">
+            {asked}
+          </span>
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-1.5 text-label text-muted">
+        <WorkGlyph status={status} />
+        <span>{said}</span>
+        <button
+          type="button"
+          onClick={() => { sendLoadWorkItem(turn.workItemId); useUiStore.getState().openNav("work"); }}
+          aria-label={`Open the job${asked ? `: ${asked.slice(0, 60)}` : ""}`}
+          className="inline-flex items-center gap-1 rounded-control border border-hair bg-elevated px-1.5 py-0.5 text-tiny text-muted transition-colors duration-fast hover:border-edge hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+        >
+          <Glyph icon={Icon.attach.run} size={ICON.xs} className="shrink-0 text-faint" />
+          <span>Open the job</span>
+        </button>
+      </div>
+      {status === "succeeded" && answer !== null && (
+        <div className="whitespace-pre-wrap break-words text-label text-ink">{answer || "(the agent produced nothing)"}</div>
+      )}
+      {(job?.tool_refusals ?? []).length > 0 && (
+        <div className="text-caption text-muted">{REFUSED.row(job!.tool_refusals)}. {REFUSED.note}</div>
+      )}
     </div>
   );
 }
