@@ -25,6 +25,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createElement } from "react";
 
+import { LIVE } from "../lib/cockpitCopy.ts";
 import { CARD_HEIGHT, CARD_WIDTH, ROW_HEIGHT, SPINE, SPINE_X } from "../lib/cockpitLayout.ts";
 import { markup, seed } from "../lib/testRender.ts";
 import { MOTION, SPACE } from "../lib/tokens.ts";
@@ -274,6 +275,35 @@ console.log("\na filter the page is under is always on screen");
   check("the selected status keeps its chip at zero, pressed",
     /aria-pressed="true" aria-label="waiting on you: 0"/.test(list), list.slice(0, 600));
   check("...while an unselected empty status is still not offered", !/aria-label="failed: 0"/.test(list));
+}
+
+console.log("\nthe new-rows pill and the pinned day hang from the frame, not the rows");
+{
+  // BOTH WERE `absolute top-0` CHILDREN OF THE SCROLLER, so they sat at the top of its CONTENT and
+  // scrolled away with it — and both only appear once the reader has scrolled down. Measured live,
+  // the "1 new" pill was 1,552pt above the window. They must be outside the scrolling element.
+  seed(useWorkStore, {
+    items: [job("a-1")], pending: [job("p-1")], atTop: false, nextCursor: null, loaded: true, anyLive: true,
+    counts: { ...NO_COUNTS, succeeded: 2 }, workspaceCounts: NO_COUNTS,
+    filters: { scope: "all", status: null, agentId: null },
+    fleet: [], open: null, openingId: null, logs: null, error: null, notice: null,
+  });
+  const html = markup(createElement(WorkList));
+  /** The whole of the element whose opening tag starts at `at`, by counting nested divs. */
+  const elementAt = (at: number): string => {
+    let depth = 0;
+    const re = /<div\b|<\/div>/g;
+    re.lastIndex = at;
+    for (let m = re.exec(html); m; m = re.exec(html)) {
+      depth += m[0] === "</div>" ? -1 : 1;
+      if (depth === 0) return html.slice(at, m.index + 6);
+    }
+    return html.slice(at);
+  };
+  const scroller = elementAt(html.lastIndexOf("<div", html.indexOf("overflow-y-auto")));
+  check("the pill is drawn", html.includes(LIVE.pill(1)));
+  check("...outside the scrolling element, so it cannot scroll out of view",
+    scroller.length > 0 && !scroller.includes(LIVE.pill(1)), scroller.slice(0, 200));
 }
 
 console.log("\na job waiting on a person does not lock the window");

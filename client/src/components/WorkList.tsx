@@ -657,111 +657,117 @@ export function WorkList() {
           `px-5` IS THE SPINE. It was `px-4`, which put every row's status glyph four pixels left of
           the word "Cockpit" and of the first fleet card — the two-pixel disagreement §Craft 3 is
           about, at twice the size. */}
-      <div
-        ref={(el) => { scrollRef.current = el; setHost(el); }}
-        onScroll={(e) => {
-          setScrollTop(e.currentTarget.scrollTop);
-          // §18: "AN ITEM ARRIVING WHILE THE READER IS ALREADY AT THE TOP INSERTS DIRECTLY." A
-          // small tolerance rather than `=== 0`, because a scroller can sit at a fractional offset
-          // after a wheel event and a reader two pixels down is, by any reading a person would
-          // give it, at the top. `ROW_HEIGHT / 2` is the tolerance: less than half a row means no
-          // row is meaningfully hidden above the fold.
-          setAtTop(e.currentTarget.scrollTop < ROW_HEIGHT / 2);
-        }}
-        className={`relative scroll-fade min-h-0 flex-1 overflow-y-auto py-1 ${SPINE_X}`}
-      >
-        {items.length === 0 ? (
-          <ZeroState />
-        ) : (
-          <>
-            {/* §18's PILL. "A new item arriving above the scroll position does not insert. It
-                increments a count, and a small pill — '3 new' — appears pinned at the top of the
-                list. Pressing it scrolls to the top and inserts them."
+      {/* THE SCROLLER'S FRAME, WHICH DOES NOT SCROLL — and it is what the pill and the pinned heading
+          hang from. They were `absolute top-0` children of the scroller itself, which put them at
+          the top of its CONTENT: they scrolled away with the rows, and since both only appear once
+          the reader has scrolled down, both were always out of view — the "1 new" pill measured
+          1,552pt above the window, and no day heading was ever pinned. */}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <div
+          ref={(el) => { scrollRef.current = el; setHost(el); }}
+          onScroll={(e) => {
+            setScrollTop(e.currentTarget.scrollTop);
+            // §18: "AN ITEM ARRIVING WHILE THE READER IS ALREADY AT THE TOP INSERTS DIRECTLY." A
+            // small tolerance rather than `=== 0`, because a scroller can sit at a fractional offset
+            // after a wheel event and a reader two pixels down is, by any reading a person would
+            // give it, at the top. `ROW_HEIGHT / 2` is the tolerance: less than half a row means no
+            // row is meaningfully hidden above the fold.
+            setAtTop(e.currentTarget.scrollTop < ROW_HEIGHT / 2);
+          }}
+          className={`scroll-fade min-h-0 flex-1 overflow-y-auto py-1 ${SPINE_X}`}
+        >
+          {items.length === 0 ? (
+            <ZeroState />
+          ) : (
+            <>
+              {/* THE SPACER PAIR, WHICH IS WHY THIS IS NOT A `transform`. A translated slice takes
+                  its rows out of the scroller's own flow, so the scrollbar reports the height of six
+                  rows over a list of ten thousand. Two spacers keep the scroller's own geometry
+                  honest, which is what makes the thumb the right size and a page-down the right
+                  distance — and `feedWindow` already returns both numbers for exactly this. */}
+              <div style={{ height: view.offsetTop }} aria-hidden />
+              <ul className="flex flex-col">
+                {slice.map((entry) => (
+                  entry.kind === "day"
+                    // §22: A SINGLE ROW STILL GETS ITS HEADING. "A single row with no heading looks
+                    // like a fragment." And a day with no items renders nothing at all, which falls
+                    // out of deriving the groups from the items — see `groupByDay`.
+                    ? <DayHeading key={entry.key} label={entry.label} />
+                    : <Row key={entry.key} item={entry.item} columns={columns} marks={marks} categories={categories} />
+                ))}
+              </ul>
+              <div style={{ height: Math.max(0, view.totalHeight - view.end * ROW_HEIGHT) }} aria-hidden />
+              {/* KEYSET, NOT INFINITE SCROLL. A list whose head moves every few seconds and that also
+                  loads on scroll is a list that jumps under the reader; an explicit control is the
+                  one that keeps the position somebody chose. */}
+              {nextCursor && (
+                <button
+                  type="button"
+                  onClick={() => sendListWork({ more: true })}
+                  className="w-full py-3 text-tiny text-muted transition-colors duration-fast hover:text-ink"
+                >
+                  Show older jobs
+                </button>
+              )}
+            </>
+          )}
+        </div>
+        {/* §18's PILL. "A new item arriving above the scroll position does not insert. It
+            increments a count, and a small pill — '3 new' — appears pinned at the top of the
+            list. Pressing it scrolls to the top and inserts them."
 
-                PINNED TO THE LIST AND NOT INSIDE A GROUP — §18 says so in as many words, and it is
-                why the pill is not one of the flattened entries: an entry could be scrolled past,
-                and a control announcing rows the reader has not seen must not itself be one of the
-                things they have to scroll to find.
+            PINNED TO THE LIST AND NOT INSIDE A GROUP — §18 says so in as many words, and it is
+            why the pill is not one of the flattened entries: an entry could be scrolled past,
+            and a control announcing rows the reader has not seen must not itself be one of the
+            things they have to scroll to find.
 
-                ABOVE THE DAY HEADING IN THE STACKING ORDER, because for the frame after a press the
-                two occupy the same strip and the pill is the one being pressed.
+            ABOVE THE DAY HEADING IN THE STACKING ORDER, because for the frame after a press the
+            two occupy the same strip and the pill is the one being pressed.
 
-                NO ENTRANCE ANIMATION. §11: "Rows entering the list do not animate", and §Craft's
-                closing list rules out an entrance on every row. The pill appearing is a state
-                change the reader should notice, not a performance. */}
-            {pending.length > 0 && (
-              <button
-                type="button"
-                onClick={() => {
-                  // ORDER MATTERS: admit first, then scroll. Admitting inserts the rows at the head
-                  // and pushes the reader's position down by exactly their height; scrolling first
-                  // would land at the top of the OLD list and then be shoved down again.
-                  admit();
-                  scrollRef.current?.scrollTo({ top: 0 });
-                  setScrollTop(0);
-                  setAtTop(true);
-                }}
-                title={LIVE.pillTitle}
-                className="absolute inset-x-0 top-0 z-20 mx-auto w-fit rounded-full border border-edge bg-elevated px-2.5 py-0.5 text-tiny tabular-nums text-ink shadow-floating transition-colors duration-fast hover:bg-active"
-              >
-                {LIVE.pill(pending.length)}
-              </button>
-            )}
+            NO ENTRANCE ANIMATION. §11: "Rows entering the list do not animate", and §Craft's
+            closing list rules out an entrance on every row. The pill appearing is a state
+            change the reader should notice, not a performance. */}
+        {items.length > 0 && pending.length > 0 && (
+          <button
+            type="button"
+            onClick={() => {
+              // ORDER MATTERS: admit first, then scroll. Admitting inserts the rows at the head
+              // and pushes the reader's position down by exactly their height; scrolling first
+              // would land at the top of the OLD list and then be shoved down again.
+              admit();
+              scrollRef.current?.scrollTo({ top: 0 });
+              setScrollTop(0);
+              setAtTop(true);
+            }}
+            title={LIVE.pillTitle}
+            className="absolute inset-x-0 top-1 z-20 mx-auto w-fit rounded-full border border-edge bg-elevated px-2.5 py-0.5 text-tiny tabular-nums text-ink shadow-floating transition-colors duration-fast hover:bg-active"
+          >
+            {LIVE.pill(pending.length)}
+          </button>
+        )}
 
-            {/* §18's PINNED HEADING, which is what replaces CSS `sticky`. It is `aria-hidden`
-                because the real heading is in the list below it and a screen reader reading both
-                would announce every day twice; this one is for the eye, which is the only sense
-                stickiness was ever for.
+        {/* §18's PINNED HEADING, which is what replaces CSS `sticky`. It is `aria-hidden`
+            because the real heading is in the list below it and a screen reader reading both
+            would announce every day twice; this one is for the eye, which is the only sense
+            stickiness was ever for.
 
-                AND ONLY ONCE THE LIST HAS BEEN SCROLLED. At the very top the in-flow heading is
-                already at the top of the list, so pinning a copy over it drew "TODAY" twice, four
-                pixels apart — the scroller's own `py-1` being the offset between them. A sticky
-                element does not have this problem because it IS the in-flow element; a pinned copy
-                has to earn its place by there being something it is replacing.
+            AND ONLY ONCE THE LIST HAS BEEN SCROLLED. At the very top the in-flow heading is
+            already at the top of the list, so pinning a copy over it drew "TODAY" twice, four
+            pixels apart — the scroller's own `py-1` being the offset between them. A sticky
+            element does not have this problem because it IS the in-flow element; a pinned copy
+            has to earn its place by there being something it is replacing.
 
-                `scrollTop > 0` RATHER THAN A COMPARISON AGAINST THE FIRST HEADING'S OFFSET. The
-                moment the list moves at all, the in-flow heading has begun sliding under this one
-                and the two are doing the job between them — which is exactly what sticky looks
-                like. At rest there is nothing above the first heading to replace. */}
-            {pinnedDay && scrollTop > 0 && (
-              <div
-                aria-hidden
-                className={`pointer-events-none absolute inset-x-0 top-0 z-10 bg-canvas py-1.5 ${SPINE_X} ${TYPE.panelLabel}`}
-              >
-                {pinnedDay}
-              </div>
-            )}
-
-            {/* THE SPACER PAIR, WHICH IS WHY THIS IS NOT A `transform`. A translated slice takes
-                its rows out of the scroller's own flow, so the scrollbar reports the height of six
-                rows over a list of ten thousand. Two spacers keep the scroller's own geometry
-                honest, which is what makes the thumb the right size and a page-down the right
-                distance — and `feedWindow` already returns both numbers for exactly this. */}
-            <div style={{ height: view.offsetTop }} aria-hidden />
-            <ul className="flex flex-col">
-              {slice.map((entry) => (
-                entry.kind === "day"
-                  // §22: A SINGLE ROW STILL GETS ITS HEADING. "A single row with no heading looks
-                  // like a fragment." And a day with no items renders nothing at all, which falls
-                  // out of deriving the groups from the items — see `groupByDay`.
-                  ? <DayHeading key={entry.key} label={entry.label} />
-                  : <Row key={entry.key} item={entry.item} columns={columns} marks={marks} categories={categories} />
-              ))}
-            </ul>
-            <div style={{ height: Math.max(0, view.totalHeight - view.end * ROW_HEIGHT) }} aria-hidden />
-            {/* KEYSET, NOT INFINITE SCROLL. A list whose head moves every few seconds and that also
-                loads on scroll is a list that jumps under the reader; an explicit control is the
-                one that keeps the position somebody chose. */}
-            {nextCursor && (
-              <button
-                type="button"
-                onClick={() => sendListWork({ more: true })}
-                className="w-full py-3 text-tiny text-muted transition-colors duration-fast hover:text-ink"
-              >
-                Show older jobs
-              </button>
-            )}
-          </>
+            `scrollTop > 0` RATHER THAN A COMPARISON AGAINST THE FIRST HEADING'S OFFSET. The
+            moment the list moves at all, the in-flow heading has begun sliding under this one
+            and the two are doing the job between them — which is exactly what sticky looks
+            like. At rest there is nothing above the first heading to replace. */}
+        {items.length > 0 && pinnedDay && scrollTop > 0 && (
+          <div
+            aria-hidden
+            className={`pointer-events-none absolute inset-x-0 top-0 z-10 bg-canvas py-1.5 ${SPINE_X} ${TYPE.panelLabel}`}
+          >
+            {pinnedDay}
+          </div>
         )}
       </div>
     </>
