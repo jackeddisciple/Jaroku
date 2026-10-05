@@ -108,7 +108,11 @@ export function TraceTimeline() {
               ) : run.status === "paused" ? (
                 <span className="text-run">Paused</span>
               ) : (
-                <span className="text-muted">Ran in {fmtDuration(elapsed)}</span>
+                // THE GRAPH ALONE, and saying so: a deployed job's detail shows a longer figure
+                // for the same run, measured end to end, and the two read as a contradiction.
+                <span className="text-muted" title="The agent's graph alone, from its first step to its last">
+                  Ran in {fmtDuration(elapsed)}
+                </span>
               )}
               <span className="text-muted">{fmtTokens(tokens)}</span>
               <span className="text-muted">{fmtCost(cost)}</span>

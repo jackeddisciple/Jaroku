@@ -188,7 +188,12 @@ function MetadataLine({ item }: { item: WorkItemDetailView }) {
       : []),
     { label: "asked by", value: item.created_by_name ?? "somebody who has left" },
     { label: "started", value: started.text },
-    { label: "took", value: took.text, title: took.title ?? undefined },
+    // SAID TO BE END TO END, with what that includes on the hover — the trace times the graph alone.
+    {
+      label: "took",
+      value: took.title ? took.text : `${took.text} ${DETAIL.durationLabel}`,
+      title: took.title ?? DETAIL.durationMeans,
+    },
   ];
 
   return (
@@ -438,7 +443,10 @@ export function WorkDetail() {
             <span className={TYPE.sectionLabel}>Figures</span>
             <Figure label="Cost" figure={cockpitCost(item.cost_usd, item.cost_complete)} />
             <Figure label="Tokens" figure={cockpitTokens(item.tokens)} />
-            <Figure label="Duration" figure={cockpitDuration(item.duration_ms)} />
+            <Figure
+              label={`Duration (${DETAIL.durationLabel})`}
+              figure={{ ...cockpitDuration(item.duration_ms), title: cockpitDuration(item.duration_ms).title ?? DETAIL.durationMeans }}
+            />
           </div>
 
           <div className="mt-auto flex flex-wrap items-center gap-2 pt-2">

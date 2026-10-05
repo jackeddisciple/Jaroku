@@ -312,5 +312,10 @@ console.log("\nthe phrases three documents quote");
   check("...and there are words for a job that finished before it could stop", /finished before/.test(DESTRUCTIVE.stop.finishedFirst));
 }
 
+// TWO DURATIONS FOR ONE JOB — "took 8.6s" here, "Ran in 5.8s" on its trace — with nothing saying
+// why. The job's figure says it is end to end, and what that includes beyond the graph.
+check("the job's duration says it is end to end", DETAIL.durationLabel === "end to end");
+check("...and why the trace's \"Ran in\" is shorter", /Ran in/.test(DETAIL.durationMeans) && /graph alone/.test(DETAIL.durationMeans));
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 (globalThis as { process?: { exit(code: number): void } }).process?.exit(fail === 0 ? 0 : 1);

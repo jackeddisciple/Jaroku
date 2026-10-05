@@ -378,6 +378,15 @@ export const DETAIL = {
   costPartial: "Part of this run could not be priced, so this is a floor rather than a total.",
   tokensUnknown: "No step reported a token count.",
   durationUnknown: "This job has not ended, so it has no duration yet.",
+  /**
+   * WHAT THE JOB'S DURATION MEASURES, because the trace shows a different one for the same job —
+   * "took 8.6s" here, "Ran in 5.8s" there — and nothing said why. Both are true; they time
+   * different things.
+   */
+  durationLabel: "end to end",
+  durationMeans:
+    "From the container accepting the job to Jaroku hearing it end — starting the agent's process, " +
+    "any wait for you, and reporting back included. The trace's “Ran in” times the agent's graph alone.",
 } as const;
 
 /** The one thing the header says beyond its own name — §3's count beside the panel label. */
