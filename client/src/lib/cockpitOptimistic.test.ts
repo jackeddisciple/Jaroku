@@ -33,7 +33,7 @@ const job = (id: string, patch: Partial<WorkItemView> = {}): WorkItemView => ({
   created_by: "u", created_by_name: "Tester", input_preview: `job ${id}`,
   status: "succeeded", output_preview: null, error: null, failure_kind: null,
   created_at: "2026-08-28T12:00:00.000Z", started_at: null, ended_at: null,
-  cost_usd: null, tokens: null, duration_ms: null, cost_complete: true,
+  cost_usd: null, tokens: null, duration_ms: null, cost_complete: true, tool_refusals: [],
   ...patch,
 });
 

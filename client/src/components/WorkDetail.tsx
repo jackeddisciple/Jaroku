@@ -24,7 +24,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { DETAIL, FAILURE_SENTENCE, GATE, REFUSAL, STATUS_WORD } from "../lib/cockpitCopy.ts";
+import { DETAIL, FAILURE_SENTENCE, GATE, REFUSAL, REFUSED, STATUS_WORD } from "../lib/cockpitCopy.ts";
 import { cockpitAbsolute, cockpitCost, cockpitDuration, cockpitTokens } from "../lib/cockpitFormat.ts";
 import { selectRun } from "../lib/selection.ts";
 import { sendCancelWork, sendLoadRun, sendRetryWork } from "../lib/socket.ts";
@@ -391,6 +391,27 @@ export function WorkDetail() {
                   {item.error}
                 </pre>
               )}
+            </div>
+          )}
+
+          {/* WHAT IT WAS REFUSED, when a high-impact tool was denied or nobody answered. The job
+                carried on without it and usually reads `succeeded`, so this block is the only place
+                the panel says the answer above may not be what was asked for. */}
+          {(item.tool_refusals ?? []).length > 0 && (
+            <div className="flex flex-col gap-1">
+              <span className={TYPE.sectionLabel}>{REFUSED.heading}</span>
+              <ul className="flex flex-col gap-0.5 text-caption leading-[1.55] text-ink">
+                {item.tool_refusals.map((r, i) => (
+                  <li key={`${r.at}-${i}`} className="flex flex-wrap items-baseline gap-x-1.5">
+                    <span className="font-mono text-tiny">{r.server}/{r.tool}</span>
+                    <span className="text-muted">— {REFUSED.outcome[r.outcome]}</span>
+                    <span className="text-faint" title={cockpitAbsolute(r.at).title ?? undefined}>
+                      · {cockpitAbsolute(r.at).text}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-tiny leading-[1.5] text-muted">{REFUSED.note}</p>
             </div>
           )}
 

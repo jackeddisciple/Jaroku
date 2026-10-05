@@ -80,6 +80,24 @@ export function isWorkFailureKind(v: unknown): v is WorkFailureKind {
   return typeof v === "string" && (WORK_FAILURE_KINDS as readonly string[]).includes(v);
 }
 
+/**
+ * A high-impact tool call the job asked for and did not get — migration 082.
+ *
+ * `denied` IS A PERSON'S ANSWER and `timed_out` IS NOBODY'S: the confirmation ran out its two
+ * minutes and the bridge denied it on its own clock. Both leave the graph running without the
+ * tool, and the run usually ends `succeeded` with an apology for an answer — so this is the only
+ * record that the job did not get the thing it was for.
+ */
+export interface ToolRefusal {
+  server: string;
+  tool: string;
+  outcome: "denied" | "timed_out";
+  at: string;
+}
+
+/** The most refusals one job keeps. A graph that loops on a denied tool should not grow a row. */
+export const MAX_TOOL_REFUSALS = 20;
+
 export interface WorkItem {
   id: string;
   agent_id: string;
@@ -97,6 +115,8 @@ export interface WorkItem {
   started_at: string | null;
   ended_at: string | null;
   created_seq: number;
+  /** Tool calls the job was refused or nobody answered. Empty for nearly every job. */
+  tool_refusals: ToolRefusal[];
 }
 
 /**
@@ -196,15 +216,14 @@ const nowIso = (): string => new Date().toISOString();
 // Explicit rather than `SELECT *`: `workspace_id` is on every row and belongs on none of the
 // snapshots a client receives, exactly as the thread and inbox stores list their columns out.
 const COLUMNS = `id, agent_id, deployment_id, run_id, created_by, input, status, output, error,
-                 failure_kind, created_at, started_at, ended_at, created_seq`;
+                 failure_kind, created_at, started_at, ended_at, created_seq, tool_refusals`;
 
 export class WorkStore {
   /** Shares the trace store's database: same file, single writer. See TraceStore.database(). */
   constructor(private db: Db) {}
 
-  // No `init()`. The table arrives with migration 063 on both drivers and no column has been added
-  // to it after the fact. When one is, copy `ensureColumn` from store.ts — an existing database has
-  // no migration row saying it is missing a column, so a migration cannot know to add it.
+  // No `init()`. The table arrives with migration 063 on both drivers, and its one later column
+  // (`tool_refusals`, 082) with a numbered migration on both, which an existing database runs.
 
   private q(ctx: TenantContext): Queryable {
     return this.db.forWorkspace(ctx.workspaceId);
@@ -226,6 +245,7 @@ export class WorkStore {
       started_at: row.started_at === null || row.started_at === undefined ? null : String(row.started_at),
       ended_at: row.ended_at === null || row.ended_at === undefined ? null : String(row.ended_at),
       created_seq: asInt(row.created_seq),
+      tool_refusals: parseRefusals(row.tool_refusals),
     };
   }
 
@@ -269,6 +289,7 @@ export class WorkStore {
       started_at: null,
       ended_at: null,
       created_seq: 0,
+      tool_refusals: [],
     };
 
     // The sequence read and the insert are ONE TRANSACTION, for the reason `deployStore.create`
@@ -644,6 +665,36 @@ export class WorkStore {
   }
 
   /**
+   * Record a tool call the job asked for and did not get. Returns the item, or undefined when the
+   * run is not a job — every local run's confirmations end here too, and none of them is one.
+   *
+   * READ AND WRITTEN IN ONE TRANSACTION, so two refusals settling together — a node can fire
+   * several calls in one turn — both land rather than the second overwriting the first.
+   */
+  async noteToolRefusal(
+    ctx: TenantContext,
+    runId: string,
+    refusal: Omit<ToolRefusal, "at"> & { at?: string },
+  ): Promise<WorkItem | undefined> {
+    const id = await this.db.scoped(ctx.workspaceId, async (tx: Queryable) => {
+      const row = await tx.get<{ id: string; tool_refusals: unknown }>(
+        `SELECT id, tool_refusals FROM work_items WHERE run_id = ? AND workspace_id = ?`,
+        [runId, ctx.workspaceId],
+      );
+      if (!row) return undefined;
+      const list = [...parseRefusals(row.tool_refusals), {
+        server: refusal.server, tool: refusal.tool, outcome: refusal.outcome, at: refusal.at ?? nowIso(),
+      }].slice(-MAX_TOOL_REFUSALS);
+      await tx.run(
+        `UPDATE work_items SET tool_refusals = ? WHERE id = ? AND workspace_id = ?`,
+        [JSON.stringify(list), row.id, ctx.workspaceId],
+      );
+      return String(row.id);
+    });
+    return id ? this.get(ctx, id) : undefined;
+  }
+
+  /**
    * Attach a fresh run to an item that is being retried.
    *
    * A RETRY IS A NEW ROW, not a rewritten one — see `dispatcher.ts` — so this exists for the one
@@ -661,6 +712,20 @@ export class WorkStore {
       ),
     );
     return res.changes > 0;
+  }
+}
+
+/** The stored refusals, or none. A column that cannot be read is an empty list, never a throw. */
+export function parseRefusals(value: unknown): ToolRefusal[] {
+  if (typeof value !== "string" || !value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((r): r is ToolRefusal =>
+      typeof r?.server === "string" && typeof r?.tool === "string"
+        && (r?.outcome === "denied" || r?.outcome === "timed_out") && typeof r?.at === "string");
+  } catch {
+    return [];
   }
 }
 

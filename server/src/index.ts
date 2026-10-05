@@ -2942,7 +2942,15 @@ registerControlPlaneRoutes(router, {
   // `confirmResolved` on the wire; nothing was calling it for a HOSTED ask that ran out its own
   // clock, so the modal stayed up at 0:00 over a job that had already failed. Idempotent — a
   // person who answered has already cleared it, and this then finds nothing to clear.
-  onMcpConfirmSettled: (runId, nonce, verdict) => clearConfirms(runId, verdict, nonce),
+  //
+  // STILL PENDING HERE MEANS NOBODY ANSWERED. A person's answer removes the ask before the bus
+  // wakes this request, so an ask that is still held when the verdict arrives was denied by the
+  // clock — and that is recorded on the job, which would otherwise end `succeeded` without it.
+  onMcpConfirmSettled: (runId, nonce, verdict) => {
+    const unanswered = pendingConfirms.get(confirmKey(runId, nonce));
+    if (unanswered && verdict === "deny") noteToolRefused(unanswered, "timed_out");
+    clearConfirms(runId, verdict, nonce);
+  },
 });
 
 /**
@@ -2954,6 +2962,20 @@ registerControlPlaneRoutes(router, {
  */
 function reasonOf(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+/**
+ * A tool call a job asked for and did not get, written onto the job and broadcast.
+ *
+ * A job refused its tool carries on without it and usually ends `succeeded`, with an apology for
+ * an answer and a bill — so without this nothing on the row, the detail panel or the operate
+ * record would say the tool was ever refused. Floated and caught: the ask is already settled.
+ */
+function noteToolRefused(p: PendingConfirm, outcome: "denied" | "timed_out"): void {
+  const ctx = contextForRun(p.runId);
+  void workStore.noteToolRefusal(ctx, p.runId, { server: p.server, tool: p.tool, outcome })
+    .then((item) => broadcastWorkItem(ctx, item))
+    .catch((err) => console.error("[work] could not record a refused tool call:", (err as Error).message));
 }
 
 function handleHostedMcpConfirmRequest(runId: string, payload: Record<string, unknown>): void {
@@ -5731,6 +5753,14 @@ async function handleMcpCommand(ctx: TenantContext, cmd: McpCommand): Promise<vo
         runEventBus.resolveMcpConfirm(cmd.runId, cmd.nonce, verdict);
         console.log(`[mcp] ${pending.server}/${pending.tool} — ${verdict}`);
         relay.broadcastMcp(ctx, { type: "confirmResolved", runId: cmd.runId, nonce: cmd.nonce, verdict });
+        // A DENIAL IS RECORDED ON THE JOB — see `noteToolRefused`.
+        if (verdict === "deny") noteToolRefused(pending, "denied");
+        // AND THE JOB IS RUNNING AGAIN, which nothing said for a person's answer: `clearConfirms`
+        // finds the ask already gone, so the row sat at `waiting` until the run ended.
+        void workLifecycle.onConfirmResolved(ctx, cmd.runId)
+          .then((item) => broadcastWorkItem(ctx, item))
+          .catch((err) => console.error("[work] could not resume a waiting job:", (err as Error).message));
+        scheduleFleetRefresh(ctx);
         // The thread stops being blocked the moment this is answered, and §3.3 reads the confirm
         // queue live — so the fact changes here and the list has to hear about it.
         scheduleListRefresh(ctx);

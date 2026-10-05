@@ -23,7 +23,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   CLAUSE, COMPOSER, CONNECTION_LABEL, DESTRUCTIVE, DETAIL, EMPTY, FAILURE_SENTENCE, FILTERS,
-  GATE, HEADER, LIVE, OFFLINE, PUBLIC_NOTE, REFUSAL, STATUS_WORD, count,
+  GATE, HEADER, LIVE, OFFLINE, PUBLIC_NOTE, REFUSAL, REFUSED, STATUS_WORD, count,
 } from "./cockpitCopy.ts";
 import type { WorkFailureKind } from "../types.ts";
 
@@ -290,6 +290,17 @@ console.log("\nthe phrases three documents quote");
   // §9: every status has a word, because colour is never the only signal.
   check("all six statuses have a word", Object.values(STATUS_WORD).filter((w) => w.length > 0).length === 6);
   check("...and `waiting` says who is blocking", STATUS_WORD.waiting === "waiting on you");
+}
+
+// A job refused its tool reads `succeeded`, so the row's sentence is the only thing saying so —
+// and a denial (somebody's decision) and a timeout (nobody's) are said differently.
+{
+  check("one denial is said as a denial", REFUSED.row([{ outcome: "denied" }]) === "A tool call was denied");
+  check("one timeout says nobody answered", REFUSED.row([{ outcome: "timed_out" }]) === "A tool call went unanswered");
+  check("several of one kind are counted", REFUSED.row([{ outcome: "denied" }, { outcome: "denied" }]) === "2 tool calls were denied");
+  check("a mix is called refused", REFUSED.row([{ outcome: "denied" }, { outcome: "timed_out" }]) === "2 tool calls were refused");
+  check("the detail names who refused it, or that nobody did",
+    /person/.test(REFUSED.outcome.denied) && /nobody/.test(REFUSED.outcome.timed_out));
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

@@ -126,6 +126,33 @@ export const FAILURE_SENTENCE: Record<WorkFailureKind, string> = {
 };
 
 /**
+ * What a job that was refused a tool says about it — on the row, and in the detail panel.
+ *
+ * SAID ON EVERY SUCH ROW, WHATEVER ITS STATUS. A job refused its tool carries on without it and
+ * usually ends `succeeded`, with an apology for an answer and a bill; a list that showed only the
+ * status showed nine refused jobs as nine successes. The two outcomes are two sentences because
+ * they ask two different things of the reader: a denial was somebody's decision, and a timeout
+ * was nobody's.
+ */
+export const REFUSED = {
+  /** The row's one line. */
+  row: (refusals: readonly { outcome: "denied" | "timed_out" }[]): string => {
+    const timedOut = refusals.filter((r) => r.outcome === "timed_out").length;
+    const denied = refusals.length - timedOut;
+    if (denied === 0) return timedOut === 1 ? "A tool call went unanswered" : `${timedOut} tool calls went unanswered`;
+    if (timedOut === 0) return denied === 1 ? "A tool call was denied" : `${denied} tool calls were denied`;
+    return `${refusals.length} tool calls were refused`;
+  },
+  heading: "What it was refused",
+  outcome: {
+    denied: "denied by a person",
+    timed_out: "nobody answered in time, so it was denied",
+  },
+  /** Why a succeeded job with refusals may not have done its job. */
+  note: "It carried on without the tool, so what came back may not be what was asked for.",
+} as const;
+
+/**
  * The one word each status wears where a word is wanted — a chip's title, a glyph's `title`.
  *
  * NOT A REPLACEMENT FOR THE GLYPH. §9's rule is six statuses, six marks, and these are what the

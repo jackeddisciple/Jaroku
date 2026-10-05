@@ -825,6 +825,8 @@ export interface RecordForPrompt {
     cost_complete: boolean;
     run_id: string | null;
     trace_reviewed: boolean;
+    /** Tool calls it was refused. Optional so a caller with none to say need not say so. */
+    tool_refusals?: readonly { server: string; tool: string; outcome: string }[];
   }[];
   counts: Record<string, number>;
   truncation: { by_count: boolean; by_bytes: boolean; total: number };
@@ -873,6 +875,12 @@ There is therefore nothing you can report about what this agent has or has not d
       + field("result", i.output)
       + field("error", i.error)
       + `\n  took: ${duration(i.duration_ms)} · cost: ${money(i.cost_usd, i.cost_complete)}`
+      // A TOOL IT ASKED FOR AND DID NOT GET. Such a job usually ends `succeeded` with an apology for
+      // an answer, and a record that said only "succeeded" would let this report it as done.
+      + ((i.tool_refusals ?? []).length
+        ? `\n  tools refused: ${(i.tool_refusals ?? []).map((r) =>
+          `${r.server}/${r.tool} (${r.outcome === "timed_out" ? "nobody answered in time" : "denied by a person"})`).join(", ")}`
+        : "")
       + (i.status === "failed"
         ? `\n  trace: ${i.run_id ? (i.trace_reviewed ? "opened by somebody" : "NOT yet opened by anybody") : "none recorded"}`
         : "");

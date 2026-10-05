@@ -210,5 +210,27 @@ console.log("\nand the other boundary: a record that is real but incomplete");
   await db.close();
 }
 
+console.log("\nand a job that succeeded without the tool it asked for");
+{
+  // A REFUSED TOOL IS IN THE RECORD. Such a job ends `succeeded` with an apology for an answer, and
+  // a record that said only "succeeded" is one an answer could report as done.
+  const db = await openTestSqlite();
+  const agentId = await seedAgent(db, A);
+  const at = "2026-07-02T00:00:00.000Z";
+  await db.run(
+    `INSERT INTO work_items (id, workspace_id, agent_id, deployment_id, run_id, created_by,
+                             input, status, output, created_at, started_at, ended_at, created_seq,
+                             tool_refusals)
+     VALUES (?, ?, ?, ?, ?, ?, 'what is the event loop', 'succeeded', 'I could not reach the tool', ?, ?, ?, 0, ?)`,
+    [randomUUID(), A.workspaceId, agentId, DEPLOYMENT, randomUUID(), USER, at, at, at,
+     JSON.stringify([{ server: "deepwiki", tool: "ask_wiki_question", outcome: "timed_out", at }])],
+  );
+  const record = renderRecord(await buildFactPack(A, db.forWorkspace(A.workspaceId), deps,
+    { agents: [{ id: agentId, name: "Tracey" }] }));
+  check("the record names the tool it was refused, and that nobody answered",
+    record.includes("tools refused: deepwiki/ask_wiki_question (nobody answered in time)"), record);
+  await db.close();
+}
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 process.exit(fail === 0 ? 0 : 1);

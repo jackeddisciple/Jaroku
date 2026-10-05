@@ -2851,6 +2851,19 @@ export interface WorkItemView {
   duration_ms: number | null;
   /** False when the cost is a floor rather than a total. The row says so. */
   cost_complete: boolean;
+  /**
+   * Tool calls the job asked for and did not get — a person denied it, or nobody answered in time.
+   * Such a job usually ends `succeeded` with an apology for an answer, so this is what says why.
+   */
+  tool_refusals: ToolRefusalView[];
+}
+
+/** One tool call a job was refused. */
+export interface ToolRefusalView {
+  server: string;
+  tool: string;
+  outcome: "denied" | "timed_out";
+  at: string;
 }
 
 /** One job in full, for the detail panel: the same row plus what a row does not carry. */

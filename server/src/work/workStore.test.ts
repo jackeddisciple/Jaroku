@@ -21,14 +21,14 @@
 
 import { randomUUID } from "node:crypto";
 
-import { openTestSqlite, testContext } from "../db/testDb.ts";
+import { openTestSqlite, testContext, withScratchPostgres } from "../db/testDb.ts";
 import { AgentRepository } from "../db/repositories/agents.ts";
 import { DeployStore } from "../deployStore.ts";
 import { IdentityRepository } from "../db/repositories/identity.ts";
 import { newRequestId, systemContext, type TenantContext } from "../db/tenant.ts";
 import type { Db } from "../db/db.ts";
 import {
-  MAX_WORK_INPUT_BYTES, WorkInputTooLarge, WorkStore, WORK_PAGE, WORK_STATUSES,
+  MAX_TOOL_REFUSALS, MAX_WORK_INPUT_BYTES, WorkInputTooLarge, WorkStore, WORK_PAGE, WORK_STATUSES,
   isWorkFailureKind, isWorkStatus,
 } from "./workStore.ts";
 
@@ -288,6 +288,45 @@ console.log("\nfilters, counts and transitions");
 
   await db.close();
 }
+
+// --- 5b. a tool the job was refused is kept on the job ----------------------------------------
+//
+// A deployed job denied its high-impact tool — by a person, or by nobody answering in time — ran
+// on without it and ended `succeeded`, with nothing saying the tool was ever refused.
+async function refusals(label: string, db: Db): Promise<void> {
+  const { ctx, agentId, deploymentId } = await fixture(db);
+  const store = new WorkStore(db);
+  const runId = randomUUID();
+  const job = await store.create(ctx, { agentId, deploymentId, runId, input: "what is the event loop" });
+  check(`${label}: a fresh job was refused nothing`, job.tool_refusals.length === 0);
+
+  await store.noteToolRefusal(ctx, runId, { server: "deepwiki", tool: "ask_wiki_question", outcome: "denied" });
+  const after = await store.noteToolRefusal(ctx, runId, {
+    server: "deepwiki", tool: "ask_wiki_question", outcome: "timed_out",
+  });
+  check(`${label}: both refusals are kept, in order`,
+    after?.tool_refusals.map((r) => r.outcome).join(",") === "denied,timed_out", JSON.stringify(after?.tool_refusals));
+  check(`${label}: ...naming the tool`, after?.tool_refusals[0]?.tool === "ask_wiki_question"
+    && after.tool_refusals[0].server === "deepwiki");
+  await store.finish(ctx, job.id, { status: "succeeded", output: "Sorry, I could not reach the tool." });
+  const done = await store.get(ctx, job.id);
+  check(`${label}: ...and survive the job ending succeeded`,
+    done?.status === "succeeded" && done.tool_refusals.length === 2);
+  check(`${label}: a run that is no job is refused nothing and written nowhere`,
+    (await store.noteToolRefusal(ctx, randomUUID(), { server: "s", tool: "t", outcome: "denied" })) === undefined);
+  check(`${label}: the page carries them too`,
+    (await store.list(ctx, { scope: "all" })).items.find((i) => i.id === job.id)?.tool_refusals.length === 2);
+
+  // A graph that loops on a denied tool must not grow the row without bound.
+  for (let i = 0; i < 30; i++) {
+    await store.noteToolRefusal(ctx, runId, { server: "s", tool: `t${i}`, outcome: "denied" });
+  }
+  check(`${label}: at most ${MAX_TOOL_REFUSALS} are kept, the newest`,
+    (await store.get(ctx, job.id))?.tool_refusals.length === MAX_TOOL_REFUSALS
+      && (await store.get(ctx, job.id))?.tool_refusals.at(-1)?.tool === "t29");
+}
+await refusals("sqlite", await openTestSqlite());
+await withScratchPostgres((pg) => refusals("postgres", pg));
 
 // --- 6. the page ceiling holds ------------------------------------------------------------------
 

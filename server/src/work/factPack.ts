@@ -30,7 +30,9 @@
 import { asInt, type Queryable } from "../db/db.ts";
 import type { TenantContext } from "../db/tenant.ts";
 import { costsForItems, type WorkCost } from "./cost.ts";
-import type { WorkFailureKind, WorkItem, WorkStatus } from "./workStore.ts";
+import {
+  parseRefusals, type ToolRefusal, type WorkFailureKind, type WorkItem, type WorkStatus,
+} from "./workStore.ts";
 
 /**
  * How many items a pack may carry.
@@ -98,6 +100,8 @@ export interface WorkFactRow {
    * is nothing outstanding to look at, which is what the word is being used for.
    */
   trace_reviewed: boolean;
+  /** Tool calls it asked for and did not get — denied, or nobody answered. Empty for most jobs. */
+  tool_refusals: ToolRefusal[];
 }
 
 /**
@@ -224,7 +228,7 @@ export async function buildFactPack(
   const [rows, countRows, models, unreviewed] = await Promise.all([
     q.all<Record<string, unknown>>(
       `SELECT id, agent_id, deployment_id, run_id, input, status, output, error, failure_kind,
-              created_at, started_at, ended_at, created_seq
+              created_at, started_at, ended_at, created_seq, tool_refusals
          FROM work_items
         WHERE workspace_id = ? AND agent_id IN (${holes})
         ORDER BY created_at DESC, created_seq DESC
@@ -272,6 +276,7 @@ export async function buildFactPack(
     started_at: r["started_at"] === null || r["started_at"] === undefined ? null : String(r["started_at"]),
     ended_at: r["ended_at"] === null || r["ended_at"] === undefined ? null : String(r["ended_at"]),
     created_seq: asInt(r["created_seq"]),
+    tool_refusals: parseRefusals(r["tool_refusals"]),
   }));
 
   // COST FROM `steps`, NEVER `runs.cost` — §10, and `cost.ts`'s header opens with the reason. The
@@ -305,6 +310,7 @@ export async function buildFactPack(
       // ONLY A FAILURE CAN BE UNREVIEWED. Anything else has nothing outstanding to look at, and
       // reporting a succeeded job as "nobody opened its trace" would be true and useless.
       trace_reviewed: item.status !== "failed" || !item.run_id || !unreviewed.has(item.run_id),
+      tool_refusals: item.tool_refusals,
     };
     const size = rowBytes(row);
     // THE FIRST ROW ALWAYS GOES IN, even if it alone is over budget. A pack that could be empty

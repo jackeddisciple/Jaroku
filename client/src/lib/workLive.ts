@@ -213,6 +213,8 @@ export function optimisticRow(input: {
     tokens: null,
     duration_ms: null,
     cost_complete: true,
+    // Nothing has been asked of a tool yet, let alone refused.
+    tool_refusals: [],
   };
 }
 

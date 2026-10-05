@@ -78,7 +78,7 @@ const job = (id: string, patch: Partial<WorkItemView> = {}): WorkItemView => ({
   created_by: "u", created_by_name: "Tester", input_preview: "refund order 4471",
   status: "succeeded", output_preview: null, error: null, failure_kind: null,
   created_at: new Date().toISOString(), started_at: null, ended_at: null,
-  cost_usd: 0.0031, tokens: 900, duration_ms: 4200, cost_complete: true,
+  cost_usd: 0.0031, tokens: 900, duration_ms: 4200, cost_complete: true, tool_refusals: [],
   ...patch,
 });
 

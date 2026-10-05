@@ -26,7 +26,7 @@ import { pictureBySlug } from "../lib/agentPicture.ts";
 import { categoryBySlug } from "../lib/agentCategory.ts";
 import { AgentFace, FACE_SIZE } from "./AgentFace.tsx";
 
-import { DESTRUCTIVE, EMPTY, FAILURE_SENTENCE, FILTERS, HEADER, LIVE, STATUS_WORD } from "../lib/cockpitCopy.ts";
+import { DESTRUCTIVE, EMPTY, FAILURE_SENTENCE, FILTERS, HEADER, LIVE, REFUSED, STATUS_WORD } from "../lib/cockpitCopy.ts";
 import { cockpitCost, cockpitTime } from "../lib/cockpitFormat.ts";
 import { rowColumns, type RowColumns } from "../lib/workRow.ts";
 import { dayAt, flattenWork, workWindow } from "../lib/workWindow.ts";
@@ -145,6 +145,16 @@ function Row({ item, columns, marks, categories }: {
             <Truncate className="hidden min-w-0 max-w-[28ch] shrink text-caption text-muted md:block"
               title={FAILURE_SENTENCE[item.failure_kind]}>
               {FAILURE_SENTENCE[item.failure_kind]}
+            </Truncate>
+          )}
+
+          {/* A TOOL IT WAS REFUSED, IN THE SAME SLOT. Such a job usually ends `succeeded`, with an
+              apology for an answer — and a list showing only the tick read nine refused jobs as
+              nine successes. Said whatever the status, because the status cannot say it. */}
+          {!item.failure_kind && (item.tool_refusals ?? []).length > 0 && (
+            <Truncate className="hidden min-w-0 max-w-[28ch] shrink text-caption text-muted md:block"
+              title={`${REFUSED.row(item.tool_refusals)}. ${REFUSED.note}`}>
+              {REFUSED.row(item.tool_refusals)}
             </Truncate>
           )}
 

@@ -30,7 +30,7 @@ import type { HealthState } from "../deployOps.ts";
 import { isPriced as isPricedModel, round8 } from "../pricing.ts";
 import { costsForItems, type WorkCost } from "./cost.ts";
 import { preview } from "./payload.ts";
-import type { ListWorkFilters, WorkItem, WorkStatus, WorkStore } from "./workStore.ts";
+import type { ListWorkFilters, ToolRefusal, WorkItem, WorkStatus, WorkStore } from "./workStore.ts";
 
 /**
  * A deployment's credential state, as §9's four.
@@ -76,6 +76,11 @@ export interface WorkItemView {
   duration_ms: number | null;
   /** False when the cost is a floor rather than a total. The card says so. */
   cost_complete: boolean;
+  /**
+   * Tool calls the job asked for and did not get — migration 082. A job refused its tool usually
+   * ends `succeeded` with an apology for an answer, so the row has to say this as well as the status.
+   */
+  tool_refusals: ToolRefusal[];
 }
 
 /** One job in full, for the detail panel. The same shape plus what a row does not carry. */
@@ -527,6 +532,7 @@ function view(
     tokens: cost?.tokens ?? null,
     duration_ms: cost?.duration_ms ?? null,
     cost_complete: cost?.cost_complete ?? true,
+    tool_refusals: item.tool_refusals,
   };
 }
 
