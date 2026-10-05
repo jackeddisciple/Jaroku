@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import "./index.css";
 import { App } from "./App.tsx";
 import { onDeepLink } from "./lib/deepLink.ts";
+import { openWorkLink, workLinkFrom } from "./lib/workLink.ts";
 import { offerAuthCallback, readAuthCallback } from "./lib/authLink.ts";
 import { onBackendStatus } from "./lib/hostBackend.ts";
 import { useHostStore } from "./store/hostStore.ts";
@@ -19,8 +20,8 @@ import { hydrateSession } from "./lib/auth.ts";
 // module is that thing, and it is also the reason `onDeepLink` is idempotent about being called
 // once — it is called once.
 //
-// IT ACTS ON TWO ACTIONS AND LOGS THE REST, and both of them are about this window rather than
-// about anything in a workspace. `parseDeepLink` has already done the part that belongs to it:
+// IT ACTS ON THREE ACTIONS AND LOGS THE REST: the two below about this window, and a shared job
+// link, which opens that job in the Cockpit. `parseDeepLink` has already done the part that belongs to it:
 // proved the scheme, matched the action against a list, and refused everything it did not
 // recognise. In a browser this call does nothing at all and returns a no-op.
 //
@@ -61,7 +62,13 @@ onDeepLink((link) => {
   // the webhook says so and the poll agrees, which is why there is no `setTier` here.
   if (link.action === "billing") {
     useUiStore.getState().openWorkspacePanel("billing");
+    return;
   }
+
+  // A JOB SOMEBODY SHARED — the Cockpit's copy chip puts this link on the clipboard. Read through
+  // `parseWorkLink`, the one reading of the shape, from the URL the shell received.
+  const job = workLinkFrom(link);
+  if (job) openWorkLink(job);
 });
 
 // WHAT THE HOST SAYS ABOUT ITS BACKEND, subscribed here for the same reason and one more.

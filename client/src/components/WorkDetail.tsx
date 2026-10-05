@@ -500,12 +500,25 @@ export function WorkDetail() {
                 AND IT COPIES A LINK RATHER THAN THE BARE ID — §20: "Give every work item an
                 addressable identity SO A FAILED JOB CAN BE PASTED TO A TEAMMATE." A uuid in a chat
                 message is a string nobody can do anything with; `jaroku://open?workspace=…` is the
-                shape `deepLink.ts` reserved for exactly this, and `workLink.ts` says plainly which
-                half of §20's offer was taken: the item is addressable, the receiving handler is
-                not built. The chip still SHOWS the id, because that is what a person recognises. */}
+                shape `deepLink.ts` reserved for exactly this, and opening one now opens the job —
+                see `openWorkLink`. The chip still SHOWS the id, because that is what a person
+                recognises. */}
             <button
               type="button"
-              onClick={() => void navigator.clipboard?.writeText(workLink(workspaceId ?? "", item.id))}
+              // SAID WHEN IT WORKED, AND WHEN IT DID NOT. It copied in silence, so nobody could tell
+              // whether the press had done anything; and a clipboard the page may not write to is
+              // a real state, in which the id itself is the most useful thing to show.
+              onClick={() => {
+                const copy = navigator.clipboard?.writeText(workLink(workspaceId ?? "", item.id));
+                if (!copy) {
+                  useUiStore.getState().showToast(`Could not copy — the job is ${item.id}`, "err");
+                  return;
+                }
+                void copy.then(
+                  () => useUiStore.getState().showToast(DETAIL.copied, "ok"),
+                  () => useUiStore.getState().showToast(`Could not copy — the job is ${item.id}`, "err"),
+                );
+              }}
               title={DETAIL.copyId}
               aria-label={DETAIL.copyId}
               className="ml-auto inline-flex items-center gap-1 transition-opacity duration-fast hover:opacity-80 focus-visible:outline-none focus-visible:shadow-focusring"

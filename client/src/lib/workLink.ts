@@ -8,24 +8,22 @@
 // Whether you implement the handler here or only make the item addressable, SAY WHICH — but do not
 // invent a second URL shape beside the one already reserved."
 //
-// SO: THE ITEM IS ADDRESSABLE AND THE HANDLER IS NOT BUILT. That is the honest half of the choice
-// §20 offers, and this comment is the "say which" it asks for. What exists is a URL anybody can
-// produce, paste and read; what does not exist is the code that receives one and opens the job.
-//
-// WHY THAT DIVISION AND NOT THE OTHER. The address is the half with a deadline: the moment somebody
-// copies an id out of this product into a chat, the shape of what they copied is fixed by habit
-// whether or not it was designed. The handler has no deadline — a link that parses and does nothing
-// is what `deepLink.ts` already produces for `open`, and it logs rather than erroring, so a link
-// pasted today is inert rather than broken. Building the receiver means switching the workspace
-// first, which is a flow with its own confirmations (`WorkspaceSwitchLock`), and putting that on
-// the end of this pass would be the largest untested path in it.
+// THE ITEM IS ADDRESSABLE AND THE HANDLER IS BUILT — `openWorkLink` below, called from `main.tsx`
+// when the operating system hands this window a `jaroku://` URL. It was not, at first: the copy chip
+// put this link on the clipboard and opening it did nothing at all, so "paste a failed job to a
+// teammate", the whole reason the address exists, led nowhere. Opening one switches workspace first
+// when the job is in another one the person belongs to, through the ordinary `switchWorkspace` with
+// its own lock, and says so when they do not belong to it.
 //
 // THE WORKSPACE IS IN THE URL FOR EXACTLY THAT REASON. A link that named only the item would be
 // unopenable by the person who receives it — work items are scoped, and a reader in the wrong
 // workspace would get a refusal rather than a job. Carrying the workspace means the day the handler
 // is written it has what it needs, and means a link is self-describing today.
 
-import { parseDeepLink } from "./deepLink.ts";
+import { parseDeepLink, type DeepLink } from "./deepLink.ts";
+import { sendLoadWorkItem, switchWorkspace } from "./socket.ts";
+import { useSessionStore } from "../store/sessionStore.ts";
+import { useUiStore } from "../store/uiStore.ts";
 
 /**
  * The resource prefix. One word, and it is the CHANNEL's name rather than the table's.
@@ -64,7 +62,11 @@ export function workLink(workspaceId: string, itemId: string): string {
  * and there is nothing different worth doing about any of them.
  */
 export function parseWorkLink(raw: unknown): { workspaceId: string; itemId: string } | null {
-  const link = parseDeepLink(raw);
+  return workLinkFrom(parseDeepLink(raw));
+}
+
+/** The same reading, of a link `parseDeepLink` has already parsed — what the shell's event carries. */
+export function workLinkFrom(link: DeepLink | null): { workspaceId: string; itemId: string } | null {
   if (!link || link.action !== "open") return null;
   const workspaceId = link.params["workspace"];
   const resource = link.params["resource"];
@@ -75,4 +77,38 @@ export function parseWorkLink(raw: unknown): { workspaceId: string; itemId: stri
   // A RESOURCE WITH NO ID IS NOT A WORK LINK. `work/` alone parses as a path and names nothing,
   // and answering with an empty id would hand a caller a lookup that cannot fail usefully.
   return itemId ? { workspaceId, itemId } : null;
+}
+
+/**
+ * Open the job a link names: in this workspace, or — if the person belongs to it — in the one it
+ * names, switching there first.
+ *
+ * NOTHING IS BELIEVED FROM THE LINK. The workspace has to be one the session already lists, and the
+ * job is asked for under that workspace's scope like any other read, so a link to somebody else's
+ * job answers "no such job" rather than showing it. A session that is not ready yet (the link
+ * started the application) waits until it is.
+ */
+export function openWorkLink(link: { workspaceId: string; itemId: string }): void {
+  const session = useSessionStore.getState();
+  if (session.status !== "ready") {
+    const stop = useSessionStore.subscribe((s) => {
+      if (s.status !== "ready") return;
+      stop();
+      openWorkLink(link);
+    });
+    return;
+  }
+  if (!session.workspaces.some((w) => w.id === link.workspaceId)) {
+    useUiStore.getState().showToast("That job is in a workspace you are not a member of", "err");
+    return;
+  }
+  const switching = session.workspaceId !== link.workspaceId;
+  if (switching) switchWorkspace(link.workspaceId);
+  useUiStore.getState().openCockpitAtItem(link.itemId);
+  // In the same workspace the socket is already open, and the Cockpit may already be mounted — so
+  // the job is asked for now rather than left to an effect that has already run.
+  if (!switching) {
+    useUiStore.getState().takeCockpitItemIntent();
+    sendLoadWorkItem(link.itemId);
+  }
 }

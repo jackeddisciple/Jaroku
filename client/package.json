@@ -87,6 +87,7 @@
     "test:work-badge": "tsx src/store/workBadge.test.ts",
     "test:work-delta": "tsx src/store/workDelta.test.ts",
     "test:socket-heartbeat": "tsx src/lib/socketHeartbeat.test.ts",
+    "test:work-link": "tsx src/lib/workLink.test.ts",
     "test:fleet-sentence": "tsx src/lib/fleetSentence.test.ts",
     "test:work-glyphs": "tsx src/components/workGlyphs.test.ts",
     "test:status-glyph": "tsx src/components/statusGlyph.test.ts",

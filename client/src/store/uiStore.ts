@@ -323,6 +323,15 @@ interface UiState {
   openCockpitForAgent: (agentId: string | null) => void;
   takeCockpitAgentIntent: () => string | null;
   /**
+   * Open the Cockpit on one job — what a pasted job link asks for (`lib/workLink.ts`).
+   *
+   * AN INTENT FOR THE SAME REASON AS THE AGENT'S: the link may first switch workspace, which empties
+   * every store and closes the socket, and the job can only be asked for once the new one is open.
+   */
+  cockpitItemIntent: string | null;
+  openCockpitAtItem: (itemId: string) => void;
+  takeCockpitItemIntent: () => string | null;
+  /**
    * Whether the sidebar is hidden. Chrome, not navigation: the destination stays selected, the
    * three panes keep their sizes, and showing it again is one control — so this is the one piece of
    * layout state that is NOT persisted. A window that reopened with its sidebar gone would look
@@ -621,6 +630,17 @@ export const useUiStore = create<UiState>((set) => ({
   openNav: (navView) => set({ navView, navSection: navView }),
   inboxAgentIntent: null,
   cockpitAgentIntent: undefined,
+  cockpitItemIntent: null,
+  openCockpitAtItem: (itemId) =>
+    set({ cockpitItemIntent: itemId, navView: "work", navSection: "work" }),
+  takeCockpitItemIntent: () => {
+    let intent: string | null = null;
+    useUiStore.setState((s) => {
+      intent = s.cockpitItemIntent;
+      return s.cockpitItemIntent === null ? {} : { cockpitItemIntent: null };
+    });
+    return intent;
+  },
   openInboxForAgent: (agentId) =>
     set({ inboxAgentIntent: agentId, navView: "inbox", navSection: "inbox" }),
   openCockpitForAgent: (agentId) =>

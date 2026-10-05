@@ -44,7 +44,7 @@ import { useEffect } from "react";
 import { EMPTY, HEADER, OFFLINE } from "../lib/cockpitCopy.ts";
 import { CARD_HEIGHT, CARD_WIDTH, ROW_HEIGHT, SPINE_X } from "../lib/cockpitLayout.ts";
 import { selectAgent } from "../lib/selection.ts";
-import { sendListFleet, sendListWork } from "../lib/socket.ts";
+import { sendListFleet, sendListWork, sendLoadWorkItem } from "../lib/socket.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
@@ -218,6 +218,12 @@ export function CockpitView() {
     if (intent !== null) setFilters({ agentId: intent, scope: "all" });
     sendListWork();
     sendListFleet();
+    // A JOB SOMEBODY OPENED BY ITS LINK, asked for once there is a socket to ask on — the link may
+    // have switched workspace first, which closes the old one.
+    if (connected) {
+      const item = useUiStore.getState().takeCockpitItemIntent();
+      if (item) sendLoadWorkItem(item);
+    }
   }, [takeCockpitAgentIntent, setFilters, workspaceId, connected]);
 
   return (
