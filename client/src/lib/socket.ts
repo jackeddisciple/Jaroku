@@ -1924,8 +1924,8 @@ export function sendLoadDeployLogs(deploymentId: string, sinceSeq?: number): voi
 /**
  * Store the user's Railway token. `null` removes it.
  *
- * Travels one way, exactly as a provider key does: written to runtime/.env server-side by the
- * same credential writer, and the answer is `railwayConfigured: true` — never the token.
+ * Travels one way, exactly as a provider key does: kept server-side for THIS workspace alone, and
+ * the answer is `railwayConfigured: true` — never the token.
  */
 export function sendSetRailwayToken(token: string | null): void {
   send({ cmd: "setRailwayToken", token });

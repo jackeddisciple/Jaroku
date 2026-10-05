@@ -86,8 +86,8 @@ export interface ReconnectOutcome {
 
 export interface DeployOpsDeps {
   store: DeployStore;
-  /** The workspace's Railway token, read at the moment of use and never held. */
-  token: () => string | undefined;
+  /** The ASKING workspace's Railway token, read at the moment of use and never held. */
+  token: (ctx: TenantContext) => Promise<string | null | undefined>;
   /** Put a fresh serve token where the dispatcher can find it. Returns a warning, or null. */
   storeServeToken: (e: { ctx: TenantContext; serviceId: string; token: string }) => Promise<string | null>;
   /** Whether this caller may destroy things in the user's hosting account. */
@@ -114,8 +114,8 @@ export class DeployOps {
     this.now = deps.now ?? (() => Date.now());
   }
 
-  private api(scrub: (t: string) => string = (t) => t): RailwayApi {
-    const token = this.deps.token();
+  private async api(ctx: TenantContext, scrub: (t: string) => string = (t) => t): Promise<RailwayApi> {
+    const token = await this.deps.token(ctx);
     if (!token) throw new RailwayError("auth", "no Railway token is configured for this workspace", "deployOps");
     return this.deps.apiFor?.(token, scrub) ?? new RailwayApi({ token, scrub });
   }
@@ -243,9 +243,9 @@ export class DeployOps {
     const row = await this.deps.store.get(ctx, deploymentId);
     if (!row?.railway_deployment_id) return { lines: [], cursor: opts.since ?? null };
 
-    const token = this.deps.token();
+    const token = await this.deps.token(ctx);
     const scrub = makeScrubber([token ?? ""].filter(Boolean));
-    const raw = await this.api(scrub).deploymentLogs(row.railway_deployment_id, opts.limit ?? RUNTIME_LOG_PAGE);
+    const raw = await (await this.api(ctx, scrub)).deploymentLogs(row.railway_deployment_id, opts.limit ?? RUNTIME_LOG_PAGE);
 
     const since = opts.since ?? null;
     const lines = raw
@@ -290,7 +290,7 @@ export class DeployOps {
     }
 
     try {
-      await this.api().deleteService(row.railway_service_id);
+      await (await this.api(ctx)).deleteService(row.railway_service_id);
     } catch (err) {
       const message = err instanceof RailwayError ? err.message : (err as Error).message;
       // SETTLED ANYWAY, AND SAID PLAINLY. The user asked to stop it and Jaroku could not; leaving
@@ -338,9 +338,9 @@ export class DeployOps {
     // The same shape a deploy mints. Not derived from anything — a token that could be
     // recomputed from the deployment id would be a token anybody holding the id could compute.
     const token = randomBytes(24).toString("base64url");
-    const scrub = makeScrubber([token, this.deps.token() ?? ""].filter(Boolean));
+    const scrub = makeScrubber([token, (await this.deps.token(ctx)) ?? ""].filter(Boolean));
     try {
-      await this.api(scrub).upsertVariables(target, { JAROKU_SERVE_TOKEN: token });
+      await (await this.api(ctx, scrub)).upsertVariables(target, { JAROKU_SERVE_TOKEN: token });
     } catch (err) {
       const message = err instanceof RailwayError ? err.message : (err as Error).message;
       return { ok: false, detail: `could not set the new token on Railway: ${scrub(message)}`, restartsService: false, token: null };

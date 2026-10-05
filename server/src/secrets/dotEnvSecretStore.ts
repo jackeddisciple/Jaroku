@@ -38,8 +38,9 @@ import { serveTokenEnvKeyFor, type CredentialWriter } from "../envWriter.ts";
 import type { TenantContext } from "../db/tenant.ts";
 import type { ElevationReceipt } from "./elevation.ts";
 import type { SecretRefRepository } from "../db/repositories/secretRefs.ts";
+import { RAILWAY_ENV_KEY } from "../railwayApi.ts";
 import {
-  assertSecretName, type SecretRef, type SecretStore, type SetResult,
+  NEVER_FOR_A_RUN, assertSecretName, type SecretRef, type SecretStore, type SetResult,
 } from "./secretStore.ts";
 
 export interface DotEnvSecretStoreOptions {
@@ -60,8 +61,13 @@ export interface DotEnvSecretStoreOptions {
   refs?: SecretRefRepository;
 }
 
-/** Names that are Jaroku's own plumbing rather than a user's credential. Never listed. */
-const NOT_A_SECRET = /^(JAROKU_(?!MCP_)|NODE_|PATH$|HOME$|PWD$|SHELL$|LANG$|TERM$)/;
+/**
+ * Names that are Jaroku's own plumbing rather than a user's credential. Never listed.
+ *
+ * The Railway account token is among them: it is the Deploy panel's, behind its own door
+ * (`getRailwayToken`), and the hosted store never lists it either.
+ */
+const NOT_A_SECRET = /^(JAROKU_(?!MCP_)|NODE_|PATH$|HOME$|PWD$|SHELL$|LANG$|TERM$|RAILWAY_API_TOKEN$)/;
 
 export class DotEnvSecretStore implements SecretStore {
   readonly kind = "dotenv" as const;
@@ -99,6 +105,7 @@ export class DotEnvSecretStore implements SecretStore {
     const out: Record<string, string> = {};
     const at = new Date().toISOString();
     for (const name of names) {
+      if (NEVER_FOR_A_RUN.has(name)) continue;
       const value = process.env[name];
       // Absent rather than empty. A blank value would turn "you have not configured this" into
       // a 401 from somebody else's API with nothing pointing at the cause.
@@ -160,6 +167,27 @@ export class DotEnvSecretStore implements SecretStore {
     const written = this.opts.writer.set(name, token);
     if (written.ok) process.env[name] = token;
     return written;
+  }
+
+  /**
+   * See `SecretStore.getRailwayToken`.
+   *
+   * The process environment, which is where the file put it and where `setRailwayToken` writes
+   * it. One value for the machine — this store refuses to run under NODE_ENV=production for
+   * exactly that reason, and on a desktop the machine is the person.
+   */
+  async getRailwayToken(_ctx: TenantContext): Promise<string | null> {
+    const value = process.env[RAILWAY_ENV_KEY];
+    return typeof value === "string" && value.length > 0 ? value : null;
+  }
+
+  /** See `SecretStore.setRailwayToken`. Through the one writer of `runtime/.env`, like the rest. */
+  async setRailwayToken(_ctx: TenantContext, token: string | null): Promise<SetResult> {
+    if (token === null) {
+      this.opts.writer.clear(RAILWAY_ENV_KEY);
+      return { ok: true, warning: null };
+    }
+    return this.opts.writer.set(RAILWAY_ENV_KEY, token);
   }
 
   /**

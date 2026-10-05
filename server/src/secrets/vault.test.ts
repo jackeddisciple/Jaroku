@@ -172,6 +172,35 @@ async function suite(label: string, db: Db): Promise<void> {
   );
   await store.set(A, "ANTHROPIC_API_KEY", "sk-ant-belongs-to-A");
 
+  // --- the Railway account token is one per workspace ---------------------------------
+  //
+  // It was one per PROCESS: written to runtime/.env and process.env, so on a hosted server one
+  // tenant's Railway account deployed every tenant's agents and any of them could replace it.
+  console.log("\n  the Railway account token, per workspace");
+  check((await store.getRailwayToken(B)) === null, "a workspace that set no Railway token has none");
+  await store.setRailwayToken(A, "railway-token-of-A");
+  check((await store.getRailwayToken(A)) === "railway-token-of-A", "A's token reads back for A");
+  check((await store.getRailwayToken(B)) === null, "...and B still has none — it is not the server's");
+  await store.setRailwayToken(B, "railway-token-of-B");
+  check(
+    (await store.getRailwayToken(A)) === "railway-token-of-A" && (await store.getRailwayToken(B)) === "railway-token-of-B",
+    "B setting its own replaces nothing of A's",
+  );
+  await store.setRailwayToken(B, null);
+  check(
+    (await store.getRailwayToken(B)) === null && (await store.getRailwayToken(A)) === "railway-token-of-A",
+    "B removing its token leaves A's in place",
+  );
+  check(
+    !("RAILWAY_API_TOKEN" in (await store.getForRun(runA, ["RAILWAY_API_TOKEN"]))),
+    "an agent's run is never handed the account token, even by name",
+  );
+  check(
+    !(await store.listNames(A)).some((r) => r.name === "RAILWAY_API_TOKEN"),
+    "...and it is the Deploy panel's, not a row in the credentials list",
+  );
+  await store.setRailwayToken(A, null);
+
   // --- the binding -------------------------------------------------------------------
   console.log("\n  a ciphertext is bound to the row it was written for");
   const raw = await db

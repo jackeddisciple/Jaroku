@@ -91,7 +91,7 @@ function fakeApi(script: {
   let clock = Date.UTC(2026, 7, 27, 12, 0, 0);
   const ops = new DeployOps({
     store,
-    token: () => RAILWAY_TOKEN,
+    token: async () => RAILWAY_TOKEN,
     storeServeToken: async () => null,
     canKill: () => true,
     now: () => clock,
@@ -157,7 +157,7 @@ function fakeApi(script: {
     ],
   });
   const ops = new DeployOps({
-    store, token: () => RAILWAY_TOKEN, storeServeToken: async () => null, canKill: () => true,
+    store, token: async () => RAILWAY_TOKEN, storeServeToken: async () => null, canKill: () => true,
     apiFor: () => api,
   });
 
@@ -202,7 +202,7 @@ function fakeApi(script: {
 {
   const dep = await seed();
   const denied = new DeployOps({
-    store, token: () => RAILWAY_TOKEN, storeServeToken: async () => null, canKill: () => false,
+    store, token: async () => RAILWAY_TOKEN, storeServeToken: async () => null, canKill: () => false,
     apiFor: () => fakeApi({}).api,
   });
   const refusal = await denied.kill(ctx, dep.id);
@@ -215,7 +215,7 @@ function fakeApi(script: {
   const dep = await seed();
   const { api, calls } = fakeApi({});
   const ops = new DeployOps({
-    store, token: () => RAILWAY_TOKEN, storeServeToken: async () => null, canKill: () => true,
+    store, token: async () => RAILWAY_TOKEN, storeServeToken: async () => null, canKill: () => true,
     apiFor: () => api,
   });
   const outcome = await ops.kill(ctx, dep.id);
@@ -235,7 +235,7 @@ function fakeApi(script: {
   const dep = await seed();
   const { api } = fakeApi({ failDelete: "service not found" });
   const ops = new DeployOps({
-    store, token: () => RAILWAY_TOKEN, storeServeToken: async () => null, canKill: () => true,
+    store, token: async () => RAILWAY_TOKEN, storeServeToken: async () => null, canKill: () => true,
     apiFor: () => api,
   });
   const outcome = await ops.kill(ctx, dep.id);
@@ -255,7 +255,7 @@ function fakeApi(script: {
   const stored: { serviceId: string; token: string }[] = [];
   const { api, calls } = fakeApi({});
   const ops = new DeployOps({
-    store, token: () => RAILWAY_TOKEN, canKill: () => true, apiFor: () => api,
+    store, token: async () => RAILWAY_TOKEN, canKill: () => true, apiFor: () => api,
     storeServeToken: async ({ serviceId, token }) => { stored.push({ serviceId, token }); return null; },
   });
 
@@ -285,7 +285,7 @@ function fakeApi(script: {
   const dep = await seed();
   const { api } = fakeApi({});
   const ops = new DeployOps({
-    store, token: () => RAILWAY_TOKEN, canKill: () => true, apiFor: () => api,
+    store, token: async () => RAILWAY_TOKEN, canKill: () => true, apiFor: () => api,
     storeServeToken: async () => "the vault is locked",
   });
   const outcome = await ops.reconnect(ctx, dep.id);
@@ -299,7 +299,7 @@ function fakeApi(script: {
   const dep = await seed();
   const { api } = fakeApi({ failVariables: "unauthorized" });
   const ops = new DeployOps({
-    store, token: () => RAILWAY_TOKEN, canKill: () => true, apiFor: () => api,
+    store, token: async () => RAILWAY_TOKEN, canKill: () => true, apiFor: () => api,
     storeServeToken: async () => null,
   });
   const outcome = await ops.reconnect(ctx, dep.id);

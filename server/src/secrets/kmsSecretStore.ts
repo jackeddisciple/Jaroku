@@ -35,8 +35,9 @@ import type { SecretRefRepository } from "../db/repositories/secretRefs.ts";
 import {
   newDataKey, openWithDataKey, sealWithDataKey, type MasterKeyProvider,
 } from "./masterKey.ts";
+import { RAILWAY_ENV_KEY } from "../railwayApi.ts";
 import {
-  assertSecretName, unstorableReason, type RunWorkspaceResolver, type SecretRef,
+  NEVER_FOR_A_RUN, assertSecretName, unstorableReason, type RunWorkspaceResolver, type SecretRef,
   type SecretStore, type SetResult,
 } from "./secretStore.ts";
 
@@ -127,7 +128,7 @@ export class KmsSecretStore implements SecretStore {
     // No such run means no secrets. Never "all of them", and never the caller's own scope: a
     // run id that does not resolve is the one case where guessing is a cross-tenant leak.
     if (!workspaceId) return {};
-    return this.decryptInto(workspaceId, names);
+    return this.decryptInto(workspaceId, names.filter((n) => !NEVER_FOR_A_RUN.has(n)));
   }
 
   /** The decryption itself, shared by the two plaintext exits so they cannot drift apart in how
@@ -188,7 +189,7 @@ export class KmsSecretStore implements SecretStore {
    * and therefore cannot be used to read a workspace's key from inside a sandbox.
    */
   async getForPlatformCall(ctx: TenantContext, names: string[]): Promise<Record<string, string>> {
-    return this.decryptInto(ctx.workspaceId, names);
+    return this.decryptInto(ctx.workspaceId, names.filter((n) => !NEVER_FOR_A_RUN.has(n)));
   }
 
   /**
@@ -216,6 +217,38 @@ export class KmsSecretStore implements SecretStore {
    */
   async setServeToken(ctx: TenantContext, serviceId: string, token: string): Promise<SetResult> {
     return this.seal(ctx.workspaceId, serveTokenEnvKeyFor(serviceId), token);
+  }
+
+  /**
+   * See `SecretStore.getRailwayToken`.
+   *
+   * ONE ROW PER WORKSPACE, sealed under that workspace's data key and bound to it by the
+   * authenticated data, so a ciphertext moved between tenants fails to open rather than deploying
+   * into the wrong account. Opened directly rather than through `decryptInto`: this is not a run
+   * receiving a credential, and recording it as one would put the deploy path in the blast-radius
+   * view as an agent that read the key.
+   */
+  async getRailwayToken(ctx: TenantContext): Promise<string | null> {
+    const row = await this.q(ctx.workspaceId).get<{ data_key_id: string; ciphertext: string }>(
+      `SELECT data_key_id, ciphertext FROM workspace_secrets WHERE workspace_id = ? AND name = ?`,
+      [ctx.workspaceId, RAILWAY_ENV_KEY],
+    );
+    if (!row) return null;
+    const material = await this.dataKeyById(ctx.workspaceId, row.data_key_id);
+    return openWithDataKey(material, row.ciphertext, aadFor(ctx.workspaceId, RAILWAY_ENV_KEY));
+  }
+
+  /**
+   * See `SecretStore.setRailwayToken`. Sealed like every other value and, like the serve token, not
+   * registered in `secret_refs` — it is the Deploy panel's, not a row in the credentials list.
+   */
+  async setRailwayToken(ctx: TenantContext, token: string | null): Promise<SetResult> {
+    if (token !== null) return this.seal(ctx.workspaceId, RAILWAY_ENV_KEY, token);
+    await this.q(ctx.workspaceId).run(
+      `DELETE FROM workspace_secrets WHERE workspace_id = ? AND name = ?`,
+      [ctx.workspaceId, RAILWAY_ENV_KEY],
+    );
+    return { ok: true, warning: null };
   }
 
   /**

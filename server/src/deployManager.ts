@@ -35,7 +35,7 @@ import {
 } from "./deploySecrets.ts";
 import { isSafeAgentId } from "./projectFs.ts";
 import {
-  RailwayApi, RailwayError, RAILWAY_ENV_KEY, isTerminalStatus, RAILWAY_TERMINAL_OK, railwayProjectName,
+  RailwayApi, RailwayError, isTerminalStatus, RAILWAY_TERMINAL_OK, railwayProjectName,
   railwayServiceName, type RailwayWorkspace,
 } from "./railwayApi.ts";
 import { checkRailwayCli, RailwayUpload } from "./railwayCli.ts";
@@ -71,8 +71,13 @@ export interface DeployManagerDeps {
   projects: ProjectStore;
   /** The workspace this deploy belongs to. Read at the moment of use, like `token`. */
   context: () => TenantContext;
-  /** The agent's Railway token, read at the moment of use. Never held by this class. */
-  token: () => string | undefined;
+  /**
+   * The deploying workspace's Railway token, read at the moment of use. Never held by this class.
+   *
+   * BY CONTEXT, because it is the workspace's and not the server's. It used to be a read of the
+   * process environment, which on a hosted server is one person's Railway account for every tenant.
+   */
+  token: (ctx: TenantContext) => Promise<string | null | undefined>;
   /**
    * The credential NAMES this workspace has configured. Never a value — see ADR-026.
    *
@@ -209,10 +214,10 @@ export async function planDeploy(
     else problems.push(message);
   }
 
-  if (!deps.token()) {
+  if (!(await deps.token(deps.context()))) {
     problems.push(
-      `no Railway token. Add one in the deploy panel — it is stored in runtime/.env as ` +
-      `${RAILWAY_ENV_KEY} and never leaves this machine except as an Authorization header.`,
+      `no Railway token. Add one in the deploy panel — it is kept for this workspace alone and ` +
+      `only ever leaves as the Authorization header on a call to Railway.`,
     );
   }
 
@@ -283,7 +288,7 @@ export class DeployManager {
     const plan = await planDeploy(this.deps, req);
     if (plan.problems.length) return { error: plan.problems.join(" · ") };
 
-    const token = this.deps.token();
+    const token = await this.deps.token(this.deps.context());
     if (!token) return { error: "no Railway token" };
 
     // Only the names the user actually agreed to, intersected with what is really declared —
@@ -364,7 +369,7 @@ export class DeployManager {
 
     // Past the upload, the build belongs to Railway and only Railway can stop it.
     const row = await this.deps.store.get(this.deps.context(), deploymentId);
-    const token = this.deps.token();
+    const token = await this.deps.token(this.deps.context());
     if (row?.railway_deployment_id && token) {
       try {
         await new RailwayApi({ token }).cancelDeployment(row.railway_deployment_id);

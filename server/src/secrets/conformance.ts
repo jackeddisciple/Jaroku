@@ -121,6 +121,31 @@ export async function runSecretConformance(
   );
   await store.delete(ctx, serveTokenEnvKeyFor(SERVICE));
 
+  // --- the fifth door: the workspace's Railway account token ----------------------------
+  //
+  // Both stores must agree that it reads back for the deploy path, never reaches a run or a
+  // platform model call, and is not listed with the workspace's own credentials.
+  const railwayBefore = process.env["RAILWAY_API_TOKEN"];
+  const RAILWAY = "railway_conformance_0123456789_ABCdef";
+  const railwaySet = await store.setRailwayToken(ctx, RAILWAY);
+  check(railwaySet.ok, "a workspace's Railway token can be stored", railwaySet.warning ?? "");
+  check((await store.getRailwayToken(ctx)) === RAILWAY, "...and the deploy path reads it back byte for byte");
+  check(
+    !("RAILWAY_API_TOKEN" in (await store.getForRun(runId, ["RAILWAY_API_TOKEN"]))),
+    "...but a run asking for it by name is never handed it",
+  );
+  check(
+    !("RAILWAY_API_TOKEN" in (await store.getForPlatformCall(ctx, ["RAILWAY_API_TOKEN"]))),
+    "...nor is a platform-side model call",
+  );
+  check(
+    !(await store.listNames(ctx)).some((r) => r.name === "RAILWAY_API_TOKEN"),
+    "...and it is not listed as one of the workspace's own credentials",
+  );
+  await store.setRailwayToken(ctx, null);
+  check((await store.getRailwayToken(ctx)) === null, "removing it makes it unreadable again");
+  if (railwayBefore !== undefined && store.kind === "dotenv") await store.setRailwayToken(ctx, railwayBefore);
+
   // --- the surface that does not exist, and the one door that now does -----------------
   //
   // THIS ASSERTION CHANGED, and the change is the point rather than a detail. It used to read

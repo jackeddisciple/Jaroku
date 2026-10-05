@@ -707,7 +707,7 @@ function RailwayTokenRow({ configured }: { configured: boolean }) {
           <button
             className={quietBtn}
             onClick={() => sendSetRailwayToken(null)}
-            title="Removes it from runtime/.env"
+            title="Removes this workspace's Railway token"
           >
             Remove
           </button>
@@ -767,9 +767,9 @@ function RailwayTokenRow({ configured }: { configured: boolean }) {
           <p className="mt-1.5 text-tiny leading-[1.5] text-faint">
             Create one at{" "}
             <span className="font-mono">railway.com/account/tokens</span> (an account token,
-            not a project token). Stored in <span className="font-mono">runtime/.env</span> as{" "}
-            <span className="font-mono">RAILWAY_API_TOKEN</span>, which is gitignored. It is
-            never logged and never sent back to this page.
+            not a project token). It is kept for this workspace alone — encrypted in its vault
+            when Jaroku is hosted, in <span className="font-mono">runtime/.env</span> on a desktop —
+            and is never logged, never handed to an agent and never sent back to this page.
           </p>
         </div>
       )}

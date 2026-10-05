@@ -2453,7 +2453,9 @@ const deployDeps: DeployManagerDeps = {
   agents: agentRepo,
   projects,
   context: contextForDeploy,
-  token: () => process.env[RAILWAY_ENV_KEY],
+  // THE DEPLOYING WORKSPACE'S OWN, from the vault. It was `process.env`, which on a hosted server is
+  // whichever tenant set one last — deploying everybody's agents into one person's account.
+  token: (ctx) => secrets.getRailwayToken(ctx),
   // NAMES, from the vault, for THIS workspace — not `process.env`, which asks whether the server
   // has a variable when the question is whether this tenant has the credential. The Secrets tab
   // makes the two visible side by side, which is what turned a latent divergence into one somebody
@@ -2533,7 +2535,7 @@ async function deploySnapshot(
 ): Promise<{ deployments: unknown[]; railwayConfigured: boolean }> {
   return {
     deployments: await deployStore.list(ctx),
-    railwayConfigured: Boolean(process.env[RAILWAY_ENV_KEY]),
+    railwayConfigured: (await secrets.getRailwayToken(ctx)) !== null,
   };
 }
 
@@ -7005,7 +7007,9 @@ const WORK_COMMAND_NAMES = new Set([
  */
 const deployOps = new DeployOps({
   store: deployStore,
-  token: () => process.env[RAILWAY_ENV_KEY],
+  // The asking workspace's own token — see `deployDeps.token`. Logs, Reconnect and Kill reach the
+  // account of the workspace that pressed them, never another tenant's.
+  token: (ctx) => secrets.getRailwayToken(ctx),
   storeServeToken: async ({ ctx, serviceId, token }) => {
     try {
       const result = await secrets.setServeToken(ctx, serviceId, token);
@@ -10676,8 +10680,8 @@ async function handleDeployCommand(ctx: TenantContext, cmd: DeployChannelCommand
       case "setRailwayToken": {
         // null clears it — the same "remove the key entirely" shape setMcpServerAuth has.
         if (cmd.token === null) {
-          credentials.clear(RAILWAY_ENV_KEY);
-          console.log(`[deploy] Railway token cleared (${RAILWAY_ENV_KEY})`);
+          await secrets.setRailwayToken(ctx, null);
+          console.log(`[deploy] Railway token cleared for workspace ${ctx.workspaceId}`);
           broadcastDeployments();
           return;
         }
@@ -10686,12 +10690,13 @@ async function handleDeployCommand(ctx: TenantContext, cmd: DeployChannelCommand
           relay.broadcastDeploy(ctx, { type: "error", message: "no token was entered" });
           return;
         }
-        const written = credentials.set(RAILWAY_ENV_KEY, token);
+        // INTO THIS WORKSPACE'S VAULT, not the server's environment. See `SecretStore.getRailwayToken`.
+        const written = await secrets.setRailwayToken(ctx, token);
         if (!written.ok) {
           relay.broadcastDeploy(ctx, { type: "error", message: written.warning ?? "could not store that token" });
           return;
         }
-        console.log(`[deploy] Railway token set (${RAILWAY_ENV_KEY})`);
+        console.log(`[deploy] Railway token set for workspace ${ctx.workspaceId}`);
         broadcastDeployments();
         if (written.warning) relay.broadcastDeploy(ctx, { type: "notice", message: written.warning });
         return;

@@ -32,6 +32,7 @@
 // `runtime/.env` working exactly as it does today, so `npm run dev` needs no KMS, no cloud
 // account and no key material. `KmsSecretStore` is production. Selected by config.
 
+import { RAILWAY_ENV_KEY } from "../railwayApi.ts";
 import type { TenantContext } from "../db/tenant.ts";
 import type { ElevationReceipt } from "./elevation.ts";
 
@@ -172,6 +173,26 @@ export interface SecretStore {
   setServeToken(ctx: TenantContext, serviceId: string, token: string): Promise<SetResult>;
 
   /**
+   * The workspace's own Railway account token, for the deploy path and nothing else.
+   *
+   * THE FIFTH DOOR, AND IT EXISTS BECAUSE THE TOKEN WAS BEHIND NONE. It was written to
+   * `runtime/.env` and `process.env` and read back from there by every deploy — one value per
+   * PROCESS. On a hosted server that is one person's Railway account deploying every tenant's
+   * agents, every tenant told "Railway connected", and any workspace owner able to replace or
+   * remove it for all of them. Locally the two are the same thing, which is why it went unseen.
+   *
+   * NO NAME ARGUMENT, like the serve token: the store knows what it is called, so this cannot be
+   * pointed at another credential. It is a value flowing INTO a request to Railway and never back
+   * out to a handler. It is not listed among the workspace's credentials — the Deploy panel owns
+   * it — and it is never handed to a run: `getForRun` refuses the name, because an agent's code
+   * has no business holding the account that hosts it.
+   */
+  getRailwayToken(ctx: TenantContext): Promise<string | null>;
+
+  /** Store the workspace's Railway token, or with null forget it. The write half of the door above. */
+  setRailwayToken(ctx: TenantContext, token: string | null): Promise<SetResult>;
+
+  /**
    * Hand a stored value back to the person who owns it.
    *
    * THE THIRD PLAINTEXT EXIT, AND THE ONE THAT REVERSES THE RULE AT THE TOP OF THIS FILE. It is
@@ -219,6 +240,15 @@ export interface SecretStore {
  * reason envWriter refuses a value containing one.
  */
 export const SECRET_NAME = /^[A-Z][A-Z0-9_]{0,127}$/;
+
+/**
+ * Credentials that belong to the platform's own calls and never reach an agent's environment.
+ *
+ * The Railway account token can create and delete whole projects in somebody's hosting account.
+ * A generated agent that declared it in `required_env` — or simply read its environment — would
+ * otherwise be handed it like any other key.
+ */
+export const NEVER_FOR_A_RUN: ReadonlySet<string> = new Set([RAILWAY_ENV_KEY]);
 
 export function isSecretName(name: unknown): name is string {
   return typeof name === "string" && SECRET_NAME.test(name);
