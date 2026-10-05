@@ -11,11 +11,20 @@ Never logs values — only the *names* of the keys it set, and only to stderr.
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 
 # runtime/jaroku_interceptor/env.py -> runtime/.env
 DEFAULT_ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
+
+# Credentials that belong to the Jaroku server and never to an agent, though they share the file.
+#
+# The Railway account token can create and delete whole projects in somebody's hosting account,
+# and a deployed agent's serve token spends that agent's provider key. The process manager strips
+# them from a run's environment — and this loader used to read them straight back out of the
+# file ("loaded 1 var(s) from .env: RAILWAY_API_TOKEN"), handing them to generated code.
+PLATFORM_ONLY = re.compile(r"^(RAILWAY_API_TOKEN|JAROKU_DEPLOY_[A-Z0-9_]+_SERVE_TOKEN)$")
 
 
 def _parse_line(line: str) -> tuple[str, str] | None:
@@ -40,8 +49,9 @@ def _parse_line(line: str) -> tuple[str, str] | None:
 def load_env(path: Path | None = None, *, verbose: bool = True) -> list[str]:
     """Load KEY=VALUE pairs from ``path`` into os.environ. Returns the names set.
 
-    Existing environment variables are never overwritten. Missing/unreadable files
-    are not an error — the fake provider needs no keys at all.
+    Existing environment variables are never overwritten, and the server's own credentials
+    (``PLATFORM_ONLY``) are never loaded at all. Missing/unreadable files are not an error —
+    the fake provider needs no keys at all.
     """
     env_path = Path(path) if path is not None else DEFAULT_ENV_PATH
     try:
@@ -55,7 +65,7 @@ def load_env(path: Path | None = None, *, verbose: bool = True) -> list[str]:
         if parsed is None:
             continue
         key, value = parsed
-        if key in os.environ:
+        if key in os.environ or PLATFORM_ONLY.match(key):
             continue
         os.environ[key] = value
         loaded.append(key)

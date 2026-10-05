@@ -1991,6 +1991,11 @@ jobs:
         working-directory: runtime
         run: uv sync --frozen --no-dev
 
+      # WHAT A RUN'S ENVIRONMENT MAY HOLD. The runner's .env loader read the Railway account token
+      # back out of the file after the process manager had stripped it, handing it to agent code.
+      - name: the server's credentials stay out of a run
+        run: npm run test:runner-env
+
       - name: a deployed agent, driven for real
         run: |
           # POST /run answers before the graph finishes — and the framing discipline the old

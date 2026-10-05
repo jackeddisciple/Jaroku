@@ -80,6 +80,12 @@ export class LocalSubprocessSandbox extends EventEmitter<SandboxEvents> implemen
     // agent's own keys have to be here — a Gmail tool cannot work without them — but this one
     // does not, and generated code runs in this process. Least privilege where it is free.
     delete env[RAILWAY_ENV_KEY];
+    // AND EVERY DEPLOYED AGENT'S SERVE TOKEN, for the same reason: each one spends that agent's
+    // provider key, and none of them is this run's. The runner's own .env loader skips them too,
+    // or it would read them straight back out of runtime/.env.
+    for (const name of Object.keys(env)) {
+      if (/^JAROKU_DEPLOY_[A-Z0-9_]+_SERVE_TOKEN$/.test(name)) delete env[name];
+    }
 
     const child = spawn("uv", args, { cwd: opts.runtimeDir, env });
     this.child = child;
