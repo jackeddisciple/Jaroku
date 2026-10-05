@@ -328,6 +328,16 @@ console.log("\nthe job panel does not lie over the list, the filters or the comp
     panelTag(closed));
 }
 
+console.log("\na refusal at the composer moves nothing");
+{
+  // THE OVER-LIMIT SENTENCE WAS DRAWN UNDER THE BUTTON, which pushed the button up and narrowed the
+  // box the moment 70,000 bytes were pasted. It is said on the status line above the box instead.
+  const composer = CODE.find((f) => f.path === "components/WorkComposer.tsx")!.text;
+  check("the composer's refusals are not drawn under its button", !/<DisabledReason/.test(composer));
+  check("...they are said on the status line, which is always there",
+    /statusLine/.test(composer) && /work-composer-status/.test(composer));
+}
+
 console.log("\nrelative times keep moving");
 {
   // "last job 7s ago" sat on a card while the job was three minutes old: relative times were worked

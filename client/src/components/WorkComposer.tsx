@@ -42,7 +42,7 @@ import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { useWorkStore } from "../store/workStore.ts";
 import { WorkGate } from "./WorkGate.tsx";
-import { DisabledReason, ENABLED, type DisabledState } from "./DisabledReason.tsx";
+import { ENABLED, type DisabledState } from "./DisabledReason.tsx";
 import { Select } from "./Select.tsx";
 // `ArrowUpIcon` RATHER THAN A NEW SEND MARK. The composer bar's send control already uses it, and
 // the rule is to extend the icons this app has rather than define a second glyph for an action that
@@ -196,6 +196,13 @@ export function WorkComposer() {
           ? `That is ${bytes.toLocaleString()} bytes and the limit is ${MAX_INPUT_BYTES.toLocaleString()} — shorten it.`
           : (moment.status ?? COMPOSER.placeholder.noAgent),
       };
+  /**
+   * WHERE THE REASON IS SAID: on the status line above the box, which is always there — never under
+   * the button. Drawn beside the button, a refusal pushed the button up and narrowed the box the
+   * moment it appeared (pasting 70,000 bytes moved the whole composer), a layout shift this tab
+   * otherwise refuses.
+   */
+  const statusLine = moment.status ?? (blocked.reason && input.trim() ? blocked.reason : null);
 
   /**
    * §19, in order: draw the row, clear the box, send.
@@ -241,7 +248,11 @@ export function WorkComposer() {
         </span>
         {/* §23's STATUS, which is null when nothing is happening — so this renders nothing at all
             on a ready composer rather than a line saying so. */}
-        {moment.status && <span className="text-faint">· {moment.status}</span>}
+        {statusLine && (
+          <span id="work-composer-status" className="min-w-0 truncate text-faint" title={statusLine}>
+            · {statusLine}
+          </span>
+        )}
       </div>
 
       <div className={`flex items-end gap-2 pt-1.5 pb-2.5 ${SPINE_X}`}>
@@ -278,18 +289,17 @@ export function WorkComposer() {
           className="max-h-[96px] min-h-[36px] flex-1 resize-none rounded-input border border-edge bg-elevated px-2.5 py-2 text-caption leading-[1.5] text-ink placeholder:text-faint focus-visible:outline-none focus-visible:shadow-focusring"
         />
 
-        <DisabledReason state={blocked} className="shrink-0">
-          <button
-            type="button"
-            onClick={() => setGated(true)}
-            disabled={Boolean(blocked.reason) || input.trim().length === 0}
-            className="flex h-9 w-9 items-center justify-center rounded-control bg-accent text-bg transition-opacity duration-fast hover:opacity-90 focus-visible:outline-none focus-visible:shadow-focusring disabled:pointer-events-none disabled:opacity-40"
-            title={COMPOSER.send}
-            aria-label={COMPOSER.send}
-          >
-            <ArrowUpIcon size={ICON.sm} />
-          </button>
-        </DisabledReason>
+        <button
+          type="button"
+          onClick={() => setGated(true)}
+          disabled={Boolean(blocked.reason) || input.trim().length === 0}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-control bg-accent text-bg transition-opacity duration-fast hover:opacity-90 focus-visible:outline-none focus-visible:shadow-focusring disabled:pointer-events-none disabled:opacity-40"
+          title={blocked.reason ?? COMPOSER.send}
+          aria-label={COMPOSER.send}
+          aria-describedby={statusLine ? "work-composer-status" : undefined}
+        >
+          <ArrowUpIcon size={ICON.sm} />
+        </button>
       </div>
 
       {/* MONEY ASKS FIRST. There is no free dry-run path out here — the container runs on the
