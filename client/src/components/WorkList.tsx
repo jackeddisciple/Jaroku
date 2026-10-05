@@ -26,10 +26,11 @@ import { pictureBySlug } from "../lib/agentPicture.ts";
 import { categoryBySlug } from "../lib/agentCategory.ts";
 import { AgentFace, FACE_SIZE } from "./AgentFace.tsx";
 
-import { DESTRUCTIVE, EMPTY, FAILURE_SENTENCE, FILTERS, HEADER, LIVE, REFUSED, STATUS_WORD } from "../lib/cockpitCopy.ts";
+import { DESTRUCTIVE, EMPTY, FAILURE_SENTENCE, FILTERS, HEADER, LIVE, NOT_SENT, REFUSED, STATUS_WORD } from "../lib/cockpitCopy.ts";
 import { cockpitCost, cockpitTime } from "../lib/cockpitFormat.ts";
 import { rowColumns, type RowColumns } from "../lib/workRow.ts";
 import { dayAt, flattenWork, workWindow } from "../lib/workWindow.ts";
+import { isOptimistic } from "../lib/workLive.ts";
 import { sendCancelWork, sendListWork, sendLoadWorkItem, sendRetryWork } from "../lib/socket.ts";
 import { ROW_HEIGHT, SPINE_X } from "../lib/cockpitLayout.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
@@ -90,6 +91,9 @@ function Row({ item, columns, marks, categories }: {
   const openId = useWorkStore((s) => s.open?.id ?? s.openingId);
   const active = openId === item.id;
   const live = item.status === "queued" || item.status === "running" || item.status === "waiting";
+  // A PRESS THE SERVER REFUSED BEFORE ANY JOB EXISTED — see `NOT_SENT`. Its id is still the client's
+  // own, so there is nothing on the server to open, stop or retry.
+  const notSent = isOptimistic(item) && item.status === "failed";
   const cost = cockpitCost(item.cost_usd, item.cost_complete);
   const when = cockpitTime(item.created_at);
 
@@ -125,7 +129,11 @@ function Row({ item, columns, marks, categories }: {
             the Inbox's `view_evidence` control had. */}
         <button
           type="button"
-          onClick={() => sendLoadWorkItem(item.id)}
+          // A REFUSED PRESS OPENS ON WHAT IS KNOWN ABOUT IT, here. Asking the server for it waited for
+          // ever — "Reading the job…" — on an id the server had never issued.
+          onClick={() => notSent
+            ? useWorkStore.getState().openItem({ ...item, input: item.input_preview, output: null })
+            : sendLoadWorkItem(item.id)}
           className="flex min-w-0 flex-1 items-center gap-3 text-left focus-visible:outline-none focus-visible:shadow-focusring"
         >
           {/* 1. STATUS GLYPH, fixed width at `ICON.xs`, and on the spine. §13: it never leaves. */}
@@ -151,6 +159,13 @@ function Row({ item, columns, marks, categories }: {
           {/* A TOOL IT WAS REFUSED, IN THE SAME SLOT. Such a job usually ends `succeeded`, with an
               apology for an answer — and a list showing only the tick read nine refused jobs as
               nine successes. Said whatever the status, because the status cannot say it. */}
+          {notSent && item.error && (
+            <Truncate className="hidden min-w-0 max-w-[28ch] shrink text-caption text-muted md:block"
+              title={NOT_SENT.row(item.error)}>
+              {NOT_SENT.row(item.error)}
+            </Truncate>
+          )}
+
           {/* AND A STOP SOMEBODY ASKED FOR, while the job is still going. Stop used to be a press
               with nothing to show for it until the job ended — which, for a single-node agent,
               was as `succeeded`. */}
@@ -262,8 +277,9 @@ function Row({ item, columns, marks, categories }: {
 
         {/* THE VERB SLOT, whose WIDTH IS ALWAYS THERE — §Craft 4. See this component's header. */}
         <div className="flex w-[68px] shrink-0 items-center justify-end pr-1 opacity-0 transition-opacity duration-fast focus-within:opacity-100 group-hover:opacity-100">
-          {/* Keyed apart, like the detail panel's pair — see there. */}
-          {live ? (
+          {/* Keyed apart, like the detail panel's pair — see there. Nothing at all for a press that was
+              never sent: there is no job to stop or to ask again. */}
+          {notSent ? null : live ? (
             <Capable key="stop" cmd="cancelWork">
               <button
                 type="button"

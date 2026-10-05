@@ -24,13 +24,14 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { DESTRUCTIVE, DETAIL, FAILURE_SENTENCE, GATE, REFUSAL, REFUSED } from "../lib/cockpitCopy.ts";
+import { DESTRUCTIVE, DETAIL, FAILURE_SENTENCE, GATE, NOT_SENT, REFUSAL, REFUSED } from "../lib/cockpitCopy.ts";
 import { cockpitAbsolute, cockpitCost, cockpitDuration, cockpitTokens } from "../lib/cockpitFormat.ts";
 import { selectRun } from "../lib/selection.ts";
 import { sendCancelWork, sendLoadRun, sendRetryWork } from "../lib/socket.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { useCanRun } from "../lib/useCapability.ts";
 import { workLink } from "../lib/workLink.ts";
+import { isOptimistic } from "../lib/workLive.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
@@ -268,6 +269,8 @@ export function WorkDetail() {
   };
 
   const live = item && (item.status === "queued" || item.status === "running" || item.status === "waiting");
+  // A PRESS THE SERVER REFUSED BEFORE ANY JOB EXISTED — see `NOT_SENT`. Nothing to stop, retry or copy.
+  const notSent = Boolean(item && isOptimistic(item));
   /**
    * §14: A CONTROL THE READER LACKS PERMISSION FOR IS DISABLED WITH A STATED REASON, NOT MISSING.
    *
@@ -393,6 +396,7 @@ export function WorkDetail() {
           {(item.failure_kind || item.error) && (
             <div className="flex flex-col gap-1">
               <span className={TYPE.sectionLabel}>{DETAIL.wentWrong}</span>
+              {notSent && <p className="text-caption leading-[1.55] text-ink">{NOT_SENT.detail}</p>}
               {item.failure_kind && (
                 <p className="text-caption leading-[1.55] text-ink">{FAILURE_SENTENCE[item.failure_kind]}</p>
               )}
@@ -457,6 +461,7 @@ export function WorkDetail() {
             {/* 6. THE ACTIONS. §21: Stop is inline and a single press, because it is scoped to one
                    item and the item is on screen. Retry is the same weight — it creates a new job
                    rather than destroying one. */}
+            {!notSent && <>
             {/* KEYED APART, so Stop and Retry are two elements rather than one that changes its
                 props: a job that ended under the pointer kept Stop's tooltip — "running — it stops
                 at its next node boundary" — over what had become the Retry button. */}
@@ -511,6 +516,7 @@ export function WorkDetail() {
                   wrong four lines up. */}
               <Chip mono size="sm" tone="faint">{item.id.slice(0, 8)}</Chip>
             </button>
+            </>}
           </div>
         </div>
       )}

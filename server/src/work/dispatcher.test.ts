@@ -392,8 +392,11 @@ console.log("\nthe cap, on a workspace that is already busy");
     });
     const refused = await capped.dispatch(f.ctx, { agentId: f.agentId, input: "one too many" });
     check("the third is refused", !refused.ok && refused.stage === "refused" && refused.refusal === "at_capacity");
-    check("...naming the figure and the variable, so it can be acted on",
-      !refused.ok && /2 jobs in flight/.test(refused.detail) && /JAROKU_WORK_CONCURRENCY/.test(refused.detail),
+    // NAMING THE FIGURE AND WHAT THE READER CAN DO, which a server variable is not: it ended "…or
+    // raise JAROKU_WORK_CONCURRENCY", and no desktop or hosted user can set that.
+    check("...naming the figure and what the reader can do about it",
+      !refused.ok && /2 jobs in flight/.test(refused.detail) && /not sent/.test(refused.detail)
+        && !/JAROKU_/.test(refused.detail),
       !refused.ok ? refused.detail : "");
     check("...and the limit as its own number, not the count over again",
       !refused.ok && /the limit is 2/.test(refused.detail), !refused.ok ? refused.detail : "");

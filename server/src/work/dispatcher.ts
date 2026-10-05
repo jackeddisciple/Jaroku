@@ -227,9 +227,13 @@ export class WorkDispatcher {
           // the moment the cap is lowered under a busy workspace, or jobs park in `waiting` on
           // somebody who never answers. A refusal reporting 1002 as the ceiling sends the operator
           // looking for one that is not there, and buries the figure they would actually set.
+          //
+          // AND NOTHING SOMEBODY CANNOT DO. It ended "…or raise JAROKU_WORK_CONCURRENCY", a server
+          // environment variable no desktop user and no hosted user can set; the operator who can
+          // reads it in this file.
           detail:
             `this workspace has ${err.inFlight} job${err.inFlight === 1 ? "" : "s"} in flight and ` +
-            `the limit is ${err.cap} — wait for one to finish, or raise ${WORK_CONCURRENCY_ENV}`,
+            `the limit is ${err.cap} — this job was not sent; send it again once one finishes`,
         };
       }
       throw err;

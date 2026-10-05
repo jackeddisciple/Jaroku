@@ -369,21 +369,17 @@ export const useWorkStore = create<WorkState>((set, get) => ({
   refuseOptimistic: (ref, reason) =>
     set((prev) => {
       const merged = refuseOptimistic({ items: prev.items, pending: prev.pending }, ref, reason);
-      // THE COUNTS FOLLOW THE ROW. It left `queued` and became `failed`, and a chip still counting
-      // it as queued would offer a filter that no longer contains it.
+      // IT LEAVES `queued` AND IS COUNTED NOWHERE. It used to be counted `failed`, putting a "failed
+      // 1" chip over a job that never existed on the server — one a reload made disappear, and one
+      // the server's own counts never had. The row stays as the record of the press; the chips count
+      // jobs.
       const moved = merged.items !== prev.items;
       return {
         items: merged.items,
         pending: merged.pending,
-        counts: moved
-          ? { ...prev.counts, queued: Math.max(0, prev.counts.queued - 1), failed: prev.counts.failed + 1 }
-          : prev.counts,
+        counts: moved ? { ...prev.counts, queued: Math.max(0, prev.counts.queued - 1) } : prev.counts,
         workspaceCounts: moved
-          ? {
-              ...prev.workspaceCounts,
-              queued: Math.max(0, prev.workspaceCounts.queued - 1),
-              failed: prev.workspaceCounts.failed + 1,
-            }
+          ? { ...prev.workspaceCounts, queued: Math.max(0, prev.workspaceCounts.queued - 1) }
           : prev.workspaceCounts,
       };
     }),

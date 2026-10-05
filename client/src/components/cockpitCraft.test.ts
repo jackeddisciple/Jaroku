@@ -306,6 +306,24 @@ console.log("\nthe new-rows pill and the pinned day hang from the frame, not the
     scroller.length > 0 && !scroller.includes(LIVE.pill(1)), scroller.slice(0, 200));
 }
 
+console.log("\na press the server refused is not a failed job");
+{
+  // IT WAS DRAWN AS ONE: a red mark, a "failed 1" chip, and a panel stuck on "Reading the job…" for
+  // a job the server had never issued — gone on the next reload.
+  const refusedRow = job("pending:ref-1", {
+    status: "failed", error: "this workspace has 4 jobs in flight and the limit is 4", run_id: null,
+  });
+  const html = renderList([refusedRow]);
+  check("it says it was not sent, and why", html.includes("Not sent — this workspace has 4 jobs in flight"));
+  check("...and offers no Retry or Stop for a job that does not exist",
+    !html.includes("Retry this work item") && !html.includes("Stop this job"));
+  seed(useWorkStore, { counts: { ...NO_COUNTS, queued: 1 }, workspaceCounts: { ...NO_COUNTS, queued: 1 } });
+  useWorkStore.setState({ items: [job("pending:ref-2", { status: "queued" })] });
+  useWorkStore.getState().refuseOptimistic("ref-2", "no");
+  check("...and the chips count it nowhere", useWorkStore.getState().counts.failed === 0
+    && useWorkStore.getState().counts.queued === 0, JSON.stringify(useWorkStore.getState().counts));
+}
+
 console.log("\na job waiting on a person does not lock the window");
 {
   // THE CONFIRMATION WAS A MODAL OVER EVERYTHING, and that was the bug: the waiting row, its Stop,

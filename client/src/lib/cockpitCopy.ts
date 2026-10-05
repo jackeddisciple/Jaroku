@@ -153,6 +153,18 @@ export const REFUSED = {
 } as const;
 
 /**
+ * A dispatch the server refused before any job existed — the row that records the press.
+ *
+ * NOT A FAILED JOB, and it must not read as one: nothing ran, nothing was charged, and there is no
+ * job behind it to open. It was drawn as `failed`, counted on the "failed" chip, and opening it waited
+ * for ever on a job the server had never heard of.
+ */
+export const NOT_SENT = {
+  row: (reason: string): string => `Not sent — ${reason}`,
+  detail: "This was never sent: no job exists for it, nothing ran and nothing was charged. Its text went back into the composer.",
+} as const;
+
+/**
  * The one word each status wears where a word is wanted — a chip's title, a glyph's `title`.
  *
  * NOT A REPLACEMENT FOR THE GLYPH. §9's rule is six statuses, six marks, and these are what the
