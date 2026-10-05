@@ -35,7 +35,8 @@ import {
 } from "./deploySecrets.ts";
 import { isSafeAgentId } from "./projectFs.ts";
 import {
-  RailwayApi, RailwayError, RAILWAY_ENV_KEY, isTerminalStatus, RAILWAY_TERMINAL_OK, type RailwayWorkspace,
+  RailwayApi, RailwayError, RAILWAY_ENV_KEY, isTerminalStatus, RAILWAY_TERMINAL_OK, railwayProjectName,
+  railwayServiceName, type RailwayWorkspace,
 } from "./railwayApi.ts";
 import { checkRailwayCli, RailwayUpload } from "./railwayCli.ts";
 import { numberFromEnv } from "./env.ts";
@@ -665,7 +666,7 @@ export class DeployManager {
       workspace
         ? `created Railway project ${project.name} in the Railway workspace "${workspace.name}"`
         : `created Railway project ${project.name}`);
-    const service = await api.createService(project.id, agentId);
+    const service = await api.createService(project.id, railwayServiceName(agentId));
     return {
       projectId: project.id,
       environmentId: project.environmentId,
@@ -694,7 +695,7 @@ export class DeployManager {
 
   /** Railway project names are user-visible; keep them recognisable and unique enough. */
   private projectName(agentId: string): string {
-    return `${agentId.replace(/_/g, "-")}-${Date.now().toString(36).slice(-4)}`;
+    return railwayProjectName(agentId, Date.now().toString(36).slice(-4));
   }
 
   /**

@@ -18,7 +18,9 @@ import { openTestSqlite, testContext, withScratchPostgres } from "./db/testDb.ts
 import { newRequestId, systemContext } from "./db/tenant.ts";
 
 import { DeployStore, isInFlight, type DeployStatus } from "./deployStore.ts";
-import { RailwayApi, RailwayError, isTerminalStatus } from "./railwayApi.ts";
+import {
+  RAILWAY_NAME_MAX, RailwayApi, RailwayError, isTerminalStatus, railwayProjectName, railwayServiceName,
+} from "./railwayApi.ts";
 
 let fail = 0;
 const check = (name: string, ok: boolean, detail = ""): void => {
@@ -389,6 +391,20 @@ await withScratchPostgres(async (pg) => burst(new DeployStore(pg), "postgres"));
   check("...and its project is still created, for Railway to place",
     (await api.createProject("bruno-1a2b")).id === "proj" && !("workspaceId" in (created.at(-1) ?? {})));
   server.close();
+}
+
+// --- 8c. a name Railway will take, whatever the slug ---------------------------------------
+{
+  const long = "margot_s_input_names_a_github_repository";
+  const project = railwayProjectName(long, "1a2b");
+  check("a forty-character slug makes a project name Railway accepts",
+    project.length <= RAILWAY_NAME_MAX && project.endsWith("-1a2b"), project);
+  check("...cut at a word, not mid-word", project === "margot-s-input-names-a-1a2b", project);
+  check("...and its service name fits too", railwayServiceName(long).length <= RAILWAY_NAME_MAX,
+    railwayServiceName(long));
+  check("a short slug is left as it was", railwayProjectName("bruno", "88pi") === "bruno-88pi");
+  check("a slug that is one long word is simply cut",
+    railwayProjectName("x".repeat(60), "zzzz").length === RAILWAY_NAME_MAX);
 }
 
 // --- 9. an unrecognised build status is not success ------------------------------------------

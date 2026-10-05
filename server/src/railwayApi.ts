@@ -43,6 +43,36 @@ export const RAILWAY_ENV_KEY = "RAILWAY_API_TOKEN";
 
 const REQUEST_TIMEOUT_MS = numberFromEnv("JAROKU_RAILWAY_TIMEOUT_MS", 20_000);
 
+/**
+ * The longest name Railway accepts for a project or a service.
+ *
+ * "Project names must be between 1 and 32 characters." An agent planned from a sentence gets a
+ * forty-character slug — `margot_s_input_names_a_github_repository` — and every deploy of one was
+ * refused at the first Railway call, so the name is cut to fit rather than taken whole.
+ */
+export const RAILWAY_NAME_MAX = 32;
+
+/** A slug as Railway shows it: hyphens for underscores, cut at a word where it can be. */
+function railwayLabel(slug: string, max: number): string {
+  const label = slug.replace(/_/g, "-").replace(/[^a-zA-Z0-9-]/g, "-").replace(/-{2,}/g, "-");
+  if (label.length <= max) return label.replace(/^-+|-+$/g, "") || "agent";
+  const cut = label.slice(0, max);
+  const atWord = cut.lastIndexOf("-");
+  // AT A WORD when one ends past the halfway mark, so `margot-s-input-names-a-github` rather than
+  // `margot-s-input-names-a-githu`. A slug that is one long word is simply cut.
+  return (atWord >= max / 2 ? cut.slice(0, atWord) : cut).replace(/^-+|-+$/g, "") || "agent";
+}
+
+/** `<slug>-<suffix>`, never longer than Railway allows. The suffix is what keeps it unique. */
+export function railwayProjectName(slug: string, suffix: string): string {
+  return `${railwayLabel(slug, RAILWAY_NAME_MAX - suffix.length - 1)}-${suffix}`;
+}
+
+/** The service inside it: the slug, within the same limit. */
+export function railwayServiceName(slug: string): string {
+  return railwayLabel(slug, RAILWAY_NAME_MAX);
+}
+
 export type RailwayFailureKind =
   /** The token is missing, wrong, or lacks the scope. The user has to fix a credential. */
   | "auth"
