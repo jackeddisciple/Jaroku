@@ -22,7 +22,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import {
-  CLAUSE, COMPOSER, CONNECTION_LABEL, DESTRUCTIVE, DETAIL, EMPTY, FAILURE_SENTENCE, FILTERS,
+  CITATION, CLAUSE, COMPOSER, CONNECTION_LABEL, DESTRUCTIVE, DETAIL, EMPTY, FAILURE_SENTENCE, FILTERS,
   GATE, HEADER, LIVE, OFFLINE, PUBLIC_NOTE, REFUSAL, REFUSED, STATUS_WORD, count,
 } from "./cockpitCopy.ts";
 import type { WorkFailureKind } from "../types.ts";
@@ -316,6 +316,19 @@ console.log("\nthe phrases three documents quote");
 // why. The job's figure says it is end to end, and what that includes beyond the graph.
 check("the job's duration says it is end to end", DETAIL.durationLabel === "end to end");
 check("...and why the trace's \"Ran in\" is shorter", /Ran in/.test(DETAIL.durationMeans) && /graph alone/.test(DETAIL.durationMeans));
+
+console.log("\nsix cited jobs are six different names");
+{
+  // EVERY CHIP WAS NAMED "Bruno — succeeded. Open this job.", so a screen reader read six identical
+  // buttons in one answer. The name now says which job: when it was asked for, and its id's head.
+  const cites = Array.from({ length: 6 }, (_, i) => ({
+    id: `${i}a2b3c4d-0000-4000-8000-00000000000${i}`, status: "succeeded", agent_name: "Bruno",
+  }));
+  const labels = cites.map((c) => CITATION.label(c, "05/10/2026, 14:03:00"));
+  check("each citation's name is its own", new Set(labels).size === labels.length, labels.join(" | "));
+  check("...and still says whose job it is and how it ended", labels.every((l) => l.includes("Bruno") && l.includes("succeeded")));
+  check("...without a dangling \"from\" when the time is unknown", !CITATION.label(cites[0]!, "").includes("from"));
+}
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 (globalThis as { process?: { exit(code: number): void } }).process?.exit(fail === 0 ? 0 : 1);

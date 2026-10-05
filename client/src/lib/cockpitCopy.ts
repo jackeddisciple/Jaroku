@@ -415,3 +415,15 @@ export const HEADER = {
   announce: (agentName: string): string => `${agentName} is waiting on you.`,
   announceMany: (count: number): string => `${count} jobs are waiting on you.`,
 } as const;
+
+/**
+ * A job cited in a conversation — Part 3 §7.4's chip, whose visible text is only the status word.
+ *
+ * ITS NAME SAYS WHICH JOB. Six chips in one answer were six buttons a screen reader read identically
+ * ("Bruno — succeeded. Open this job."), so nobody listening could tell them apart. When it was asked
+ * for and the id's first eight characters are what differ between two jobs asked in the same minute.
+ */
+export const CITATION = {
+  label: (cite: { id: string; status: string; agent_name: string }, when: string): string =>
+    `${cite.agent_name}’s job${when ? ` from ${when}` : ""} (${cite.id.slice(0, 8)}) — ${cite.status}. Open it.`,
+} as const;

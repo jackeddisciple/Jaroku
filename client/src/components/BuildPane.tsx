@@ -33,10 +33,10 @@ import { fixPrompt, routeLabel, routeMessage } from "../lib/intent.ts";
 import { classifyOperate, operateLabel, operateSendLabel, type OperateRoute } from "../lib/operateIntent.ts";
 import { WorkGate } from "./WorkGate.tsx";
 import { useWorkStore } from "../store/workStore.ts";
-import { FAILURE_SENTENCE, REFUSED } from "../lib/cockpitCopy.ts";
+import { CITATION, FAILURE_SENTENCE, REFUSED } from "../lib/cockpitCopy.ts";
 import { WorkGlyph } from "./WorkGlyph.tsx";
 import { threadById } from "../store/threadStore.ts";
-import { fmtCost, fmtTokens } from "../lib/format.ts";
+import { absTime, fmtCost, fmtTokens } from "../lib/format.ts";
 import { isProviderId, type ProviderModel } from "../types.ts";
 import { secondaryBtn } from "./buttons.ts";
 import { Chip, chipClass } from "./Chip.tsx";
@@ -266,7 +266,8 @@ function GenTurnView({ turn, isLive }: { turn: GenTurn; isLive: boolean }) {
  * reading speed and a coloured mark in a sentence is a thing somebody has to stop and decode. The
  * glyph belongs on the row, where a column of them is scannable.
  */
-function CitationChip({ cite }: { cite: { id: string; status: string; agent_name: string } }) {
+function CitationChip({ cite }: { cite: { id: string; status: string; agent_name: string; created_at: string } }) {
+  const label = CITATION.label(cite, absTime(cite.created_at));
   return (
     <button
       type="button"
@@ -286,7 +287,8 @@ function CitationChip({ cite }: { cite: { id: string; status: string; agent_name
         sendLoadWorkItem(cite.id);
         useUiStore.getState().openNav("work");
       }}
-      title={`${cite.agent_name} — ${cite.status}. Open this job.`}
+      title={label}
+      aria-label={label}
       className="mx-0.5 inline-flex max-w-full items-center gap-1 rounded-control border border-hair bg-elevated px-1.5 py-0.5 align-baseline text-tiny text-muted transition-colors duration-fast hover:border-edge hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
     >
       <Glyph icon={Icon.attach.run} size={ICON.xs} className="shrink-0 text-faint" />
