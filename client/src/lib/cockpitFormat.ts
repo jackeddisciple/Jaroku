@@ -131,3 +131,19 @@ export function cockpitAbsolute(iso: string | null | undefined): Figure {
   const text = absTime(iso);
   return text === "" ? { text: "—", title: null, floor: false } : plain(text);
 }
+
+/**
+ * A container log line's time: the reader's own clock, with the instant on hover.
+ *
+ * IT WAS THE RAW UTC TEXT, cut at the seconds — "07:34" in a pane read at 13:04 in India, with
+ * nothing saying it was UTC. Railway stamps lines to the nanosecond, which some engines will not
+ * parse, so the fraction is cut to milliseconds first. Unparseable stays as it arrived rather than
+ * becoming a made-up time.
+ */
+export function logClock(timestamp: string): Figure {
+  const t = Date.parse(timestamp.replace(/(\.\d{3})\d+(?=Z|[+-]\d|$)/, "$1"));
+  if (Number.isNaN(t)) return plain(timestamp.slice(11, 19) || timestamp);
+  const at = new Date(t);
+  const text = at.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  return { text, title: `${at.toLocaleString(undefined, { timeZoneName: "short" })} · ${at.toISOString()}`, floor: false };
+}

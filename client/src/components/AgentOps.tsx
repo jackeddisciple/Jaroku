@@ -24,6 +24,7 @@
 
 import { useEffect } from "react";
 
+import { logClock } from "../lib/cockpitFormat.ts";
 import { sendLoadAgentLogs } from "../lib/socket.ts";
 import { ICON } from "../lib/tokens.ts";
 import { useUiStore } from "../store/uiStore.ts";
@@ -67,14 +68,16 @@ export function LogPane({ card }: { card: FleetCardView }) {
         <span className="text-tiny text-muted">Asking Railway…</span>
       ) : mine.lines.length === 0 ? (
         // A CONTAINER THAT HAS PRINTED NOTHING IS NOT A CONTAINER THAT IS BROKEN, and saying
-        // "no logs" flatly would read as the second. Nothing has arrived SINCE, which is the
-        // honest reading of a window onto the end of a stream.
-        <span className="text-tiny text-muted">Nothing since the pane opened.</span>
+        // "no logs" flatly would read as the second. This is only ever the FIRST answer now —
+        // later polls add to the pane rather than replacing it — so it says what Railway holds.
+        <span className="text-tiny text-muted">Railway has no recent lines from this container — new ones appear here.</span>
       ) : (
         <ul className="flex flex-col gap-0.5">
           {mine.lines.map((line) => (
             <li key={`${line.timestamp}-${line.message}`} className="flex gap-2 text-tiny leading-[1.5]">
-              <span className="shrink-0 text-faint tabular-nums">{line.timestamp.slice(11, 19)}</span>
+              <span className="shrink-0 text-faint tabular-nums" title={logClock(line.timestamp).title ?? undefined}>
+                {logClock(line.timestamp).text}
+              </span>
               <Truncate className="min-w-0 text-ink" title={line.message}>
                 {line.message}
               </Truncate>

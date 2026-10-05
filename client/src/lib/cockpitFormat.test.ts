@@ -18,7 +18,7 @@
 //
 //   npm run test:cockpit-format
 
-import { cockpitAbsolute, cockpitCost, cockpitDuration, cockpitTime, cockpitTokens } from "./cockpitFormat.ts";
+import { cockpitAbsolute, cockpitCost, cockpitDuration, cockpitTime, cockpitTokens, logClock } from "./cockpitFormat.ts";
 import { absTime, fmtCost, fmtDuration, fmtTokens, relTime } from "./format.ts";
 
 let fail = 0;
@@ -149,6 +149,20 @@ console.log("\nthe other two figures");
     cockpitTokens(11_646).text);
   check("...and does not below it", cockpitTokens(842).text === "842 tok", cockpitTokens(842).text);
   check("a real zero is a count and not an absence", cockpitTokens(0).text === "0 tok", cockpitTokens(0).text);
+}
+
+// A LOG LINE'S TIME IS THE READER'S CLOCK. It was the raw UTC text — "07:34" read at 13:04 in
+// India with nothing saying UTC — and Railway's nanosecond stamps are more than some engines parse.
+{
+  const at = "2026-10-04T07:34:12.123456789Z";
+  const clockText = logClock(at);
+  const local = new Date(Date.UTC(2026, 9, 4, 7, 34, 12, 123)).toLocaleTimeString(undefined, {
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+  });
+  check("a log line's time is shown in the reader's own timezone", clockText.text === local, `${clockText.text} vs ${local}`);
+  check("...with the exact instant, in UTC, on hover", (clockText.title ?? "").includes("2026-10-04T07:34:12.123Z"),
+    clockText.title ?? "");
+  check("an unparseable stamp is shown as it came rather than invented", logClock("not a time").text === "not a time");
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

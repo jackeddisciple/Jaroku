@@ -370,11 +370,41 @@ export const useWorkStore = create<WorkState>((set) => ({
   openItem: (open) => set({ open, openingId: null }),
   openingItem: (openingId) => set({ openingId }),
   closeItem: () => set({ open: null, openingId: null, logs: null }),
-  setLogs: (logs) => set({ logs }),
+  setLogs: (logs) => set((prev) => ({ logs: mergeLogs(prev.logs, logs) })),
   setError: (error) => set({ error }),
   setNotice: (notice) => set({ notice }),
   setFilters: (patch) => set((prev) => ({ filters: { ...prev.filters, ...patch } })),
 }));
+
+type LogWindow = NonNullable<WorkState["logs"]>;
+
+/** How many log lines the pane keeps. A window onto the end of a stream, not an archive. */
+export const LOG_LINES_KEPT = 500;
+
+/**
+ * A followed log window, merged into the one in hand rather than replacing it.
+ *
+ * EVERY POLL AFTER THE FIRST ASKS FOR WHAT IS NEWER THAN THE LAST LINE SHOWN, so its answer is
+ * usually empty — and replacing the window with it blanked the pane four seconds after it opened:
+ * real container lines, then "Nothing since the pane opened" for good. So a window for the same
+ * deployment is added to what is there, deduplicated on (timestamp, text) because a poll can arrive
+ * twice, and kept in time order. A different deployment's window starts afresh.
+ */
+export function mergeLogs(prev: LogWindow | null, next: LogWindow): LogWindow {
+  if (!prev || prev.deploymentId !== next.deploymentId) {
+    return { ...next, lines: next.lines.slice(-LOG_LINES_KEPT) };
+  }
+  const key = (l: LogWindow["lines"][number]): string => `${l.timestamp}\u0000${l.message}`;
+  const seen = new Set(prev.lines.map(key));
+  const added = next.lines.filter((l) => !seen.has(key(l)));
+  const lines = added.length === 0
+    ? prev.lines
+    : [...prev.lines, ...added].sort((a, b) => a.timestamp.localeCompare(b.timestamp)).slice(-LOG_LINES_KEPT);
+  // THE CURSOR ONLY MOVES FORWARDS. An empty answer carries the cursor it was asked with, and a late
+  // answer to an older poll must not walk the follow back over lines already shown.
+  const cursor = [prev.cursor, next.cursor].filter((c): c is string => Boolean(c)).sort().at(-1) ?? null;
+  return { deploymentId: next.deploymentId, lines, cursor };
+}
 
 /**
  * The sidebar badge: `waiting` and nothing else.

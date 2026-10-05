@@ -27,7 +27,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { matchesFilters, useWorkStore } from "./workStore.ts";
+import { LOG_LINES_KEPT, matchesFilters, mergeLogs, useWorkStore } from "./workStore.ts";
 import type { WorkCounts, WorkFilters, WorkItemDetailView, WorkItemView } from "../types.ts";
 
 let failures = 0;
@@ -252,6 +252,28 @@ console.log("\nthe counts a dispatch moves, and the server's own counts after it
   });
   check("counts for a filter the page has left do not move the chips", w().counts.failed === 0);
   check("...though the workspace's figures, which no filter moves, still do", w().workspaceCounts.failed === 9);
+}
+
+console.log("\na followed log window adds to the pane rather than replacing it\n");
+{
+  // THE PANE BLANKED ITSELF FOUR SECONDS AFTER OPENING: the first follow poll asked for lines newer
+  // than the last one shown, got none, and replaced the window with that.
+  const line = (t: string, m: string) => ({ timestamp: `2026-10-04T07:34:${t}.000000000Z`, message: m, severity: null });
+  const first = { deploymentId: "dep-1", lines: [line("01", "Starting Container"), line("02", "[serve] up")], cursor: "c2" };
+  const empty = mergeLogs(first, { deploymentId: "dep-1", lines: [], cursor: "c2" });
+  check("an empty follow keeps what was shown", empty.lines.length === 2, JSON.stringify(empty.lines));
+  const more = mergeLogs(empty, { deploymentId: "dep-1", lines: [line("02", "[serve] up"), line("03", "job 1")], cursor: "c3" });
+  check("a new line is added once, after the others",
+    more.lines.map((l) => l.message).join("|") === "Starting Container|[serve] up|job 1", JSON.stringify(more.lines));
+  check("...and the cursor moves on", more.cursor === "c3");
+  check("a late answer to an older poll does not walk the cursor back",
+    mergeLogs(more, { deploymentId: "dep-1", lines: [], cursor: "c2" }).cursor === "c3");
+  check("another deployment's window starts afresh",
+    mergeLogs(more, { deploymentId: "dep-2", lines: [line("09", "other")], cursor: "x" }).lines.length === 1);
+  const many = { deploymentId: "dep-1", lines: Array.from({ length: LOG_LINES_KEPT + 50 }, (_, i) =>
+    ({ timestamp: `2026-10-04T08:${String(Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}Z`, message: `l${i}`, severity: null })), cursor: "z" };
+  check(`the pane keeps the newest ${LOG_LINES_KEPT}`, mergeLogs(null, many).lines.length === LOG_LINES_KEPT
+    && mergeLogs(null, many).lines.at(-1)?.message === `l${LOG_LINES_KEPT + 49}`);
 }
 
 console.log(failures === 0 ? "\nALL CORRECT\n" : `\n${failures} FAILED\n`);
