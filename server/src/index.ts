@@ -312,7 +312,7 @@ import { DeployDispatcher } from "./deployDispatch.ts";
 // reconnect and left them with no caller — so what this section wires is a screen rather than a
 // second mechanism. See server/src/work/.
 import { WorkStore, isWorkStatus, type WorkItem } from "./work/workStore.ts";
-import { WorkDispatcher, workConcurrencyFromEnv } from "./work/dispatcher.ts";
+import { WorkDispatcher, workConcurrencyFromEnv, type WorkDispatchOutcome } from "./work/dispatcher.ts";
 import { WorkActions } from "./work/actions.ts";
 import { WorkLifecycle } from "./work/lifecycle.ts";
 import { WorkSnapshots, type AgentRunBar as WorkRunBar } from "./work/snapshot.ts";
@@ -7205,6 +7205,7 @@ const workSnapshots = new WorkSnapshots({
     return out;
   },
   hasServeToken: async (ctx, serviceId) => (await secrets.getServeToken(ctx, serviceId)) !== null,
+  credentialRefused: (deploymentId) => refusedCredentials.has(deploymentId),
   // THE CACHE, NEVER A PROBE. §10 asks for a bounded poll with a stated staleness rather than a
   // per-render fetch, and a snapshot builder that probed would make twenty outbound requests to
   // URLs Jaroku does not own every time somebody opened the tab.
@@ -7278,6 +7279,22 @@ async function broadcastWorkItem(ctx: TenantContext, item: WorkItem | undefined)
   relay.broadcastWorkItem(ctx, await workSnapshots.item(ctx, item));
 }
 
+/**
+ * Deployments whose container refused the stored token on the last dispatch to them — what turns a
+ * fleet card to "Credential refused". In memory: a restart forgets it, and the next refused dispatch
+ * says it again, which is the only evidence there ever is.
+ */
+const refusedCredentials = new Set<string>();
+
+/** What a dispatch's outcome says about the deployment's credential. */
+function noteCredentialOutcome(outcome: WorkDispatchOutcome): void {
+  if (outcome.ok) {
+    if (refusedCredentials.delete(outcome.item.deployment_id)) void relay.broadcastFleet();
+  } else if (outcome.stage === "failed" && outcome.failureKind === "unauthorised" && outcome.refusedToken) {
+    refusedCredentials.add(outcome.item.deployment_id);
+  }
+}
+
 async function handleWorkCommand(ctx: TenantContext, cmd: WorkCommand): Promise<void> {
   const fail = (message: string, itemId?: string, clientRef?: string): void =>
     relay.sendWork(ctx, ctx.requestId, { type: "error", message, itemId, clientRef });
@@ -7297,6 +7314,7 @@ async function handleWorkCommand(ctx: TenantContext, cmd: WorkCommand): Promise<
         // the same dispatcher, the same store, the same run token and the same trace. Nothing below
         // this line knows a conversation exists.
         const out = await workDispatcher.dispatch(ctx, { agentId: cmd.agentId, input: cmd.input });
+        noteCredentialOutcome(out);
         if (!out.ok) {
           // A REFUSAL AND A FAILURE ARE BOTH REPORTED TO THE ASKER, and the difference between them
           // is already visible in what happened to the board: a refusal wrote no row, so the
@@ -7384,6 +7402,7 @@ async function handleWorkCommand(ctx: TenantContext, cmd: WorkCommand): Promise<
       case "retryWork": {
         if (typeof cmd.itemId !== "string") return fail("that is not a job id");
         const out = await workActions.retry(ctx, cmd.itemId);
+        if (out.dispatch) noteCredentialOutcome(out.dispatch);
         if (!out.ok) return fail(out.detail, cmd.itemId);
         // THE DETAIL, NOT THE ROW. This event OPENS the detail panel, which renders what was asked and
         // what came back — two fields a row deliberately does not carry, because a page of fifty
@@ -7414,6 +7433,8 @@ async function handleWorkCommand(ctx: TenantContext, cmd: WorkCommand): Promise<
           });
         }
         if (!out.ok) return fail(out.detail, cmd.deploymentId);
+        // A FRESH TOKEN IS A FRESH START for the card's credential state.
+        refusedCredentials.delete(cmd.deploymentId);
         relay.sendWork(ctx, ctx.requestId, { type: "notice", message: out.detail });
         await relay.broadcastFleet();
         return;

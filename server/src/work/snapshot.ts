@@ -263,6 +263,12 @@ export interface WorkSnapshotDeps {
   deployments: (ctx: TenantContext) => Promise<Map<string, Deployment>>;
   /** Whether a Railway service has a stored serve token. Null for a deployment with no service. */
   hasServeToken: (ctx: TenantContext, serviceId: string) => Promise<boolean>;
+  /**
+   * Whether the container refused the stored token on its last dispatch — `unauthorised`.
+   *
+   * Absent means "never refused", which is what a suite about anything else wants.
+   */
+  credentialRefused?: (deploymentId: string) => boolean;
   /** The last health answer for a deployment, if anything has asked. Never a fresh probe. */
   cachedHealth?: (deploymentId: string) => { state: HealthState; staleMs: number } | undefined;
   /**
@@ -438,18 +444,20 @@ export class WorkSnapshots {
   /**
    * Which of §9's four states this deployment's credential is in.
    *
-   * `unauthorised` IS NOT DECIDED HERE, and the absence is the decision: this function knows only
-   * what is STORED, and a token that exists but was rotated on Railway is indistinguishable from a
-   * working one until something actually presents it. The store has no way to know a token was
-   * rotated out from under it — §6.3 says so — so the state a card shows becomes `unauthorised`
-   * when a JOB fails that way, from the failure kind, and never from a guess made here.
+   * `unauthorised` IS A FACT SOMETHING REPORTED, never a guess made here: a token that exists but
+   * was rotated on Railway is indistinguishable from a working one until something presents it. So
+   * it comes from `credentialRefused`, which the dispatch sets when the container answers 401 and a
+   * Reconnect or an accepted job clears. It used to be promised by this comment and set by nothing,
+   * so after a rotation the card stayed "connected", the composer kept offering it, and every job
+   * failed with nothing on the card saying why.
    */
   private async connectionOf(ctx: TenantContext, deployment: Deployment): Promise<FleetConnection> {
     // A public endpoint has no token by design, so the absence of one says nothing about it. The
     // env key is what the deploy wrote, and it is the only record of the choice.
     if (deployment.env_keys.includes("JAROKU_SERVE_PUBLIC")) return "public";
     if (!deployment.railway_service_id) return "unconnected";
-    return (await this.deps.hasServeToken(ctx, deployment.railway_service_id)) ? "connected" : "unconnected";
+    if (!(await this.deps.hasServeToken(ctx, deployment.railway_service_id))) return "unconnected";
+    return this.deps.credentialRefused?.(deployment.id) ? "unauthorised" : "connected";
   }
 
   /**

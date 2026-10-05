@@ -61,8 +61,14 @@ export type WorkDispatchOutcome =
   | { ok: true; item: WorkItem }
   /** Nothing was written and nothing was spent. */
   | { ok: false; stage: "refused"; refusal: WorkRefusal; detail: string }
-  /** The row exists and reads `failed`. Something MAY have been spent — see the header. */
-  | { ok: false; stage: "failed"; item: WorkItem; failureKind: WorkFailureKind; detail: string };
+  /**
+   * The row exists and reads `failed`. Something MAY have been spent — see the header.
+   *
+   * `refusedToken` IS TRUE WHEN THE CONTAINER REFUSED THE TOKEN Jaroku presented — a 401 — as
+   * against Jaroku having none to present. Only the first means the stored credential is wrong,
+   * which is what turns a fleet card to "Credential refused".
+   */
+  | { ok: false; stage: "failed"; item: WorkItem; failureKind: WorkFailureKind; detail: string; refusedToken: boolean };
 
 export interface WorkDispatcherDeps {
   work: WorkStore;
@@ -254,7 +260,10 @@ export class WorkDispatcher {
         error: detail,
         failureKind: "unauthorised",
       });
-      return { ok: false, stage: "failed", item: await this.ended(ctx, item), failureKind: "unauthorised", detail };
+      return {
+        ok: false, stage: "failed", item: await this.ended(ctx, item), failureKind: "unauthorised", detail,
+        refusedToken: false,
+      };
     }
 
     // --- 4. POST /run, and expect 202 --------------------------------------------------------
@@ -276,7 +285,10 @@ export class WorkDispatcher {
         error: started.detail,
         failureKind,
       });
-      return { ok: false, stage: "failed", item: await this.ended(ctx, item), failureKind, detail: started.detail };
+      return {
+        ok: false, stage: "failed", item: await this.ended(ctx, item), failureKind, detail: started.detail,
+        refusedToken: started.reason === "unauthorised",
+      };
     }
 
     // --- 5. from here the trace drives the state ---------------------------------------------

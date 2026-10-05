@@ -44,8 +44,8 @@ export type CancelOutcome =
   | { ok: false; detail: string };
 
 export type RetryOutcome =
-  | { ok: true; item: WorkItem; detail: string }
-  | { ok: false; detail: string };
+  | { ok: true; item: WorkItem; detail: string; dispatch: WorkDispatchOutcome }
+  | { ok: false; detail: string; dispatch?: WorkDispatchOutcome };
 
 export class WorkActions {
   constructor(private readonly deps: WorkActionsDeps) {}
@@ -144,10 +144,10 @@ export class WorkActions {
       agentId: item.agent_id,
       input: item.input,
     });
-    if (out.ok) return { ok: true, item: out.item, detail: "asked again" };
+    if (out.ok) return { ok: true, item: out.item, detail: "asked again", dispatch: out };
     // THE ORIGINAL IS UNTOUCHED EITHER WAY. A retry that failed is a fact about the retry; the row
     // it came from still records what happened the first time, and rewriting it would lose the
     // history somebody is retrying BECAUSE of.
-    return { ok: false, detail: out.detail };
+    return { ok: false, detail: out.detail, dispatch: out };
   }
 }

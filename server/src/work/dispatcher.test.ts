@@ -330,6 +330,26 @@ console.log("\nfailed, with the row kept as evidence");
       !out.ok && out.stage === "failed" && out.item.failure_kind === "unauthorised" && out.item.ended_at !== null);
   }
 
+  // A TOKEN THE CONTAINER REFUSES is the one failure that says the stored credential is wrong —
+  // a token rotated on Railway — and it is what turns a fleet card to "Credential refused". Having
+  // no token to present is a different fact, and must not say the same.
+  {
+    const stub = await startMockServe({ token: "the-real-token", behaviour: "died", agentId: "a_deployed_agent" });
+    try {
+      const noToken = await fixture(db, stub.url, { serveToken: null });
+      const none = await noToken.dispatcher.dispatch(noToken.ctx, { agentId: noToken.agentId, input: "hello" });
+      check("...no token: failed, and not marked as refused",
+        !none.ok && none.stage === "failed" && none.refusedToken === false);
+      const wrong = await fixture(db, stub.url, { serveToken: "a-rotated-token" });
+      const out = await wrong.dispatcher.dispatch(wrong.ctx, { agentId: wrong.agentId, input: "hello" });
+      check("a token the container answers 401 to is marked as refused",
+        !out.ok && out.stage === "failed" && out.failureKind === "unauthorised" && out.refusedToken === true,
+        JSON.stringify(out.ok ? {} : { stage: out.stage, detail: out.detail }));
+    } finally {
+      await stub.close();
+    }
+  }
+
   // THE CONTAINER IS NOT THERE. Port 1 on loopback answers nothing.
   {
     const f = await fixture(db, "http://127.0.0.1:1");

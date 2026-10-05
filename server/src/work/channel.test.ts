@@ -101,8 +101,12 @@ const snapshots = new WorkSnapshots({
     return out as never;
   },
   hasServeToken: async (_c, serviceId) => serveTokens.has(serviceId),
+  credentialRefused: (deploymentId) => refused.has(deploymentId),
   scoped: (c) => db.forWorkspace(c.workspaceId),
 });
+
+/** Deployments whose token the container has refused — what index.ts records from a 401. */
+const refused = new Set<string>();
 
 const jobs = await liveAgent("channel_agent");
 
@@ -255,6 +259,19 @@ console.log("\nthe fleet strip");
   const open = await liveAgent("public_agent", { token: false, publicServe: true });
   const openCard = (await snapshots.fleet(ctx)).cards.find((c) => c.agent_id === open.agentId)!;
   check("a public endpoint reads public rather than unconnected", openCard.connection === "public");
+
+  // A TOKEN THE CONTAINER REFUSED. This state was promised by a comment and set by nothing, so after
+  // a rotation on Railway the card stayed "connected" and every job failed with no card saying why.
+  refused.add(card.deployment_id);
+  const rotated = (await snapshots.fleet(ctx)).cards.find((c) => c.deployment_id === card.deployment_id)!;
+  check("a stored token the container refused reads unauthorised", rotated.connection === "unauthorised", rotated.connection);
+  refused.delete(card.deployment_id);
+  check("...and connected again once that is cleared",
+    (await snapshots.fleet(ctx)).cards.find((c) => c.deployment_id === card.deployment_id)!.connection === "connected");
+  refused.add(withoutToken.deployment_id);
+  check("no stored token reads unconnected whatever else is said",
+    (await snapshots.fleet(ctx)).cards.find((c) => c.agent_id === unconnected.agentId)!.connection === "unconnected");
+  refused.clear();
 }
 
 // --- 5. forty agents and forty jobs cost what one costs ---------------------------------------------
