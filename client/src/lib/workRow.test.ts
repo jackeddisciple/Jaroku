@@ -33,7 +33,7 @@ const filters = (patch: Partial<WorkFilters> = {}): WorkFilters => ({
 
 let seq = 0;
 const item = (createdAt: string, patch: Partial<WorkItemView> = {}): WorkItemView => ({
-  id: `w-${++seq}`, agent_id: "a", agent_name: "billing_bot", deployment_id: "d", run_id: "r",
+  id: `w-${++seq}`, agent_id: "a", agent_name: "billing_bot", agent_slug: null, deployment_id: "d", run_id: "r",
   created_by: "u", created_by_name: "Tester", input_preview: "refund order 4471",
   status: "succeeded", output_preview: null, error: null, failure_kind: null,
   created_at: createdAt, started_at: createdAt, ended_at: createdAt,

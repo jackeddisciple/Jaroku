@@ -216,6 +216,7 @@ export function WorkComposer() {
       ref,
       agentId: chosen.agent_id,
       agentName: chosen.agent_name,
+      agentSlug: chosen.agent_slug,
       deploymentId: chosen.deployment_id,
       createdBy: viewer?.id ?? "",
       createdByName: viewer?.displayName ?? viewer?.email ?? null,

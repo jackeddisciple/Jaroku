@@ -96,6 +96,8 @@ function Row({ item, columns, marks, categories }: {
   const notSent = isOptimistic(item) && item.status === "failed";
   const cost = cockpitCost(item.cost_usd, item.cost_complete);
   const when = cockpitTime(item.created_at);
+  // §14's category, by slug for the reason the portrait is — see below.
+  const category = item.agent_slug ? categories.get(item.agent_slug) : undefined;
 
   return (
     <li>
@@ -205,7 +207,9 @@ function Row({ item, columns, marks, categories }: {
                   and the agent column goes, its picture goes with it rather than leaving a mark
                   attached to nothing. */}
               <AgentFace
-                picture={marks.get(item.agent_id)}
+                // BY SLUG, which is what `marks` is keyed by. It was looked up by `agent_id`, the
+                // uuid, and every row missed: a monogram where the card above showed the face.
+                picture={item.agent_slug ? marks.get(item.agent_slug) : undefined}
                 name={item.agent_name ?? item.agent_id}
                 size={FACE_SIZE.row}
               />
@@ -213,8 +217,8 @@ function Row({ item, columns, marks, categories }: {
                 variant="prose"
                 className="max-w-[20ch] shrink-0 text-caption text-muted"
                 title={
-                  categories.get(item.agent_id)
-                    ? `${item.agent_name ?? ""} — ${categories.get(item.agent_id)}`
+                  category
+                    ? `${item.agent_name ?? ""} — ${category}`
                     : item.agent_name ?? undefined
                 }
               >
@@ -225,9 +229,9 @@ function Row({ item, columns, marks, categories }: {
                   agent column goes, the category goes with it rather than becoming a fragment
                   attached to nothing, and it is never a column of its own competing with the cost
                   figure §13 spends its sharpest paragraph protecting. */}
-              {categories.get(item.agent_id) && (
+              {category && (
                 <span className="hidden shrink-0 text-tiny text-faint xl:inline">
-                  · {categories.get(item.agent_id)}
+                  · {category}
                 </span>
               )}
             </span>

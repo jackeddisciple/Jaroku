@@ -2842,6 +2842,8 @@ export interface WorkItemView {
   id: string;
   agent_id: string;
   agent_name: string | null;
+  /** The agent's slug — what its portrait and category are looked up by. Null for a deleted agent. */
+  agent_slug: string | null;
   deployment_id: string;
   run_id: string | null;
   created_by: string;

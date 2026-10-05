@@ -54,6 +54,12 @@ export interface WorkItemView {
   agent_id: string;
   /** Resolved here so a row is not a second lookup in the client. Null for a deleted agent. */
   agent_name: string | null;
+  /**
+   * ...AND ITS SLUG, which is what every client-side agent lookup is keyed by — the portrait and the
+   * category both. The row looked them up by `agent_id`, the uuid, so every lookup missed: the card
+   * above showed the agent's face and every row showed a monogram. Null for a deleted agent.
+   */
+  agent_slug: string | null;
   deployment_id: string;
   /** The trace. Null only for a job that never reached a container. */
   run_id: string | null;
@@ -248,6 +254,8 @@ export interface WorkSnapshotDeps {
   work: WorkStore;
   /** Agent uuid → display name. One read for the page, not one per row. */
   agentNames: (ctx: TenantContext) => Promise<Map<string, string>>;
+  /** Agent uuid → slug, for the row's `agent_slug`. One read for the page. Absent leaves it null. */
+  agentSlugs?: (ctx: TenantContext) => Promise<Map<string, string>>;
   /** User uuid → display name or email. One read for the page. */
   actorNames: (ctx: TenantContext) => Promise<Map<string, string>>;
   /**
@@ -307,13 +315,14 @@ export class WorkSnapshots {
     // at. The second read is skipped when the page is already the whole workspace, which is what
     // "Everyone's" with no agent filter means — the two answers are then the same answer.
     const wholeWorkspace = filters.scope === "all" && !filters.agentId;
-    const [page, counts, workspaceCounts, agents, actors, deployments] = await Promise.all([
+    const [page, counts, workspaceCounts, agents, actors, deployments, slugs] = await Promise.all([
       this.deps.work.list(ctx, filters),
       this.deps.work.countsByStatus(ctx, filters),
       wholeWorkspace ? Promise.resolve(null) : this.deps.work.countsByStatus(ctx, { scope: "all" }),
       this.deps.agentNames(ctx),
       this.deps.actorNames(ctx),
       this.deps.deployments(ctx),
+      this.deps.agentSlugs?.(ctx) ?? Promise.resolve(new Map<string, string>()),
     ]);
     const costs = await costsForItems(
       ctx,
@@ -322,7 +331,7 @@ export class WorkSnapshots {
       (item) => modelOf(deployments, item),
     );
     return {
-      items: page.items.map((item) => view(item, costs.get(item.id), agents, actors)),
+      items: page.items.map((item) => view(item, costs.get(item.id), agents, actors, slugs)),
       nextCursor: page.nextCursor,
       counts,
       workspaceCounts: workspaceCounts ?? counts,
@@ -370,13 +379,14 @@ export class WorkSnapshots {
    * makes wrong — which is the mistake the Inbox's own delta note is about.
    */
   async item(ctx: TenantContext, item: WorkItem): Promise<WorkItemView> {
-    const [agents, actors, deployments] = await Promise.all([
+    const [agents, actors, deployments, slugs] = await Promise.all([
       this.deps.agentNames(ctx),
       this.deps.actorNames(ctx),
       this.deps.deployments(ctx),
+      this.deps.agentSlugs?.(ctx) ?? Promise.resolve(new Map<string, string>()),
     ]);
     const costs = await costsForItems(ctx, this.deps.scoped(ctx), [item], (i) => modelOf(deployments, i));
-    return view(item, costs.get(item.id), agents, actors);
+    return view(item, costs.get(item.id), agents, actors, slugs);
   }
 
   /** One item in full, for the detail panel. */
@@ -547,11 +557,13 @@ function view(
   cost: WorkCost | undefined,
   agents: Map<string, string>,
   actors: Map<string, string>,
+  slugs: Map<string, string>,
 ): WorkItemView {
   return {
     id: item.id,
     agent_id: item.agent_id,
     agent_name: agents.get(item.agent_id) ?? null,
+    agent_slug: slugs.get(item.agent_id) ?? null,
     deployment_id: item.deployment_id,
     run_id: item.run_id,
     created_by: item.created_by,

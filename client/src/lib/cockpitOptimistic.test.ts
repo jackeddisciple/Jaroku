@@ -29,7 +29,7 @@ const check = (name: string, ok: boolean, detail = ""): void => {
 };
 
 const job = (id: string, patch: Partial<WorkItemView> = {}): WorkItemView => ({
-  id, agent_id: "a", agent_name: "billing_bot", deployment_id: "d", run_id: `r-${id}`,
+  id, agent_id: "a", agent_name: "billing_bot", agent_slug: null, deployment_id: "d", run_id: `r-${id}`,
   created_by: "u", created_by_name: "Tester", input_preview: `job ${id}`,
   status: "succeeded", output_preview: null, error: null, failure_kind: null,
   created_at: "2026-08-28T12:00:00.000Z", started_at: null, ended_at: null,

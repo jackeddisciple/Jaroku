@@ -182,7 +182,7 @@ console.log("\nkilling the last agent does not take its record with it");
   // THE LAST AGENT KILLED USED TO SWAP THE LIST FOR THE FIRST-RUN STATE: "No agents are live yet"
   // over a workspace with nine past jobs, none of them reachable, while the header counted nine.
   const past = {
-    id: "job-1", agent_id: "a", agent_name: "Bruno", deployment_id: "d", run_id: "r",
+    id: "job-1", agent_id: "a", agent_name: "Bruno", agent_slug: null, deployment_id: "d", run_id: "r",
     created_by: "u", created_by_name: "Tester", input_preview: "what is 17 times 23",
     status: "succeeded" as const, output_preview: "391", error: null, failure_kind: null,
     created_at: new Date().toISOString(), started_at: null, ended_at: null,

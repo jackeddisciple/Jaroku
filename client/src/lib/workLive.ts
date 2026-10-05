@@ -185,6 +185,8 @@ export function optimisticRow(input: {
   ref: string;
   agentId: string;
   agentName: string | null;
+  /** The agent's slug, so the row wears its portrait from the first frame. */
+  agentSlug?: string | null;
   deploymentId: string;
   createdBy: string;
   createdByName: string | null;
@@ -194,6 +196,7 @@ export function optimisticRow(input: {
     id: `${OPTIMISTIC_PREFIX}${input.ref}`,
     agent_id: input.agentId,
     agent_name: input.agentName,
+    agent_slug: input.agentSlug ?? null,
     deployment_id: input.deploymentId,
     run_id: null,
     created_by: input.createdBy,

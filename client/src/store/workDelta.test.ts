@@ -49,6 +49,7 @@ const NO_COUNTS: WorkCounts = {
 const item = (patch: Partial<WorkItemView> & { id: string }): WorkItemView => ({
   agent_id: "agent-1",
   agent_name: "Support triage",
+  agent_slug: null,
   deployment_id: "dep-1",
   run_id: null,
   created_by: ME,

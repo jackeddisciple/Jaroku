@@ -7182,6 +7182,7 @@ const workSnapshots = new WorkSnapshots({
     const rows = await agentRepo.list(ctx, { includeArchived: true });
     return new Map(rows.map((a) => [a.id, a.display_name ?? a.slug]));
   },
+  agentSlugs: async (ctx) => new Map((await agentRepo.list(ctx, { includeArchived: true })).map((a) => [a.id, a.slug])),
   // DISPLAY NAME OR EMAIL, in that order, because §4's whole point is that a job names a person.
   // A workspace where nobody has set a display name would otherwise render every row unattributed,
   // which is the honest-but-useless state the column exists to avoid.

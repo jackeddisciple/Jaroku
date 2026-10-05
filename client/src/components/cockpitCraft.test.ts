@@ -29,6 +29,7 @@ import { LIVE } from "../lib/cockpitCopy.ts";
 import { CARD_HEIGHT, CARD_WIDTH, ROW_HEIGHT, SPINE, SPINE_X } from "../lib/cockpitLayout.ts";
 import { markup, seed } from "../lib/testRender.ts";
 import { MOTION, SPACE } from "../lib/tokens.ts";
+import { useBuildStore } from "../store/buildStore.ts";
 import { useWorkStore } from "../store/workStore.ts";
 import type { WorkItemView } from "../types.ts";
 import { WorkList } from "./WorkList.tsx";
@@ -75,7 +76,7 @@ const CODE = SOURCES.map((f) => ({ path: f.path, text: stripComments(f.text) }))
 
 const NO_COUNTS = { queued: 0, running: 0, waiting: 0, succeeded: 0, failed: 0, cancelled: 0 };
 const job = (id: string, patch: Partial<WorkItemView> = {}): WorkItemView => ({
-  id, agent_id: "a", agent_name: "billing_bot", deployment_id: "d", run_id: "r",
+  id, agent_id: "a", agent_name: "billing_bot", agent_slug: null, deployment_id: "d", run_id: "r",
   created_by: "u", created_by_name: "Tester", input_preview: "refund order 4471",
   status: "succeeded", output_preview: null, error: null, failure_kind: null,
   created_at: new Date().toISOString(), started_at: null, ended_at: null,
@@ -304,6 +305,18 @@ console.log("\nthe new-rows pill and the pinned day hang from the frame, not the
   check("the pill is drawn", html.includes(LIVE.pill(1)));
   check("...outside the scrolling element, so it cannot scroll out of view",
     scroller.length > 0 && !scroller.includes(LIVE.pill(1)), scroller.slice(0, 200));
+}
+
+console.log("\na row wears its agent's face and category");
+{
+  // THE ROW LOOKED BOTH UP BY THE AGENT'S UUID while both maps are keyed by its slug, so every row
+  // showed a monogram under a card showing the portrait, and the category never appeared.
+  seed(useBuildStore, { agents: [{ agent_id: "bruno", name: "Bruno", picture: "agent-09", category: "Personal Assistant" }] as never });
+  const html = renderList([job("w-face", { agent_id: "uuid-1", agent_name: "Bruno", agent_slug: "bruno" })]);
+  check("the row's portrait is the agent's own", /agent-faces\/[^"]*agent-09|agent-09/.test(html),
+    html.slice(html.indexOf("w-face") - 200, html.indexOf("w-face") + 600));
+  check("...and its category is named", html.includes("Personal Assistant"));
+  seed(useBuildStore, { agents: [] });
 }
 
 console.log("\na press the server refused is not a failed job");
