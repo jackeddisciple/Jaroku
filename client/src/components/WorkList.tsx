@@ -31,6 +31,7 @@ import { cockpitCost, cockpitTime } from "../lib/cockpitFormat.ts";
 import { rowColumns, type RowColumns } from "../lib/workRow.ts";
 import { dayAt, flattenWork, workWindow } from "../lib/workWindow.ts";
 import { isOptimistic } from "../lib/workLive.ts";
+import { useNow } from "../lib/useNow.ts";
 import { sendCancelWork, sendListWork, sendLoadWorkItem, sendRetryWork } from "../lib/socket.ts";
 import { ROW_HEIGHT, SPINE_X } from "../lib/cockpitLayout.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
@@ -563,8 +564,15 @@ function WaitingAnnouncer() {
   );
 }
 
+/** How often the rows' relative times are worked out again. See `useNow`. */
+const CLOCK_MS = 10_000;
+
 export function WorkList() {
   const items = useWorkStore((s) => s.items);
+  // THE ROWS' TIMES MOVE WITH THE CLOCK, not only when the list does — see `useNow`.
+  const now = useNow(CLOCK_MS);
+  // And the day headings turn over at midnight rather than at the next change to the list.
+  const today = new Date(now).toDateString();
   const nextCursor = useWorkStore((s) => s.nextCursor);
   const filters = useWorkStore((s) => s.filters);
   const pending = useWorkStore((s) => s.pending);
@@ -605,7 +613,8 @@ export function WorkList() {
   // the list can be ten thousand rows (§18) and the grouping walks all of them.
   // §18's flat list: headings and rows, every entry one row tall, so `feedWindow` applies to it
   // unchanged. See `workWindow.ts` for why a heading is a row and why that is not a compromise.
-  const entries = useMemo(() => flattenWork(items), [items]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const entries = useMemo(() => flattenWork(items), [items, today]);
 
   /**
    * §18's window, and the scroll offset it is computed from.

@@ -307,6 +307,17 @@ console.log("\nthe new-rows pill and the pinned day hang from the frame, not the
     scroller.length > 0 && !scroller.includes(LIVE.pill(1)), scroller.slice(0, 200));
 }
 
+console.log("\nrelative times keep moving");
+{
+  // "last job 7s ago" sat on a card while the job was three minutes old: relative times were worked
+  // out when the data changed, and only then. The strip and the list now re-read them on a clock.
+  const strip = CODE.find((f) => f.path === "components/FleetStrip.tsx")!.text;
+  const list = CODE.find((f) => f.path === "components/WorkList.tsx")!.text;
+  check("the fleet strip re-reads its times on a clock", /useNow\(/.test(strip));
+  check("...and so does the list, whose day headings turn over with it",
+    /useNow\(/.test(list) && /\[items, today\]/.test(list));
+}
+
 console.log("\na row wears its agent's face and category");
 {
   // THE ROW LOOKED BOTH UP BY THE AGENT'S UUID while both maps are keyed by its slug, so every row

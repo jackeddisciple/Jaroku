@@ -24,6 +24,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useAnchoredMenu } from "../lib/anchoredMenu.ts";
 import { useMenuFocus } from "../lib/menuFocus.ts";
+import { useNow } from "../lib/useNow.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 
 import { CONNECTION_LABEL, DESTRUCTIVE, FILTERS } from "../lib/cockpitCopy.ts";
@@ -540,8 +541,14 @@ function moveCardFocus(from: number, delta: 1 | -1, track: HTMLElement | null, c
   target.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
+/** How often the strip's relative times — "last job 4m ago" — are worked out again. */
+const CLOCK_MS = 5_000;
+
 export function FleetStrip() {
   const fleet = useWorkStore((s) => s.fleet);
+  // THE CARDS' SENTENCES ARE RE-READ AGAINST THE CLOCK, not only when the fleet changes — see
+  // `useNow`. A card said "last job 7s ago" about a job three minutes old.
+  useNow(CLOCK_MS);
   // ONE MAP FOR THE WHOLE STRIP. A `find` per card over forty agents is the shape of an N+1 that
   // never shows up in review and is instantly visible in a real workspace — the same rule
   // `test:agent-grid` holds the server's statement count to.
