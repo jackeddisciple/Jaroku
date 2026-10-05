@@ -277,6 +277,27 @@ console.log("\na followed log window adds to the pane rather than replacing it\n
     && mergeLogs(null, many).lines.at(-1)?.message === `l${LOG_LINES_KEPT + 49}`);
 }
 
+console.log("\na late answer does not reopen a panel somebody closed\n");
+{
+  const w = () => useWorkStore.getState();
+  const detail = (id: string) => ({ ...item({ id }), input: "the full input", output: null }) as WorkItemDetailView;
+  seed([]);
+  w().closeItem();
+  w().openingItem("job-a");
+  w().closeItem();
+  w().receiveDetail(detail("job-a"));
+  check("an answer arriving after the panel was closed leaves it closed", w().open === null);
+  w().openingItem("job-b");
+  w().receiveDetail(detail("job-a"));
+  check("...and an answer for another job does not take the place of the one asked for",
+    w().open === null && w().openingId === "job-b");
+  w().receiveDetail(detail("job-b"));
+  check("the answer the panel is waiting for opens it", w().open?.id === "job-b" && w().openingId === null);
+  w().receiveDetail({ ...detail("job-b"), output: "done" });
+  check("...and a re-read of the open job refreshes it", w().open?.output === "done");
+  w().closeItem();
+}
+
 console.log(failures === 0 ? "\nALL CORRECT\n" : `\n${failures} FAILED\n`);
 // The client has no `@types/node` on purpose — see `node-shims.d.ts` — so `process` is reached the
 // way `reset.test.ts` reaches it rather than by widening the shim for one line.

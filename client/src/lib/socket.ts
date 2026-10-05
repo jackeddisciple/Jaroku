@@ -647,7 +647,8 @@ function dispatch(msg: ServerMessage): void {
         // item carries no filter — it cannot, it goes to every socket in the workspace — so a
         // client holding "mine, failed" receives transitions for jobs it is not showing.
         const viewer = useSessionStore.getState().user?.id ?? null;
-        if ("input" in msg.item) w.openItem(msg.item);
+        // A DETAIL OPENS THE PANEL ONLY WHEN THE PANEL ASKED FOR IT — see `receiveDetail`.
+        if ("input" in msg.item) w.receiveDetail(msg.item);
         // THE STORE APPLIES THE FILTER, because it is the one that holds the list: a delta can
         // ADD a row that has just come into existence, UPDATE one it holds, or REMOVE one that
         // has left the filter, and only the list knows which of the three this is.

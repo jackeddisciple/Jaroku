@@ -133,6 +133,12 @@ interface WorkState {
   refuseOptimistic: (ref: string, reason: string) => void;
   setFleet: (fleet: FleetCardView[], anyLive: boolean) => void;
   openItem: (item: WorkItemDetailView) => void;
+  /**
+   * A job's detail arrived: open the panel on it ONLY IF that is what the panel is waiting for, or
+   * it is the job already open being re-read. Every detail answer used to open the panel, so one
+   * that landed after the panel was closed opened it again under whoever had moved on.
+   */
+  receiveDetail: (item: WorkItemDetailView) => void;
   openingItem: (itemId: string | null) => void;
   closeItem: () => void;
   setLogs: (logs: { deploymentId: string; lines: { timestamp: string; message: string; severity: string | null }[]; cursor: string | null }) => void;
@@ -368,6 +374,12 @@ export const useWorkStore = create<WorkState>((set) => ({
 
   setFleet: (fleet, anyLive) => set({ fleet, anyLive }),
   openItem: (open) => set({ open, openingId: null }),
+  receiveDetail: (item) =>
+    set((prev) => {
+      const asked = prev.openingId === item.id;
+      const reread = prev.openingId === null && prev.open?.id === item.id;
+      return asked || reread ? { open: item, openingId: null } : {};
+    }),
   openingItem: (openingId) => set({ openingId }),
   closeItem: () => set({ open: null, openingId: null, logs: null }),
   setLogs: (logs) => set((prev) => ({ logs: mergeLogs(prev.logs, logs) })),
