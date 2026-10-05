@@ -430,6 +430,32 @@ export class RailwayApi {
     );
   }
 
+  /** The services a project still holds. What decides whether an emptied project may go. */
+  async projectServices(projectId: string): Promise<{ id: string; name: string }[]> {
+    const data = await this.call<{ project: { services?: { edges?: { node: { id: string; name: string } }[] } } }>(
+      "projectServices",
+      `query project($id: String!) { project(id: $id) { services { edges { node { id name } } } } }`,
+      { id: projectId },
+    );
+    return data.project?.services?.edges?.map((e) => e.node).filter((n) => n?.id) ?? [];
+  }
+
+  /**
+   * Delete a whole project. Only ever called on one Jaroku made, once nothing else is in it.
+   *
+   * A project emptied by Kill, or left half-made by a deploy that failed between creating it and
+   * creating its service, is still a project in somebody's account — and on Railway's free plan
+   * it is one of a handful they are allowed. Leaving them is how a free allowance gets used up by
+   * things nobody can see from Jaroku.
+   */
+  async deleteProject(projectId: string): Promise<void> {
+    await this.call(
+      "deleteProject",
+      `mutation projectDelete($id: String!) { projectDelete(id: $id) }`,
+      { id: projectId },
+    );
+  }
+
   /**
    * The public URL. `targetPort` is passed explicitly rather than left to Railway's port
    * detection: serve.py binds $PORT with a documented default of 8080, so guessing would be
@@ -487,4 +513,25 @@ export class RailwayApi {
 function truncate(text: string, max = 500): string {
   const flat = text.replace(/\s+/g, " ").trim();
   return flat.length > max ? `${flat.slice(0, max)}…` : flat;
+}
+
+/**
+ * Delete a project once nothing but `goneServiceId` is left in it. Never throws.
+ *
+ * Kill uses it on the project a deleted service leaves behind; the deploy uses it to roll back a
+ * project it created and could not finish setting up.
+ */
+export async function removeEmptyProject(
+  api: RailwayApi,
+  projectId: string,
+  goneServiceId: string | null,
+): Promise<"removed" | "kept" | "failed"> {
+  try {
+    const left = (await api.projectServices(projectId)).filter((s) => s.id !== goneServiceId);
+    if (left.length > 0) return "kept";
+    await api.deleteProject(projectId);
+    return "removed";
+  } catch {
+    return "failed";
+  }
 }

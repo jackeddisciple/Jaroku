@@ -245,8 +245,9 @@ export const DESTRUCTIVE = {
     label: "Kill",
     title: "Stop this agent’s service",
     warning: (agentName: string): string =>
-      `Stopping ${agentName}’s service kills everything running on it. Jaroku cannot bring it ` +
-      `back — the service is redeployed from the Deploy panel.`,
+      `Stopping ${agentName}’s service deletes it from Railway — and its project, once nothing ` +
+      `else is in it — and kills everything running on it. Jaroku cannot bring it back; the ` +
+      `agent is redeployed from the Deploy panel.`,
     confirm: "Kill it",
   },
   /** Shared by both dialogs. Never the default focus on either — §21. */

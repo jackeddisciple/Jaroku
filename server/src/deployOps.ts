@@ -16,7 +16,7 @@ import { randomBytes } from "node:crypto";
 
 import type { Deployment, DeployStore } from "./deployStore.ts";
 import { makeScrubber } from "./deploySecrets.ts";
-import { RailwayApi, RailwayError } from "./railwayApi.ts";
+import { RailwayApi, RailwayError, removeEmptyProject } from "./railwayApi.ts";
 import type { TenantContext } from "./db/tenant.ts";
 
 /**
@@ -289,8 +289,10 @@ export class DeployOps {
       };
     }
 
+    let api: RailwayApi;
     try {
-      await (await this.api(ctx)).deleteService(row.railway_service_id);
+      api = await this.api(ctx);
+      await api.deleteService(row.railway_service_id);
     } catch (err) {
       const message = err instanceof RailwayError ? err.message : (err as Error).message;
       // SETTLED ANYWAY, AND SAID PLAINLY. The user asked to stop it and Jaroku could not; leaving
@@ -307,7 +309,25 @@ export class DeployOps {
 
     await this.deps.store.patch(ctx, deploymentId, { status: "removed", url: null });
     this.health_.delete(deploymentId);
-    return { ok: true, detail: "the Railway service has been deleted and the agent is no longer serving", serviceRemoved: true };
+
+    // AND THE PROJECT IT LIVED IN, once nothing else does. Every Jaroku deploy makes a project of
+    // its own, so a Kill that stopped at the service left an empty project in the user's account —
+    // one of the few Railway's free plan allows. A project still holding anything else (a database
+    // somebody added by hand) is left exactly as it is. The service just deleted is not counted,
+    // because Railway can list it for a moment after the delete is accepted.
+    const project = row.railway_project_id
+      ? await removeEmptyProject(api, row.railway_project_id, row.railway_service_id)
+      : "kept";
+    return {
+      ok: true,
+      detail:
+        project === "removed"
+          ? "the Railway service and the empty project it lived in have been deleted, and the agent is no longer serving"
+          : project === "kept"
+            ? "the Railway service has been deleted and the agent is no longer serving — its project holds other services, so it was left"
+            : "the Railway service has been deleted and the agent is no longer serving, but its now-empty project could not be removed — delete it from your Railway dashboard",
+      serviceRemoved: true,
+    };
   }
 
   /**

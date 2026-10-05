@@ -36,7 +36,7 @@ import {
 import { isSafeAgentId } from "./projectFs.ts";
 import {
   RailwayApi, RailwayError, isTerminalStatus, RAILWAY_TERMINAL_OK, railwayProjectName,
-  railwayServiceName, type RailwayWorkspace,
+  railwayServiceName, removeEmptyProject, type RailwayWorkspace,
 } from "./railwayApi.ts";
 import { checkRailwayCli, RailwayUpload } from "./railwayCli.ts";
 import { numberFromEnv } from "./env.ts";
@@ -694,7 +694,19 @@ export class DeployManager {
       workspace
         ? `created Railway project ${project.name} in the Railway workspace "${workspace.name}"`
         : `created Railway project ${project.name}`);
-    const service = await api.createService(project.id, railwayServiceName(agentId));
+    let service: { id: string; name: string };
+    try {
+      service = await api.createService(project.id, railwayServiceName(agentId));
+    } catch (err) {
+      // A PROJECT WITH NOTHING IN IT IS UNDONE, not left. Nothing has recorded its id yet, so a
+      // retry would make another, and each one uses up an allowance of the user's Railway plan.
+      const undone = await removeEmptyProject(api, project.id, null);
+      await this.log(id, "provisioning", "jaroku",
+        undone === "removed"
+          ? `could not create the service, so the empty project ${project.name} was deleted again`
+          : `could not create the service — the empty project ${project.name} is still in your Railway account`);
+      throw err;
+    }
     return {
       projectId: project.id,
       environmentId: project.environmentId,

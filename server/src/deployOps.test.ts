@@ -63,9 +63,19 @@ function fakeApi(script: {
   logs?: { timestamp: string; message: string; severity?: string | null }[];
   failDelete?: string;
   failVariables?: string;
+  /** What the project still lists after the delete. Railway can list the gone service for a moment. */
+  projectHolds?: (deletedServiceId: string | null) => { id: string; name: string }[];
 }) {
   const calls: { op: string; args: unknown }[] = [];
+  let deleted: string | null = null;
   const api = {
+    projectServices: async (projectId: string) => {
+      calls.push({ op: "projectServices", args: { projectId } });
+      return script.projectHolds?.(deleted) ?? (deleted ? [{ id: deleted, name: "still listed" }] : []);
+    },
+    deleteProject: async (projectId: string) => {
+      calls.push({ op: "deleteProject", args: { projectId } });
+    },
     deploymentLogs: async (deploymentId: string, limit: number) => {
       calls.push({ op: "deploymentLogs", args: { deploymentId, limit } });
       return (script.logs ?? []).map((l) => ({ ...l, severity: l.severity ?? null }));
@@ -73,6 +83,7 @@ function fakeApi(script: {
     deleteService: async (serviceId: string) => {
       calls.push({ op: "deleteService", args: { serviceId } });
       if (script.failDelete) throw new RailwayError("api", script.failDelete, "deleteService");
+      deleted = serviceId;
     },
     upsertVariables: async (target: unknown, values: Record<string, string>) => {
       calls.push({ op: "upsertVariables", args: { target, names: Object.keys(values), values } });
@@ -226,6 +237,26 @@ function fakeApi(script: {
   const after = await store.get(ctx, dep.id);
   check("...and the row stops claiming to be serving",
     after?.status === "removed" && after.url === null, `${after?.status} ${after?.url}`);
+  // A Kill that stopped at the service left an empty project in the user's Railway account.
+  check("...and the project it lived in goes too, once the service was all it held",
+    calls.some((c) => c.op === "deleteProject" && JSON.stringify(c.args).includes(dep.railway_project_id!)),
+    JSON.stringify(calls.map((c) => c.op)));
+  check("...even while Railway still lists the service it just deleted",
+    outcome.detail.includes("empty project"), outcome.detail);
+}
+
+{
+  // A PROJECT THAT HOLDS SOMETHING ELSE IS LEFT ALONE — a database somebody added by hand.
+  const dep = await seed();
+  const { api, calls } = fakeApi({ projectHolds: () => [{ id: "svc-postgres", name: "Postgres" }] });
+  const ops = new DeployOps({
+    store, token: async () => RAILWAY_TOKEN, storeServeToken: async () => null, canKill: () => true,
+    apiFor: () => api,
+  });
+  const outcome = await ops.kill(ctx, dep.id);
+  check("a project holding another service is not deleted", outcome.ok && !calls.some((c) => c.op === "deleteProject"),
+    JSON.stringify(calls.map((c) => c.op)));
+  check("...and the sentence says why it was left", outcome.detail.includes("other services"), outcome.detail);
 }
 
 {
