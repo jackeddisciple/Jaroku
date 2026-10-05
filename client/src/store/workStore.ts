@@ -77,6 +77,8 @@ interface WorkState {
   /** The filters the page in hand answers for, echoed by the server. */
   filters: WorkFilters;
   fleet: FleetCardView[];
+  /** When the fleet arrived — what a card's health staleness is aged from while it is on screen. */
+  fleetReceivedAt: number;
   /**
    * Whether this workspace has any live deployment at all.
    *
@@ -201,6 +203,7 @@ export const useWorkStore = create<WorkState>((set, get) => ({
   workspaceCounts: NO_COUNTS,
   filters: DEFAULT_FILTERS,
   fleet: [],
+  fleetReceivedAt: 0,
   anyLive: false,
   loaded: false,
   open: null,
@@ -400,7 +403,7 @@ export const useWorkStore = create<WorkState>((set, get) => ({
 
   setAtTop: (atTop) => set({ atTop }),
 
-  setFleet: (fleet, anyLive) => set({ fleet, anyLive }),
+  setFleet: (fleet, anyLive) => set({ fleet, anyLive, fleetReceivedAt: Date.now() }),
   openItem: (open) => set((prev) => ({ open, openingId: null, known: remember(prev.known, [open]) })),
   receiveDetail: (item) =>
     set((prev) => {

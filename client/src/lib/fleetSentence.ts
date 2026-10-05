@@ -147,10 +147,13 @@ export function fleetSentence(facts: FleetFacts): string {
  * the probe, it appears in a different place on the card, and folding it in would push a real
  * clause out of a three-clause cap to make room for a fact nobody asked for.
  */
-export function healthLine(card: FleetCardView): string | null {
+export function healthLine(card: FleetCardView, sinceReceivedMs = 0): string | null {
   if (!card.health) return null;
-  const age = card.health_stale_ms ?? 0;
-  const when = age < 2_000 ? "just now" : `${Math.round(age / 1000)}s ago`;
+  // HOW OLD THE ANSWER IS NOW: its age when the fleet was sent, plus however long the card has been
+  // on screen since. And in the words every other relative time here uses — it counted only in
+  // seconds, so an hour-old probe read "as of 3600s ago", and it stood still once received.
+  const age = (card.health_stale_ms ?? 0) + Math.max(0, sinceReceivedMs);
+  const when = relTime(new Date(Date.now() - age).toISOString()) || "just now";
   switch (card.health) {
     case "healthy":
       return `answering, as of ${when}`;

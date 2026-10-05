@@ -126,7 +126,9 @@ function CardMenu({ card }: { card: FleetCardView }) {
   const [confirming, setConfirming] = useState<"reconnect" | "kill" | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const health = healthLine(card);
+  const receivedAt = useWorkStore((s) => s.fleetReceivedAt);
+  // Aged from when the fleet arrived, re-read on the strip's clock — see `healthLine`.
+  const health = healthLine(card, receivedAt ? Date.now() - receivedAt : 0);
   const spend = cockpitCost(card.spend_today, card.spend_complete);
   // THE PANEL LEAVES THE CARD. It opened inside it, and the card is `overflow-hidden` inside a strip
   // that scrolls sideways — an `overflow` ancestor clips an absolutely-positioned descendant whatever

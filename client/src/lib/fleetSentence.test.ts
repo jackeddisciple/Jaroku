@@ -210,6 +210,13 @@ console.log("\nthe probe, and its stated staleness");
   check("an unreachable probe is not the same sentence as an unhealthy one",
     healthLine(card({ health: "unreachable", health_stale_ms: 1 }))
       !== healthLine(card({ health: "unhealthy", health_stale_ms: 1 })));
+  // AN HOUR-OLD PROBE READ "as of 3600s ago", and the age stood still once the card was on screen.
+  check("an old answer is said in minutes or hours, not thousands of seconds",
+    healthLine(card({ health: "healthy", health_stale_ms: 7_200_000 })) === "answering, as of 2h ago",
+    String(healthLine(card({ health: "healthy", health_stale_ms: 7_200_000 }))));
+  check("...and it ages while the card is on screen",
+    healthLine(card({ health: "healthy", health_stale_ms: 30_000 }), 90_000) === "answering, as of 2m ago",
+    String(healthLine(card({ health: "healthy", health_stale_ms: 30_000 }), 90_000)));
 
   // IT IS NOT IN THE SENTENCE, which is what keeps a probe result from displacing a live clause.
   check("the probe never reaches the sentence",
