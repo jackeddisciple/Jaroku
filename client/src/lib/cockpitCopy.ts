@@ -186,6 +186,14 @@ export const EMPTY = {
     /** When there is nothing built yet to deploy. */
     noAgent: "Make an agent first",
   },
+  /**
+   * Nothing is live NOW, in a workspace that has had live agents — the last one was killed.
+   *
+   * NOT "YET", and not instead of the list: this used to be the first-run state, which replaced the
+   * list and said "No agents are live yet" over a workspace whose nine past jobs — outputs, costs and
+   * all — then could not be reached, while the header went on counting them.
+   */
+  noneLiveNow: { title: "No agent is live now. Its jobs stay below" },
   /** Live agents and nothing asked of them. A `line`, because the composer below is the answer. */
   noWork: { title: "Nothing has been asked of them yet." },
   /** Narrowed to nothing. Names the filter and offers to clear it — a `line`, for the same reason. */

@@ -117,7 +117,13 @@ function Header() {
  * illustration for a condition that resolves itself is theatre — `EmptyState`'s own file makes the
  * same argument at greater length.
  */
-function NothingLive() {
+function NothingLive({ hasHistory }: {
+  /**
+   * The workspace has jobs on record — it HAD live agents. The state becomes one line above the list
+   * rather than the whole tab: see `EMPTY.noneLiveNow`.
+   */
+  hasHistory: boolean;
+}) {
   const agents = useBuildStore((s) => s.agents);
   // THE AGENTS THAT COULD GO LIVE: built, and runnable. A draft has no code to deploy.
   const deployable = agents.filter((a) => !a.draft && a.runnable).slice(0, 3);
@@ -134,6 +140,28 @@ function NothingLive() {
     selectAgent(slug);
   };
   const link = "inline-flex items-center gap-1 text-ink underline-offset-2 hover:underline focus-visible:outline-none focus-visible:shadow-focusring";
+  const actions = deployable.length > 0 ? deployable.map((a) => (
+    <button key={a.agent_id} type="button" onClick={() => openDeploy(a.agent_id)} className={link}>
+      {EMPTY.noAgents.deploy(a.name)}
+      <Icon.emptyState.openDeployPanel size={ICON.badge} />
+    </button>
+  )) : (
+    <button type="button" onClick={() => useUiStore.getState().openNav("agents")} className={link}>
+      {EMPTY.noAgents.noAgent}
+      <Icon.emptyState.openDeployPanel size={ICON.badge} />
+    </button>
+  );
+  if (hasHistory) {
+    return (
+      <EmptyState
+        size="line"
+        icon={RocketIcon}
+        title={EMPTY.noneLiveNow.title}
+        hint={<span className="inline-flex flex-wrap gap-x-3 gap-y-1">{actions}</span>}
+        className={`shrink-0 border-b border-hair ${SPINE_X}`}
+      />
+    );
+  }
   return (
     <EmptyState
       icon={RocketIcon}
@@ -146,19 +174,7 @@ function NothingLive() {
           {EMPTY.noAgents.hint}{" "}
           {/* §6: TEXT + A TRAILING MARK, one per agent that can go live — or, with none built yet,
               the way to make one. */}
-          <span className="mt-1 flex flex-wrap justify-center gap-x-3 gap-y-1">
-            {deployable.length > 0 ? deployable.map((a) => (
-              <button key={a.agent_id} type="button" onClick={() => openDeploy(a.agent_id)} className={link}>
-                {EMPTY.noAgents.deploy(a.name)}
-                <Icon.emptyState.openDeployPanel size={ICON.badge} />
-              </button>
-            )) : (
-              <button type="button" onClick={() => useUiStore.getState().openNav("agents")} className={link}>
-                {EMPTY.noAgents.noAgent}
-                <Icon.emptyState.openDeployPanel size={ICON.badge} />
-              </button>
-            )}
-          </span>
+          <span className="mt-1 flex flex-wrap justify-center gap-x-3 gap-y-1">{actions}</span>
         </>
       }
     />
@@ -168,6 +184,11 @@ function NothingLive() {
 export function CockpitView() {
   const loaded = useWorkStore((s) => s.loaded);
   const anyLive = useWorkStore((s) => s.anyLive);
+  // WHETHER THIS WORKSPACE HAS A RECORD AT ALL: the workspace's own counts, which no filter moves,
+  // or a page in hand. Either means it once had something live.
+  const hasHistory = useWorkStore(
+    (s) => s.items.length > 0 || Object.values(s.workspaceCounts).some((n) => n > 0),
+  );
   const error = useWorkStore((s) => s.error);
   // §10's refusal, said in the corner toast. It was a strip under the header on the argument that a
   // toast disappears before somebody has read which job failed — but the job's own row already keeps
@@ -218,8 +239,17 @@ export function CockpitView() {
       <div className="relative flex min-h-0 flex-1 flex-col">
         {!loaded ? (
           <CockpitSkeleton />
+        ) : !anyLive && hasHistory ? (
+          // NOTHING LIVE, AND A RECORD TO KEEP SHOWING. Killing the last agent used to swap the list
+          // for the first-run state, so every past job became unreachable while the header still
+          // counted them. The line sits above the list instead; there is no composer, because there
+          // is nothing to send to.
+          <>
+            <NothingLive hasHistory />
+            <WorkList />
+          </>
         ) : !anyLive ? (
-          <NothingLive />
+          <NothingLive hasHistory={false} />
         ) : (
           <>
             <WorkList />

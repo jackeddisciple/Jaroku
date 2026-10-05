@@ -167,5 +167,29 @@ console.log("\nwe have not been told yet is a third thing");
   check("...which is not a spinner", !/animate-spin/.test(loading));
 }
 
+console.log("\nkilling the last agent does not take its record with it");
+{
+  // THE LAST AGENT KILLED USED TO SWAP THE LIST FOR THE FIRST-RUN STATE: "No agents are live yet"
+  // over a workspace with nine past jobs, none of them reachable, while the header counted nine.
+  const past = {
+    id: "job-1", agent_id: "a", agent_name: "Bruno", deployment_id: "d", run_id: "r",
+    created_by: "u", created_by_name: "Tester", input_preview: "what is 17 times 23",
+    status: "succeeded" as const, output_preview: "391", error: null, failure_kind: null,
+    created_at: new Date().toISOString(), started_at: null, ended_at: null,
+    cost_usd: 0.0007, tokens: 300, duration_ms: 4000, cost_complete: true,
+    tool_refusals: [], stop_requested_at: null,
+  };
+  seed(useWorkStore, {
+    items: [past], pending: [], atTop: true, nextCursor: null, loaded: true, anyLive: false,
+    counts: { ...NO_COUNTS, succeeded: 1 }, workspaceCounts: { ...NO_COUNTS, succeeded: 1 },
+    filters: filters(), fleet: [], open: null, openingId: null, logs: null, error: null, notice: null,
+  });
+  const killed = markup(createElement(CockpitView));
+  check("the past jobs are still listed", killed.includes("what is 17 times 23"));
+  check("...under a line saying nothing is live now", killed.includes(EMPTY.noneLiveNow.title));
+  check("...and not the first-run sentence, which says \"yet\"", !killed.includes(EMPTY.noAgents.title));
+  check("...and no composer, because there is nothing to send to", !/Dispatch|will run for real/.test(killed));
+}
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 (globalThis as { process?: { exit(code: number): void } }).process?.exit(fail === 0 ? 0 : 1);
