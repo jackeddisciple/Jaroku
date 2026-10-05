@@ -252,7 +252,8 @@ console.log("\nthe phrases three documents quote");
   check("the three empty states are three different sentences",
     new Set([EMPTY.noAgents.title, EMPTY.noWork.title, EMPTY.filtered.title]).size === 3);
   check("...and the two that have somewhere to go say so",
-    EMPTY.noAgents.action.length > 0 && EMPTY.filtered.action.length > 0);
+    EMPTY.noAgents.deploy("billing_bot").includes("billing_bot") && EMPTY.noAgents.noAgent.length > 0
+      && EMPTY.filtered.action.length > 0);
   check("...and the first names the Deploy panel", /Deploy panel/.test(EMPTY.noAgents.hint), EMPTY.noAgents.hint);
 
   // §14: the reason names the capability in human words rather than in a permission string.

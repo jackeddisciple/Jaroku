@@ -181,7 +181,10 @@ export const EMPTY = {
   noAgents: {
     title: "No agents are live yet.",
     hint: "Deploy an agent from its Deploy panel and it will appear here, with everything it has been asked to do.",
-    action: "Open the Deploy panel",
+    /** One per agent that can be deployed, each opening that agent's Deploy panel. */
+    deploy: (agentName: string): string => `Deploy ${agentName}`,
+    /** When there is nothing built yet to deploy. */
+    noAgent: "Make an agent first",
   },
   /** Live agents and nothing asked of them. A `line`, because the composer below is the answer. */
   noWork: { title: "Nothing has been asked of them yet." },

@@ -43,8 +43,10 @@ import { useEffect } from "react";
 
 import { EMPTY, HEADER, OFFLINE } from "../lib/cockpitCopy.ts";
 import { CARD_HEIGHT, CARD_WIDTH, ROW_HEIGHT, SPINE_X } from "../lib/cockpitLayout.ts";
+import { selectAgent } from "../lib/selection.ts";
 import { sendListFleet, sendListWork } from "../lib/socket.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
+import { useBuildStore } from "../store/buildStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
@@ -116,7 +118,22 @@ function Header() {
  * same argument at greater length.
  */
 function NothingLive() {
-  const setRightTab = useUiStore((s) => s.setRightTab);
+  const agents = useBuildStore((s) => s.agents);
+  // THE AGENTS THAT COULD GO LIVE: built, and runnable. A draft has no code to deploy.
+  const deployable = agents.filter((a) => !a.draft && a.runnable).slice(0, 3);
+  /**
+   * That agent's Deploy panel, in the three panes where it lives.
+   *
+   * THIS WAS `setRightTab("deploy")` AND NOTHING ELSE, which did nothing anyone could see: the
+   * Cockpit is a full-screen destination with no right panel, so the click switched a hidden tab —
+   * and named no agent, so even that panel would not have known what to deploy. Selecting the agent
+   * closes the full-screen view, and the tab opens on it.
+   */
+  const openDeploy = (slug: string): void => {
+    useUiStore.getState().setRightTab("deploy");
+    selectAgent(slug);
+  };
+  const link = "inline-flex items-center gap-1 text-ink underline-offset-2 hover:underline focus-visible:outline-none focus-visible:shadow-focusring";
   return (
     <EmptyState
       icon={RocketIcon}
@@ -127,17 +144,21 @@ function NothingLive() {
       hint={
         <>
           {EMPTY.noAgents.hint}{" "}
-          {/* §6: TEXT + A TRAILING MARK. `EMPTY.noAgents.action` has been in the copy table since
-              the Cockpit shipped and nothing rendered it — so the one empty state whose answer is
-              in another panel named that panel in prose and gave no way to reach it. */}
-          <button
-            type="button"
-            onClick={() => setRightTab("deploy")}
-            className="inline-flex items-center gap-1 text-ink underline-offset-2 hover:underline focus-visible:outline-none focus-visible:shadow-focusring"
-          >
-            {EMPTY.noAgents.action}
-            <Icon.emptyState.openDeployPanel size={ICON.badge} />
-          </button>
+          {/* §6: TEXT + A TRAILING MARK, one per agent that can go live — or, with none built yet,
+              the way to make one. */}
+          <span className="mt-1 flex flex-wrap justify-center gap-x-3 gap-y-1">
+            {deployable.length > 0 ? deployable.map((a) => (
+              <button key={a.agent_id} type="button" onClick={() => openDeploy(a.agent_id)} className={link}>
+                {EMPTY.noAgents.deploy(a.name)}
+                <Icon.emptyState.openDeployPanel size={ICON.badge} />
+              </button>
+            )) : (
+              <button type="button" onClick={() => useUiStore.getState().openNav("agents")} className={link}>
+                {EMPTY.noAgents.noAgent}
+                <Icon.emptyState.openDeployPanel size={ICON.badge} />
+              </button>
+            )}
+          </span>
         </>
       }
     />

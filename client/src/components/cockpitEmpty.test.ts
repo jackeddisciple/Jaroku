@@ -24,8 +24,9 @@ import { createElement } from "react";
 
 import { EMPTY } from "../lib/cockpitCopy.ts";
 import { markup, seed } from "../lib/testRender.ts";
+import { useBuildStore } from "../store/buildStore.ts";
 import { useWorkStore } from "../store/workStore.ts";
-import type { WorkFilters } from "../types.ts";
+import type { AgentSummary, WorkFilters } from "../types.ts";
 import { CockpitView } from "./CockpitView.tsx";
 import { WorkList } from "./WorkList.tsx";
 
@@ -87,6 +88,20 @@ console.log("\neach one says what to do about it");
   // §10: the first names the Deploy panel, "with the action. This is the ONLY `full` empty state in
   // the tab — it is a genuine state of the product, not a gap that clears in ten seconds."
   check("no agents names where to go", noAgents.includes("Deploy panel"), EMPTY.noAgents.hint);
+  // AND GOES THERE, FOR A NAMED AGENT. The one action used to switch a hidden tab: the Cockpit has
+  // no right panel, so nothing changed on screen, and it named no agent to deploy anyway.
+  check("with nothing built, it points at making an agent", noAgents.includes(EMPTY.noAgents.noAgent));
+  seed(useBuildStore, {
+    agents: [
+      { agent_id: "bruno", name: "Bruno", runnable: true, draft: false },
+      { agent_id: "sketch", name: "Sketch", runnable: false, draft: true },
+    ] as unknown as AgentSummary[],
+  });
+  const withAgents = render({ loaded: true, anyLive: false, filters: filters() }, "view");
+  check("with an agent built, it offers to deploy that agent by name",
+    withAgents.includes(EMPTY.noAgents.deploy("Bruno")), withAgents.slice(withAgents.indexOf("No agents"), withAgents.indexOf("No agents") + 600));
+  check("...and not a draft, which has nothing to deploy", !withAgents.includes(EMPTY.noAgents.deploy("Sketch")));
+  seed(useBuildStore, { agents: [] });
 
   // §10: the third "names the filter and offers to clear it", and the offer is a real control —
   // a sentence that described the way back without providing one would end in the reader hunting.
