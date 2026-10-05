@@ -69,6 +69,13 @@ export interface RailwayProject {
   environmentId: string;
 }
 
+/** A Railway workspace — where a project lives and whose plan it is billed to. */
+export interface RailwayWorkspace {
+  id: string;
+  name: string;
+  createdAt: string | null;
+}
+
 export interface RailwayDeployment {
   id: string;
   status: string;
@@ -207,15 +214,55 @@ export class RailwayApi {
     return { ok: true, projectCount: data.projects?.edges?.length ?? 0 };
   }
 
-  /** Create a project and return it with the id of the environment everything else needs. */
-  async createProject(name: string): Promise<RailwayProject> {
-    const created = await this.call<{ projectCreate: { id: string; name: string } }>(
-      "createProject",
-      `mutation projectCreate($input: ProjectCreateInput!) {
-         projectCreate(input: $input) { id name }
-       }`,
-      { input: { name } },
-    );
+  /**
+   * The Railway workspaces this token's user belongs to, oldest first.
+   *
+   * EMPTY FOR A TOKEN THAT CANNOT ASK. `me` answers for an ACCOUNT token only; a workspace- or
+   * project-scoped one is refused, and that refusal is not a reason to fail a deploy — such a
+   * token already names its workspace, and `createProject` lets Railway infer it.
+   */
+  async workspaces(): Promise<RailwayWorkspace[]> {
+    let data: { me?: { workspaces?: { id: string; name: string; createdAt?: string | null }[] } };
+    try {
+      data = await this.call("workspaces", `query { me { workspaces { id name createdAt } } }`);
+    } catch (err) {
+      if (err instanceof RailwayError && err.kind !== "unreachable") return [];
+      throw err;
+    }
+    return (data.me?.workspaces ?? [])
+      .filter((w) => typeof w?.id === "string" && w.id)
+      .map((w) => ({ id: w.id, name: w.name ?? w.id, createdAt: w.createdAt ?? null }))
+      .sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""));
+  }
+
+  /**
+   * Create a project and return it with the id of the environment everything else needs.
+   *
+   * `workspaceId` IS REQUIRED BY RAILWAY NOW for an account token: without it every first deploy
+   * was refused in under a second with "You must specify a workspaceId to create a project", so
+   * nobody could get an agent live at all. Null leaves it out, for a scoped token that implies one.
+   */
+  async createProject(name: string, workspaceId: string | null = null): Promise<RailwayProject> {
+    let created: { projectCreate: { id: string; name: string } };
+    try {
+      created = await this.call<{ projectCreate: { id: string; name: string } }>(
+        "createProject",
+        `mutation projectCreate($input: ProjectCreateInput!) {
+           projectCreate(input: $input) { id name }
+         }`,
+        { input: workspaceId ? { name, workspaceId } : { name } },
+      );
+    } catch (err) {
+      if (!workspaceId && err instanceof RailwayError && /workspaceId/i.test(err.message)) {
+        throw new RailwayError(
+          "auth",
+          "Railway needs to know which workspace to create the project in, and this token cannot " +
+            "list them. Use an account token from railway.com/account/tokens.",
+          "createProject",
+        );
+      }
+      throw err;
+    }
     const project = created.projectCreate;
     // projectCreate does not return environments, so the default one is read back. Doing it
     // here rather than at each call site means nothing downstream can forget and end up

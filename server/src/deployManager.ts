@@ -34,7 +34,9 @@ import {
   type DeploySecretStatus,
 } from "./deploySecrets.ts";
 import { isSafeAgentId } from "./projectFs.ts";
-import { RailwayApi, RailwayError, RAILWAY_ENV_KEY, isTerminalStatus, RAILWAY_TERMINAL_OK } from "./railwayApi.ts";
+import {
+  RailwayApi, RailwayError, RAILWAY_ENV_KEY, isTerminalStatus, RAILWAY_TERMINAL_OK, type RailwayWorkspace,
+} from "./railwayApi.ts";
 import { checkRailwayCli, RailwayUpload } from "./railwayCli.ts";
 import { numberFromEnv } from "./env.ts";
 import type { TenantContext } from "./db/tenant.ts";
@@ -657,14 +659,37 @@ export class DeployManager {
       }
     }
 
-    const project = await api.createProject(this.projectName(agentId));
-    await this.log(id, "provisioning", "jaroku", `created Railway project ${project.name}`);
+    const workspace = await this.railwayWorkspace(id, api);
+    const project = await api.createProject(this.projectName(agentId), workspace?.id ?? null);
+    await this.log(id, "provisioning", "jaroku",
+      workspace
+        ? `created Railway project ${project.name} in the Railway workspace "${workspace.name}"`
+        : `created Railway project ${project.name}`);
     const service = await api.createService(project.id, agentId);
     return {
       projectId: project.id,
       environmentId: project.environmentId,
       serviceId: service.id,
     };
+  }
+
+  /**
+   * Which Railway workspace a new project goes into.
+   *
+   * ONE IS THE ORDINARY CASE AND IS SIMPLY USED. SEVERAL MEANS THE ACCOUNT ALSO BELONGS TO A TEAM,
+   * and the oldest is chosen: it is the one Railway made with the account, the person's own — a
+   * deploy that quietly landed on a team's bill would be worse than one that did not. Which one was
+   * used is said in the log either way. None means the token cannot list them (a scoped token),
+   * and Railway infers it from the token.
+   */
+  private async railwayWorkspace(id: string, api: RailwayApi): Promise<RailwayWorkspace | null> {
+    const workspaces = await api.workspaces();
+    if (workspaces.length > 1) {
+      await this.log(id, "provisioning", "jaroku",
+        `this Railway account belongs to ${workspaces.length} workspaces; using "${workspaces[0]!.name}", ` +
+          `the account's own`);
+    }
+    return workspaces[0] ?? null;
   }
 
   /** Railway project names are user-visible; keep them recognisable and unique enough. */

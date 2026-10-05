@@ -325,6 +325,72 @@ await withScratchPostgres(async (pg) => burst(new DeployStore(pg), "postgres"));
   check("a host that is not there is unreachable", deadKind === "unreachable");
 }
 
+// --- 8b. a project is created in a workspace, because Railway now insists -------------------
+//
+// `projectCreate` without a workspaceId was refused in under a second — "You must specify a
+// workspaceId to create a project" — so every first deploy failed and nobody could get an agent
+// live. The stub plays Railway's side: it refuses a project with no workspace, and it answers
+// `me` only when told the token is an account token.
+{
+  let accountToken = true;
+  let workspaces: { id: string; name: string; createdAt: string }[] = [];
+  const created: Record<string, unknown>[] = [];
+  const server: Server = createServer((req, res) => {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      const { query, variables } = JSON.parse(body) as { query: string; variables: Record<string, any> };
+      const send = (payload: unknown): void => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify(payload));
+      };
+      if (query.includes("me {")) {
+        return accountToken
+          ? send({ data: { me: { workspaces } } })
+          : send({ errors: [{ message: "Not Authorized" }] });
+      }
+      if (query.includes("projectCreate")) {
+        created.push(variables["input"]);
+        return variables["input"]?.workspaceId || !accountToken
+          ? send({ data: { projectCreate: { id: "proj", name: variables["input"].name } } })
+          : send({ errors: [{ message: "You must specify a workspaceId to create a project" }] });
+      }
+      if (query.includes("environments")) {
+        return send({ data: { project: { environments: { edges: [{ node: { id: "env", name: "production" } }] } } } });
+      }
+      send({ data: {} });
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  const endpoint = `http://127.0.0.1:${(server.address() as { port: number }).port}/graphql/v2`;
+  const api = new RailwayApi({ token: "tok", endpoint, timeoutMs: 3000 });
+
+  workspaces = [
+    { id: "ws-team", name: "A team", createdAt: "2026-03-01T00:00:00Z" },
+    { id: "ws-own", name: "Mine", createdAt: "2025-01-01T00:00:00Z" },
+  ];
+  const listed = await api.workspaces();
+  check("the token's workspaces are listed, oldest first",
+    listed.map((w) => w.id).join(",") === "ws-own,ws-team", JSON.stringify(listed));
+
+  const project = await api.createProject("bruno-1a2b", listed[0]!.id);
+  check("a project is created with the workspace it belongs in",
+    project.id === "proj" && created.at(-1)?.["workspaceId"] === "ws-own", JSON.stringify(created.at(-1)));
+  check("...and comes back with its environment", project.environmentId === "env");
+
+  let refusal = "";
+  try { await api.createProject("bruno-1a2b"); } catch (err) { refusal = (err as Error).message; }
+  check("a project with no workspace says how to fix it rather than quoting Railway",
+    /account token/.test(refusal), refusal);
+
+  accountToken = false;
+  check("a token that cannot list workspaces lists none rather than failing the deploy",
+    (await api.workspaces()).length === 0);
+  check("...and its project is still created, for Railway to place",
+    (await api.createProject("bruno-1a2b")).id === "proj" && !("workspaceId" in (created.at(-1) ?? {})));
+  server.close();
+}
+
 // --- 9. an unrecognised build status is not success ------------------------------------------
 {
   check("SUCCESS is terminal", isTerminalStatus("SUCCESS"));
