@@ -108,7 +108,9 @@ export function setWindowTitle(workspaceName: string | null | undefined, waiting
   }
   const invoke = bridge()?.core?.invoke;
   if (!invoke) return;
-  // The name rather than the assembled title: the shell composes it, so the em dash and the
-  // product's own name are spelled in one place. See `window.rs`.
-  void invoke("set_window_title", { name: (workspaceName ?? "").trim() }).catch(() => {});
+  // The parts rather than the assembled title: the shell composes it, so the em dash and the
+  // product's own name are spelled in one place. See `window.rs`. THE COUNT CROSSES TOO — only the
+  // name used to, so a minimised window's native title never showed what was waiting.
+  void invoke("set_window_title", { name: (workspaceName ?? "").trim(), waiting: Math.max(0, Math.floor(waiting)) })
+    .catch(() => {});
 }

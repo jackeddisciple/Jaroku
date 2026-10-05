@@ -1147,6 +1147,8 @@ jobs:
           npm run test:work-link
           # AND THE PALETTE'S "DISPATCH TO" ENDS IN A COMPOSER WITH THE CARET IN IT, even with the tab open.
           npm run test:palette-dispatch
+          # AND THE DESKTOP WINDOW'S OWN TITLE CARRIES THE WAITING COUNT, not only the page's.
+          npm run test:window-title
           # THE FLEET CARD'S ONE LINE, WHICH BOTH SPECIFICATIONS CALL THE HARDEST DESIGN IN THE
           # FEATURE, and the reason is what happens when it is wrong: a strip of twenty cards all
           # reading "Deployed", which is what the Railway dashboard already gives and is why

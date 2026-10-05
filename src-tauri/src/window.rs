@@ -337,17 +337,29 @@ pub fn focus_existing(app: &AppHandle) {
 /// the server has stored one, so the clamp is belt-and-braces — but this string comes from the page
 /// and the failure of a bad one is a window with no title at all, which reads as a broken build.
 /// An empty name yields the product's own name, which is what the window opened with.
+///
+/// AND THE WAITING COUNT, which the page puts in front when it is backgrounded (`windowTitle.ts`).
+/// Only the name used to cross, so the native title — the one a minimised window shows — never
+/// carried the count `document.title` did.
 #[tauri::command]
-pub fn set_window_title(app: AppHandle, name: Option<String>) {
+pub fn set_window_title(app: AppHandle, name: Option<String>, waiting: Option<u32>) {
     let Some(main) = app.get_webview_window(MAIN) else { return };
-    let trimmed = name.unwrap_or_default().trim().chars().take(64).collect::<String>();
-    // An em dash rather than a hyphen: the two halves are a product and a place, not a compound.
-    let title = if trimmed.is_empty() { "Jaroku".to_string() } else { format!("Jaroku — {trimmed}") };
+    let title = title_for(name.as_deref(), waiting.unwrap_or(0));
     // ON MACOS THE TITLE AND THE LIGHTS ARE SET TOGETHER — see `reinset_traffic_lights`.
     #[cfg(target_os = "macos")]
     reinset_traffic_lights(&main, Some(title));
     #[cfg(not(target_os = "macos"))]
     let _ = main.set_title(&title);
+}
+
+/// The window's title, composed the way `titleFor` in `client/src/lib/windowTitle.ts` composes
+/// `document.title`, so the two surfaces read the same.
+fn title_for(name: Option<&str>, waiting: u32) -> String {
+    let trimmed = name.unwrap_or_default().trim().chars().take(64).collect::<String>();
+    // An em dash rather than a hyphen: the two halves are a product and a place, not a compound.
+    let base = if trimmed.is_empty() { "Jaroku".to_string() } else { format!("Jaroku — {trimmed}") };
+    // THE COUNT GOES IN FRONT, where a window list truncates last.
+    if waiting > 0 { format!("({waiting}) {base}") } else { base }
 }
 
 /// Put the traffic lights back where `traffic_light_position` put them — optionally setting the
@@ -465,6 +477,14 @@ mod tests {
         // given, `hostConfig.ts` accepts wss://, and `apiBase` derives the HTTP origin from it. So
         // one injected string moves both surfaces and they cannot drift apart.
         assert!(host_config("wss://jaroku-api.fly.dev").contains("wss://jaroku-api.fly.dev"));
+    }
+
+    #[test]
+    fn the_title_carries_the_waiting_count_in_front_and_nothing_when_none_is_waiting() {
+        assert_eq!(title_for(Some("Cockpit Test"), 1), "(1) Jaroku — Cockpit Test");
+        assert_eq!(title_for(Some("Cockpit Test"), 0), "Jaroku — Cockpit Test");
+        assert_eq!(title_for(Some("  "), 2), "(2) Jaroku");
+        assert_eq!(title_for(None, 0), "Jaroku");
     }
 
     #[test]

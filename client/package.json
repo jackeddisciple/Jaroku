@@ -102,6 +102,7 @@
     "test:work-live": "tsx src/lib/workLive.test.ts",
     "test:cockpit-composer": "tsx src/lib/cockpitComposer.test.ts",
     "test:palette-dispatch": "tsx src/lib/paletteDispatch.test.ts",
+    "test:window-title": "tsx src/lib/windowTitle.test.ts",
     "test:cockpit-optimistic": "tsx src/lib/cockpitOptimistic.test.ts",
     "test:cockpit-empty": "tsx src/components/cockpitEmpty.test.ts",
     "test:cockpit-craft": "tsx src/components/cockpitCraft.test.ts",
