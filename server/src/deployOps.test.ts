@@ -246,6 +246,29 @@ function fakeApi(script: {
 }
 
 {
+  // NOT LIVE WHILE RAILWAY DELETES IT. The delete takes seconds, and for all of them the card read
+  // live and a dispatch would have gone to a URL that was going away.
+  const dep = await seed();
+  const { api } = fakeApi({});
+  let statusWhenAsked = "";
+  let detachedFirst = false;
+  const watching = {
+    ...api,
+    deleteService: async (serviceId: string) => {
+      statusWhenAsked = (await store.get(ctx, dep.id))?.status ?? "";
+      return api.deleteService(serviceId);
+    },
+  } as unknown as RailwayApi;
+  const ops = new DeployOps({
+    store, token: async () => RAILWAY_TOKEN, storeServeToken: async () => null, canKill: () => true,
+    apiFor: () => watching,
+  });
+  await ops.kill(ctx, dep.id, { onDetached: () => { detachedFirst = statusWhenAsked === ""; } });
+  check("the deployment stops being live before Railway is asked to delete it", statusWhenAsked === "removed", statusWhenAsked);
+  check("...and the caller is told then, so the screens can say so", detachedFirst);
+}
+
+{
   // A PROJECT THAT HOLDS SOMETHING ELSE IS LEFT ALONE — a database somebody added by hand.
   const dep = await seed();
   const { api, calls } = fakeApi({ projectHolds: () => [{ id: "svc-postgres", name: "Postgres" }] });

@@ -7468,7 +7468,14 @@ async function handleWorkCommand(ctx: TenantContext, cmd: WorkCommand): Promise<
 
       case "killAgent": {
         if (typeof cmd.deploymentId !== "string") return fail("that is not a deployment id");
-        const out = await deployOps.kill(ctx, cmd.deploymentId);
+        // THE SCREENS ARE TOLD THE MOMENT IT STOPS BEING LIVE, not once Railway has answered — see
+        // `DeployOps.kill`'s `onDetached`.
+        const out = await deployOps.kill(ctx, cmd.deploymentId, {
+          onDetached: () => {
+            void relay.broadcastFleet();
+            broadcastDeployments();
+          },
+        });
         // IT REPORTS WHAT ACTUALLY HAPPENED rather than what was asked for — Part 1's own rule, and
         // the reason `ok` and `serviceRemoved` are two fields. "Removed from Jaroku, still running
         // on Railway" and "stopped" are different facts about somebody's bill.

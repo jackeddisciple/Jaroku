@@ -308,6 +308,8 @@ export const DESTRUCTIVE = {
       `else is in it — and kills everything running on it. Jaroku cannot bring it back; the ` +
       `agent is redeployed from the Deploy panel.`,
     confirm: "Kill it",
+    /** Said the moment it is confirmed, until Railway answers. */
+    stopping: (agentName: string): string => `Stopping ${agentName}…`,
   },
   /** Shared by both dialogs. Never the default focus on either — §21. */
   cancel: "Cancel",

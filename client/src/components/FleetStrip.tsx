@@ -277,7 +277,15 @@ function CardMenu({ card }: { card: FleetCardView }) {
         confirmLabel={DESTRUCTIVE.kill.confirm}
         destructive
         onCancel={() => setConfirming(null)}
-        onConfirm={() => { setConfirming(null); sendKillAgent(card.deployment_id); }}
+        onConfirm={() => {
+          setConfirming(null);
+          // SAID AT ONCE, because Railway takes seconds to delete a service and nothing on screen
+          // said a kill was under way. The card goes as soon as the server has detached it; the
+          // outcome — deleted, or detached and still running — replaces this when Railway answers.
+          if (sendKillAgent(card.deployment_id)) {
+            useUiStore.getState().showToast(DESTRUCTIVE.kill.stopping(card.agent_name));
+          }
+        }}
       />
     </div>
   );

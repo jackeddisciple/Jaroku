@@ -274,7 +274,19 @@ export class DeployOps {
    * end — but the sentence the user gets must say which of the two happened. "Removed from
    * Jaroku, still running on Railway" and "stopped" are different facts about somebody's bill.
    */
-  async kill(ctx: TenantContext, deploymentId: string): Promise<KillOutcome> {
+  async kill(
+    ctx: TenantContext,
+    deploymentId: string,
+    opts: {
+      /**
+       * Called once the deployment has stopped being live in Jaroku — BEFORE Railway is asked. The
+       * service delete takes seconds, and for all of them the card read live, the composer offered
+       * it, and a job dispatched then went to a URL that was going away. The caller tells the
+       * screens at this moment rather than after Railway answers.
+       */
+      onDetached?: () => void;
+    } = {},
+  ): Promise<KillOutcome> {
     if (!(await this.deps.canKill(ctx))) {
       return { ok: false, detail: "you do not have permission to stop a deployed agent", serviceRemoved: false };
     }
@@ -282,6 +294,7 @@ export class DeployOps {
     if (!row) return { ok: false, detail: "no such deployment", serviceRemoved: false };
     if (!row.railway_service_id) {
       await this.deps.store.patch(ctx, deploymentId, { status: "removed" });
+      opts.onDetached?.();
       return {
         ok: true,
         detail: "this deployment never reached Railway — the record has been removed",
@@ -289,14 +302,21 @@ export class DeployOps {
       };
     }
 
+    // DETACHED FIRST, so nothing can be dispatched to it while Railway deletes the service — the
+    // dispatcher only sends to a `live` row. The order of the two outcomes below is unchanged: the
+    // row ends `removed` either way, and the sentence says whether the service went with it.
+    await this.deps.store.patch(ctx, deploymentId, { status: "removed", url: null });
+    this.health_.delete(deploymentId);
+    opts.onDetached?.();
+
     let api: RailwayApi;
     try {
       api = await this.api(ctx);
       await api.deleteService(row.railway_service_id);
     } catch (err) {
       const message = err instanceof RailwayError ? err.message : (err as Error).message;
-      // SETTLED ANYWAY, AND SAID PLAINLY. The user asked to stop it and Jaroku could not; leaving
-      // the row live would claim the agent is serving, and claiming it was stopped would be worse.
+      // SAID PLAINLY. The user asked to stop it and Jaroku could not; the row is no longer live, and
+      // it carries the reason — claiming it was stopped would be the worse lie.
       await this.deps.store.patch(ctx, deploymentId, { status: "removed", error: message });
       return {
         ok: false,
@@ -306,9 +326,6 @@ export class DeployOps {
         serviceRemoved: false,
       };
     }
-
-    await this.deps.store.patch(ctx, deploymentId, { status: "removed", url: null });
-    this.health_.delete(deploymentId);
 
     // AND THE PROJECT IT LIVED IN, once nothing else does. Every Jaroku deploy makes a project of
     // its own, so a Kill that stopped at the service left an empty project in the user's account —
