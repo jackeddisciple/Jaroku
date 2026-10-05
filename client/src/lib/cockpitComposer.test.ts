@@ -16,6 +16,7 @@
 //   npm run test:cockpit-composer
 
 import { COMPOSER } from "./cockpitCopy.ts";
+import { GATE_PREVIEW_LINES, gatePreview } from "../components/WorkGate.tsx";
 import { cockpitComposer, type CockpitSituation } from "./cockpitComposer.ts";
 
 let fail = 0;
@@ -168,6 +169,19 @@ console.log("\nnothing that was always going to be refused reaches a confirmatio
   ] as [string, CockpitSituation][]) {
     check(`${name} is refused before the gate`, !cockpitComposer(s).ready, name);
   }
+}
+
+// THE GATE SHOWS WHAT IS ABOUT TO BE SENT. It showed the first line only, and a job pasted with a
+// leading newline put an empty box under "Run this for real?" — for any longer job, everything after
+// line one was invisible at the moment money was spent.
+{
+  const leading = gatePreview("\n\nnodejs/node: what is the event loop?\nsecond line");
+  check("a leading blank line does not leave the preview empty",
+    leading.text.startsWith("nodejs/node: what is the event loop?"), JSON.stringify(leading));
+  check("...and the second line is shown too", leading.text.includes("second line") && leading.more === 0);
+  const long = gatePreview(Array.from({ length: 16 }, (_, i) => `line ${i + 1}`).join("\n"));
+  check(`a long job shows its first ${GATE_PREVIEW_LINES} lines and counts the rest`,
+    long.text.split("\n").length === GATE_PREVIEW_LINES && long.more === 16 - GATE_PREVIEW_LINES, JSON.stringify(long));
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

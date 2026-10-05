@@ -35,11 +35,28 @@ import { Icon } from "../lib/icons/registry.ts";
  * before migration 041 has no record of which version it ran, and a confident "v1" would be a lie
  * about somebody's production on the one screen asking them to spend money.
  */
+/** How many lines of the job the gate shows before saying how many more there are. */
+export const GATE_PREVIEW_LINES = 6;
+
+/**
+ * What the gate shows of the job: its opening lines — from the first that has anything on it — and
+ * how many lines follow them.
+ *
+ * IT WAS THE FIRST LINE, and the first line can be empty: a job pasted with a leading newline put an
+ * empty box under "Run this for real?", and for any job of more than one line everything after the
+ * first was invisible at the moment money was spent. A few lines, and a count of the rest, keeps
+ * §8's point — recognition, not review — without hiding what is being sent.
+ */
+export function gatePreview(input: string): { text: string; more: number } {
+  const lines = input.replace(/^(?:[ \t]*\r?\n)+/, "").replace(/\s+$/, "").split("\n");
+  return {
+    text: lines.slice(0, GATE_PREVIEW_LINES).join("\n"),
+    more: Math.max(0, lines.length - GATE_PREVIEW_LINES),
+  };
+}
+
 function GateBody({ card, input }: { card: FleetCardView; input: string }) {
-  // THE FIRST LINE, which is what §8 asks for. A gate that rendered a 600-line pasted email would
-  // be a dialog somebody scrolls rather than reads, and the point of the line is recognition —
-  // "yes, that is the job I meant" — rather than review.
-  const firstLine = input.split("\n", 1)[0] ?? "";
+  const preview = gatePreview(input);
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-col gap-0.5 text-caption">
@@ -58,10 +75,14 @@ function GateBody({ card, input }: { card: FleetCardView; input: string }) {
           <span className="text-warn">its URL is public, so anyone holding it can spend the same key</span>
         )}
       </div>
-      <p className="truncate rounded-control border border-hair bg-canvas px-2 py-1 text-caption text-ink"
-        title={firstLine}>
-        {firstLine}
-      </p>
+      <div className="rounded-control border border-hair bg-canvas px-2 py-1">
+        <p className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words text-caption text-ink">{preview.text}</p>
+        {preview.more > 0 && (
+          <p className="mt-0.5 text-tiny text-faint">
+            and {preview.more} more line{preview.more === 1 ? "" : "s"}
+          </p>
+        )}
+      </div>
     </div>
   );
 }
