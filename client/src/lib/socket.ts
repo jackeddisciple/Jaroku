@@ -2570,7 +2570,9 @@ function scheduleWorkCounts(): void {
 }
 
 export function sendListFleet(): void {
-  send({ cmd: "listFleet" });
+  // THE READER'S OWN UTC OFFSET, east-positive, so the cards' "today" is the same day as the list's
+  // day headings rather than UTC's. The server keeps it for this socket's later broadcasts.
+  send({ cmd: "listFleet", utcOffsetMinutes: -new Date().getTimezoneOffset() });
 }
 
 /** One job in full. The panel opens on the id first, so it is never a blank slide-over. */

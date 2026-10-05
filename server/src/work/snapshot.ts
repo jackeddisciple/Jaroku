@@ -402,12 +402,12 @@ export class WorkSnapshots {
    * deployed has nothing to operate — and putting a card up for every draft would turn the glance
    * into a second Agents grid, which §3 spends a paragraph saying this must not be.
    */
-  async fleet(ctx: TenantContext): Promise<FleetPayload> {
+  async fleet(ctx: TenantContext, opts: { utcOffsetMinutes?: number } = {}): Promise<FleetPayload> {
     const [agents, deployments, live, today, lastJob, outcomes] = await Promise.all([
       this.deps.agentNames(ctx),
       this.deps.deployments(ctx),
       this.deps.work.liveByAgent(ctx),
-      this.todayByAgent(ctx),
+      this.todayByAgent(ctx, opts.utcOffsetMinutes ?? 0),
       this.lastJobByAgent(ctx),
       this.deps.runOutcomes?.(ctx) ?? Promise.resolve(new Map<string, AgentRunBar[]>()),
     ]);
@@ -477,10 +477,10 @@ export class WorkSnapshots {
    * the join multiplies: a job with four steps would otherwise be four jobs. That is the kind of
    * mistake that produces a plausible number on a card built to be glanced at.
    *
-   * TODAY IS UTC MIDNIGHT, which is a limit worth stating rather than hiding — the same one the
-   * Inbox's snooze has. Nothing in this product records a person's timezone, so "today" is the
-   * server's day, and for somebody in Los Angeles the counter turns over in the afternoon. The
-   * honest fix is a timezone on the user and it is not this part.
+   * TODAY IS THE READER'S DAY, from the UTC offset their client reported — the same clock the
+   * list's day headings use. It was UTC midnight, so in India the card said "N jobs today" about all
+   * of yesterday's jobs until half past five in the morning, under a list that had already moved on
+   * to "Today". A client that has reported nothing gets UTC, which is what this used to be for all.
    */
   /**
    * When each agent was last given anything — §5's third clause, and a query of its own.
@@ -518,9 +518,11 @@ export class WorkSnapshots {
     return out;
   }
 
-  private async todayByAgent(ctx: TenantContext): Promise<Map<string, { jobs: number; cost: number; complete: boolean }>> {
-    const midnight = new Date(this.deps.now?.() ?? Date.now());
-    midnight.setUTCHours(0, 0, 0, 0);
+  private async todayByAgent(
+    ctx: TenantContext,
+    utcOffsetMinutes: number,
+  ): Promise<Map<string, { jobs: number; cost: number; complete: boolean }>> {
+    const midnight = localMidnight(this.deps.now?.() ?? Date.now(), utcOffsetMinutes);
     const rows = await this.deps.scoped(ctx).all<{
       agent_id: string; jobs: unknown; cost: unknown; unpriced: unknown;
     }>(
@@ -545,6 +547,16 @@ export class WorkSnapshots {
     }
     return out;
   }
+}
+
+/**
+ * The instant the reader's day began: shift into their wall clock, take its midnight, shift back.
+ * Exported for the suite, which is where a timezone a few hours from UTC can be asserted exactly.
+ */
+export function localMidnight(nowMs: number, utcOffsetMinutes: number): Date {
+  const shifted = new Date(nowMs + utcOffsetMinutes * 60_000);
+  shifted.setUTCHours(0, 0, 0, 0);
+  return new Date(shifted.getTime() - utcOffsetMinutes * 60_000);
 }
 
 function modelOf(deployments: Map<string, Deployment>, item: WorkItem): string | undefined {

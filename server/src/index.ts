@@ -4851,7 +4851,7 @@ const relay = new WsRelay({
     const item = await workStore.get(ctx, itemId);
     return item ? workSnapshots.detail(ctx, item) : undefined;
   },
-  listFleet: (ctx) => workSnapshots.fleet(ctx),
+  listFleet: (ctx, opts) => workSnapshots.fleet(ctx, opts),
   /**
    * §5.5's `getActivity`: six aggregates for one range, each sent as it resolves.
    *

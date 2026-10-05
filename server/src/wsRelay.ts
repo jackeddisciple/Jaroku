@@ -3193,7 +3193,13 @@ export type ListWorkCommand = {
   countsOnly?: boolean;
 };
 export type LoadWorkItemCommand = { cmd: "loadWorkItem"; itemId: string };
-export type ListFleetCommand = { cmd: "listFleet" };
+/**
+ * `utcOffsetMinutes` IS THE CLIENT'S OWN, east of UTC — what "today" means on its cards. The server
+ * counted today from UTC midnight while the list's day headings use the reader's clock, so in India
+ * the card counted all of yesterday's jobs as today's until half past five in the morning. Kept on
+ * the socket, so every later broadcast of the strip to it uses the same day.
+ */
+export type ListFleetCommand = { cmd: "listFleet"; utcOffsetMinutes?: number };
 export type DispatchWorkCommand = {
   cmd: "dispatchWork";
   agentId: string;
@@ -3788,6 +3794,8 @@ export interface SocketSession {
   hostProviders?: Map<string, HostObservation>;
   /** Unix seconds, or null when the socket was opened without a token (the dev path). */
   expiresAt?: number | null;
+  /** The client's UTC offset, east-positive, as its last `listFleet` reported it. See ListFleetCommand. */
+  utcOffsetMinutes?: number;
   userId?: string | null;
   /**
    * A handle for THIS connection, so §14.2's End session can name one socket.
@@ -4258,7 +4266,7 @@ export interface RelayOptions {
    * a job does and the strip moves when a deployment does. One combined read would re-send the
    * strip on every job transition.
    */
-  listFleet?: (ctx: TenantContext) => FleetWire | Promise<FleetWire>;
+  listFleet?: (ctx: TenantContext, opts?: { utcOffsetMinutes?: number }) => FleetWire | Promise<FleetWire>;
   /**
    * One thread, for the client that asked to open it (§4.5).
    *
@@ -5059,10 +5067,15 @@ export class WsRelay {
               ...((await this.opts.listWork?.(ctx, command)) ?? EMPTY_WORK),
             }), live, (message) => ({ channel: "work", type: "error", message }));
           } else if (msg.cmd === "listFleet") {
+            const offset = msg.utcOffsetMinutes;
+            const session = this.sessions.get(ws);
+            if (session && typeof offset === "number" && Number.isInteger(offset) && Math.abs(offset) <= 14 * 60) {
+              session.utcOffsetMinutes = offset;
+            }
             void this.answer(ws, async (ctx) => ({
               channel: "work",
               type: "fleet",
-              ...((await this.opts.listFleet?.(ctx)) ?? EMPTY_FLEET),
+              ...((await this.opts.listFleet?.(ctx, { utcOffsetMinutes: this.sessions.get(ws)?.utcOffsetMinutes })) ?? EMPTY_FLEET),
             }), live, (message) => ({ channel: "work", type: "error", message }));
           } else if (msg.cmd === "loadWorkItem" && typeof msg.itemId === "string") {
             const itemId = msg.itemId;
@@ -5667,7 +5680,8 @@ export class WsRelay {
    */
   async broadcastFleet(): Promise<void> {
     await this.perClient(async (ws, ctx) => {
-      this.sendTo(ws, { channel: "work", type: "fleet", ...((await this.opts.listFleet?.(ctx)) ?? EMPTY_FLEET) });
+      const utcOffsetMinutes = this.sessions.get(ws)?.utcOffsetMinutes;
+      this.sendTo(ws, { channel: "work", type: "fleet", ...((await this.opts.listFleet?.(ctx, { utcOffsetMinutes })) ?? EMPTY_FLEET) });
     });
   }
 

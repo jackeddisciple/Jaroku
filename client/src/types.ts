@@ -2208,7 +2208,8 @@ export type ClientCommand =
   // "Are you still there?" — the liveness ping a hung server cannot answer. See `lib/socket.ts`.
   | { cmd: "ping" }
   | { cmd: "loadWorkItem"; itemId: string }
-  | { cmd: "listFleet" }
+  // The reader's UTC offset, east-positive — what "today" means on the fleet cards.
+  | { cmd: "listFleet"; utcOffsetMinutes?: number }
   // `threadId` ON A DISPATCH IS A NOTE ABOUT WHERE IT CAME FROM, never a route: an operate thread's
   // command is the SAME `dispatchWork` the Cockpit composer sends, through the same pre-flight gate,
   // and the id is what binds the resulting job back into the conversation as a `work` item.

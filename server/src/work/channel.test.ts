@@ -29,7 +29,7 @@ import { DeployStore } from "../deployStore.ts";
 import { newRequestId, systemContext, type TenantContext } from "../db/tenant.ts";
 import { COMMAND_CHANNEL, channelFor } from "../wsRelay.ts";
 import { capabilityFor } from "../auth/capabilities.ts";
-import { WorkSnapshots } from "./snapshot.ts";
+import { WorkSnapshots, localMidnight } from "./snapshot.ts";
 import { WorkStore, WORK_STATUSES, type WorkItem } from "./workStore.ts";
 
 let fail = 0;
@@ -272,6 +272,45 @@ console.log("\nthe fleet strip");
   check("no stored token reads unconnected whatever else is said",
     (await snapshots.fleet(ctx)).cards.find((c) => c.agent_id === unconnected.agentId)!.connection === "unconnected");
   refused.clear();
+}
+
+// --- 4b. "today" is the reader's day ---------------------------------------------------------------
+//
+// THE CARD COUNTED FROM UTC MIDNIGHT while the list's day headings use the reader's clock, so in India
+// the card said "N jobs today" about all of yesterday's jobs until 05:30 local time.
+
+console.log("\ntoday, on the reader's clock");
+{
+  // 22:00 UTC on the 4th is 03:30 on the 5th in India (+05:30).
+  const now = Date.parse("2026-10-04T22:00:00.000Z");
+  check("India's day began at 18:30 UTC the evening before",
+    localMidnight(now, 330).toISOString() === "2026-10-04T18:30:00.000Z", localMidnight(now, 330).toISOString());
+  check("...UTC's at its own midnight",
+    localMidnight(now, 0).toISOString() === "2026-10-04T00:00:00.000Z");
+  check("...and Los Angeles's on the 4th, local", localMidnight(now, -420).toISOString() === "2026-10-04T07:00:00.000Z");
+
+  const clocked = new WorkSnapshots({
+    work,
+    agentNames: async (c) => new Map((await agents.list(c, { includeArchived: true })).map((a) => [a.id, a.display_name ?? a.slug])),
+    actorNames: async () => new Map(),
+    deployments: async (c) => {
+      const [bySlug, rows] = await Promise.all([deploys.currentByAgent(c), agents.list(c, { includeArchived: true })]);
+      const out = new Map<string, Awaited<ReturnType<typeof deploys.get>>>();
+      for (const a of rows) { const d = bySlug.get(a.slug); if (d) out.set(a.id, d); }
+      return out as never;
+    },
+    hasServeToken: async () => true,
+    scoped: (c) => db.forWorkspace(c.workspaceId),
+    now: () => now,
+  });
+  const dayAgent = await liveAgent("day_agent");
+  // 15:30 on the 4th in India — yesterday there, still today in UTC.
+  await work.create(ctx, { agentId: dayAgent.agentId, deploymentId: dayAgent.deploymentId, runId: randomUUID(),
+    input: "yesterday in India", at: "2026-10-04T10:00:00.000Z" });
+  const inUtc = (await clocked.fleet(ctx)).cards.find((c) => c.agent_id === dayAgent.agentId)!;
+  const inIndia = (await clocked.fleet(ctx, { utcOffsetMinutes: 330 })).cards.find((c) => c.agent_id === dayAgent.agentId)!;
+  check("a job from yesterday afternoon in India is today for a UTC reader", inUtc.jobs_today === 1, String(inUtc.jobs_today));
+  check("...and not today for a reader in India", inIndia.jobs_today === 0, String(inIndia.jobs_today));
 }
 
 // --- 5. forty agents and forty jobs cost what one costs ---------------------------------------------
