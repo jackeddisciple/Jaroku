@@ -216,6 +216,44 @@ console.log("\nand the socket passes the viewer\n");
   );
 }
 
+console.log("\nthe counts a dispatch moves, and the server's own counts after it\n");
+{
+  // EVERY DISPATCH LEFT A "QUEUED 1" BEHIND FOR GOOD. The placeholder was counted `queued`, the
+  // real row arrived already `running`, and nothing moved either count: six dispatches read nine.
+  seed([], MINE, NO_COUNTS);
+  const w = () => useWorkStore.getState();
+  w().drawOptimistic(item({ id: "pending:r1", status: "queued" }));
+  check("a drawn row is counted queued", w().counts.queued === 1);
+  w().settleOptimistic("r1", item({ id: "job-1", status: "running" }));
+  check("settled, it leaves queued", w().counts.queued === 0, JSON.stringify(w().counts));
+  check("...and is counted as what it really is", w().counts.running === 1, JSON.stringify(w().counts));
+  w().noteItem(item({ id: "job-1", status: "running" }), ME);
+  check("the broadcast that follows does not count it a second time", w().counts.running === 1);
+  w().noteItem(item({ id: "job-1", status: "succeeded" }), ME);
+  check("...and its ending moves it, once",
+    w().counts.running === 0 && w().counts.succeeded === 1 && w().counts.queued === 0, JSON.stringify(w().counts));
+
+  // A DELTA CAN BEAT THE ANSWER: the real row is already held when the dispatch is settled.
+  seed([], MINE, NO_COUNTS);
+  w().drawOptimistic(item({ id: "pending:r2", status: "queued" }));
+  w().noteItem(item({ id: "job-2", status: "running" }), ME);
+  w().settleOptimistic("r2", item({ id: "job-2", status: "running" }));
+  check("a row a delta already counted is not counted twice when it settles",
+    w().counts.running === 1 && w().counts.queued === 0, JSON.stringify(w().counts));
+
+  // AND THE SERVER HAS THE LAST WORD, under the filters the page is still showing.
+  seed([], MINE, { ...NO_COUNTS, queued: 13 });
+  w().setCounts({ counts: { ...NO_COUNTS, running: 4 }, workspaceCounts: { ...NO_COUNTS, running: 5 }, filters: MINE });
+  check("re-read counts replace the drifted ones", w().counts.queued === 0 && w().counts.running === 4);
+  check("...and the badge's own", w().workspaceCounts.running === 5);
+  w().setCounts({
+    counts: { ...NO_COUNTS, failed: 9 }, workspaceCounts: { ...NO_COUNTS, failed: 9 },
+    filters: { scope: "all", status: null, agentId: null },
+  });
+  check("counts for a filter the page has left do not move the chips", w().counts.failed === 0);
+  check("...though the workspace's figures, which no filter moves, still do", w().workspaceCounts.failed === 9);
+}
+
 console.log(failures === 0 ? "\nALL CORRECT\n" : `\n${failures} FAILED\n`);
 // The client has no `@types/node` on purpose — see `node-shims.d.ts` — so `process` is reached the
 // way `reset.test.ts` reaches it rather than by widening the shim for one line.

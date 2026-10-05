@@ -4846,6 +4846,7 @@ const relay = new WsRelay({
   // them, on frame one. A socket with no person on it — the dev path — still gets the workspace's
   // jobs, because "mine" narrows to nobody rather than to everybody when there is no actor.
   listWork: (ctx, cmd) => workSnapshotFor(ctx, cmd),
+  countWork: (ctx, cmd) => workSnapshots.counts(ctx, workFiltersOf(cmd)),
   loadWorkItem: async (ctx, itemId) => {
     const item = await workStore.get(ctx, itemId);
     return item ? workSnapshots.detail(ctx, item) : undefined;
@@ -7252,12 +7253,17 @@ const workSnapshots = new WorkSnapshots({
 
 /** The list the relay answers, with whatever filter the client asked for. */
 async function workSnapshotFor(ctx: TenantContext, cmd: ListWorkCommand): Promise<WorkSnapshotWire> {
-  return workSnapshots.list(ctx, {
-    scope: cmd.scope === "all" ? "all" : "mine",
+  return workSnapshots.list(ctx, workFiltersOf(cmd));
+}
+
+/** A `listWork` command's filters, read defensively like every other field of an untrusted command. */
+function workFiltersOf(cmd: ListWorkCommand) {
+  return {
+    scope: cmd.scope === "all" ? "all" as const : "mine" as const,
     status: isWorkStatus(cmd.status) ? cmd.status : undefined,
     agentId: typeof cmd.agentId === "string" && cmd.agentId ? cmd.agentId : undefined,
     cursor: typeof cmd.cursor === "string" ? cmd.cursor : null,
-  });
+  };
 }
 
 /**

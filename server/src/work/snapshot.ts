@@ -327,6 +327,32 @@ export class WorkSnapshots {
   }
 
   /**
+   * The counts a page carries, without the page — what the client re-reads after deltas.
+   *
+   * THE SAME TWO READS `list` MAKES, so the chips cannot disagree with the next snapshot. See
+   * `ListWorkCommand.countsOnly` in the relay for why the client has to ask.
+   */
+  async counts(
+    ctx: TenantContext,
+    filters: ListWorkFilters = {},
+  ): Promise<Pick<WorkSnapshotPayload, "counts" | "workspaceCounts" | "filters">> {
+    const wholeWorkspace = filters.scope === "all" && !filters.agentId;
+    const [counts, workspaceCounts] = await Promise.all([
+      this.deps.work.countsByStatus(ctx, filters),
+      wholeWorkspace ? Promise.resolve(null) : this.deps.work.countsByStatus(ctx, { scope: "all" }),
+    ]);
+    return {
+      counts,
+      workspaceCounts: workspaceCounts ?? counts,
+      filters: {
+        scope: filters.scope === "all" ? "all" : "mine",
+        status: filters.status ?? null,
+        agentId: filters.agentId ?? null,
+      },
+    };
+  }
+
+  /**
    * One item, changed — §5's `item` event, and the reason a transition is a delta rather than a
    * board.
    *

@@ -27,7 +27,9 @@
 
 import { create } from "zustand";
 
-import { admitPending, mergeDelta, refuseOptimistic, settleOptimistic } from "../lib/workLive.ts";
+import {
+  OPTIMISTIC_PREFIX, admitPending, mergeDelta, refuseOptimistic, settleOptimistic,
+} from "../lib/workLive.ts";
 import type {
   FleetCardView, WorkCounts, WorkFilters, WorkItemDetailView, WorkItemView, WorkStatus,
 } from "../types.ts";
@@ -104,6 +106,11 @@ interface WorkState {
   notice: string | null;
 
   setSnapshot: (s: { items: WorkItemView[]; nextCursor: string | null; counts: WorkCounts; workspaceCounts: WorkCounts; filters: WorkFilters }) => void;
+  /**
+   * The counts re-read from the server, with no page. Applied only while the page is still under
+   * the filters they were counted for — a late answer about another filter would be wrong chips.
+   */
+  setCounts: (s: { counts: WorkCounts; workspaceCounts: WorkCounts; filters: WorkFilters }) => void;
   /** A second page, appended. The cursor is what makes this an append rather than a replace. */
   appendPage: (s: { items: WorkItemView[]; nextCursor: string | null }) => void;
   /**
@@ -210,6 +217,14 @@ export const useWorkStore = create<WorkState>((set) => ({
       error: null,
     }),
 
+  setCounts: (s) =>
+    set((prev) => {
+      // THE BADGE'S NUMBERS ARE THE WORKSPACE'S whatever the filter; the chips' only if they still
+      // describe the page in hand.
+      const same = prev.filters.scope === s.filters.scope && prev.filters.agentId === s.filters.agentId;
+      return same ? { counts: s.counts, workspaceCounts: s.workspaceCounts } : { workspaceCounts: s.workspaceCounts };
+    }),
+
   appendPage: (s) =>
     set((prev) => {
       // IDEMPOTENT, because a page can arrive twice — a double click on "load more", or a retry
@@ -301,10 +316,30 @@ export const useWorkStore = create<WorkState>((set) => ({
       workspaceCounts: { ...prev.workspaceCounts, queued: prev.workspaceCounts.queued + 1 },
     })),
 
+  /**
+   * THE COUNTS MOVE WITH THE SETTLE. The placeholder was counted `queued` when it was drawn, and the
+   * real row arrives already `running`; nothing moved them, so every dispatch left a "queued 1" on
+   * the chips for good — "COCKPIT 36" over twenty-two jobs. The placeholder's count is taken back
+   * here, and the real row is counted like any other arrival unless it was already (a delta for it
+   * can beat this answer). The server's own counts, re-read after the burst, have the last word.
+   */
   settleOptimistic: (ref, real) =>
     set((prev) => {
+      const placeholder = prev.items.find((i) => i.id === `${OPTIMISTIC_PREFIX}${ref}`);
+      const held = prev.items.some((i) => i.id === real.id);
       const merged = settleOptimistic({ items: prev.items, pending: prev.pending }, ref, real);
-      return { items: merged.items, pending: merged.pending };
+      if (!placeholder) return { items: merged.items, pending: merged.pending };
+      const move = (counts: WorkCounts, add: boolean): WorkCounts => {
+        const next = { ...counts, [placeholder.status]: Math.max(0, counts[placeholder.status] - 1) };
+        if (add) next[real.status] = next[real.status] + 1;
+        return next;
+      };
+      return {
+        items: merged.items,
+        pending: merged.pending,
+        counts: move(prev.counts, !held),
+        workspaceCounts: move(prev.workspaceCounts, !held),
+      };
     }),
 
   refuseOptimistic: (ref, reason) =>

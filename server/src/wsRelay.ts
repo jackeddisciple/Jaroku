@@ -3170,6 +3170,15 @@ export type ListWorkCommand = {
   status?: string;
   agentId?: string;
   cursor?: string | null;
+  /**
+   * Answer with the counts and nothing else — no page.
+   *
+   * WHAT KEEPS THE CHIPS AND THE HEADER TRUE. A delta can move a job the client is not holding, or
+   * arrive before the dispatch it belongs to, and arithmetic over what the client saw cannot be
+   * exact: every dispatch left a "queued 1" behind for good. So after a burst of deltas the client
+   * asks for the counts again — a page would replace the list under the reader, which §18 forbids.
+   */
+  countsOnly?: boolean;
 };
 export type LoadWorkItemCommand = { cmd: "loadWorkItem"; itemId: string };
 export type ListFleetCommand = { cmd: "listFleet" };
@@ -3278,6 +3287,8 @@ export type WorkEvent =
    * become is a board: the moment this carried `items`, every transition would re-send the page.
    */
   | { type: "item"; item: unknown }
+  /** The counts under the asked-for filters, and the workspace's, with no page — see `countsOnly`. */
+  | { type: "counts"; counts: unknown; workspaceCounts: unknown; filters: unknown }
   | ({ type: "fleet" } & FleetWire)
   /**
    * A dispatch was accepted, to the socket that asked and to nobody else.
@@ -4219,6 +4230,11 @@ export interface RelayOptions {
    * permission."
    */
   listWork?: (ctx: TenantContext, cmd: ListWorkCommand) => WorkSnapshotWire | Promise<WorkSnapshotWire>;
+  /** The same counts `listWork` carries, without the page. See `ListWorkCommand.countsOnly`. */
+  countWork?: (
+    ctx: TenantContext,
+    cmd: ListWorkCommand,
+  ) => Promise<{ counts: unknown; workspaceCounts: unknown; filters: unknown }>;
   /** One job in full — what was asked, what came back — for the detail panel. Scoped the same way. */
   loadWorkItem?: (ctx: TenantContext, itemId: string) => Promise<unknown | undefined>;
   /**
@@ -5006,6 +5022,16 @@ export class WsRelay {
                 type: "error", message: "the activity feed is not available",
               }),
             }), live, (message) => ({ channel: "activity", type: "error", message }));
+          } else if (msg.cmd === "listWork" && msg.countsOnly === true) {
+            // THE COUNTS ALONE, to the asking socket — see `ListWorkCommand.countsOnly`.
+            const command = msg;
+            void this.answer(ws, async (ctx) => ({
+              channel: "work",
+              type: "counts",
+              ...((await this.opts.countWork?.(ctx, command)) ?? {
+                counts: EMPTY_WORK.counts, workspaceCounts: EMPTY_WORK.counts, filters: EMPTY_WORK.filters,
+              }),
+            }), live, (message) => ({ channel: "work", type: "error", message }));
           } else if (msg.cmd === "listWork") {
             // TO THE ASKING SOCKET ONLY. A filter is one client's choice of what to look at, and a
             // broadcast page would move a colleague's list to a filter they did not pick.

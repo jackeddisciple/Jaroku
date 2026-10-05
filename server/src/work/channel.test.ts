@@ -218,6 +218,13 @@ console.log("\na snapshot carries the filter it answers for");
   const byAgent = await snapshots.list(ctx, { scope: "all", agentId: theirs.agent_id });
   check("an agent filter narrows the chips too", byAgent.counts.queued <= all.counts.queued);
   check("...but never the badge", byAgent.workspaceCounts.queued === all.workspaceCounts.queued);
+
+  // THE COUNTS ALONE, which the client re-reads after a burst of deltas: the same two numbers a
+  // page carries, and no page — a page would replace the list under whoever is reading it.
+  const counted = await snapshots.counts(ctx, { scope: "mine" });
+  check("the counts alone are the page's counts", JSON.stringify(counted.counts) === JSON.stringify(mine.counts));
+  check("...and the workspace's", JSON.stringify(counted.workspaceCounts) === JSON.stringify(mine.workspaceCounts));
+  check("...with the filters they answer for, and no rows", counted.filters.scope === "mine" && !("items" in counted));
 }
 
 // --- 4. the fleet is its own read ------------------------------------------------------------------

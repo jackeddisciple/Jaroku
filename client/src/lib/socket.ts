@@ -574,7 +574,11 @@ function dispatch(msg: ServerMessage): void {
         } else {
           w.setSnapshot(msg);
         }
+      } else if (msg.type === "counts") {
+        w.setCounts(msg);
       } else if (msg.type === "item") {
+        // AND THE COUNTS ARE ASKED FOR AGAIN once the burst settles — see `scheduleWorkCounts`.
+        scheduleWorkCounts();
         // THE FILTER IS APPLIED HERE, which is the one thing this store decides. A broadcast
         // item carries no filter — it cannot, it goes to every socket in the workspace — so a
         // client holding "mine, failed" receives transitions for jobs it is not showing.
@@ -600,6 +604,7 @@ function dispatch(msg: ServerMessage): void {
         }
       } else if (msg.type === "fleet") w.setFleet(msg.cards, msg.anyLive);
       else if (msg.type === "dispatched") {
+        scheduleWorkCounts();
         // NAVIGATION, WHICH IS WHY IT IS ANSWERED TO THIS SOCKET AND NOT BROADCAST: the composer
         // clears and the detail panel opens on the job that was just started.
         w.openItem(msg.item);
@@ -633,7 +638,10 @@ function dispatch(msg: ServerMessage): void {
         // 'did it run or not' is the one question this tab exists to never leave open." The strip
         // above the list says it too, because §10 requires the refusal to be somewhere that does
         // not scroll away; the row is what somebody finds later.
-        if (msg.clientRef) w.refuseOptimistic(msg.clientRef, msg.message);
+        if (msg.clientRef) {
+          w.refuseOptimistic(msg.clientRef, msg.message);
+          scheduleWorkCounts();
+        }
       }
       else if (msg.type === "notice") w.setNotice(msg.message);
       break;
@@ -2459,6 +2467,32 @@ export function sendListWork(opts: { more?: boolean } = {}): void {
     agentId: s.filters.agentId ?? undefined,
     cursor: opts.more ? s.nextCursor : null,
   });
+}
+
+/**
+ * Ask for the counts again, once a burst of work deltas has settled.
+ *
+ * THE CHIPS AND THE HEADER COULD NOT BE COUNTED EXACTLY ON THIS SIDE. A delta can move a job that is
+ * not on the page, or beat the dispatch it belongs to, and the arithmetic drifted for good — every
+ * dispatch left "queued 1" behind until somebody pressed refresh. So the server counts, after the
+ * moment: one grouped read per burst rather than one per transition, and no page, because a page
+ * would replace the list under the reader.
+ */
+let workCountsTimer: ReturnType<typeof setTimeout> | null = null;
+const WORK_COUNTS_SETTLE_MS = 400;
+function scheduleWorkCounts(): void {
+  if (workCountsTimer) clearTimeout(workCountsTimer);
+  workCountsTimer = setTimeout(() => {
+    workCountsTimer = null;
+    const s = useWorkStore.getState();
+    send({
+      cmd: "listWork",
+      countsOnly: true,
+      scope: s.filters.scope,
+      status: s.filters.status ?? undefined,
+      agentId: s.filters.agentId ?? undefined,
+    });
+  }, WORK_COUNTS_SETTLE_MS);
 }
 
 export function sendListFleet(): void {

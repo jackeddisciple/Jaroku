@@ -2201,7 +2201,8 @@ export type ClientCommand =
   // The Cockpit (§5). Three reads and six verbs, and there is deliberately no confirm command
   // among them: a confirmation on a deployed run goes through `resolveMcpConfirm` like every
   // other, because the modal must not be able to tell which kind of run it is answering.
-  | { cmd: "listWork"; scope?: "mine" | "all"; status?: WorkStatus; agentId?: string; cursor?: string | null }
+  // `countsOnly` asks for the counts alone, with no page — re-read after deltas the client cannot count.
+  | { cmd: "listWork"; scope?: "mine" | "all"; status?: WorkStatus; agentId?: string; cursor?: string | null; countsOnly?: boolean }
   | { cmd: "loadWorkItem"; itemId: string }
   | { cmd: "listFleet" }
   // `threadId` ON A DISPATCH IS A NOTE ABOUT WHERE IT CAME FROM, never a route: an operate thread's
@@ -2956,6 +2957,11 @@ export type WorkMessage =
    * the shapes are compatible on purpose, so one handler files both.
    */
   | { type: "item"; item: WorkItemView | WorkItemDetailView }
+  /**
+   * The counts again, without a page — the answer to `listWork` with `countsOnly`. What keeps the
+   * chips and the header true after deltas the client could not count exactly.
+   */
+  | { type: "counts"; counts: WorkCounts; workspaceCounts: WorkCounts; filters: WorkFilters }
   | { type: "fleet"; cards: FleetCardView[]; anyLive: boolean }
   /**
    * A dispatch this client asked for was accepted. To the asker, because it is navigation.
