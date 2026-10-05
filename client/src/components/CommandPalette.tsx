@@ -412,9 +412,17 @@ export function CommandPalette() {
                     a busy workspace that is a list somebody starts reading before it is replaced. */}
                 <Item
                   onSelect={run(() => {
-                    useWorkStore.getState().setFilters({ scope: "all", status: "waiting", agentId: null });
+                    // NOTHING WAITING IS AN ANSWER, NOT A FILTER. Narrowing to `waiting` with nothing
+                    // in it showed an empty list under a filter with no chip, and it stayed that way
+                    // the next time the Cockpit was opened. The workspace's count is the badge's
+                    // own, which the relay sends on connect, so it is current here.
+                    const waiting = useWorkStore.getState().workspaceCounts.waiting;
+                    useWorkStore.getState().setFilters({
+                      scope: "all", status: waiting > 0 ? "waiting" : null, agentId: null,
+                    });
                     useUiStore.getState().openNav("work");
                     sendListWork();
+                    if (waiting === 0) useUiStore.getState().showToast("Nothing is waiting on anybody");
                   })}
                 >
                   Show what is waiting

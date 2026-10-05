@@ -427,7 +427,12 @@ function Filters() {
           // A STATUS WITH NOTHING IN IT IS NOT OFFERED. A rail of six chips reading zero is six
           // controls that lead to an empty list, and the counts are the page's own scope — so a
           // chip that is present is a chip with something behind it.
-          counts[status] > 0 ? (
+          //
+          // EXCEPT THE ONE THAT IS SELECTED, which stays whatever its count. Filtering to `running`
+          // until the last job finished — or "Show what is waiting" with nothing waiting — left the
+          // list narrowed to a status whose chip had gone, with no chip pressed and nothing on the
+          // page saying what the list was narrowed to or how to undo it.
+          counts[status] > 0 || filters.status === status ? (
             <button
               key={status}
               type="button"

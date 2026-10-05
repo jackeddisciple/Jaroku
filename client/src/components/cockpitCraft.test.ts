@@ -259,6 +259,23 @@ console.log("\na region that announces every transition is one nobody can use");
   check("...and only while the tab is backgrounded", /backgrounded\(\)/.test(app));
 }
 
+console.log("\na filter the page is under is always on screen");
+{
+  // THE CHIP OF A STATUS THAT RAN OUT USED TO GO, AND TOOK THE FILTER'S ONLY TRACE WITH IT. The
+  // list stayed narrowed to `queued` — or to `waiting` after "Show what is waiting" with nothing
+  // waiting — with no chip pressed and nothing saying what it was narrowed to.
+  seed(useWorkStore, {
+    items: [], pending: [], atTop: true, nextCursor: null, loaded: true, anyLive: true,
+    counts: { ...NO_COUNTS, succeeded: 3 }, workspaceCounts: { ...NO_COUNTS, succeeded: 3 },
+    filters: { scope: "all", status: "waiting", agentId: null },
+    fleet: [], open: null, openingId: null, logs: null, error: null, notice: null,
+  });
+  const list = markup(createElement(WorkList));
+  check("the selected status keeps its chip at zero, pressed",
+    /aria-pressed="true" aria-label="waiting on you: 0"/.test(list), list.slice(0, 600));
+  check("...while an unselected empty status is still not offered", !/aria-label="failed: 0"/.test(list));
+}
+
 console.log("\na job waiting on a person does not lock the window");
 {
   // THE CONFIRMATION WAS A MODAL OVER EVERYTHING, and that was the bug: the waiting row, its Stop,
