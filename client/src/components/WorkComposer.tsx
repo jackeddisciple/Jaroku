@@ -92,8 +92,14 @@ export function WorkComposer() {
   // THE PICKER DEFAULTS TO THE ONLY LIVE AGENT, because a workspace with one deployment should not
   // have to choose. It follows the fleet rather than being set once: an agent going live, or the
   // last one being killed, changes what "the only one" means.
+  //
+  // THE PICKER OFFERS EVERY DEPLOYED AGENT, and the default is the only reachable one. It offered
+  // only the reachable ones, so a workspace whose agents all needed reconnecting said "Pick an agent
+  // first" with nothing to pick — and the sentence that says to reconnect never showed. An agent
+  // that needs reconnecting can be chosen; the composer then says so instead of sending.
   const live = fleet.filter((c) => !needsReconnect(c.connection));
-  const chosen = live.find((c) => c.agent_id === agentId) ?? (live.length === 1 ? live[0] : undefined);
+  const chosen = fleet.find((c) => c.agent_id === agentId)
+    ?? (live.length === 1 ? live[0] : fleet.length === 1 ? fleet[0] : undefined);
   useEffect(() => {
     if (!chosen && agentId) setAgentId(null);
   }, [chosen, agentId]);
@@ -179,11 +185,10 @@ export function WorkComposer() {
    * ORDER — the property a fixture per state cannot see.
    */
   const moment = cockpitComposer({
-    liveAgents: live.length,
+    liveAgents: fleet.length,
     agentName: chosen?.agent_name ?? null,
-    // A CARD IN `live` IS BY CONSTRUCTION REACHABLE, so this is true whenever one is chosen. It is
-    // still passed rather than hard-coded, because the filter above is a rendering decision and
-    // this is the rule — and the two are allowed to diverge without the sentence going wrong.
+    // FALSE FOR AN AGENT THAT NEEDS RECONNECTING, which the picker now lets somebody choose — and
+    // which is the only way the "reconnect it" sentence is ever said.
     connected: chosen ? !needsReconnect(chosen.connection) : false,
     // AT CAPACITY IS THE WORKSPACE'S CAP, because that is the only one anything enforces: the
     // server refuses the insert once queued, running and waiting reach it, whoever's jobs they are.
@@ -272,10 +277,13 @@ export function WorkComposer() {
       <div className={`flex items-end gap-2 pt-1.5 pb-2.5 ${SPINE_X}`}>
         {/* THE PICKER IS ABSENT WHEN THERE IS ONE AGENT, which is the ordinary case: a workspace
             with one deployment should not be asked to choose between one thing. */}
-        {live.length > 1 && (
+        {fleet.length > 1 && (
           <Select
             value={chosen?.agent_id ?? ""}
-            options={live.map((c) => ({ value: c.agent_id, label: c.agent_name }))}
+            options={fleet.map((c) => ({
+              value: c.agent_id,
+              label: needsReconnect(c.connection) ? COMPOSER.needsReconnect(c.agent_name) : c.agent_name,
+            }))}
             onChange={(value) => setAgentId(value || null)}
             ariaLabel="Which agent should do this"
             placeholder="Pick an agent…"

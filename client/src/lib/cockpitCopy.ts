@@ -249,6 +249,8 @@ export const COMPOSER = {
     forbidden: "Dispatching a job needs the run:execute capability.",
     inFlight: "Sending it now.",
   },
+  /** A picker entry for an agent that cannot take work until it is reconnected. */
+  needsReconnect: (agentName: string): string => `${agentName} (needs reconnecting)`,
   send: "Dispatch",
   /** Restored on refusal, so the courtesy any message box owes is a string somebody can see. */
   restored: "That was refused, so what you typed is back in the box.",

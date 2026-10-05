@@ -78,8 +78,8 @@ export function needsReconnect(connection: FleetConnection): boolean {
 }
 
 /**
- * Whether a job can be sent to this agent now: it has a live card the composer could point at.
- * The one rule the composer's picker and Retry share, so neither offers what the other would not.
+ * Whether a job can be sent to this agent now: it has a live card that does not need reconnecting.
+ * The rule the composer's send and Retry share, so neither offers what the other would refuse.
  */
 export function agentCanTakeWork(fleet: readonly FleetCardView[], agentId: string | null): boolean {
   return agentId !== null && fleet.some((c) => c.agent_id === agentId && !needsReconnect(c.connection));

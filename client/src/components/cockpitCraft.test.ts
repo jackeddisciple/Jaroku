@@ -25,7 +25,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createElement } from "react";
 
-import { LIVE, RETRY } from "../lib/cockpitCopy.ts";
+import { COMPOSER, LIVE, RETRY } from "../lib/cockpitCopy.ts";
 import { CARD_HEIGHT, CARD_WIDTH, ROW_HEIGHT, SPINE, SPINE_X } from "../lib/cockpitLayout.ts";
 import { markup, seed } from "../lib/testRender.ts";
 import { MOTION, SPACE } from "../lib/tokens.ts";
@@ -34,6 +34,7 @@ import { useWorkStore } from "../store/workStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import type { FleetCardView, WorkItemView } from "../types.ts";
 import { WorkDetail } from "./WorkDetail.tsx";
+import { WorkComposer } from "./WorkComposer.tsx";
 import { WorkList } from "./WorkList.tsx";
 
 let fail = 0;
@@ -402,6 +403,25 @@ console.log("\nretry is offered only where the job can go");
   check("the detail says why it cannot be retried, rather than refusing after the press",
     detail.includes(RETRY.notLive("Bruno")));
   seed(useWorkStore, { open: null, fleet: [] });
+}
+
+console.log("\nagents that all need reconnecting are offered, and the composer says to reconnect");
+{
+  // A WORKSPACE WHOSE ONLY AGENTS WERE UNCONNECTED SAID "No agent selected — Pick an agent first" with
+  // no picker: it listed reachable agents only, so the "reconnect it" sentence could never be reached.
+  const card = (id: string, name: string): FleetCardView =>
+    ({ agent_id: id, agent_name: name, connection: "unconnected", outcomes: [] }) as unknown as FleetCardView;
+  seed(useWorkStore, { fleet: [card("uuid-bruno", "Bruno")], items: [], loaded: true, anyLive: true });
+  const one = markup(createElement(WorkComposer));
+  check("one unconnected agent is chosen, and the composer says to reconnect it",
+    one.includes(COMPOSER.status.unconnected) && !one.includes(COMPOSER.placeholder.noAgent), one.slice(0, 400));
+  seed(useWorkStore, { fleet: [card("uuid-bruno", "Bruno"), card("uuid-margot", "Margot")] });
+  const two = markup(createElement(WorkComposer));
+  check("two are offered in the picker rather than leaving nothing to pick",
+    two.includes("Which agent should do this"), two.slice(0, 600));
+  const composer = CODE.find((f) => f.path === "components/WorkComposer.tsx")!.text;
+  check("...each marked if it needs reconnecting", /COMPOSER\.needsReconnect\(c\.agent_name\)/.test(composer));
+  seed(useWorkStore, { fleet: [] });
 }
 
 console.log("\na job waiting on a person does not lock the window");
