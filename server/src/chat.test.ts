@@ -367,6 +367,17 @@ console.log("\n§16 — a deleted agent says so");
   check("...and does not read as gone", !/gone —/.test(never), never);
 }
 
+console.log("\na draft is a draft, not v1");
+{
+  // "MARGOT IS V1 WITH NO TOOLS ATTACHED", about an agent nothing had been built for: the row says
+  // version 1 from the moment it exists, and the block repeated it as a fact about the agent.
+  const draft = chatContext({ agentName: "Margot", version: 1, draft: true, connectors: 0, mcpTools: 0, thread: { turns: 2, costUsd: null, costKnown: true } });
+  check("a draft is said to have no code built yet", /a draft — named, with no code built yet/.test(draft), draft);
+  check("...with no version and no tool count claimed for it", !/ v1\b/.test(draft) && !/no tools/.test(draft), draft);
+  const built = chatContext({ agentName: "Bruno", version: 3, connectors: 1, mcpTools: 0, thread: { turns: 2, costUsd: null, costKnown: true } });
+  check("a built agent still names its version and tools", / · v3 · 1 tool/.test(built), built);
+}
+
 console.log("\n§16 — an unrecognised run status names itself");
 {
   const base = {

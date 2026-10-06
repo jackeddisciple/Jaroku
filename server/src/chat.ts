@@ -106,6 +106,11 @@ export interface ChatGrounding {
   /** Its current version number. Null when there is no agent, never 0 for one that exists. */
   version?: number | null;
   /**
+   * A name and a face with no code built yet. The row says version 1 from the moment it exists, and
+   * the block repeated it: "Margot is v1 with no tools attached", about an agent nothing was built for.
+   */
+  draft?: boolean;
+  /**
    * How many tools it has, split the way the product splits them.
    *
    * REVIEWED CONNECTORS AND MCP TOOLS COUNTED APART, because §8.2's "what tools does it have?" is
@@ -178,9 +183,10 @@ export function chatContext(g: ChatGrounding): string {
       : "agent:       none — this conversation has no agent yet (the planning stage)");
   } else {
     const parts = [g.agentName];
-    if (typeof g.version === "number") parts.push(`v${g.version}`);
+    if (g.draft) parts.push("a draft — named, with no code built yet");
+    else if (typeof g.version === "number") parts.push(`v${g.version}`);
     const tools = (g.connectors ?? 0) + (g.mcpTools ?? 0);
-    if (g.connectors !== undefined || g.mcpTools !== undefined) {
+    if (!g.draft && (g.connectors !== undefined || g.mcpTools !== undefined)) {
       // REVIEWED AND MCP NAMED APART. §8.2 answers "what tools does it have?" with "reviewed vs MCP
       // marked", and the split is the whole of what makes one trustworthy and the other not.
       parts.push(

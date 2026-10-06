@@ -13761,9 +13761,15 @@ async function chatGrounding(
     // only when there is a run to ask about.
     const digest = lastRun ? (await store.runDigests(ctx, [lastRun.id]).catch(() => new Map())).get(lastRun.id) : undefined;
 
+    // A DRAFT HAS NO VERSION TO NAME: nothing published, and — in the workspace this process acts in,
+    // the only one whose disk it may read — no `agent.py` dropped in by hand either.
+    const draft = versions.length === 0 && !(
+      ctx.workspaceId === serverContext().workspaceId && existsSync(join(agentsDir(RUNTIME_DIR), agent.slug, "agent.py"))
+    );
     return {
       agentName: agent.display_name ?? agent.slug,
       version: agent.current_version,
+      draft,
       connectors: agent.connectors.length,
       mcpTools: agent.mcp_tools.length,
       deployedUrl: deployment?.url ?? null,
