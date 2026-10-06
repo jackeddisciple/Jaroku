@@ -239,6 +239,7 @@ pub fn run() {
             // one of the two for as long as the bundle takes to load. `reveal_eventually` is the
             // guarantee that a bundle which never answers cannot leave the application invisible.
             app.manage(window::AppSize::default());
+            app.manage(window::WindowStageNow::default());
             let ws_url = match &backend {
                 backend::Backend::Remote(url) => url.clone(),
                 backend::Backend::Local => window::ws_url(port),

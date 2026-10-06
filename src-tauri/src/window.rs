@@ -55,6 +55,36 @@ const TRAFFIC_LIGHTS: (f64, f64) = (9.0, 24.05);
 #[derive(Default)]
 pub struct AppSize(Mutex<Option<LogicalSize<f64>>>);
 
+/// The stage the window was last put in, so a page that asks again changes nothing.
+///
+/// A RELOAD ASKS AGAIN. The page remembers the stage it asked for only until it reloads — a dev
+/// edit, a crash-recovered backend, a deep link — and every reload put the window back to 1440×900,
+/// centred, whatever size and place somebody had given it.
+#[derive(Default)]
+pub struct WindowStageNow(Mutex<Option<&'static str>>);
+
+/// The size to apply when the page asks for the application stage, or None to leave the window as
+/// it is. `previous` is the stage it was in; `current` its size now; `remembered` what the welcome
+/// screen put aside.
+fn app_stage_size(
+    previous: Option<&str>,
+    current: Option<(f64, f64)>,
+    remembered: Option<(f64, f64)>,
+) -> Option<(f64, f64)> {
+    match previous {
+        // Already the application: nothing to move.
+        Some("app") => None,
+        // Back from the welcome screen: the size it put aside, else the default.
+        Some(_) => Some(remembered.unwrap_or(APP)),
+        // The first stage of this launch. The window-state plugin has restored the size somebody
+        // chose, and only a window too small to hold the application is given the default.
+        None => match current {
+            Some((w, h)) if w >= APP_MIN.0 && h >= APP_MIN.1 => None,
+            _ => Some(APP),
+        },
+    }
+}
+
 pub fn open(app: &AppHandle, ws_url: &str) -> Result<(), Box<dyn std::error::Error>> {
     let builder = WebviewWindowBuilder::new(app, MAIN, WebviewUrl::default())
         .title("Jaroku")
@@ -229,6 +259,16 @@ pub fn reveal_eventually(app: &AppHandle) {
 pub fn set_window_stage(app: AppHandle, stage: String) {
     let Some(main) = app.get_webview_window(MAIN) else { return };
     let remembered = app.state::<AppSize>();
+    let name: &'static str = if stage == "splash" { "splash" } else { "app" };
+    let previous = match app.state::<WindowStageNow>().0.lock() {
+        Ok(mut slot) => slot.replace(name),
+        Err(_) => None,
+    };
+    if previous == Some(name) {
+        // THE SAME STAGE AGAIN — a reload. Shown, and otherwise left exactly where it was put.
+        let _ = main.show();
+        return;
+    }
 
     // The size this call is moving the window TO, named once because `place_centred` below needs
     // the number we asked for rather than the one the window is mid-way through becoming.
@@ -260,15 +300,28 @@ pub fn set_window_stage(app: AppHandle, stage: String) {
         // Nothing on this screen reflows, so a resize handle offers a worse version of one layout.
         let _ = main.set_resizable(false);
     } else {
-        target = remembered
-            .0
-            .lock()
-            .ok()
-            .and_then(|mut slot| slot.take())
-            .unwrap_or_else(|| LogicalSize::new(APP.0, APP.1));
+        let put_aside = remembered.0.lock().ok().and_then(|mut slot| slot.take()).map(|s| (s.width, s.height));
+        let current = match (main.inner_size(), main.scale_factor()) {
+            (Ok(size), Ok(scale)) => {
+                let logical = size.to_logical::<f64>(scale);
+                Some((logical.width, logical.height))
+            }
+            _ => None,
+        };
         let _ = main.set_resizable(true);
         let _ = main.set_min_size(Some(LogicalSize::new(APP_MIN.0, APP_MIN.1)));
-        let _ = main.set_size(target);
+        match app_stage_size(previous, current, put_aside) {
+            Some((w, h)) => {
+                target = LogicalSize::new(w, h);
+                let _ = main.set_size(target);
+            }
+            None => {
+                // LEFT WHERE THE WINDOW-STATE PLUGIN PUT IT: the size and the place somebody chose.
+                let _ = main.show();
+                let _ = main.set_focus();
+                return;
+            }
+        }
     }
 
     let _ = main.show();
@@ -485,6 +538,25 @@ mod tests {
         assert_eq!(title_for(Some("Cockpit Test"), 0), "Jaroku — Cockpit Test");
         assert_eq!(title_for(Some("  "), 2), "(2) Jaroku");
         assert_eq!(title_for(None, 0), "Jaroku");
+    }
+
+    #[test]
+    fn a_reload_asking_for_the_application_again_leaves_the_window_alone() {
+        assert_eq!(app_stage_size(Some("app"), Some((1180.0, 740.0)), None), None);
+    }
+
+    #[test]
+    fn the_first_application_stage_keeps_the_size_the_window_state_plugin_restored() {
+        assert_eq!(app_stage_size(None, Some((1180.0, 740.0)), None), None);
+        // ...unless it is too small to hold the application.
+        assert_eq!(app_stage_size(None, Some((560.0, 620.0)), None), Some(APP));
+        assert_eq!(app_stage_size(None, None, None), Some(APP));
+    }
+
+    #[test]
+    fn leaving_the_welcome_screen_restores_the_size_it_put_aside() {
+        assert_eq!(app_stage_size(Some("splash"), Some((560.0, 620.0)), Some((1300.0, 820.0))), Some((1300.0, 820.0)));
+        assert_eq!(app_stage_size(Some("splash"), Some((560.0, 620.0)), None), Some(APP));
     }
 
     #[test]
