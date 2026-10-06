@@ -177,5 +177,14 @@ console.log("\nthe fleet card's menu leaves the card");
   check("...and is not positioned inside the card", !/role="menu"[\s\S]{0,400}absolute right-0 top-full/.test(strip));
 }
 
+console.log("\na delete half-confirmed survives a stray click");
+{
+  // CLICKING ANYWHERE OUTSIDE THE DELETE CONFIRMATION DISMISSED IT, and the slug typed next went
+  // nowhere. While a delete or a rename is being typed, only Escape or Cancel closes the menu.
+  check("an outside press does not close a confirmation or a rename in progress",
+    /if \(confirming \|\| renaming\) return;\s*setOpen\(false\);/.test(sidebar));
+  check("...and the listener knows which one is in progress", /\}, \[open, confirming, renaming\]\);/.test(sidebar));
+}
+
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
 (globalThis as { process?: { exit(code: number): void } }).process?.exit(failures === 0 ? 0 : 1);

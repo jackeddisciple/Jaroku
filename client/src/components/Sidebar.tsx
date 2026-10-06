@@ -287,6 +287,10 @@ function AgentRowMenu({ agent }: { agent: AgentSummary }) {
       // was dead for exactly as long as the portal existed without this line.
       const t = e.target as Node;
       if (ref.current?.contains(t) || panelRef.current?.contains(t)) return;
+      // A DECISION IN PROGRESS IS NOT DISMISSED BY A STRAY CLICK. The delete confirmation vanished on
+      // any press outside it, and the slug typed next went nowhere — somebody had to start the
+      // delete over without being told it had gone. Escape and Cancel still close it.
+      if (confirming || renaming) return;
       setOpen(false);
     };
     const key = (e: KeyboardEvent): void => { if (e.key === "Escape") setOpen(false); };
@@ -296,7 +300,7 @@ function AgentRowMenu({ agent }: { agent: AgentSummary }) {
       document.removeEventListener("mousedown", away);
       document.removeEventListener("keydown", key);
     };
-  }, [open]);
+  }, [open, confirming, renaming]);
 
   // See lib/menuFocus.ts — the panel renders before its trigger, so without this the keyboard
   // steps over the menu it just opened. The items live in the portal and the button stays in the
