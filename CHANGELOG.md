@@ -8,6 +8,58 @@ release notes and the commits in that release's range.
 
 ---
 
+## v0.4.0 : Bug Fixes and Improvements
+
+A full pass over the Cockpit, deploys and the desktop app, from a live test that ran real jobs on a
+real Railway deployment. Every fix below landed as its own commit with its own test, and the Cockpit
+fixes were re-checked against a live deployed agent.
+
+### Fixed
+
+- **Deploys:** the Railway token is now per workspace instead of server-wide; deploy credentials
+  come from the deploying workspace; projects go into the right Railway workspace with names short
+  enough to deploy; build-log writes no longer crash the backend; a redeploy no longer counts
+  against the live-deployment limit; Kill deletes the emptied Railway project; a deployment records
+  the version it actually serves, so a fresh deploy no longer reads as out of date; Railway's own
+  plan limits are said to be Railway's.
+- **Running jobs:** Stop actually stops a job; counts stay true after every dispatch; a job refused
+  at the in-flight limit is caught in the composer before the confirmation, instead of becoming a
+  stuck failed row; Retry is offered only when the agent is live; no job shows twice; a hung
+  server is noticed and the composer stops waiting.
+- **Tool confirmations:** a waiting job no longer locks the window, and typing or Escape no longer
+  denies the call. Each ask has its own clock. Denied and timed-out calls are named on the job
+  instead of ending as plain "succeeded". The reason shown is real. The waiting count reaches the
+  desktop window's title.
+- **The Cockpit itself:** empty states lead somewhere; menus and the "N new" pill are no longer
+  clipped; logs stay on screen; times keep moving; "Today" is the local day; the job panel docks
+  beside the list instead of covering it; job links open the job; rows show their agent's face;
+  the palette's "Dispatch to" puts the caret in the composer; Kill shows progress at once.
+- **Conversations and building:** "Give it a job" works from an agent's own conversation and shows
+  the answer there; a failed generation is repaired once and can be built again in place; drafts
+  can be built within the agent limit and are no longer left uneditable by a failed build; a
+  suggestion card no longer glues its word onto the brief; the Graph tab updates after a
+  generation; an edit that needs an MCP tool offers to grant it; reopened conversations keep their
+  citation chips.
+- **Sessions:** a session renews itself before it runs out, so you are no longer signed out every
+  hour, and signing back in returns to the workspace you were in.
+- **Inbox:** spend alerts compare today with the week before (every alert read exactly 7.0× before);
+  cards about deleted agents resolve; a new workspace is not told a key is needed to build.
+- **Desktop:** a page reload no longer resets the window's size and position.
+
+### Security
+
+- Agent code can no longer read the Railway token or deploy serve tokens from the runtime
+  environment.
+- The passwordless dev sign-in refuses any request that did not come from this machine, so a
+  tunnel or proxy cannot expose it.
+
+### Notes
+
+- Still checked only by tests, not live: "Credential refused" on a fleet card (needs a token
+  rotated by hand) and what other members see while your job waits (needs a second account).
+
+---
+
 ## v0.3.16 : Eleven Faces — the 3D Cast Retired, and an Agent You Do Not Have to Name
 
 Every agent had a procedurally-generated 3D character, an emoji, and a generated gradient: three
