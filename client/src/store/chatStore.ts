@@ -502,6 +502,9 @@ export const useChatStore = create<ChatState>((set) => ({
               id: turnId(), itemId: it.id, role: "jaroku", kind: "reply",
               status: shown.stopped ? "stopped" : "done",
               agentId, text: shown.body,
+              // THE CHIPS, READ BACK WITH THE ANSWER: a reopened conversation showed raw
+              // `[work:…]` markers, because citations arrived with the live answer and nowhere else.
+              ...(shown.citations && shown.citations.length > 0 ? { citations: shown.citations } : {}),
               ...(answered.length > 1 ? { siblings: answered } : {}),
               /**
                * §6.2, §6.4 AND §13.1: THE LINE, REBUILT FROM THE RECORD.

@@ -326,6 +326,12 @@ console.log("\nan in-flight operation's channel scope belongs to it alone");
     "the shared `buildContext` is gone — it covered four concurrent subsystems with one variable",
   );
 
+  // A REOPENED CONVERSATION KEEPS ITS CITATION CHIPS: each stored answer's `[work:…]` markers are
+  // resolved again, against this workspace's own jobs, when the thread is read back.
+  check(/const citable = await citationsFor\(ctx, /.test(indexSource) && /\.\.\.citationsOf\(v\.body as string, citable\)/.test(indexSource)
+    && /workStore\.get\(ctx, id\)/.test(indexSource),
+    "a reopened answer's citations are read back from this workspace's jobs");
+
   // A DELETED AGENT'S CONVERSATIONS LEAVE RECENTS WITH IT — archived, so every turn is kept. They are
   // read before the purge, which is what clears their link to the agent.
   const deleteFn = indexSource.slice(indexSource.indexOf("async function deleteAgent("), indexSource.indexOf("async function renameAgent("));

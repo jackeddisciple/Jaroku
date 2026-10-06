@@ -244,6 +244,21 @@ console.log("\na reconnect");
   check("hydrating twice does not duplicate", replies().length === 2, replies().length);
 }
 
+console.log("\na reopened answer keeps its citation chips");
+{
+  // A RELOADED CONVERSATION SHOWED `[work:072ec03a-…]` WHERE THE CHIPS HAD BEEN: citations came with
+  // the live answer and nowhere else. The thread payload now carries them, read back from the record.
+  reset();
+  const cite = { id: "072ec03a-9b0b-4f44-a1ab-465f9b000000", status: "succeeded", agent_name: "Bruno", created_at: "2026-10-04T09:00:00.000Z" };
+  store().hydrate(T, [{
+    id: "c1", kind: "message", ref_id: null, role: "user",
+    body: "what did you do today?", created_at: "2026-10-04T10:00:00.000Z",
+    answers: [{ ordinal: 1, body: `One job [work:${cite.id}].`, citations: [cite] }],
+  }]);
+  const r = replies()[0] as { citations?: unknown[] } | undefined;
+  check("the reopened answer carries the jobs it cited", r?.citations?.length === 1, r);
+}
+
 console.log("\nan exchange with no answer kept");
 {
   reset();

@@ -186,7 +186,7 @@ import {
   type ChatGrounding, type ItemForWindow,
 } from "./chat.ts";
 import { buildFactPack, type FactPack, type PackDeps } from "./work/factPack.ts";
-import { citableFrom, resolveCitations } from "./work/citations.ts";
+import { citableFrom, citedIds, resolveCitations, type CitationView } from "./work/citations.ts";
 import { CHAT_SYSTEM, chatClosing, CONVERSATION_SYSTEM, conversationClosing, renderRecord } from "./prompt.ts";
 import type { AskRecordCommand, ChatCommand, ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCommand, InboxCommand, EditTurnCommand, ProviderSnapshot, SelectVariantCommand, StopChatCommand, RecordChatTurnCommand, RecordBuildTurnCommand, BuildChunkCommand, EditCommand} from "./wsRelay.ts";
 import type { ListWorkCommand, WorkCommand, WorkSnapshotWire } from "./wsRelay.ts";
@@ -5125,6 +5125,12 @@ const relay = new WsRelay({
     const variants: Map<string, TurnVariant[]> = items.length > 0
       ? await turnVariants.forTurns(ctx, items.map((i) => i.id))
       : new Map();
+    // THE JOBS AN ANSWER CITED, READ BACK WITH IT. Citations were sent once, with the live answer,
+    // and stored nowhere — so a reopened conversation showed `[work:072ec03a-…]` where the chips had
+    // been. They are resolved again here against THIS workspace's jobs: an id that is not one of
+    // them stays the literal text it always was (§7.4), and a job that has moved on shows its
+    // status now.
+    const citable = await citationsFor(ctx, [...variants.values()].flat().map((v) => v.body ?? ""));
     return {
       thread: await threadView(ctx, threadId),
       items: items.map((i) => {
@@ -5169,6 +5175,7 @@ const relay = new WsRelay({
             // guessed would be the one figure in that row nobody measured.
             model: v.model_id,
             provider: v.provider,
+            ...citationsOf(v.body as string, citable),
           }));
         return { ...i, ...(answers.length > 0 ? { answers } : {}) };
       }),
@@ -13546,6 +13553,36 @@ function stopChat(ctx: TenantContext, cmd: StopChatCommand): void {
  * was a commit ago; a message refused because a history read failed would be a worse answer than an
  * amnesiac one.
  */
+/** At most this many cited jobs are read back for one conversation. */
+const CITATIONS_READ_MAX = 200;
+
+/** The jobs these answers cite, from this workspace and no other — see the thread payload. */
+async function citationsFor(ctx: TenantContext, bodies: readonly string[]): Promise<Map<string, CitationView>> {
+  const ids = [...new Set(bodies.flatMap((b) => citedIds(b)))].slice(0, CITATIONS_READ_MAX);
+  if (ids.length === 0) return new Map();
+  try {
+    const [rows, agents] = await Promise.all([
+      Promise.all(ids.map((id) => workStore.get(ctx, id).catch(() => undefined))),
+      agentRepo.list(ctx, { includeArchived: true }),
+    ]);
+    const names = new Map(agents.map((a) => [a.id, a.display_name ?? a.slug]));
+    const found = rows.filter((r): r is NonNullable<typeof r> => r !== undefined);
+    return citableFrom(found.map((r) => ({
+      id: r.id, status: r.status, agent_name: names.get(r.agent_id) ?? "an agent", created_at: r.created_at,
+    })));
+  } catch (err) {
+    // NEVER FATAL: the answer still reads, with its markers as text, which is how it read before.
+    console.warn(`[threads] could not read back an answer's citations: ${(err as Error)?.message ?? err}`);
+    return new Map();
+  }
+}
+
+/** One answer's citations, spread into its payload only when there are any. */
+function citationsOf(body: string, citable: ReadonlyMap<string, CitationView>): { citations?: CitationView[] } {
+  const { cited } = resolveCitations(body, citable);
+  return cited.length > 0 ? { citations: cited } : {};
+}
+
 async function chatMemory(
   ctx: TenantContext,
   threadId: string,

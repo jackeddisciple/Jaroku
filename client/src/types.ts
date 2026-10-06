@@ -1385,6 +1385,8 @@ export interface ThreadItemView {
      *  visible as exactly that" — so each answer names its own rather than sharing the turn's. */
     model?: string | null;
     provider?: string | null;
+    /** The jobs this answer cites, read back from the record — so a reopened conversation keeps its chips. */
+    citations?: { id: string; status: string; agent_name: string; created_at: string }[];
   }[];
 }
 
