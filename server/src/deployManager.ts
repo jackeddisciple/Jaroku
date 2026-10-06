@@ -258,9 +258,14 @@ export async function planDeploy(
     );
   }
   if (meta.mcp_servers?.length) {
+    // WHAT ACTUALLY HAPPENS, BOTH WAYS. It said these tools are always refused out there, while a job
+    // given from the Cockpit asks and waits (the dispatch carries the control plane to ask through).
+    // What IS refused is a call to the URL from outside Jaroku: nobody can be asked, and the image
+    // sets JAROKU_MCP_CONFIRM=require so it fails closed rather than running unasked.
     warnings.push(
-      `high-impact MCP tools cannot ask for confirmation out there, so the deployed agent is ` +
-      `set to refuse them. Its read-only tools still work.`,
+      `high-impact MCP tools ask before they run on a job given from the Cockpit, and wait for your ` +
+      `answer (refused after two minutes). Called directly at its URL, nobody can be asked, so they ` +
+      `are refused there. Its read-only tools work either way.`,
     );
   }
 

@@ -85,6 +85,17 @@ check("A, holding none of the agent's credentials, is told which are missing",
 check("...and is not told it lacks a Railway token, because it has one",
   !planA.problems.some((p) => p.startsWith("no Railway token")), planA.problems.join(" · "));
 
+// THE MCP WARNING SAYS WHAT HAPPENS. It said high-impact tools are always refused out there, while a
+// Cockpit job asks and waits; what is refused is a call to the URL from outside Jaroku.
+writeFileSync(join(agentDir, "jaroku.json"), JSON.stringify({ required_env: [], mcp_servers: ["deepwiki"] }));
+const withMcp = await planDeploy(deps, {
+  agentId: "bruno", provider: "anthropic", model: "claude-haiku-4-5", envKeys: [],
+}, B);
+const mcp = withMcp.warnings.find((w) => w.includes("MCP")) ?? "";
+check("an agent with MCP tools is told a Cockpit job asks before a high-impact one runs",
+  /ask before they run on a job given from the Cockpit/.test(mcp), mcp);
+check("...and that a direct call to the URL refuses them", /directly at its URL/.test(mcp) && !/set to refuse them/.test(mcp), mcp);
+
 rmSync(runtimeDir, { recursive: true, force: true });
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 process.exit(fail === 0 ? 0 : 1);
