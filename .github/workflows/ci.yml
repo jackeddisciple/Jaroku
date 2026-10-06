@@ -1158,6 +1158,8 @@ jobs:
           npm run test:sign-in-landing
           # THE INBOX SAYS WHAT ITS NUMBERS COUNT, so its header and the sidebar badge are not two answers.
           npm run test:inbox-counts
+          # THE DEPLOY PANEL FOLLOWS THE AGENT, and a one-time token shows only beside its own deployment.
+          npm run test:deploy-panel-agent
           # THE FLEET CARD'S ONE LINE, WHICH BOTH SPECIFICATIONS CALL THE HARDEST DESIGN IN THE
           # FEATURE, and the reason is what happens when it is wrong: a strip of twenty cards all
           # reading "Deployed", which is what the Railway dashboard already gives and is why

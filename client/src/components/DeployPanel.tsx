@@ -146,6 +146,18 @@ export function DeployPanel() {
 
   const selected = selectedDeployment({ deployments, selectedId });
 
+  // THE PANEL FOLLOWS THE AGENT. It kept showing the deployment last opened — after Margot's deploy,
+  // selecting Bruno still showed Margot's, her one-time token included, and Bruno's form was only
+  // reachable through "Deploy another" at the bottom. Choosing an agent now opens ITS latest
+  // deployment, or its form when it has none; the chips above still open any other on purpose.
+  useEffect(() => {
+    if (!agentId) return;
+    const mine = useDeployStore.getState().deployments
+      .filter((d) => d.agent_id === agentId)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
+    select(mine?.id ?? null);
+  }, [agentId, select]);
+
   // A deployment the user opened but has no lines for yet — reloaded, or connected mid-build.
   // Read imperatively rather than subscribed: this only needs the answer at the moment the
   // selection changes, and subscribing to `logs` here would undo the point of the selectors
@@ -175,7 +187,10 @@ export function DeployPanel() {
         </div>
       </div>
 
-      {serveToken && <ServeTokenCard onDismiss={dismissServeToken} />}
+      {/* BESIDE THE DEPLOYMENT IT BELONGS TO, AND ONLY THERE. It stays in the store until dismissed —
+          it is shown once and cannot be fetched again — but under another agent it was a bearer
+          token for a different endpoint, presented as if it were this one's. */}
+      {serveToken && serveToken.deploymentId === selected?.id && <ServeTokenCard onDismiss={dismissServeToken} />}
 
       {/* §8.2 — "Agent card / detail / Deploy / Redeploy". The checklist files it under
           `agent:write`, which is a MEMBER capability; the command is `deploy` and its real
