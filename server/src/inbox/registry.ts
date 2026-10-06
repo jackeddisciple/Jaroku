@@ -662,15 +662,19 @@ const DEFS: Record<InboxItemType, InboxTypeDef> = {
   // onboarding flow, from the Secrets tab, from a script — and, because they are seeded once per
   // workspace on a stable dedupe key, a resolved one is never raised again.
 
+  // NOT BLOCKING, AND NOT "TO START BUILDING". Planning and building run on the person's own Claude or
+  // Codex subscription; a provider key is what an agent RUNS on. The card said a key was needed to
+  // build, at the severity that lights the sidebar badge — so a workspace nobody had touched opened
+  // with a badge of 2, one of them a claim that was not true.
   setup_api_key: {
     type: "setup_api_key",
-    severity: "blocking",
+    severity: "attention",
     subject: "workspace",
     origin: "seed",
     icon: "key",
     teamOnly: false,
     actions: ["open_providers"],
-    subjectLine: () => "Add a provider key to start building",
+    subjectLine: () => "Add a provider key so your agents can run",
     resolved: (_item, facts) => facts.hasProviderKey,
   },
 

@@ -407,6 +407,11 @@ console.log("\nthe two seeded items resolve by the thing actually being done");
 {
   const key = item("setup_api_key", { subject_id: null });
   check("a workspace with no provider credential is unresolved", !isResolved(key, facts()));
+  // BUILDING RUNS ON THE SUBSCRIPTION, so a missing key stops nothing yet — and a brand-new workspace
+  // must not open with a badge for it, nor be told it cannot build.
+  check("...but it is not blocking, so a new workspace's badge does not count it",
+    inboxType("setup_api_key").severity !== "blocking");
+  check("...and it says what a key is for", /so your agents can run/.test(inboxType("setup_api_key").subjectLine({} as InboxPayload)));
   check("adding one anywhere resolves it", isResolved(key, facts({ hasProviderKey: true })));
 
   const first = item("setup_first_agent", { subject_id: null });

@@ -246,8 +246,12 @@ console.log("\ntwo real items for a new workspace, written once and never again"
   const snap = await inboxSnapshot(store, ctx, ada, { team: false, now: NOW });
   check("...so its Inbox is not empty, which the specification calls confusing rather than delightful",
     snap.items.length === 2);
-  check("...one blocking and one proposal, because adding a key blocks and describing an agent does not",
-    snap.counts.blocking === 1 && snap.counts.proposals === 1);
+  // NOTHING BLOCKS A WORKSPACE NOBODY HAS TOUCHED. Building runs on the person's own subscription, so
+  // a missing provider key stops nothing until an agent runs — the card that said it blocked opened
+  // every new workspace with a badge of 2.
+  check("...one to look at and one proposal, because a missing key stops nothing yet",
+    snap.counts.blocking === 0 && snap.counts.attention === 1 && snap.counts.proposals === 1);
+  check("...so the sidebar badge counts only the proposal", snap.counts.badge === 1);
 
   check(
     "a second pass seeds nothing, because the rows exist",

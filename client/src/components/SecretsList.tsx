@@ -606,7 +606,7 @@ export function SecretsList({ onChanged }: { onChanged: () => void }) {
     return (
       <EmptyState
         title="No credentials yet"
-        hint="Add a model provider key to start building, or any credential your agents read."
+        hint="Add a model provider key so your agents can run, or any credential they read."
         icon={KeyIcon}
         size="inline"
       />
