@@ -48,13 +48,19 @@ const check = (name: string, ok: boolean, detail = ""): void => {
 };
 
 const ctx = testContext();
+const AGENT = "11111111-1111-4111-8111-111111111111";
 
-/** Enough facts for the two predicates this file drives. The registry's suite covers the rest. */
+/**
+ * Enough facts for the two predicates this file drives. The registry's suite covers the rest.
+ *
+ * THE AGENT THE CARDS ARE ABOUT EXISTS, because a card about an agent that is gone is resolved
+ * whatever its own rule says — see `isResolved`.
+ */
 function facts(): InboxFacts {
   return {
     now: Date.now(),
     configuredSecrets: new Set(),
-    agents: new Map(),
+    agents: new Map([[AGENT, { uuid: AGENT, slug: "api_gateway" } as never]]),
     mcpServers: new Map(),
     spendCeilingUsd: null,
     pendingInvites: new Set(),
@@ -70,8 +76,6 @@ async function fresh(): Promise<{ deps: GeneratorDeps; inbox: InboxStore; close:
   const inbox = new InboxStore(db);
   return { deps: { inbox }, inbox, close: () => db.close() };
 }
-
-const AGENT = "11111111-1111-4111-8111-111111111111";
 
 // --- 1. failures collapse, and the list they carry is bounded ------------------------------
 

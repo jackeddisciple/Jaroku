@@ -718,7 +718,15 @@ export function inboxType(type: InboxItemType): InboxTypeDef {
  * the two copies disagreeing.
  */
 export function isResolved(item: InboxItemFacts, facts: InboxFacts): boolean {
-  return inboxType(item.type).resolved(item, facts);
+  const def = inboxType(item.type);
+  // A CARD ABOUT AN AGENT THAT NO LONGER EXISTS IS OVER, whatever its own rule says. Deleted agents
+  // stayed on the board — titled with the deleted agent's name, grouped under its raw id — because
+  // most rules ask about the agent's state and an agent with no state never satisfied them. The one
+  // card that is ABOUT a deletion is the exception, and keeps its own rule.
+  if (def.subject === "agent" && item.type !== "agent_deleted_by_other" && item.subject_id && !facts.agents.has(item.subject_id)) {
+    return true;
+  }
+  return def.resolved(item, facts);
 }
 
 /**

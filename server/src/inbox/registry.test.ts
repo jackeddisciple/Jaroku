@@ -456,6 +456,21 @@ console.log("\nno predicate is a constant");
   );
 }
 
+console.log("\na card about an agent that is gone is over");
+{
+  // DELETED AGENTS STAYED ON THE BOARD, titled with their names and grouped under raw ids, because
+  // most rules ask about the agent's state and an agent with no state never satisfied them.
+  const gone = facts({ agents: new Map() });
+  for (const type of ["unreviewed_failures", "cost_anomaly", "credential_missing", "version_drift"] as const) {
+    check(`${type} about a deleted agent resolves`, isResolved(item(type, { subject_id: "agent-1", payload: { credential: "X" } as InboxPayload }), gone));
+  }
+  check("...while the same card about an agent that exists keeps its own rule",
+    !isResolved(item("unreviewed_failures", { subject_id: "agent-1" }), facts()));
+  const deletion = item("agent_deleted_by_other", { subject_id: "agent-1" });
+  check("a card that reports a deletion keeps its own rule rather than being resolved by the deletion",
+    isResolved(deletion, gone) === inboxType("agent_deleted_by_other").resolved(deletion, gone));
+}
+
 console.log("\nusual spend is the days before, not the same days");
 {
   // EVERY AGENT THAT HAD SPENT ANYTHING WAS 7.0× ITS USUAL: the window was compared with itself.
