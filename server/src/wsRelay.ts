@@ -1993,7 +1993,7 @@ export type EditEvent =
   | { type: "file_start"; path: string }
   | { type: "file_delta"; path: string; text: string }
   | { type: "file_end"; path: string }
-  | { type: "proposal"; proposalId: string; agentId: string; instruction: string; summary: string; files: unknown[]; usage: unknown }
+  | { type: "proposal"; proposalId: string; agentId: string; instruction: string; summary: string; files: unknown[]; usage: unknown; grantable?: string[] }
   | { type: "applied"; proposalId: string; agentId: string; version: number; summary: string }
   | { type: "undone"; agentId: string; version: number; summary: string }
   | { type: "discarded"; proposalId: string; agentId: string }

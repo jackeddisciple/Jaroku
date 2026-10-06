@@ -108,6 +108,7 @@
     "test:sign-in-landing": "tsx src/lib/signInLanding.test.ts",
     "test:inbox-counts": "tsx src/components/inboxCounts.test.ts",
     "test:deploy-panel-agent": "tsx src/components/deployPanelAgent.test.ts",
+    "test:grant-and-retry": "tsx src/components/grantAndRetry.test.ts",
     "test:cockpit-optimistic": "tsx src/lib/cockpitOptimistic.test.ts",
     "test:cockpit-empty": "tsx src/components/cockpitEmpty.test.ts",
     "test:cockpit-craft": "tsx src/components/cockpitCraft.test.ts",

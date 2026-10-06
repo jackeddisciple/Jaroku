@@ -118,7 +118,7 @@ import {
   type UsageSummary,
 } from "./generator.ts";
 import { Planner, PLAN_MODEL, MAX_TOKENS as PLAN_MAX_TOKENS, type PendingPlan } from "./planner.ts";
-import { Editor, EDIT_MODEL, MAX_TOKENS as EDIT_MAX_TOKENS } from "./editor.ts";
+import { Editor, EDIT_MODEL, MAX_TOKENS as EDIT_MAX_TOKENS, namedUngrantedTools } from "./editor.ts";
 import { scanAgentDirectory } from "./agents.ts";
 import { AgentRepository, nextForkSlug } from "./db/repositories/agents.ts";
 import { AgentGrantRepository } from "./db/repositories/agentGrants.ts";
@@ -2029,6 +2029,12 @@ const editor = new Editor({
     runActive || interactivePool.busy || evalPool.busy
       ? "cannot modify the agent while a run is in progress"
       : null,
+  // THE TOOLS AN EDIT COULD NOT USE BECAUSE THEY ARE NOT GRANTED — see `EditorDeps.grantableMcp`.
+  // A tool counts as named when its exact name appears as a word; the registry decides what exists.
+  grantableMcp: async (ctx, slug, text) => {
+    const agent = await agentRepo.bySlug(ctx, slug);
+    return agent ? namedUngrantedTools(await mcpRegistry.list(ctx), new Set(agent.mcp_tools), text) : [];
+  },
 });
 
 /**

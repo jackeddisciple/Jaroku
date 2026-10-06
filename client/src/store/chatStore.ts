@@ -139,6 +139,10 @@ export interface ProposalTurn extends TurnAnchor {
   version?: number;
   error?: string;
   problems?: string[];
+  /** On a change that did nothing: MCP tools it needs and the agent is not granted. */
+  grantable?: string[];
+  /** What was asked, so a change refused for a missing grant can be asked again once granted. */
+  instruction?: string;
 }
 
 export interface InfoTurn extends TurnAnchor {
@@ -345,6 +349,7 @@ interface ChatState {
   editFileEnd: (path: string) => void;
   proposal: (p: In & {
     proposalId: string; agentId: string; summary: string; files: FileDiff[]; usage: GenUsage;
+    instruction?: string; grantable?: string[];
   }) => void;
   applied: (e: In & { proposalId: string; agentId: string; version: number }) => void;
   undone: (e: In & { agentId: string; version: number; summary: string }) => void;
@@ -753,7 +758,7 @@ export const useChatStore = create<ChatState>((set) => ({
   editFileEnd: (path) =>
     set((s) => touchStreaming(s, path, (f) => (f ? { ...f, done: true } : { path, bytes: 0, done: true }))),
 
-  proposal: ({ threadId, proposalId, agentId, summary, files, usage }) =>
+  proposal: ({ threadId, proposalId, agentId, summary, files, usage, instruction, grantable }) =>
     set((s) => {
       const turns = turnsIn(s, threadId);
       const open = findStreaming(turns, agentId);
@@ -768,6 +773,7 @@ export const useChatStore = create<ChatState>((set) => ({
         files,
         streaming: [],
         usage,
+        ...(files.length === 0 && grantable?.length ? { grantable, instruction } : {}),
       };
       return {
         streamingAgentId: null,

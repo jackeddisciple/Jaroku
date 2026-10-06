@@ -12,7 +12,7 @@ import { useEffect, useRef, useState } from "react";
 import type { FileDiff } from "../types.ts";
 import type { ProposalTurn } from "../store/chatStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
-import { sendApplyEdit, sendDiscardEdit, sendUndoEdit } from "../lib/socket.ts";
+import { sendApplyEdit, sendDiscardEdit, sendEdit, sendSetAgentTools, sendUndoEdit } from "../lib/socket.ts";
 import { fmtCost } from "../lib/format.ts";
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { ChevronDownIcon } from "./composerIcons.tsx";
@@ -258,11 +258,21 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
     );
   }
 
-  // No-op: the model declined and said why. Renders as a plain reply.
+  // No-op: the model declined and said why. Renders as a plain reply — and, when what it lacked is an
+  // MCP tool this workspace has, with the way on beside it.
   if (turn.status === "noop") {
     return (
       <div className="text-caption text-ink">
         <Prose text={turn.summary ?? ""} />
+        {turn.grantable && turn.grantable.length > 0 && agent && (
+          <GrantAndRetry
+            agentId={turn.agentId}
+            agentName={agent.name}
+            granted={agent.mcp_tools ?? []}
+            wanted={turn.grantable}
+            instruction={turn.instruction ?? null}
+          />
+        )}
       </div>
     );
   }
@@ -385,6 +395,43 @@ export function DiffCard({ turn }: { turn: ProposalTurn }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * An edit that could not use an MCP tool because the agent is not granted it: grant it, then ask again.
+ *
+ * AN EDIT CANNOT GRANT A TOOL, and must not — a grant is a person's decision about a third party
+ * nobody reviewed. It said "isn't in this project's MCP manifest" and stopped, and the one way on
+ * anybody found was re-planning the agent from scratch, which Free blocks once it has its agents.
+ * The grant is the Tools tab's own command; the retry is the same change, asked again.
+ */
+function GrantAndRetry({ agentId, agentName, granted, wanted, instruction }: {
+  agentId: string;
+  agentName: string;
+  granted: readonly string[];
+  wanted: readonly string[];
+  instruction: string | null;
+}) {
+  const missing = wanted.filter((ref) => !granted.includes(ref));
+  const label = (ref: string): string => ref.replace("/", "'s ");
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2">
+      {missing.length > 0 ? (
+        <button
+          type="button"
+          className={secondaryBtn}
+          title="Grant it in this agent's MCP tools — the same as the Tools tab"
+          onClick={() => sendSetAgentTools(agentId, [...granted, ...missing])}
+        >
+          Grant {missing.map(label).join(", ")} to {agentName}
+        </button>
+      ) : instruction ? (
+        <button type="button" className={primaryBtn} onClick={() => sendEdit(agentId, instruction)}>
+          Try the change again
+        </button>
+      ) : null}
     </div>
   );
 }

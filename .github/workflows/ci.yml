@@ -373,6 +373,8 @@ jobs:
           # A DEPLOYMENT NAMES THE VERSION IT SERVES — the one carrying its own artifacts, not the one
           # before them — and a redeploy of an unchanged agent mints no new version.
           npm run test:deploy-version
+          # AN EDIT THAT NEEDED AN UNGRANTED MCP TOOL NAMES IT, so the person can grant it and ask again.
+          npm run test:edit-grant
 
       # THE SUITES THAT SHIPPED WITH v0.2.15 AND CI HAS NEVER RUN. They were written, they passed,
       # and nothing but the person who wrote them ever executed them — the same gap the client job's
@@ -1160,6 +1162,8 @@ jobs:
           npm run test:inbox-counts
           # THE DEPLOY PANEL FOLLOWS THE AGENT, and a one-time token shows only beside its own deployment.
           npm run test:deploy-panel-agent
+          # AND THE CARD OFFERS THAT GRANT, THEN THE SAME CHANGE AGAIN.
+          npm run test:grant-and-retry
           # THE FLEET CARD'S ONE LINE, WHICH BOTH SPECIFICATIONS CALL THE HARDEST DESIGN IN THE
           # FEATURE, and the reason is what happens when it is wrong: a strip of twenty cards all
           # reading "Deployed", which is what the Railway dashboard already gives and is why

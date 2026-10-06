@@ -76,6 +76,12 @@ export interface EditorEvents {
   proposal: [{
     proposalId: string; agentId: string; instruction: string; summary: string;
     files: FileDiff[]; usage: UsageSummary;
+    /**
+     * On an edit that changed nothing: MCP tools in this workspace, named in the request or in the
+     * model's answer, that this agent has not been granted. The way on, rather than a dead end —
+     * see `EditorDeps.grantableMcp`.
+     */
+    grantable?: string[];
   }];
   applied: [{ proposalId: string; agentId: string; version: number; summary: string }];
   undone: [{ agentId: string; version: number; summary: string }];
@@ -131,6 +137,37 @@ export interface EditorDeps {
    * connector catalogue and does not grow one on the MCP registry.
    */
   mcpTools?: (agentId: string) => McpToolView[];
+  /**
+   * `server/tool` refs this workspace has, that `text` names, and that the agent is NOT granted.
+   *
+   * AN EDIT CANNOT GRANT A TOOL, AND SHOULD NOT — a grant is a person's decision about an unreviewed
+   * third party. But it said only "Not changed: deepwiki's ask_wiki_question isn't in this project's
+   * MCP manifest", and the one way on anybody found was re-planning the agent from scratch. Naming
+   * the tool lets the card offer the grant, and then the same change again.
+   */
+  grantableMcp?: (ctx: TenantContext, agentId: string, text: string) => Promise<string[]>;
+}
+
+/**
+ * The `server/tool` refs among `servers` that `text` names by their exact tool name and that are not
+ * in `granted` — at most five. What `EditorDeps.grantableMcp` answers from the registry.
+ */
+export function namedUngrantedTools(
+  servers: readonly { id: string; tools: readonly { name: string }[] }[],
+  granted: ReadonlySet<string>,
+  text: string,
+): string[] {
+  const lower = text.toLowerCase();
+  const out: string[] = [];
+  for (const server of servers) {
+    for (const tool of server.tools) {
+      const ref = `${server.id}/${tool.name}`;
+      if (granted.has(ref)) continue;
+      const name = tool.name.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      if (new RegExp(`(^|[^a-z0-9_])${name}($|[^a-z0-9_])`).test(lower)) out.push(ref);
+    }
+  }
+  return out.slice(0, 5);
 }
 
 /** An agent's own manifest, or undefined when it was granted no MCP tools. */
@@ -421,11 +458,17 @@ export class Editor extends EventEmitter<EditorEvents> {
         parser.prose.split("\n").map((l) => l.trim()).find((l) => l.length > 0) ??
         "Edit proposal";
 
+      // WHAT A NO-OP CAN OFFER: the MCP tools it named and the agent lacks, if any.
+      const grantable = async (): Promise<{ grantable?: string[] }> => {
+        const refs = await this.opts.grantableMcp?.(ctx, agentId, `${instruction}\n${parser.prose}`).catch(() => []) ?? [];
+        return refs.length > 0 ? { grantable: refs } : {};
+      };
+
       const emitted = [...new Set(parser.files)];
       if (emitted.length === 0) {
         // A valid no-op: the model declined (rule E5) and said why in the summary.
         this.emit("proposal", {
-          proposalId: randomUUID(), agentId, instruction, summary, files: [], usage,
+          proposalId: randomUUID(), agentId, instruction, summary, files: [], usage, ...(await grantable()),
         });
         return;
       }
@@ -434,7 +477,7 @@ export class Editor extends EventEmitter<EditorEvents> {
       if (files.length === 0) {
         // Everything the model re-emitted was byte-identical — nothing to apply.
         this.emit("proposal", {
-          proposalId: randomUUID(), agentId, instruction, summary, files: [], usage,
+          proposalId: randomUUID(), agentId, instruction, summary, files: [], usage, ...(await grantable()),
         });
         return;
       }

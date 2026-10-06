@@ -387,7 +387,9 @@ export type EditMessage = InThread &
   | { channel: "edit"; type: "file_start"; path: string }
   | { channel: "edit"; type: "file_delta"; path: string; text: string }
   | { channel: "edit"; type: "file_end"; path: string }
-  | { channel: "edit"; type: "proposal"; proposalId: string; agentId: string; instruction: string; summary: string; files: FileDiff[]; usage: GenUsage }
+  | { channel: "edit"; type: "proposal"; proposalId: string; agentId: string; instruction: string; summary: string; files: FileDiff[]; usage: GenUsage;
+      /** On an edit that changed nothing: MCP tools it named that this agent is not granted. */
+      grantable?: string[] }
   | { channel: "edit"; type: "applied"; proposalId: string; agentId: string; version: number; summary: string }
   | { channel: "edit"; type: "undone"; agentId: string; version: number; summary: string }
   | { channel: "edit"; type: "discarded"; proposalId: string; agentId: string }
