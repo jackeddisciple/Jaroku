@@ -12101,12 +12101,16 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
   const onStart = (e: { path: string }) => genOut({ type: "file_start", ...e });
   const onDelta = (e: { path: string; text: string }) => genOut({ type: "file_delta", ...e });
   const onEnd = (e: { path: string }) => genOut({ type: "file_end", ...e });
+  // THE CHECKS FOUND SOMETHING AND THE MODEL IS FIXING IT — said, because the files stream a second
+  // time and the build takes a call longer, and silence would read as the build starting over.
+  const onRepair = (e: { problems: string[] }) => genOut({ type: "repairing", ...e });
 
   const cleanup = () => {
     generating = false;
     generator.off("file_start", onStart);
     generator.off("file_delta", onDelta);
     generator.off("file_end", onEnd);
+    generator.off("repairing", onRepair);
     generator.off("done", onDone);
     generator.off("error", onError);
   };
@@ -12202,6 +12206,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
   generator.on("file_start", onStart);
   generator.on("file_delta", onDelta);
   generator.on("file_end", onEnd);
+  generator.on("repairing", onRepair);
   generator.once("done", onDone);
   generator.once("error", onError);
 

@@ -2008,6 +2008,12 @@ jobs:
       - name: the server's credentials stay out of a run
         run: npm run test:runner-env
 
+      # A GENERATION, VALIDATED FOR REAL — which is why it is here and not in `server`: the checks
+      # import the project with Python. And the repair: a project that fails them is fixed once with
+      # the problems in hand rather than thrown away, which half of a live pass's builds needed.
+      - name: a generation is validated, and repaired once when it fails
+        run: npm run test:generation
+
       # THE HOSTED CONFIRMATION GATE, driven through the real bridge: the verdicts, the timeout that
       # denies, and the reason the dialog shows — which the hosted ask used to leave behind.
       - name: a deployed agent's tool confirmations

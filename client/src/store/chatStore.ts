@@ -111,6 +111,8 @@ export interface GenTurn extends TurnAnchor {
   planUsage: GenUsage | null;
   error?: string;
   problems?: string[];
+  /** What the checks found on the first attempt, while the model fixes it — one repair, see the server. */
+  repairing?: string[];
 }
 
 export type ProposalStatus =
@@ -335,6 +337,7 @@ interface ChatState {
   genStarted: (e: In & { prompt: string }) => void;
   genDone: (e: In & { agentId: string; files: string[]; usage: GenUsage; planUsage: GenUsage }) => void;
   genError: (e: In & { message: string; problems?: string[] }) => void;
+  genRepairing: (e: In & { problems: string[] }) => void;
 
   editStarted: (e: In & { agentId: string; instruction: string }) => void;
   editFileStart: (path: string) => void;
@@ -708,6 +711,14 @@ export const useChatStore = create<ChatState>((set) => ({
       return putTurns(s, threadId, replaceTurn(turns, gen.id, {
         ...gen, status: "done" as const, agentId, files, usage, planUsage,
       }));
+    }),
+
+  genRepairing: ({ threadId, problems }) =>
+    set((s) => {
+      const turns = turnsIn(s, threadId);
+      const gen = lastGenTurn(turns);
+      if (!gen || gen.status !== "generating") return {};
+      return putTurns(s, threadId, replaceTurn(turns, gen.id, { ...gen, repairing: problems }));
     }),
 
   genError: ({ threadId, message, problems }) =>

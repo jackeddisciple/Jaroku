@@ -225,6 +225,49 @@ console.log("\ntwo workspaces may both have a support_bot");
   );
 }
 
+// --- 4. a project that fails its checks is repaired once, not thrown away ----------------------
+console.log("\na failed project gets one repair, with the problems, before it is discarded");
+{
+  // HALF THE GENERATIONS IN A LIVE PASS FAILED ON ONE LINE EACH and were discarded with no way on but
+  // to plan again. The model is now shown its own files and what was wrong, and re-emits the fix.
+  delete process.env.JAROKU_GEN_FIXTURE;
+  const { readFileSync } = await import("node:fs");
+  const bad = readFileSync(join(SERVER_DIR, "fixtures", "rejected-tool-call-and-sql.txt"), "utf8");
+  const good = readFileSync(join(SERVER_DIR, "fixtures", "support_bot.txt"), "utf8");
+  const usage = { input_tokens: 10, output_tokens: 20, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: 0.01 };
+  const asked: string[] = [];
+  // A REPAIR RE-EMITS WHAT CHANGES, so the bad project's own `tools/support.py` has to come back
+  // fixed — here as the plain module the good project would have, which nothing imports.
+  const fixedSupport = `<<<FILE path="tools/support.py">>>\n\"\"\"Retired: the summary tool replaced it.\"\"\"\n<<<ENDFILE>>>\n`;
+  const answers = [bad, `${good.replace(/\n?$/, "\n")}${fixedSupport}`];
+  const repaired: string[][] = [];
+  const onRepair = (e: { problems: string[] }): void => { repaired.push(e.problems); };
+  generator.on("repairing", onRepair);
+  const result = await generate(generator, {
+    runtimeDir, ctx: A, prompt: "a repaired bot", connectors: ["postgres"], name: "Repaired Bot",
+    ask: async (req) => { asked.push(req.user); return { raw: answers[asked.length - 1] ?? good, usage }; },
+  });
+  check(!result.error, "a project that failed once and was fixed is built", result.error?.problems?.join(" | ") ?? result.error?.message);
+  check(asked.length === 2, `...in two calls, the second a repair (${asked.length})`);
+  check(repaired.length === 1 && repaired[0]!.length > 0, "...and the repair was announced with the problems");
+  check(repaired[0]!.every((p) => asked[1]!.includes(p)), "the repair is told every problem the checks found");
+  check(/<<<FILE path="agent\.py">>>/.test(asked[1]!), "...and shown the files it wrote");
+  const agent = await agents.bySlug(A, "repaired_bot");
+  check(agent !== undefined && agent.creation_cost !== null && Math.abs(agent.creation_cost - 0.02) < 1e-9,
+    `...and both calls are what it cost (${agent?.creation_cost})`);
+
+  asked.length = 0;
+  repaired.length = 0;
+  const twice = await generate(generator, {
+    runtimeDir, ctx: A, prompt: "a stubborn bot", connectors: ["postgres"], name: "Stubborn Bot",
+    ask: async (req) => { asked.push(req.user); return { raw: bad, usage }; },
+  });
+  check(Boolean(twice.error) && (twice.error?.problems ?? []).length > 0, "a project that fails twice is refused, with the problems");
+  check(asked.length === 2, "...after one repair, not a loop");
+  check((await agents.bySlug(A, "stubborn_bot")) === undefined, "...and leaves no agent behind");
+  generator.off("repairing", onRepair);
+}
+
 delete process.env.JAROKU_GEN_FIXTURE;
 await db.close();
 for (const d of scratch) rmSync(d, { recursive: true, force: true });

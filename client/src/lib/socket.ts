@@ -282,6 +282,8 @@ function dispatch(msg: ServerMessage): void {
         case "plan": c.planReady(msg); break;
         case "plan_discarded": c.planDiscarded(msg); break;
         case "plan_restored": c.planRestored(msg); break;
+        // THE FIRST ATTEMPT FAILED THE CHECKS AND IS BEING FIXED ONCE. The files stream again after this.
+        case "repairing": c.genRepairing(msg); break;
         case "plan_error": c.planError(msg); break;
         // THE TURN THIS APP WAS HANDED. Answered on the CLI holding the user's sign-in; nothing is
         // rendered from here, because the text goes back to the server and comes out as the plan

@@ -162,6 +162,17 @@ export function summarizeUsage(model: string, u: {
   };
 }
 
+/** Two calls' usage as one — a generation and its repair pass are one generation to pay for. */
+export function addUsage(a: UsageSummary, b: UsageSummary): UsageSummary {
+  return {
+    input_tokens: a.input_tokens + b.input_tokens,
+    output_tokens: a.output_tokens + b.output_tokens,
+    cache_read_input_tokens: a.cache_read_input_tokens + b.cache_read_input_tokens,
+    cache_creation_input_tokens: a.cache_creation_input_tokens + b.cache_creation_input_tokens,
+    cost_usd: a.cost_usd + b.cost_usd,
+  };
+}
+
 export function emptyUsage(): UsageSummary {
   return {
     input_tokens: 0, output_tokens: 0,

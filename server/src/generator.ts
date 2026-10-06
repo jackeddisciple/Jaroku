@@ -23,7 +23,7 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, normalize, relative } from "node:path";
 import type { EffortPlan } from "./effort.ts";
 import type { AskModel } from "./askModel.ts";
-import { anthropicClient, emptyUsage, summarizeUsage, type UsageSummary } from "./claude.ts";
+import { addUsage, anthropicClient, emptyUsage, summarizeUsage, type UsageSummary } from "./claude.ts";
 import {
   CONNECTOR_GUARD_FILE, CONNECTOR_GUARD_TEMPLATE, connectionSuppliedEnv, loadConnectors, optionalEnv,
   requiredEnv, resolveSelected, templatesDir, type Connector,
@@ -34,7 +34,7 @@ import type { AgentRepository } from "./db/repositories/agents.ts";
 import type { TenantContext } from "./db/tenant.ts";
 import { newStagingId, safeObjectPath } from "./storage/keys.ts";
 import type { ProjectStore } from "./storage/projectStore.ts";
-import { buildSystemPrompt, buildUserPrompt, type GenerationRequest } from "./prompt.ts";
+import { buildRepairPrompt, buildSystemPrompt, buildUserPrompt, type GenerationRequest } from "./prompt.ts";
 import {
   BRIDGE_FILE, BRIDGE_TEMPLATE, MANIFEST_FILE, buildManifest, manifestCollisions, manifestEnv,
   manifestRefs, manifestToolNames, type Manifest,
@@ -137,6 +137,8 @@ export interface GeneratorEvents {
   file_start: [{ path: string }];
   file_delta: [{ path: string; text: string }];
   file_end: [{ path: string }];
+  /** The project failed the checks and is being repaired once — see `buildRepairPrompt`. */
+  repairing: [{ problems: string[] }];
   done: [{
     agentId: string; name: string; files: string[]; usage: UsageSummary; planUsage: UsageSummary;
     /** True of the project and worth saying — see `ValidationResult.warnings`. Absent when there is nothing. */
@@ -348,6 +350,9 @@ export class Generator extends EventEmitter<GeneratorEvents> {
       }
 
       const fixture = process.env.JAROKU_GEN_FIXTURE;
+      // A REPLAY CANNOT BE REPAIRED: there is no model to ask, only the recording. See below.
+      const replayed = Boolean(fixture && existsSync(fixture));
+      const request = generationRequest(opts, slug, name, selected);
       if (fixture && existsSync(fixture)) {
         // Same warning as the edit path: replay ignores the prompt entirely, and a
         // forgotten env var makes every generation return the same canned project.
@@ -359,7 +364,7 @@ export class Generator extends EventEmitter<GeneratorEvents> {
       } else {
         const raw = await this.streamGeneration(
           all,
-          generationRequest(opts, slug, name, selected),
+          request,
           (chunk) => parser.push(chunk),
           (u) => (usage = u),
           opts.apiKey,
@@ -371,43 +376,71 @@ export class Generator extends EventEmitter<GeneratorEvents> {
 
       const protocolError = parser.finish();
       if (protocolError) throw new Error(protocolError);
+      /** What the model wrote, before any host file joins it — what a repair is shown. */
+      const modelFiles = new Map(staged);
+      const written = [...parser.files];
 
       // Host-owned files, added after the model's so the model cannot shadow them. Same order
       // and same content as when they were written to a directory; the only difference is that
       // "written" now means "put in the map that becomes the staging objects".
       const connectorFiles = this.connectorFiles(selected, runtimeDir);
       const mcpFiles = this.mcpBridgeFiles(manifest, runtimeDir);
-      const hostFiles = this.hostFiles(staged, {
-        agentId: slug, name, description: opts.prompt, selected, manifest,
-        planned: Boolean(opts.plan),
-        planCost: opts.planUsage?.cost_usd ?? 0,
-        generationCost: usage.cost_usd,
-      });
-      for (const f of [...connectorFiles, ...mcpFiles, ...hostFiles]) staged.set(f.path, f.content);
+      const stageAndValidate = async () => {
+        const hostFiles = this.hostFiles(staged, {
+          agentId: slug, name, description: opts.prompt, selected, manifest,
+          planned: Boolean(opts.plan),
+          planCost: opts.planUsage?.cost_usd ?? 0,
+          generationCost: usage.cost_usd,
+        });
+        for (const f of [...connectorFiles, ...mcpFiles, ...hostFiles]) staged.set(f.path, f.content);
 
-      // STAGING IS THE OBJECT STORE NOW. Under a staging id nothing else refers to, so a
-      // generation that never lands leaves objects behind and no version at all.
-      for (const path of [...staged.keys()].sort()) {
-        await projects.putStaging(ctx, agentUuid, stagingId, { path, content: staged.get(path)! });
+        // STAGING IS THE OBJECT STORE NOW. Under a staging id nothing else refers to, so a
+        // generation that never lands leaves objects behind and no version at all.
+        for (const path of [...staged.keys()].sort()) {
+          await projects.putStaging(ctx, agentUuid, stagingId, { path, content: staged.get(path)! });
+        }
+
+        // ...and validation reads from there, rather than from wherever the files happened to be
+        // written. That is what makes this the same code path on a replica holding no copy.
+        await projects.materialiseStaging(ctx, agentUuid, stagingId, scratch);
+        return validateProject(scratch, {
+          runtimeDir,
+          // The bridge is reviewed code copied in verbatim, exactly like a connector template,
+          // so it is excluded from the model-output lints for the same reason.
+          connectorFiles: [...connectorFiles, ...mcpFiles].map((f) => f.path),
+          // Connector tools are real tool objects too — calling one directly crashes the
+          // same way, so they must be part of the "do not call directly" set.
+          connectorToolNames: selected.flatMap((c) => c.tools.map((t) => t.name)),
+          // The grant, so a generated call can be checked against the schema the server
+          // actually declared rather than against a guess.
+          mcpTools: manifest,
+          // Fresh project: the connector templates raise, so the tool node has to survive a raise.
+          requireToolErrorHandling: true,
+        });
+      };
+      let result = await stageAndValidate();
+
+      // ONE REPAIR, WITH THE PROBLEMS, BEFORE ANYTHING IS DISCARDED. Half the generations in a live
+      // pass failed on one line each — a `print()`, an import of a module that was never written, a
+      // project with no tools that never defined `TOOLS` — and every one was thrown away with
+      // nothing to press but "plan it again". The model is shown its own files and exactly what was
+      // wrong, re-emits what changes, and the whole project is checked again from the start. One
+      // pass, not a loop: a project that fails twice is told to the person, and the plan comes back.
+      if (!result.ok && !replayed) {
+        this.emit("repairing", { problems: result.problems });
+        staged.clear();
+        for (const [path, content] of modelFiles) staged.set(path, content);
+        const repair = new FileProtocolParser(onEvent);
+        const first = usage;
+        await this.streamGeneration(
+          all, request, (chunk) => repair.push(chunk), (u) => (usage = addUsage(first, u)),
+          opts.apiKey, opts.effort, opts.ask, buildRepairPrompt(request, modelFiles, result.problems),
+        );
+        const repairError = repair.finish();
+        if (repairError) throw new Error(repairError);
+        for (const path of repair.files) if (!written.includes(path)) written.push(path);
+        result = await stageAndValidate();
       }
-
-      // ...and validation reads from there, rather than from wherever the files happened to be
-      // written. That is what makes this the same code path on a replica holding no copy.
-      await projects.materialiseStaging(ctx, agentUuid, stagingId, scratch);
-      const result = await validateProject(scratch, {
-        runtimeDir,
-        // The bridge is reviewed code copied in verbatim, exactly like a connector template,
-        // so it is excluded from the model-output lints for the same reason.
-        connectorFiles: [...connectorFiles, ...mcpFiles].map((f) => f.path),
-        // Connector tools are real tool objects too — calling one directly crashes the
-        // same way, so they must be part of the "do not call directly" set.
-        connectorToolNames: selected.flatMap((c) => c.tools.map((t) => t.name)),
-        // The grant, so a generated call can be checked against the schema the server
-        // actually declared rather than against a guess.
-        mcpTools: manifest,
-        // Fresh project: the connector templates raise, so the tool node has to survive a raise.
-        requireToolErrorHandling: true,
-      });
       if (!result.ok) {
         await projects.discardStaging(ctx, agentUuid, stagingId);
         this.emit("error", {
@@ -452,7 +485,7 @@ export class Generator extends EventEmitter<GeneratorEvents> {
       await projects.materialise(ctx, agentUuid, version, join(agentsDir(runtimeDir), slug));
 
       this.emit("done", {
-        agentId: slug, name, files: parser.files, usage, planUsage: opts.planUsage ?? emptyUsage(),
+        agentId: slug, name, files: written, usage, planUsage: opts.planUsage ?? emptyUsage(),
         // WHAT WAS TRUE OF THE PROJECT AND DID NOT STOP IT. An unused connector grant rides the
         // success rather than being swallowed by it — the conversation says so in a line, and
         // nothing about the generation is hidden because it passed.
@@ -477,6 +510,8 @@ export class Generator extends EventEmitter<GeneratorEvents> {
     apiKey?: string,
     effort?: EffortPlan | null,
     ask?: AskModel,
+    /** The message to send instead of the brief — a repair pass's. */
+    user: string = buildUserPrompt(req),
   ): Promise<string> {
     let raw = "";
     // THE SUBSCRIPTION PATH ANSWERS HERE. See the same note in planner.ts: `ask` brings its own
@@ -485,7 +520,7 @@ export class Generator extends EventEmitter<GeneratorEvents> {
     if (ask) {
       const answered = await ask({
         system: buildSystemPrompt(allConnectors),
-        user: buildUserPrompt(req),
+        user,
         onChunk: (text) => { raw += text; onChunk(text); },
       });
       // A turn that delivered in one piece never called `onChunk`, so the parser has seen nothing —
@@ -513,7 +548,7 @@ export class Generator extends EventEmitter<GeneratorEvents> {
           cache_control: { type: "ephemeral" },
         },
       ],
-      messages: [{ role: "user", content: buildUserPrompt(req) }],
+      messages: [{ role: "user", content: user }],
     });
 
     stream.on("text", (delta) => {

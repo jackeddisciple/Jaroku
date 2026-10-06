@@ -326,5 +326,26 @@ const userTexts = () => turns().filter((t) => t.role === "user").map((t) => (t a
   check("it belongs to no session", threadFor(store(), T).length === 0);
 }
 
+// A FAILED BUILD SAYS IT IS BEING FIXED, AND WHEN IT FAILS ANYWAY THE PLAN IS ONE PRESS AWAY.
+// Half a live pass's generations failed their checks and were discarded; the only way on was to
+// plan again, because the plan's own Generate was far up the thread and nothing sat at the failure.
+{
+  const R = "th-repair";
+  const inR = () => threadFor(store(), R);
+  store().planReady({ threadId: R, planId: "p-r", prompt: "an agent", plan: PLAN, warnings: [], usage: USAGE, revision: 1 });
+  store().genStarted({ threadId: R, prompt: "an agent" });
+  store().genRepairing({ threadId: R, problems: ["agent.py:61 writes to stdout via print() (rule 3)"] });
+  const gen = () => inR().find((t) => t.role === "jaroku" && t.kind === "gen") as { repairing?: string[]; status: string } | undefined;
+  check("the turn says the checks' problems are being fixed", gen()?.repairing?.length === 1 && gen()?.status === "generating");
+  store().genError({ threadId: R, message: "the generated project failed validation and was discarded", problems: ["x"] });
+  store().planRestored({ threadId: R, planId: "p-r" });
+  check("a failure after the repair gives the plan back", pendingPlanId(inR()) === "p-r");
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const pane = readFileSync(fileURLToPath(new URL("../components/BuildPane.tsx", import.meta.url)), "utf8");
+  check("...and the failed turn offers to build it again, without planning again",
+    /Build it again/.test(pane) && /retryPlan\.status === "pending"/.test(pane) && /sendGenerate\(retryPlan\.prompt, \[\], undefined, retryPlan\.planId\)/.test(pane));
+}
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 (globalThis as { process?: { exit(code: number): void } }).process?.exit(fail === 0 ? 0 : 1);

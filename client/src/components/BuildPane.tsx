@@ -22,7 +22,7 @@ import { isRunnable, modelName, providerLabelOf, runProviders, useProviderStore 
 import {
   sendApplyEdit, sendAskRecord, sendBranchRun, sendChat, sendDiscardEdit, sendDiscardPlan, sendDispatchWork,
   sendCreateThread, sendEditTurn, sendSelectVariant, sendStopChat,
-  sendEdit, sendExplain, sendLoadWorkItem, sendPeekWorkItem, sendPlanAgent, sendPromoteTestInput, sendRun, reportHostProviders} from "../lib/socket.ts";
+  sendEdit, sendExplain, sendGenerate, sendLoadWorkItem, sendPeekWorkItem, sendPlanAgent, sendPromoteTestInput, sendRun, reportHostProviders} from "../lib/socket.ts";
 import { useEvalStore } from "../store/evalStore.ts";
 import { UpsellCard } from "./UpsellCard.tsx";
 import { composerMoment } from "../lib/composerMoment.ts";
@@ -38,7 +38,7 @@ import { WorkGlyph } from "./WorkGlyph.tsx";
 import { threadById } from "../store/threadStore.ts";
 import { absTime, fmtCost, fmtTokens } from "../lib/format.ts";
 import { isProviderId, type ProviderModel } from "../types.ts";
-import { secondaryBtn } from "./buttons.ts";
+import { primaryBtn, secondaryBtn } from "./buttons.ts";
 import { Chip, chipClass } from "./Chip.tsx";
 import { ChoiceRow, type Choice } from "./ChoiceRow.tsx";
 import { DiffCard } from "./DiffCard.tsx";
@@ -140,10 +140,20 @@ const CONNECTORS = [
   { id: "http", label: "HTTP/Webhook", hint: "https requests to allowlisted domains" },
 ];
 
-function GenTurnView({ turn, isLive }: { turn: GenTurn; isLive: boolean }) {
+function GenTurnView({ turn, isLive, retryPlan }: {
+  turn: GenTurn;
+  isLive: boolean;
+  /**
+   * The plan this failed build came from, given back by the server and awaiting a decision again.
+   * Its Generate button is far up the thread; the failure is where somebody is looking, so the same
+   * press is offered here. Absent when the plan did not come back — then there is nothing to rebuild.
+   */
+  retryPlan?: PlanTurn;
+}) {
   const files = useBuildStore((s) => s.files);
   const fileOrder = useBuildStore((s) => s.fileOrder);
   const streamingFile = useBuildStore((s) => s.streamingFile);
+  const connected = useTraceStore((s) => s.connection === "open");
 
   if (turn.status === "error") {
     return (
@@ -157,6 +167,17 @@ function GenTurnView({ turn, isLive }: { turn: GenTurn; isLive: boolean }) {
           </ul>
         )}
         <div className="mt-2 text-faint">Nothing was written — any previous agent is untouched.</div>
+        {retryPlan?.planId && retryPlan.status === "pending" && (
+          <button
+            type="button"
+            className={`${primaryBtn} mt-3 inline-flex items-center gap-1.5`}
+            disabled={!connected}
+            title="Build the same plan again — no new planning call"
+            onClick={() => retryPlan.planId && sendGenerate(retryPlan.prompt, [], undefined, retryPlan.planId)}
+          >
+            Build it again
+          </button>
+        )}
       </div>
     );
   }
@@ -165,7 +186,11 @@ function GenTurnView({ turn, isLive }: { turn: GenTurn; isLive: boolean }) {
     const list = orderedFiles({ files, fileOrder });
     return (
       <div className="text-caption">
-        <div className="text-run">Generating…</div>
+        <div className="text-run">
+          {turn.repairing
+            ? `The checks found ${turn.repairing.length === 1 ? "a problem" : `${turn.repairing.length} problems`} — fixing ${turn.repairing.length === 1 ? "it" : "them"}…`
+            : "Generating…"}
+        </div>
         <div className="mt-2 space-y-0.5">
           {list.map((f) => (
             <StreamingFileRow
@@ -1063,10 +1088,12 @@ function UserTurnView({
 }
 
 function Turn({
-  turn, isLastGen, threadId, editingTurnId, setEditingTurnId,
+  turn, isLastGen, threadId, editingTurnId, setEditingTurnId, retryPlan,
 }: {
   turn: ChatTurn;
   isLastGen: boolean;
+  /** The plan awaiting a decision, for a failed build to offer again — see `GenTurnView`. */
+  retryPlan?: PlanTurn;
   threadId: string | null;
   editingTurnId: string | null;
   setEditingTurnId: (id: string | null) => void;
@@ -1091,7 +1118,7 @@ function Turn({
   if (turn.kind === "gen") {
     return (
       <AssistantTurn turn={turn} isLast={isLastGen}>
-        <TurnRow><GenTurnView turn={turn} isLive={isLastGen} /></TurnRow>
+        <TurnRow><GenTurnView turn={turn} isLive={isLastGen} retryPlan={isLastGen ? retryPlan : undefined} /></TurnRow>
       </AssistantTurn>
     );
   }
@@ -2835,6 +2862,11 @@ export function BuildPane({
       (t): t is PlanTurn =>
         t.role === "jaroku" && t.kind === "plan" && (t.status === "pending" || t.status === "stale"),
     );
+  // THE PLAN A FAILED BUILD CAME FROM, and only that one: a plan written after the failure is below
+  // it, on screen, and "Build it again" must not quietly build something else.
+  const retryPlan = openPlan && turns.indexOf(openPlan) < turns.findIndex((t) => t.id === lastGenId)
+    ? openPlan
+    : undefined;
   const openProposal = [...turns]
     .reverse()
     .find(
@@ -3226,6 +3258,7 @@ export function BuildPane({
                 <Turn
                   turn={t}
                   isLastGen={t.id === lastGenId}
+                  retryPlan={retryPlan}
                   threadId={activeThreadId}
                   editingTurnId={editingTurnId}
                   setEditingTurnId={setEditingTurnId}

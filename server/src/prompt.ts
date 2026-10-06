@@ -136,7 +136,8 @@ Keep replies to a sentence or two.
 // never drift. Interpolated byte-for-byte into buildSystemPrompt (cache stability).
 const CONTRACT_SYMBOLS = `  TOOLS: list                            # every tool the graph can call
   def build_graph(llm): ...              # returns a COMPILED graph
-  def build_initial_state(user_input: str) -> dict`;
+  def build_initial_state(user_input: str) -> dict
+  # An agent with NO tools still defines TOOLS = [] (the host requires the name) and has no tool node.`;
 
 const HARD_RULES = `HARD RULES:
 1. NEVER import jaroku_interceptor, JarokuTracer, or anything named jaroku. The host handles
@@ -1002,4 +1003,34 @@ export function chatClosing(agentName: string | null): string {
     ? `The agent open in this conversation is "${agentName}".`
     : `No agent is open in this conversation yet — the developer is still deciding what to build.`;
   return `${who} If the answer is not in the context above, say you cannot see it rather than guessing. You cannot change anything from this conversation.`;
+}
+
+/**
+ * The second ask, when a generated project failed the host's checks: the same brief, what the model
+ * wrote, and what was wrong with it.
+ *
+ * A REPAIR RATHER THAN A RESTART. Most failures are one line — a `print()`, an import of a module
+ * that was never written, a project with no tools that never defined `TOOLS` — and throwing the
+ * whole project away for one made half of all generations a dead end with nothing to press but
+ * "plan it again". The model sees its own files and the exact problems, and re-emits only what
+ * changes. Host-owned files are not shown and must not be emitted.
+ */
+export function buildRepairPrompt(req: GenerationRequest, files: ReadonlyMap<string, string>, problems: readonly string[]): string {
+  const project = [...files.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([path, content]) => `<<<FILE path="${path}">>>\n${content.replace(/\n?$/, "\n")}<<<ENDFILE>>>`)
+    .join("\n");
+  return [
+    buildUserPrompt(req),
+    "",
+    "THE PROJECT YOU WROTE FOR THIS FAILED THE HOST'S CHECKS AND WAS NOT SAVED. The problems:",
+    ...problems.map((p) => `- ${p}`),
+    "",
+    "Here it is, exactly as you wrote it:",
+    project,
+    "",
+    "Fix every problem above. Re-emit IN FULL, in the same file protocol, every file you change — and",
+    "only those. Every HARD RULE still applies. Do not emit connector templates, the MCP bridge or any",
+    "other host-owned file.",
+  ].join("\n");
 }

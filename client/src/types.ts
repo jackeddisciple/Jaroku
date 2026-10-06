@@ -318,6 +318,8 @@ export type GenMessage = InThread &
     }
   /** The generation this plan authorised failed and wrote nothing — it is takeable again. */
   | { channel: "gen"; type: "plan_restored"; planId: string }
+  /** The first attempt failed the checks; the model is fixing exactly these, once. */
+  | { channel: "gen"; type: "repairing"; problems: string[] }
   | { channel: "gen"; type: "plan_error"; message: string });
 
 // --- editing (fix loop) ---

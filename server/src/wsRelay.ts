@@ -1927,6 +1927,8 @@ export type GenEvent =
   | { type: "file_start"; path: string }
   | { type: "file_delta"; path: string; text: string }
   | { type: "file_end"; path: string }
+  /** The checks failed and the model is fixing what they found — one pass, then the files again. */
+  | { type: "repairing"; problems: string[] }
   | { type: "started"; prompt: string }
   | { type: "done"; agentId: string; name: string; files: string[]; usage: unknown; planUsage: unknown }
   | { type: "error"; message: string; problems?: string[] }
