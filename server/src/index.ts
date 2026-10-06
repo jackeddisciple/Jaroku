@@ -2219,9 +2219,18 @@ async function deleteAgent(ctx: TenantContext, agentId: string, confirm: unknown
     return;
   }
 
+  // ITS CONVERSATIONS LEAVE RECENTS WITH IT — archived, not deleted. They stayed in the list after
+  // the agent had gone ("Margot's input name…", "PlanA personal assi…"), each one a conversation
+  // about nothing that could be opened again; archived, they keep every turn and are still found
+  // under Archived. Read BEFORE the purge, which is what clears their link to this agent.
+  const conversations = await threadStore.listForAgent(ctx, agent.id).catch(() => []);
   if (!(await agentRepo.purge(ctx, agent.id))) {
     refuseAgent(ctx, `${slug} was already gone`, slug);
     return;
+  }
+  for (const t of conversations) {
+    await threadStore.archive(ctx, t.id).catch((err) =>
+      console.warn(`[agents] could not archive ${slug}'s conversation ${t.id}: ${(err as Error).message}`));
   }
   // Objects next. A failure here leaves orphaned bytes the lifecycle sweep collects, which costs
   // storage and nothing else — so it must not stop the directory going.

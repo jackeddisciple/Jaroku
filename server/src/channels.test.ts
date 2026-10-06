@@ -326,6 +326,14 @@ console.log("\nan in-flight operation's channel scope belongs to it alone");
     "the shared `buildContext` is gone — it covered four concurrent subsystems with one variable",
   );
 
+  // A DELETED AGENT'S CONVERSATIONS LEAVE RECENTS WITH IT — archived, so every turn is kept. They are
+  // read before the purge, which is what clears their link to the agent.
+  const deleteFn = indexSource.slice(indexSource.indexOf("async function deleteAgent("), indexSource.indexOf("async function renameAgent("));
+  check(deleteFn.indexOf("threadStore.listForAgent(ctx, agent.id)") >= 0
+    && deleteFn.indexOf("threadStore.listForAgent(ctx, agent.id)") < deleteFn.indexOf("agentRepo.purge(ctx, agent.id)")
+    && /threadStore\.archive\(ctx, t\.id\)/.test(deleteFn),
+    "deleting an agent archives its conversations, found before the purge unlinks them");
+
   // A FOLDER IS NOT CODE, AND ANOTHER WORKSPACE'S DISK IS NOT THIS ONE'S. The empty folder a failed
   // build left behind made a draft "an agent" whose every message went to an edit that could not run,
   // and a bundled `bruno` on disk did the same to any workspace's agent of that name.
