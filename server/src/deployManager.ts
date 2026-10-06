@@ -27,7 +27,8 @@ import { join } from "node:path";
 import type { Deployment, DeployStatus, DeployStore } from "./deployStore.ts";
 import { readAgentMeta, writeDeployArtifacts } from "./deployArtifacts.ts";
 import type { AgentRepository } from "./db/repositories/agents.ts";
-import { filesFromDirectory, type ProjectStore } from "./storage/projectStore.ts";
+import { filesFromDirectory, manifestFor, type ProjectStore } from "./storage/projectStore.ts";
+import type { VersionManifest } from "./db/repositories/agents.ts";
 import { listProjectFiles } from "./projectFs.ts";
 import {
   hostEnv, makeScrubber, requiredSecrets, resolveSecretValues,
@@ -450,7 +451,11 @@ export class DeployManager {
       // never heard of, and that the next applied edit would silently drop when it materialises
       // the version it published. The read-only rule protecting serve.py and the Dockerfile
       // only means something if they are actually IN the thing it protects.
-      await this.recordArtifacts(req.agentId);
+      // AND THE ROW NAMES THE VERSION THE UPLOAD IS ACTUALLY BUILT FROM. It named the one before the
+      // artifacts were published, so every deploy left its own deployment a version behind: "Margot
+      // is serving v2, current is v3", and a Redeploy offered straight after a successful deploy.
+      const built = await this.recordArtifacts(req.agentId);
+      if (built !== null) await this.deps.store.patch(this.deps.context(), id, { version: built });
       if (await this.stopped(id)) return;
 
       // --- provision ---
@@ -651,21 +656,27 @@ export class DeployManager {
    * the user asked for, and an unrecorded version is a stale file list rather than a broken
    * release. It is logged rather than swallowed.
    */
-  private async recordArtifacts(agentId: string): Promise<void> {
+  private async recordArtifacts(agentId: string): Promise<number | null> {
     try {
       const ctx = this.deps.context();
       const agent = await this.deps.agents.bySlug(ctx, agentId);
-      if (!agent) return;
+      if (!agent) return null;
       const dir = join(this.deps.runtimeDir, "agents", agentId);
       const connectorFiles = agent.connectors.map((id) => `tools/${id}.py`);
       const files = filesFromDirectory(dir, listProjectFiles(dir, connectorFiles).map((f) => f.path));
-      if (!files.length) return;
-      await this.deps.projects.publish(ctx, agent.id, files, {
+      if (!files.length) return null;
+      // NOTHING NEW, NO NEW VERSION. A redeploy of an unchanged agent writes the same four artifacts
+      // again, and publishing them minted an identical version on every press.
+      const live = await this.deps.agents.version(ctx, agent.id, agent.current_version);
+      if (live && sameManifest(live.manifest, manifestFor(files))) return agent.current_version;
+      const { version } = await this.deps.projects.publish(ctx, agent.id, files, {
         source: "deploy",
         summary: "deploy artifacts",
       });
+      return version;
     } catch (err) {
       console.warn(`[deploy] could not record the deploy artifacts as a version: ${(err as Error).message}`);
+      return null;
     }
   }
 
@@ -810,3 +821,10 @@ export class DeployManager {
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/** Whether two manifests name the same files with the same contents. */
+function sameManifest(a: VersionManifest, b: VersionManifest): boolean {
+  const ka = Object.keys(a).sort();
+  const kb = Object.keys(b).sort();
+  return ka.length === kb.length && ka.every((k, i) => k === kb[i] && a[k]!.sha256 === b[k]!.sha256);
+}

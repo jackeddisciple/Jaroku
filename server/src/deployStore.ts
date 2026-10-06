@@ -143,6 +143,8 @@ export interface DeploymentPatch {
   railway_service_id?: string | null;
   railway_environment_id?: string | null;
   railway_deployment_id?: string | null;
+  /** The version the upload was built from — set once a deploy has published its own artifacts. */
+  version?: number | null;
 }
 
 /** Where a redeploy of an agent should go, if it has somewhere to go back to. */
@@ -166,6 +168,7 @@ const nowIso = (): string => new Date().toISOString();
 const PATCHABLE: ReadonlySet<string> = new Set([
   "status", "url", "error",
   "railway_project_id", "railway_service_id", "railway_environment_id", "railway_deployment_id",
+  "version",
 ]);
 
 // Explicit column lists — a deployment goes onto the deploy channel, and workspace_id has no
@@ -299,7 +302,7 @@ export class DeployStore {
     if (!current) return null;
 
     const sets: string[] = ["updated_at = ?"];
-    const values: (string | null)[] = [nowIso()];
+    const values: (string | number | null)[] = [nowIso()];
     for (const [key, value] of Object.entries(changes)) {
       if (value === undefined) continue;
       // Whitelisted, because this builds SQL out of object keys. TypeScript keeps the
@@ -312,7 +315,7 @@ export class DeployStore {
         throw new Error(`deployments.${key} is not a patchable column`);
       }
       sets.push(`${key} = ?`);
-      values.push(value as string | null);
+      values.push(value as string | number | null);
     }
 
     if (changes.status) {
