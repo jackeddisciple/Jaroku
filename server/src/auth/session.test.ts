@@ -27,7 +27,7 @@ import { Router } from "../http/router.ts";
 import { JwksClient } from "./jwks.ts";
 import { TokenVerifier } from "./verifier.ts";
 import { LocalIssuer } from "./localIssuer.ts";
-import { sessionRoutes } from "./session.ts";
+import { fromThisMachine, sessionRoutes } from "./session.ts";
 import { memoryTicketStore } from "./tickets.ts";
 import { ContextResolver } from "./resolve.ts";
 import { DEFAULT_AUDIENCE, LOCAL_ISSUER, type AuthConfig } from "./config.ts";
@@ -346,6 +346,23 @@ async function suite(driver: string, db: Db): Promise<void> {
 
     const bad = await post(local.base, "/v1/auth/dev-login", undefined, { email: "not-an-address" });
     check(bad.status === 401, "dev-login refuses something that is not an address — it lands in a UNIQUE column");
+
+    // THROUGH A TUNNEL IT IS A PASSWORDLESS SIGN-IN FOR THE WHOLE INTERNET. cloudflared connects from
+    // loopback, so what gives it away is what it adds: its own host name and forwarding headers.
+    const tunnelled = await fetch(`${local.base}/v1/auth/dev-login`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-forwarded-for": "203.0.113.9", "cf-connecting-ip": "203.0.113.9" },
+      body: JSON.stringify({ email: `tunnel-${label}@example.com` }),
+    });
+    check(tunnelled.status === 403, "dev-login refuses a request that came through a tunnel or a proxy");
+    check(fromThisMachine("127.0.0.1", (h) => ({ host: "localhost:4317" } as Record<string, string>)[h]),
+      "...and answers one from this machine");
+    check(!fromThisMachine("127.0.0.1", (h) => ({ host: "quiet-owl.trycloudflare.com" } as Record<string, string>)[h]),
+      "...but not one naming a public host, even from loopback");
+    check(!fromThisMachine("203.0.113.9", (h) => ({ host: "localhost" } as Record<string, string>)[h]),
+      "...nor one from another machine, whatever it calls the host");
+    check(fromThisMachine("::ffff:127.0.0.1", (h) => ({ host: "[::1]:4317" } as Record<string, string>)[h]),
+      "...while a mapped loopback address and the v6 loopback name are this machine");
 
     const jwks = await fetch(`${local.base}/v1/auth/jwks.json`);
     const doc = (await jwks.json()) as { keys: { kty: string; d?: string }[] };

@@ -1306,10 +1306,39 @@ function jwksHandler(issuer: LocalIssuer): Handler {
  * `runtime/.env` has always had locally: whoever can reach this port is the person sitting at
  * this machine.
  */
+/** Headers a proxy, a load balancer or a tunnel adds on the way in. None of them come from a browser. */
+const FORWARDING_HEADERS = [
+  "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "forwarded", "x-real-ip",
+  "cf-connecting-ip", "cf-ray", "true-client-ip", "x-client-ip",
+] as const;
+
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
+/**
+ * Whether a request reached this port from this machine and nothing else.
+ *
+ * THE PASSWORDLESS ROUTE'S WHOLE TRUST BOUNDARY IS "WHOEVER CAN REACH THIS PORT IS AT THIS MACHINE",
+ * and a tunnel breaks it without changing a line here: cloudflared or ngrok connects from loopback,
+ * so the peer address alone says nothing. What a tunnel or a proxy cannot help doing is name its
+ * public host in `Host` and add its forwarding headers — so a loopback peer, a loopback host and no
+ * forwarding headers, together, are what "this machine" means. A raw port-forward that also spoofs
+ * `Host` is not caught by this, and the boot log's warning stands for that case.
+ */
+export function fromThisMachine(peer: string | null | undefined, header: (name: string) => string | undefined): boolean {
+  const address = (peer ?? "").replace(/^::ffff:/, "");
+  const loopbackPeer = address === "::1" || /^127\.\d+\.\d+\.\d+$/.test(address);
+  const host = (header("host") ?? "").trim().toLowerCase().replace(/:\d+$/, "");
+  return loopbackPeer && LOOPBACK_HOSTS.has(host) && FORWARDING_HEADERS.every((h) => !header(h));
+}
+
 function devLoginHandler(deps: SessionDeps): Handler {
   const issuer = deps.localIssuer!;
   const log = deps.log ?? console.log;
   return async (req) => {
+    if (!fromThisMachine(req.raw.socket.remoteAddress, (name) => req.header(name))) {
+      log(`[auth] refused a dev sign-in that did not come from this machine (${req.requestId})`);
+      throw forbidden("signing in without a password only works on this machine, not through a tunnel or a proxy");
+    }
     const body = await req.json<{ email?: unknown; name?: unknown }>();
     const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
     // Deliberately loose: this is not an address anybody will send mail to, and a strict
