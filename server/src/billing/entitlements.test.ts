@@ -27,7 +27,7 @@ import {
   type TierEntitlements,
 } from "./entitlements.ts";
 import {
-  COMMAND_ENTITLEMENT, NO_ENTITLEMENT, USAGE_METRICS, entitlementFor, refusalMessage,
+  COMMAND_ENTITLEMENT, NO_ENTITLEMENT, USAGE_METRICS, countedAgents, entitlementFor, refusalMessage,
   requireEntitlement, type EntitlementCounts, type EntitlementKind,
 } from "./entitlementGate.ts";
 import { systemContextFor, newRequestId, type TenantContext } from "../db/tenant.ts";
@@ -364,6 +364,27 @@ console.log("\nwithin() is the one comparison");
   check(within(0, 1) && !within(1, 1) && !within(2, 1), "a limit of one admits one and refuses the second");
   check(within(Number.MAX_SAFE_INTEGER, "unlimited"), "unlimited admits anything");
   check(!within(0, 0), "a limit of zero admits nothing — which is what an abuse clamp sets");
+}
+
+// ---------------------------------------------------------------------------------------------
+console.log("\nthe agent limit counts built agents, not names");
+// ---------------------------------------------------------------------------------------------
+{
+  // THE NEW AGENT DIALOG MADE A THIRD ROW AND ITS BUILD WAS REFUSED "3 of 3": drafts were counted, so
+  // the dialog led to an agent nobody could build, and a rebuild counted the agent it rebuilt.
+  const rows = [
+    { slug: "bruno", archived_at: null }, { slug: "margot", archived_at: null },
+    { slug: "iris", archived_at: null }, { slug: "old", archived_at: "2026-09-01T00:00:00Z" },
+  ];
+  const built = new Set(["bruno", "margot", "old"]);
+  check(countedAgents(rows, built) === 2, "two built agents and a draft are two agents");
+  check(countedAgents(rows, built, "iris") === 2, "building into the draft does not count it as well");
+  check(countedAgents(rows, built, "margot") === 1, "rebuilding an agent does not count it against itself");
+  check(countedAgents(rows, new Set()) === 0, "a workspace of drafts has used none");
+  // AND THE RELAY HANDS THE GATE THE TARGET, which `generate` names `intoAgentId`.
+  const relay = readFileSync(join(here, "..", "wsRelay.ts"), "utf8");
+  check(/cmd === "generate" && typeof \(msg as \{ intoAgentId\?: unknown \}\)\.intoAgentId === "string"/.test(relay),
+    "the relay passes a generation's target to the tier gate");
 }
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);

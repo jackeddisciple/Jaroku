@@ -466,6 +466,23 @@ export interface EntitlementCounts {
   usage(ctx: TenantContext, metric: UsageMetric): Promise<number>;
 }
 
+/**
+ * The agents `maxAgents` counts: built ones — a current version with an `agent.py` — that are not
+ * archived, leaving out `except`, the agent a generation is building into.
+ *
+ * NOT ROWS. A draft is a name and a face, and `createDraftAgent` is ungated for exactly that reason;
+ * counting rows refused the build of the draft the New agent dialog had just made ("3 of 3"), so the
+ * dialog led to an agent that could never be built — and a rebuild of an existing agent counted it
+ * twice. Pure, so the rule is held by `test:entitlements` and the caller only fetches the two facts.
+ */
+export function countedAgents(
+  rows: readonly { slug: string; archived_at: string | null }[],
+  built: ReadonlySet<string>,
+  except: string | null = null,
+): number {
+  return rows.filter((a) => a.archived_at === null && built.has(a.slug) && a.slug !== except).length;
+}
+
 async function currentFor(
   check: EntitlementKind,
   ctx: TenantContext,

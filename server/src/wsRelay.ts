@@ -4827,7 +4827,12 @@ export class WsRelay {
     // and where to go — and the client renders that as an inline card rather than a bare string.
     // On the command's OWN channel rather than a new one, so the panel that asked still gets an
     // error it already knows how to show if it has no card to render.
-    const refusal = this.entitles ? await this.entitles(ctx, cmd, agentId) : null;
+    // `generate` NAMES ITS TARGET `intoAgentId`, and the quota has to see it: building into an agent
+    // that already exists — the draft the New agent dialog made, or a rebuild — is not a new agent.
+    const gated = agentId ?? (cmd === "generate" && typeof (msg as { intoAgentId?: unknown }).intoAgentId === "string"
+      ? String((msg as { intoAgentId?: unknown }).intoAgentId)
+      : null);
+    const refusal = this.entitles ? await this.entitles(ctx, cmd, gated) : null;
     if (refusal) {
       this.sendTo(ws, {
         channel: channelFor(cmd),

@@ -286,7 +286,7 @@ import { BudgetGate, billingPeriod, ceilingRefusal } from "./billing/gate.ts";
 import { entitlementsForPlan } from "./billing/entitlements.ts";
 import { PeriodUsage } from "./billing/periodUsage.ts";
 import {
-  NO_ENTITLEMENT, entitlementFor, refusalMessage, requireEntitlement,
+  NO_ENTITLEMENT, countedAgents, entitlementFor, refusalMessage, requireEntitlement,
   type EntitlementCounts,
 } from "./billing/entitlementGate.ts";
 import { WorkspaceProviderKeys } from "./billing/providerKeys.ts";
@@ -5186,7 +5186,7 @@ const relay = new WsRelay({
  * occupy the slot the tier limits; counting it locked a Free workspace out after one failed deploy.
  */
 const entitlementCounts: EntitlementCounts = {
-  agents: async (ctx) => (await agentRepo.list(ctx)).length,
+  agents: (ctx) => builtAgentCount(ctx),
   liveDeployments: async (ctx) => (await deployStore.servingAgents(ctx)).size,
   mcpServers: async (ctx) => (await mcpStore.listServers(ctx)).length,
   members: async (ctx) => (await identityRepo.listMembers(ctx)).length,
@@ -5194,6 +5194,12 @@ const entitlementCounts: EntitlementCounts = {
     ctx.actorUserId ? (await identityRepo.workspacesForUser(ctx, ctx.actorUserId)).length : 1,
   usage: async (ctx, metric) => billing.usageCount(ctx, billingPeriod().start, metric),
 };
+
+/** How many agents count against `maxAgents` — see `countedAgents`. */
+async function builtAgentCount(ctx: TenantContext, except: string | null = null): Promise<number> {
+  const [rows, built] = await Promise.all([agentRepo.list(ctx), agentRepo.currentVersionHas(ctx, "agent.py")]);
+  return countedAgents(rows, built, except);
+}
 
 /**
  * The refusal a command earns from this workspace's tier, or null.
@@ -5232,7 +5238,10 @@ async function entitlementRefusalFor(
             return serving.size;
           },
         }
-      : entitlementCounts;
+      // AND A GENERATION INTO AN AGENT THAT EXISTS IS NOT A NEW ONE — see `countedAgents`.
+      : check === "canCreateAgent" && cmd === "generate" && agentId
+        ? { ...entitlementCounts, agents: (c) => builtAgentCount(c, agentId) }
+        : entitlementCounts;
     const refusal = await requireEntitlement(check, ctx, tier, entitlements, counts);
     if (!refusal) return null;
 
