@@ -834,6 +834,11 @@ async function connect(): Promise<void> {
     // attempt. Falling back is not a security decision: the server checks membership either way.
     const target = view.workspaces.some((w) => w.id === wanted) ? wanted! : view.defaultWorkspaceId;
     const issued = await fetchTicket(token, target);
+    // LANDING SOMEWHERE OTHER THAN THE WORKSPACE THIS TAB WAS FILLED FOR — one this account is not
+    // in, or has left — IS A SWITCH, and the tab is emptied the way a switch empties it. What it
+    // held belonged to the other workspace: after a sign-in, the open conversation was asked for
+    // four times under the personal workspace and answered 404 each time.
+    if (wanted && issued.workspaceId !== wanted) resetWorkspaceStores();
     useSessionStore.getState().applySession(view, issued.workspaceId);
     storeWorkspace(issued.workspaceId);
     // The pins belong to this WORKSPACE and are read from localStorage by its id, so they can only be
