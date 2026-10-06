@@ -27,6 +27,7 @@ import {
   type InboxPayload,
   type McpInboxFacts,
 } from "./registry.ts";
+import { anomalySpend } from "./facts.ts";
 
 let failures = 0;
 const check = (name: string, ok: boolean): void => {
@@ -453,6 +454,21 @@ console.log("\nno predicate is a constant");
     `every type has facts under which it is unresolved${alwaysTrue.length ? ` — always-true: ${alwaysTrue.join(", ")}` : ""}`,
     alwaysTrue.length === 0,
   );
+}
+
+console.log("\nusual spend is the days before, not the same days");
+{
+  // EVERY AGENT THAT HAD SPENT ANYTHING WAS 7.0× ITS USUAL: the window was compared with itself.
+  const row = (usd: number) => ({ usd, costKnown: true });
+  const twice = anomalySpend(row(2), row(9));
+  check("$2 today after $7 over the seven days before is twice usual",
+    twice.spendUsd === 2 && Math.abs((twice.trailingAvgUsd ?? 0) - 1) < 1e-9);
+  const fresh = anomalySpend(row(1), row(1));
+  check("an agent whose whole history is today has no usual to be a multiple of", fresh.trailingAvgUsd === null);
+  const quiet = anomalySpend(undefined, row(7));
+  check("...and one that spent nothing today has nothing to compare", quiet.spendUsd === null && quiet.trailingAvgUsd === 1);
+  check("an unpriced call anywhere in the window keeps the agent out of the rule",
+    !anomalySpend({ usd: 1, costKnown: false }, row(8)).pricingKnown);
 }
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);

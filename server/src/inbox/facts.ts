@@ -35,6 +35,40 @@ import { COST_ANOMALY_MULTIPLE, type AgentInboxFacts, type InboxFacts, type McpI
  */
 export const ANOMALY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
+/** The span that is compared against "usual": the last day. */
+export const ANOMALY_RECENT_MS = 24 * 60 * 60 * 1000;
+
+/** One agent's spend over a window, as the billing read answers it. */
+type SpendRow = { usd: number; costKnown: boolean };
+
+/**
+ * The last day's spend against the daily mean of the seven days before it.
+ *
+ * IT COMPARED THE WINDOW WITH ITSELF. "Spend" was the seven days' total and "usual" was that total
+ * divided by seven, so every agent that had spent anything was spending exactly 7.0× its usual —
+ * three alerts in one Inbox, all reading 7.0×. Now "now" is the last 24 hours and "usual" is the
+ * daily mean of the seven days BEFORE it, so the two never share a dollar; and an agent with no
+ * history before today has no usual to be a multiple of.
+ *
+ * `throughNow` is the spend over the whole eight days and `recent` over the last one; the baseline
+ * is their difference, which keeps this to the one aggregate read per window.
+ */
+export function anomalySpend(
+  recent: SpendRow | undefined,
+  throughNow: SpendRow | undefined,
+): { spendUsd: number | null; trailingAvgUsd: number | null; pricingKnown: boolean } {
+  const days = ANOMALY_WINDOW_MS / 86_400_000;
+  const today = recent?.usd ?? 0;
+  const before = Math.max(0, (throughNow?.usd ?? 0) - today);
+  return {
+    spendUsd: recent ? today : null,
+    // NULL RATHER THAN ZERO with no history, and the distinction is the one v0.1.9 made permanent:
+    // unknown is not zero. A $0 baseline would make every first day an anomaly.
+    trailingAvgUsd: before > 1e-9 ? before / days : null,
+    pricingKnown: (recent?.costKnown ?? true) && (throughNow?.costKnown ?? true),
+  };
+}
+
 /** The reads this needs, each one already existing somewhere in the server. */
 export interface FactDeps {
   /** Every credential name declared in this workspace, and whether a value is actually behind it. */
@@ -124,15 +158,17 @@ export interface FactDeps {
  * workspace it was not asked about — there is no call below that could.
  */
 export async function inboxFacts(deps: FactDeps, ctx: TenantContext, now: number = Date.now()): Promise<InboxFacts> {
-  const since = new Date(now - ANOMALY_WINDOW_MS).toISOString();
+  const since = new Date(now - ANOMALY_RECENT_MS - ANOMALY_WINDOW_MS).toISOString();
+  const sinceRecent = new Date(now - ANOMALY_RECENT_MS).toISOString();
 
-  const [refs, agents, deployments, servers, tools, spend, ceiling, invites, members, team] = await Promise.all([
+  const [refs, agents, deployments, servers, tools, spend, spendRecent, ceiling, invites, members, team] = await Promise.all([
     deps.secretRefs(ctx),
     deps.agents(ctx),
     deps.deployments(ctx),
     deps.mcpServers(ctx),
     deps.mcpTools(ctx),
     deps.spend(ctx, since),
+    deps.spend(ctx, sinceRecent),
     deps.spendCeiling(ctx),
     deps.invites(ctx),
     deps.members(ctx),
@@ -150,13 +186,8 @@ export async function inboxFacts(deps: FactDeps, ctx: TenantContext, now: number
 
   const impactByRef = new Map(tools.map((t) => [`${t.server_id}/${t.name}`, t.impact]));
   const spendBySlug = new Map(spend.map((s) => [s.agentId ?? "", s]));
+  const recentBySlug = new Map(spendRecent.map((s) => [s.agentId ?? "", s]));
 
-  // THE TRAILING AVERAGE, FROM THE SAME WINDOW. §2.2 compares spend against "its trailing 7-day
-  // rolling average", and with one window in hand the honest reading is the window's own daily mean:
-  // an agent that spent $70 over seven days averages $10, and $40 today is four times usual. A second
-  // query for a second window would buy a more precise baseline at the cost of the "one aggregate
-  // pass" this whole file exists to keep.
-  const DAYS = ANOMALY_WINDOW_MS / 86_400_000;
 
   const agentFacts = new Map<string, AgentInboxFacts>();
   const highImpactHolders: { id: string; slug: string }[] = [];
@@ -166,7 +197,7 @@ export async function inboxFacts(deps: FactDeps, ctx: TenantContext, now: number
     // way: a deploy that FAILED still carries the version it meant to build, and computing drift off
     // it put `v2 → v9` on a card with nothing deployed at all.
     const live = deployment?.status === "live" ? deployment : null;
-    const money = spendBySlug.get(a.slug);
+    const money = anomalySpend(recentBySlug.get(a.slug), spendBySlug.get(a.slug));
     const highImpactTools = a.mcp_tools.filter((ref) => impactByRef.get(ref) === "high");
     if (highImpactTools.length > 0) highImpactHolders.push({ id: a.id, slug: a.slug });
 
@@ -190,16 +221,15 @@ export async function inboxFacts(deps: FactDeps, ctx: TenantContext, now: number
       highImpactTools,
       // Filled in below for the agents that could possibly qualify. See `gatesDisabled`.
       confirmGateEnabled: true,
-      spendUsd: money ? money.usd : null,
-      // NULL RATHER THAN ZERO for an agent that has spent nothing, and the distinction is the one
-      // v0.1.9 made permanent: unknown is not zero. An agent with no spend has no average to be
-      // three times of, and treating its baseline as $0 would make every first call an anomaly.
-      trailingAvgUsd: money && money.usd > 0 ? money.usd / DAYS : null,
+      // The last day against the seven before it — see `anomalySpend`, including why it is not the
+      // window against itself, which made every agent that had spent anything 7.0× its usual.
+      spendUsd: money.spendUsd,
+      trailingAvgUsd: money.trailingAvgUsd,
       // AN AGENT WHOSE MODEL HAS NO PRICING IS EXCLUDED FROM ANOMALY DETECTION ENTIRELY. v0.1.9
       // fixed the lie that unpriced means free, and §2.2 says in as many words that it does not come
       // back through this door: such an agent must never appear as a $0 baseline that everything
       // spikes against.
-      pricingKnown: money ? money.costKnown : true,
+      pricingKnown: money.pricingKnown,
       archivedAt: a.archived_at,
     });
   }

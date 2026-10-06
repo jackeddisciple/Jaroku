@@ -231,9 +231,9 @@ export interface AgentInboxFacts {
    * that it is.
    */
   confirmGateEnabled: boolean;
-  /** Spend over the anomaly window, or null when nothing has been spent. */
+  /** Spend over the last day, or null when nothing has been spent in it. See `anomalySpend`. */
   spendUsd: number | null;
-  /** The trailing 7-day rolling average this window is compared against, or null. */
+  /** The daily mean of the seven days before that, or null when there is no history to be usual. */
   trailingAvgUsd: number | null;
   /**
    * False when anything this agent ran used a model with no pricing entry.
