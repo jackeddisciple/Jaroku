@@ -106,6 +106,7 @@
     "test:window-title": "tsx src/lib/windowTitle.test.ts",
     "test:session-renewal": "tsx src/lib/sessionRenewal.test.ts",
     "test:sign-in-landing": "tsx src/lib/signInLanding.test.ts",
+    "test:inbox-counts": "tsx src/components/inboxCounts.test.ts",
     "test:cockpit-optimistic": "tsx src/lib/cockpitOptimistic.test.ts",
     "test:cockpit-empty": "tsx src/components/cockpitEmpty.test.ts",
     "test:cockpit-craft": "tsx src/components/cockpitCraft.test.ts",

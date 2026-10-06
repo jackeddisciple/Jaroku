@@ -475,7 +475,15 @@ export function InboxView() {
       {/* §4.1: the title, the count, and the one thing this surface can ask for. */}
       <div className="flex shrink-0 items-center gap-3 border-b border-hair px-5 py-3">
         <span className={TYPE.panelLabel}>Inbox</span>
-        <span className="text-tiny tabular-nums text-faint">{counts.all}</span>
+        {/* WHAT EACH NUMBER COUNTS, SAID WHERE BOTH CAN BE SEEN. The header read 6 beside a sidebar
+            badge of 2 and nothing said why: the badge counts what needs you — blocked, or waiting on
+            a decision — and this counts everything open. Now it says both, in those words. */}
+        <span
+          className="text-tiny tabular-nums text-faint"
+          title={`${counts.all} open · ${counts.badge} blocked or waiting on a decision — the number on the sidebar`}
+        >
+          {counts.all} open{counts.badge > 0 && counts.badge !== counts.all ? ` · ${counts.badge} need you` : ""}
+        </span>
         {/* ASK AGAIN. A full-snapshot channel that goes stale — a transition nothing broadcast, a
             frame dropped during a reconnect — otherwise has no remedy but reloading the page. Quiet
             and to the left, because it is a way to check rather than a thing to do. */}

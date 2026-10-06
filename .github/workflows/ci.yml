@@ -1156,6 +1156,8 @@ jobs:
           npm run test:session-renewal
           # AND A SIGN-IN THAT LANDS IN ANOTHER WORKSPACE EMPTIES THE TAB, so nothing of the old one is asked for.
           npm run test:sign-in-landing
+          # THE INBOX SAYS WHAT ITS NUMBERS COUNT, so its header and the sidebar badge are not two answers.
+          npm run test:inbox-counts
           # THE FLEET CARD'S ONE LINE, WHICH BOTH SPECIFICATIONS CALL THE HARDEST DESIGN IN THE
           # FEATURE, and the reason is what happens when it is wrong: a strip of twenty cards all
           # reading "Deployed", which is what the Railway dashboard already gives and is why
