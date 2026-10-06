@@ -160,6 +160,11 @@ export class ProjectStore {
    * files is a project that validates code it does not contain.
    */
   async materialise(ctx: TenantContext, agentId: string, version: number, dest: string): Promise<string[]> {
+    // A VERSION THAT DOES NOT EXIST WRITES NOTHING AND TOUCHES NOTHING. A draft's row says version 1
+    // before anything is published, and this used to empty `dest` and make it again regardless — so
+    // planning a deploy or starting a run on a draft left an empty `runtime/agents/<slug>/`, which
+    // then read as an agent with no code, and a hand-written project with no version was deleted.
+    if (!(await this.agents.version(ctx, agentId, version))) return [];
     const files = await this.readVersion(ctx, agentId, version);
     rmSync(dest, { recursive: true, force: true });
     mkdirSync(dest, { recursive: true });

@@ -4710,7 +4710,12 @@ const relay = new WsRelay({
     // is still "does this project have an agent.py", which the version manifest answers for a
     // published agent and the disk answers for one somebody dropped in by hand.
     const edits = await agentRepo.editCounts(ctx);
-    const onDisk = new Map(scanAgentDirectory(RUNTIME_DIR).map((a) => [a.agent_id, a]));
+    // THE DISK ANSWERS FOR THE WORKSPACE THIS PROCESS ACTS IN AND NO OTHER — the rule the file list
+    // and the graph already follow. `runtime/agents/` is shared by every workspace on the machine, so
+    // an agent named `bruno` anywhere else was born "not a draft" because the bundled one is on disk.
+    const onDisk = ctx.workspaceId === serverContext().workspaceId
+      ? new Map(scanAgentDirectory(RUNTIME_DIR).map((a) => [a.agent_id, a]))
+      : new Map<string, ReturnType<typeof scanAgentDirectory>[number]>();
     // THE MANIFEST ANSWERS FIRST, AND THE DISK ONLY FOR WHAT IT ALONE KNOWS. The comment above
     // already said this — "which the version manifest answers for a published agent and the disk
     // answers for one somebody dropped in by hand" — and the code asked the disk both times. An
@@ -4756,7 +4761,11 @@ const relay = new WsRelay({
          * `published` is one query for the whole workspace and `onDisk` is the directory scan that
          * already happened.
          */
-        draft: !published.has(a.slug) && !onDisk.has(a.slug),
+        //
+        // AND A FOLDER IS NOT CODE. Any directory used to count, so the empty one a failed build left
+        // behind turned the draft into "an agent" — every message routed to edit, and every edit failed
+        // with "has no published agent.py to edit". Only a folder holding an `agent.py` is a project.
+        draft: !published.has(a.slug) && !(onDisk.get(a.slug)?.runnable ?? false),
         deployment: d ? { id: d.id, status: d.status, url: d.url } : null,
         archived_at: a.archived_at,
       };

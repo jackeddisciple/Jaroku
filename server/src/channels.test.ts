@@ -326,6 +326,14 @@ console.log("\nan in-flight operation's channel scope belongs to it alone");
     "the shared `buildContext` is gone — it covered four concurrent subsystems with one variable",
   );
 
+  // A FOLDER IS NOT CODE, AND ANOTHER WORKSPACE'S DISK IS NOT THIS ONE'S. The empty folder a failed
+  // build left behind made a draft "an agent" whose every message went to an edit that could not run,
+  // and a bundled `bruno` on disk did the same to any workspace's agent of that name.
+  check(/draft: !published\.has\(a\.slug\) && !\(onDisk\.get\(a\.slug\)\?\.runnable \?\? false\)/.test(indexSource),
+    "only a folder holding agent.py makes an agent more than a draft");
+  check(/const onDisk = ctx\.workspaceId === serverContext\(\)\.workspaceId/.test(indexSource),
+    "...and only in the workspace this process acts in");
+
   // A NEW VERSION'S GRAPH GOES WHERE ITS FILES GO. A finished generation sent neither, so a Graph tab
   // opened on the draft kept "This agent's files are not on this machine" over a project that had
   // just been written. Every place that re-sends an agent's files re-sends its graph with them.

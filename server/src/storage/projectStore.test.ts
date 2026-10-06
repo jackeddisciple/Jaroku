@@ -167,6 +167,17 @@ async function suite(label: string, db: Db): Promise<void> {
   await projects.materialise(ctx, agent.id, v3.version, join(dest, "support_bot"));
   check(!existsSync(join(dest, "support_bot", "tools", "notes.py")), "...and the destination is emptied first");
 
+  // A VERSION THAT DOES NOT EXIST TOUCHES NOTHING. A draft's row says version 1 before anything is
+  // published, and a deploy plan or a run on it left an empty `runtime/agents/<slug>/` behind — which
+  // read as an agent with no code — and would have deleted a hand-written project with no version.
+  const draft = await agents.upsertFromDisk(ctx, { slug: "a_draft" });
+  const draftDir = join(dest, "a_draft");
+  check((await projects.materialise(ctx, draft.id, draft.current_version, draftDir)).length === 0 && !existsSync(draftDir),
+    "materialising a version that was never published makes no folder");
+  const handWritten = join(dest, "support_bot");
+  await projects.materialise(ctx, draft.id, 99, handWritten);
+  check(existsSync(join(handWritten, "agent.py")), "...and leaves whatever is already there");
+
   // --- staging ------------------------------------------------------------------------
   const stagingId = randomUUID();
   await projects.putStaging(ctx, agent.id, stagingId, { path: "agent.py", content: "# staged\n" });
