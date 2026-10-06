@@ -2422,6 +2422,7 @@ async function setAgentTools(ctx: TenantContext, slug: string, refs: unknown): P
   console.log(`[mcp] ${slug} scoped to ${granted.length} tool(s)`);
   await relay.broadcastAgents();
   relay.broadcastAgentFiles(ctx, slug);
+  void relay.broadcastAgentGraph(ctx, slug);
   await relay.broadcastAgentGrid();
   noticeAgent(
     ctx,
@@ -10266,6 +10267,7 @@ async function handleGithubCommand(ctx: TenantContext, cmd: GithubCommand): Prom
           });
           // The files changed under everything else that renders them.
           relay.broadcastAgentFiles(ctx, agentId);
+          void relay.broadcastAgentGraph(ctx, agentId);
           void relay.broadcastAgents();
         }
         await broadcastGithub(ctx, agentId);
@@ -12148,6 +12150,11 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
           }
         }
         relay.broadcastAgents();
+        // AND THE NEW VERSION'S FILES AND GRAPH. A Graph tab open on the draft asked once, was told
+        // there were no files, and kept saying "This agent's files are not on this machine" over a
+        // project that had just been written — only an apply, an undo or a restore re-sent it.
+        relay.broadcastAgentFiles(genCtxNow, e.agentId);
+        void relay.broadcastAgentGraph(genCtxNow, e.agentId);
         scheduleListRefresh(genCtxNow);
       })
       .catch((err) => console.error(`[threads] could not attach the agent:`, (err as Error)?.message ?? err));

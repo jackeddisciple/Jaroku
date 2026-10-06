@@ -326,6 +326,16 @@ console.log("\nan in-flight operation's channel scope belongs to it alone");
     "the shared `buildContext` is gone — it covered four concurrent subsystems with one variable",
   );
 
+  // A NEW VERSION'S GRAPH GOES WHERE ITS FILES GO. A finished generation sent neither, so a Graph tab
+  // opened on the draft kept "This agent's files are not on this machine" over a project that had
+  // just been written. Every place that re-sends an agent's files re-sends its graph with them.
+  const lines = indexSource.split("\n");
+  const filesSent = lines.flatMap((l, i) => (/relay\.broadcastAgentFiles\(/.test(l) ? [i] : []));
+  const unpaired = filesSent.filter((i) => !lines.slice(i, i + 5).some((l) => /relay\.broadcastAgentGraph\(/.test(l)));
+  check(filesSent.length >= 6 && unpaired.length === 0,
+    "every broadcast of an agent's files is followed by its graph",
+    unpaired.map((i) => `index.ts:${i + 1}`).join(", "));
+
   for (const scope of ["planContext", "genContext", "editContext", "replyContext", "deployContext"]) {
     check(
       new RegExp(`let ${scope}: TenantContext \\| null`).test(indexSource),
