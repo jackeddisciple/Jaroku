@@ -4800,6 +4800,18 @@ const relay = new WsRelay({
     const role = await contextResolver.stillAMember(session.context, ctx.requestId);
     return role ? { ok: true, role } : { ok: false, reason: "revoked" };
   },
+  // A RENEWED TOKEN FOR THE SAME PERSON, OR NOTHING. Verified as any bearer is, and matched to the
+  // account this socket was opened for — a token for somebody else must not extend this connection.
+  renewSession: async (session, token) => {
+    if (!session.context.actorUserId) return null;
+    try {
+      const auth = await tokenVerifier.verify(token);
+      const user = await identityRepo.userByExternalId(systemContext(newRequestId()), auth.subject);
+      return user && user.id === session.context.actorUserId ? auth.expiresAt : null;
+    } catch {
+      return null;
+    }
+  },
   // These two still read a global directory rather than a scoped table, which is the honest
   // limit of Session 1: runtime/agents/ is one namespace for every workspace, and Session 3's
   // object store is what makes the key itself workspace-scoped. They take the context now so

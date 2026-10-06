@@ -353,6 +353,32 @@ async function suite(driver: string, db: Db): Promise<void> {
     check(doc.keys.every((k) => k.d === undefined), "...and it is the PUBLIC half — no private material is published");
     await local.close();
   }
+
+  console.log("  · renewing a session");
+  {
+    // EVERY SESSION ENDED ON THE HOUR, MID-TASK. The session route promised "the client refreshes
+    // before this" and there was no way to: this is that way, and its three refusals.
+    const local = await serve(db, "local");
+    const claims = (token: string): { auth_time?: number; exp: number } =>
+      JSON.parse(Buffer.from(token.split(".")[1]!, "base64url").toString("utf8"));
+    const signedIn = await post(local.base, "/v1/auth/dev-login", undefined, { email: `renew-${label}@example.com` });
+    await post(local.base, "/v1/auth/session", signedIn.json.token);
+    const renewed = await post(local.base, "/v1/auth/refresh", signedIn.json.token);
+    check(renewed.status === 200 && typeof renewed.json?.token === "string", "a valid session is renewed");
+    check((await post(local.base, "/v1/auth/session", renewed.json.token)).status === 200, "...and the new token is a session");
+    check(claims(renewed.json.token).auth_time === claims(signedIn.json.token).auth_time,
+      "...still saying when its holder last really signed in, so a renewal never passes a step-up");
+    check(renewed.json.expiresAt >= signedIn.json.expiresAt, "...and lasting at least as long");
+
+    const nowS = Math.floor(Date.now() / 1000);
+    const stale = issuer.mint({ email: `renew-${label}@example.com`, authTime: nowS - 31 * 24 * 60 * 60 });
+    check((await post(local.base, "/v1/auth/refresh", stale.token)).status === 401,
+      "a session signed in over a month ago is not renewed — its holder signs in again");
+    const stranger = issuer.mint({ email: `nobody-${label}@example.com` });
+    check((await post(local.base, "/v1/auth/refresh", stranger.token)).status === 401, "nor is one for an account that does not exist");
+    check((await post(local.base, "/v1/auth/refresh", "not-a-token")).status === 401, "nor is something that is not a token");
+    await local.close();
+  }
 }
 
 const tmp = mkdtempSync(join(tmpdir(), "jaroku-session-db-"));

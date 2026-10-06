@@ -24,7 +24,8 @@ import { IdentityConflictError, ONBOARDING_STEPS, defaultWorkspace, type Identit
 import { planFor } from "../billing/plans.ts";
 import { adminModeOn, isAdminUser, setAdminMode } from "./adminMode.ts";
 import { AuthError, TokenVerifier, type AuthContext } from "./verifier.ts";
-import type { LocalIssuer } from "./localIssuer.ts";
+import { SESSION_MAX_AGE_S, type LocalIssuer } from "./localIssuer.ts";
+import { LOCAL_ISSUER } from "./config.ts";
 import type { AuthConfig } from "./config.ts";
 import type { TicketStore } from "./tickets.ts";
 import { hashSecret, type SignInStore } from "./signIn.ts";
@@ -285,6 +286,10 @@ export function sessionRoutes(deps: SessionDeps): { path: string; method: "GET" 
     // check a signature we produced — so withholding them would break the very path that makes a
     // first-party issuer real rather than a bypass. A public key is meant to be public.
     routes.push({ path: "/v1/auth/jwks.json", method: "GET", handler: jwksHandler(deps.localIssuer) });
+    // AND RENEWAL, WHEREVER THIS SERVER SIGNS — production's Google and magic-link sessions included.
+    // Every session used to end on the hour, mid-task: the response promised "the client refreshes
+    // before this" and there was nothing to refresh with.
+    routes.push({ path: REFRESH_PATH, method: "POST", handler: refreshHandler(deps) });
     // THE PASSWORDLESS ROUTE IS A SEPARATE DECISION, and gating it on `localIssuer` was the bug.
     // Signing a session for an identity the server has PROVEN — a verified Google ID token, a link
     // delivered to a mailbox somebody controls — is production behaviour. Handing a token to
@@ -295,6 +300,46 @@ export function sessionRoutes(deps: SessionDeps): { path: string; method: "GET" 
     }
   }
   return routes;
+}
+
+/** Where a session is renewed. */
+export const REFRESH_PATH = "/v1/auth/refresh";
+
+/**
+ * `POST /v1/auth/refresh` — the same session, a new expiry.
+ *
+ * ONLY A TOKEN THIS SERVER SIGNED, AND ONLY WHILE IT IS STILL VALID. An expired token proves
+ * nothing, and a provider's is the provider's to renew. The account must still exist: a person whose
+ * account was deleted does not get a fresh credential for it.
+ *
+ * THE SIGN-IN TIME TRAVELS UNCHANGED, which is the security property here. The secrets step-up asks
+ * for a sign-in within minutes and reads `auth_time`; a renewal stamped "now" would satisfy it
+ * without anybody proving anything. And renewal stops `SESSION_MAX_AGE_S` after that sign-in, so a
+ * token cannot be kept alive forever by whoever happens to hold it.
+ */
+function refreshHandler(deps: SessionDeps): Handler {
+  const issuer = deps.localIssuer!;
+  return async (req) => {
+    const auth = await authenticate(req, deps.verifier);
+    if (auth.issuer !== LOCAL_ISSUER) {
+      throw forbidden("this session was issued by your identity provider, which is what renews it");
+    }
+    const signedInAt = auth.authenticatedAt;
+    const nowS = Math.floor(Date.now() / 1000);
+    if (signedInAt === null || nowS - signedInAt > SESSION_MAX_AGE_S) {
+      throw unauthorized("it has been a while since you signed in — sign in again");
+    }
+    if (!auth.email) throw forbidden("this session has no verified email address to renew");
+    const user = await deps.identity.userByExternalId(systemContext(req.requestId), auth.subject);
+    if (!user) throw unauthorized("this account no longer exists");
+    const minted = issuer.mint({
+      subject: auth.subject,
+      email: user.email,
+      displayName: user.display_name,
+      authTime: signedInAt,
+    });
+    return { body: { token: minted.token, expiresAt: minted.expiresAt } };
+  };
 }
 
 /**

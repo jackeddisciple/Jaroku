@@ -1164,6 +1164,8 @@ export type DeployMessage =
 // on it means this connection is over or about to be — see server/src/wsRelay.ts SessionEvent.
 export type SessionMessage =
   | { channel: "session"; type: "expiring"; expiresAt: number }
+  /** A renewed token was accepted for this socket — see `sendRenewSession`. */
+  | { channel: "session"; type: "renewed"; expiresAt: number }
   | { channel: "session"; type: "expired" }
   | { channel: "session"; type: "revoked"; message: string }
   | { channel: "session"; type: "workspace_changed"; message: string }
@@ -2209,6 +2211,7 @@ export type ClientCommand =
   | { cmd: "listWork"; scope?: "mine" | "all"; status?: WorkStatus; agentId?: string; cursor?: string | null; countsOnly?: boolean }
   // "Are you still there?" — the liveness ping a hung server cannot answer. See `lib/socket.ts`.
   | { cmd: "ping" }
+  | { cmd: "renewSession"; token: string }
   | { cmd: "loadWorkItem"; itemId: string }
   // The reader's UTC offset, east-positive — what "today" means on the fleet cards.
   | { cmd: "listFleet"; utcOffsetMinutes?: number }

@@ -10,6 +10,7 @@ import { useHostStore } from "./store/hostStore.ts";
 import { useFirstRunStore } from "./store/firstRunStore.ts";
 import { useUiStore } from "./store/uiStore.ts";
 import { hydrateSession } from "./lib/auth.ts";
+import { startSessionRenewal } from "./lib/sessionRenewal.ts";
 
 // `jaroku://` links, subscribed to here rather than inside a component.
 //
@@ -107,6 +108,8 @@ useFirstRunStore.getState().watch();
 // application. The app renders, the session is absent, and the sign-in screen — which is the
 // truthful state — is what appears.
 void hydrateSession().finally(() => {
+  // A session in use is renewed before it runs out — see lib/sessionRenewal.ts.
+  startSessionRenewal();
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
       <App />

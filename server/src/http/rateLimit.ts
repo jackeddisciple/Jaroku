@@ -478,7 +478,7 @@ export function openRateLimiter(opts: { url?: string; env?: NodeJS.ProcessEnv } 
 export function ipRuleFor(path: string): RateAction | null {
   if (path === "/healthz" || path === "/readyz") return null;
   if (path.startsWith("/v1/runs/")) return null;
-  if (path === "/v1/auth/session" || path === "/v1/auth/dev-login") return "auth.session";
+  if (path === "/v1/auth/session" || path === "/v1/auth/dev-login" || path === "/v1/auth/refresh") return "auth.session";
   if (path === "/v1/ws-ticket") return "auth.ticket";
   if (path.startsWith("/v1/oauth/")) return "oauth.callback";
   return "http.request";

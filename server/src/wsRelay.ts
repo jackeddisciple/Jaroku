@@ -1832,6 +1832,7 @@ export type ClientCommand =
   | InboxCommand
   | ListWorkCommand
   | PingCommand
+  | RenewSessionCommand
   | LoadWorkItemCommand
   | ListFleetCommand
   | WorkCommand
@@ -3177,6 +3178,16 @@ export type InboxEvent =
  */
 export type PingCommand = { cmd: "ping" };
 
+/**
+ * "Here is my renewed token" — so the socket already open carries the new expiry.
+ *
+ * WITHOUT IT A RENEWAL STILL ENDED THE CONNECTION. The socket remembers the expiry of the token it
+ * was opened with and closes itself then, so a session renewed over HTTP was cut off anyway — in the
+ * middle of a generation, if one was running. The token is verified as any other, and must belong
+ * to the person this socket is already signed in as.
+ */
+export type RenewSessionCommand = { cmd: "renewSession"; token: string };
+
 export type ListWorkCommand = {
   cmd: "listWork";
   /** `mine` is the default — see §8. It is a filter, never a permission. */
@@ -3726,6 +3737,8 @@ export type SessionEvent =
   // The token behind this socket is close to expiring. The client should refresh and
   // reconnect at its convenience, rather than being cut off mid-generation.
   | { type: "expiring"; expiresAt: number }
+  // The renewed token was accepted; this is the socket's new expiry.
+  | { type: "renewed"; expiresAt: number }
   | { type: "expired" }
   // No longer a member. The socket closes immediately: it is not a warning.
   | { type: "revoked"; message: string }
@@ -3937,6 +3950,7 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   loadEnforcement: "enforcement", appealEnforcement: "enforcement",
   // A refused ping would only be the socket's role changing mid-flight; it goes where a pong goes.
   ping: "heartbeat",
+  renewSession: "session",
   // All six on `threads`, the reads included. The channel HAS an error shape, so unlike
   // `loadAgentFiles` there is nowhere better for a refusal to go — and a refusal about a rename
   // that landed in the status bar instead of the list would leave the row it was about still
@@ -4197,6 +4211,11 @@ export interface RelayOptions {
    * to import a repository.
    */
   revalidate?: (session: SocketSession) => Promise<SessionVerdict>;
+  /**
+   * Verify a renewed token for the person this socket belongs to: its expiry, or null to refuse.
+   * See `RenewSessionCommand`.
+   */
+  renewSession?: (session: SocketSession, token: string) => Promise<number | null>;
   /** How often to ask. Default 60s; a socket lives hours, so this is not a hot path. */
   revalidateMs?: number;
   /**
@@ -5054,6 +5073,22 @@ export class WsRelay {
           } else if (msg.cmd === "ping") {
             // The answer IS the point, and it costs nothing: no read, no context, no broadcast.
             this.sendTo(ws, { channel: "heartbeat", type: "pong" });
+          } else if (msg.cmd === "renewSession" && typeof msg.token === "string") {
+            // THE NEW EXPIRY, ON THE SOCKET ALREADY OPEN — see `RenewSessionCommand`. A token that
+            // does not verify, or is somebody else's, changes nothing: this socket still ends when
+            // the one it opened with does.
+            const session = this.sessions.get(ws);
+            const renew = this.opts.renewSession;
+            if (session && renew) {
+              void renew(session, msg.token)
+                .then((expiresAt) => {
+                  if (expiresAt === null || this.sessions.get(ws) !== session) return;
+                  session.expiresAt = expiresAt;
+                  this.warned.delete(ws);
+                  this.sendTo(ws, { channel: "session", type: "renewed", expiresAt });
+                })
+                .catch((err) => console.warn("[relay] a session renewal failed:", (err as Error)?.message ?? err));
+            }
           } else if (msg.cmd === "listWork" && msg.countsOnly === true) {
             // THE COUNTS ALONE, to the asking socket — see `ListWorkCommand.countsOnly`.
             const command = msg;

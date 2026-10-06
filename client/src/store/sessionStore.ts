@@ -194,9 +194,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   signOut: (message = null) => {
-    // The remembered workspace goes too. Signing out and back in as somebody else must not
-    // land in the previous account's workspace and get a 403 nobody can explain.
-    storeWorkspace(null);
+    // The remembered workspace goes on a sign-out somebody CHOSE, which is the one with no message:
+    // the next person at this machine should not open in the previous account's workspace.
+    //
+    // AND STAYS ON ONE THEY DID NOT. An expired or refused session is the same person, mid-task, who
+    // signs straight back in — and was dropped into their personal workspace instead of the one
+    // they were working in. Keeping it is safe: the workspace is only used if the account that signs
+    // in is a member (see `connect`), and the server checks membership either way.
+    if (message === null) storeWorkspace(null);
     set({
       status: "signed_out",
       user: null,

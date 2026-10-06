@@ -30,8 +30,21 @@ import { LOCAL_ISSUER } from "./config.ts";
  */
 export const SIGNING_KEY_ENV = "JAROKU_AUTH_SIGNING_KEY";
 
-/** How long a locally-minted token lasts. Short, so the refresh path is exercised too. */
-export const LOCAL_TOKEN_TTL_S = 60 * 60;
+/**
+ * How long a minted token lasts before the app has to renew it (`POST /v1/auth/refresh`).
+ *
+ * TWELVE HOURS, NOT ONE. An hour was meant to exercise a refresh path that did not exist, so every
+ * session — dev and production alike — ended mid-task on the hour; and an hour is shorter than a
+ * laptop asleep over lunch, which no in-app timer can refresh across. The app renews well before
+ * this, and `SESSION_MAX_AGE_S` bounds how long renewing can go on without signing in again.
+ */
+export const LOCAL_TOKEN_TTL_S = 12 * 60 * 60;
+
+/**
+ * How long after somebody actually signed in their session may keep being renewed. Past it, the
+ * refresh is refused and they sign in again — the bound on a token that is quietly renewed forever.
+ */
+export const SESSION_MAX_AGE_S = 30 * 24 * 60 * 60;
 
 export interface MintInput {
   /** The stable identity. Defaults to a uuid derived from the email, so re-login is the same user. */
@@ -39,6 +52,12 @@ export interface MintInput {
   email: string;
   displayName?: string | null;
   ttlS?: number;
+  /**
+   * Unix seconds: when this person last actually signed in. A renewal carries the ORIGINAL time, so a
+   * token refreshed in the background never satisfies a step-up that asks for a recent sign-in —
+   * see `AuthContext.authenticatedAt`. Absent means now: this mint IS the sign-in.
+   */
+  authTime?: number;
 }
 
 interface StoredKey {
@@ -134,6 +153,7 @@ export class LocalIssuer {
       iat: now,
       nbf: now,
       exp,
+      auth_time: input.authTime ?? now,
     };
     const signing = `${b64(JSON.stringify(header))}.${b64(JSON.stringify(payload))}`;
     const key = createPrivateKey({ key: this.privateJwk as never, format: "jwk" });

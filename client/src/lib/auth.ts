@@ -352,6 +352,19 @@ export async function devSignIn(email: string, name?: string): Promise<string> {
   return out.token;
 }
 
+/**
+ * Renew the stored session before it runs out, and keep the new token where the old one was.
+ *
+ * The server re-signs a still-valid token for the same person, keeping the time they actually signed
+ * in — see `POST /v1/auth/refresh`. A refusal (signed in too long ago, account gone) is an
+ * `AuthFailure` that is not retryable; the expiry then signs out with its own sentence.
+ */
+export async function refreshSession(token: string): Promise<{ token: string; expiresAt: number }> {
+  const out = await post<{ token: string; expiresAt: number }>("/v1/auth/refresh", {}, token);
+  storeToken(out.token);
+  return out;
+}
+
 /** Exchange the stored token for the account and its workspaces. Provisions on first sight. */
 export async function fetchSession(token: string): Promise<SessionView> {
   return post<SessionView>("/v1/auth/session", {}, token);

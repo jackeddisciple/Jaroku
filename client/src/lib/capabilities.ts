@@ -267,6 +267,7 @@ export const COMMAND_CAPABILITY: Record<string, string> = {
   setByok: "billing:manage",
   // The liveness ping — see the server's table.
   ping: "agent:read",
+  renewSession: "agent:read",
   loadEnforcement: "enforcement:appeal",
   appealEnforcement: "enforcement:appeal",
   listMembers: "member:read",

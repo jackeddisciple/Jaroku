@@ -1149,6 +1149,8 @@ jobs:
           npm run test:palette-dispatch
           # AND THE DESKTOP WINDOW'S OWN TITLE CARRIES THE WAITING COUNT, not only the page's.
           npm run test:window-title
+          # A SESSION IN USE IS RENEWED BEFORE IT RUNS OUT, and an expiry reopens the workspace in use.
+          npm run test:session-renewal
           # THE FLEET CARD'S ONE LINE, WHICH BOTH SPECIFICATIONS CALL THE HARDEST DESIGN IN THE
           # FEATURE, and the reason is what happens when it is wrong: a strip of twenty cards all
           # reading "Deployed", which is what the Railway dashboard already gives and is why

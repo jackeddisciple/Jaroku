@@ -540,6 +540,8 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   // THE LIVENESS PING, at the floor every role holds. It reads nothing and changes nothing; it is
   // gated only because no command is ungated. See `PingCommand`.
   ping: "agent:read",
+  // Renewing the credential this socket already holds — any member, about their own connection.
+  renewSession: "agent:read",
   // reads
   loadRun: "agent:read",
   // A bigger window on the same list the connect snapshot already sends. See LoadHistoryCommand.

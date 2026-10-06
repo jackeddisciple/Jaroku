@@ -531,6 +531,8 @@ function dispatch(msg: ServerMessage): void {
       // it means the connection is over or about to be — see wsRelay's SessionEvent.
       const sess = useSessionStore.getState();
       if (msg.type === "expiring") sess.setExpiring(true);
+      // THE RENEWED TOKEN WAS TAKEN: this connection now lasts as long as the new one does.
+      else if (msg.type === "renewed") useSessionStore.setState({ expiresAt: msg.expiresAt, expiring: false });
       else if (msg.type === "expired") sess.signOut("your session expired");
       else if (msg.type === "revoked") sess.signOut(msg.message);
       else if (msg.type === "workspace_changed") {
@@ -2657,6 +2659,11 @@ export function sendLoadAgentLogs(deploymentId: string, since?: string | null): 
 
 export function sendKillAgent(deploymentId: string): boolean {
   return send({ cmd: "killAgent", deploymentId });
+}
+
+/** Hand the open socket a renewed token, so it is not closed when the old one runs out. */
+export function sendRenewSession(token: string): boolean {
+  return send({ cmd: "renewSession", token });
 }
 
 /** Ask for the board again. A full-snapshot channel's way of checking it is not stale. */
