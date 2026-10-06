@@ -36,7 +36,7 @@ import {
 } from "./deploySecrets.ts";
 import { isSafeAgentId } from "./projectFs.ts";
 import {
-  RailwayApi, RailwayError, isTerminalStatus, RAILWAY_TERMINAL_OK, railwayProjectName,
+  RailwayApi, RailwayError, attributeRailwayLimit, isTerminalStatus, RAILWAY_TERMINAL_OK, railwayProjectName,
   railwayServiceName, removeEmptyProject, type RailwayWorkspace,
 } from "./railwayApi.ts";
 import { checkRailwayCli, RailwayUpload } from "./railwayCli.ts";
@@ -821,7 +821,8 @@ export class DeployManager {
   }
 
   private async fail(id: string, message: string): Promise<void> {
-    await this.settle(id, "failed", message);
+    // THE CLI'S FAILURES TOO — an upload can be refused by the Railway account's plan as well.
+    await this.settle(id, "failed", attributeRailwayLimit(message));
   }
 }
 

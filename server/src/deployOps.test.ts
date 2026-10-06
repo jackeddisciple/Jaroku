@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 
 import { DeployOps, HEALTH_CACHE_MS } from "./deployOps.ts";
 import { DeployStore } from "./deployStore.ts";
-import { RailwayApi, RailwayError } from "./railwayApi.ts";
+import { RAILWAY_PLAN_NOTE, RailwayApi, RailwayError, attributeRailwayLimit } from "./railwayApi.ts";
 import { TraceStore } from "./store.ts";
 import { openTestSqlite, testContext } from "./db/testDb.ts";
 
@@ -359,6 +359,19 @@ function fakeApi(script: {
   const outcome = await ops.reconnect(ctx, dep.id);
   check("a reconnect Railway refused restarts nothing and returns no token",
     !outcome.ok && !outcome.restartsService && outcome.token === null, JSON.stringify(outcome));
+}
+
+// --- whose limit it is ---------------------------------------------------------------------
+console.log("\nRailway's own plan limit says it is Railway's");
+{
+  // IT REACHED A PRO WORKSPACE'S INBOX AS IF JAROKU HAD SAID IT: "Free plan resource provision limit
+  // exceeded. Please upgrade to provision more resources!" — about the Railway account's plan.
+  const said = attributeRailwayLimit("Free plan resource provision limit exceeded. Please upgrade to provision more resources!");
+  check("a Railway plan limit is said to be the Railway account's, with what to do about it",
+    said.startsWith("Railway refused: Free plan resource provision limit exceeded.") && said.includes(RAILWAY_PLAN_NOTE));
+  check("...once, however many times it is passed along", attributeRailwayLimit(said) === said);
+  check("anything else Railway says is left as it is", attributeRailwayLimit("Service not found") === "Service not found");
+  check("...including a CLI that wants upgrading, which is not a plan", attributeRailwayLimit("Please upgrade your CLI") === "Please upgrade your CLI");
 }
 
 await db.close();

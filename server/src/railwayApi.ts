@@ -81,6 +81,24 @@ export type RailwayFailureKind =
   /** Never reached Railway: DNS, refused, reset, timeout. Usually worth retrying. */
   | "unreachable";
 
+/** The sentence that says whose limit it is. Also what keeps it from being added twice. */
+export const RAILWAY_PLAN_NOTE =
+  "That is your Railway account's plan, not Jaroku's — delete a project you no longer use in Railway, or upgrade the Railway plan.";
+
+/**
+ * Railway's own refusal, with whose limit it is said out loud.
+ *
+ * "Free plan resource provision limit exceeded. Please upgrade to provision more resources!" reached
+ * a Pro workspace's Inbox as if Jaroku had said it — about a plan the person had just paid to leave.
+ * It is Railway's, about the Railway account the token belongs to; on its free plan that is one
+ * agent live at a time. Anything else Railway says is left as it is.
+ */
+export function attributeRailwayLimit(message: string): string {
+  if (message.includes(RAILWAY_PLAN_NOTE)) return message;
+  if (!/\b(free|hobby|trial|pro|team) plan\b|\bplan (limit|allows)|resource provision limit|limit exceeded/i.test(message)) return message;
+  return `Railway refused: ${message.trim().replace(/[.!]*$/, ".")} ${RAILWAY_PLAN_NOTE}`;
+}
+
 export class RailwayError extends Error {
   constructor(
     readonly kind: RailwayFailureKind,
@@ -221,7 +239,7 @@ export class RailwayApi {
       const kind: RailwayFailureKind = /not authorized|unauthorized|authentication/i.test(message)
         ? "auth"
         : "api";
-      throw new RailwayError(kind, this.scrub(truncate(message)), operation);
+      throw new RailwayError(kind, attributeRailwayLimit(this.scrub(truncate(message))), operation);
     }
     if (!payload.data) {
       throw new RailwayError("api", "Railway answered with no data", operation);
