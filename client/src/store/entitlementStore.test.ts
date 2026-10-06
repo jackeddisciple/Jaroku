@@ -107,6 +107,26 @@ console.log("\none refusal at a time, about one channel");
   );
 }
 
+console.log("\nan agent limit goes once an agent has gone");
+{
+  // "3 OF 3 AGENTS USED" STAYED UP AFTER TWO WERE DELETED, over a workspace with room again.
+  const { useBuildStore } = await import("./buildStore.ts");
+  const agent = (id: string) => ({ agent_id: id, name: id, runnable: true }) as never;
+  useBuildStore.setState({ agents: [agent("a"), agent("b"), agent("c")] });
+  const quota = {
+    error: "quota_exceeded", kind: "agents", current: 3, limit: 3, tier: "free",
+    upgradeUrl: "pro", unlocks: "pro", unlocksLabel: "Pro",
+  } as const;
+  useEntitlementStore.getState().refuse("gen", quota);
+  useBuildStore.setState({ agents: [agent("a"), agent("b"), agent("c"), agent("d")] });
+  check(useEntitlementStore.getState().refusal !== null, "a list that grew leaves the card where it is");
+  useBuildStore.setState({ agents: [agent("a")] });
+  check(useEntitlementStore.getState().refusal === null, "a list that shrank withdraws the agent limit");
+  useEntitlementStore.getState().refuse("deploy", { ...quota, kind: "live_deployments" });
+  useBuildStore.setState({ agents: [] });
+  check(useEntitlementStore.getState().refusal !== null, "...and only the agent limit, not another refusal");
+}
+
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
 // Through the global rather than as a bare `process`, because this package has no `@types/node` —
 // deliberately, so a component cannot reach for one and still compile. See node-shims.d.ts.

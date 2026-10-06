@@ -23,6 +23,7 @@
 // with a refusal is worse than no billing surface.
 
 import { create } from "zustand";
+import { useBuildStore } from "./buildStore.ts";
 
 /** A limit that may not exist. The server sends the word rather than the absence. */
 export type Limit = number | "unlimited";
@@ -124,3 +125,16 @@ export const useEntitlementStore = create<EntitlementState>((set) => ({
   // about one workspace and must never be carried into another.
   clear: () => set({ refusal: null, channel: null }),
 }));
+
+/**
+ * AN AGENT LIMIT IS OUT OF DATE ONCE AN AGENT HAS GONE.
+ *
+ * Not a recount — the figures are still the server's — but the card is a claim about the moment of
+ * the refusal, and it kept saying "3 of 3 agents used" over a workspace that had since deleted two.
+ * When the list shrinks, the card is withdrawn; the next refusal, if there is one, brings its own.
+ */
+useBuildStore.subscribe((now, before) => {
+  if (now.agents.length >= before.agents.length) return;
+  const { refusal, clear } = useEntitlementStore.getState();
+  if (refusal?.error === "quota_exceeded" && refusal.kind === "agents") clear();
+});
