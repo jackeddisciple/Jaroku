@@ -50,6 +50,15 @@ export interface PlannedStateField {
 }
 
 export interface AgentPlan {
+  /**
+   * The name the plan proposes for the agent, when it proposed one.
+   *
+   * WITHOUT IT AN AGENT PLANNED FROM A CONVERSATION WAS NAMED AFTER THE LAST THING SOMEBODY TYPED.
+   * The record's name falls back to the brief's first line, and a brief planned from a chat is often
+   * "Yes, do that. Plan it." — which became the agent's name in the sidebar and its package name on
+   * disk. An explicit name (the onboarding screen's) still wins; this is what fills the gap.
+   */
+  name?: string;
   tools: PlannedTool[];
   state: PlannedStateField[];
   /** Node/edge lines in plain language, verbatim. */
@@ -247,7 +256,9 @@ export function parsePlan(raw: string): AgentPlan {
     if (f) state.push(f);
   }
 
+  const name = planName(sections.get("name") ?? "");
   return {
+    ...(name ? { name } : {}),
     tools,
     state,
     graph: bulletLines(sections.get("graph") ?? ""),
@@ -255,6 +266,17 @@ export function parsePlan(raw: string): AgentPlan {
     raw: text,
     complete,
   };
+}
+
+/**
+ * The name section's first line, as a name: no bullet, quotes or markdown, one line, bounded.
+ * Undefined when what is there is not a name a sidebar could show.
+ */
+function planName(body: string): string | undefined {
+  const first = bulletLines(body)[0] ?? "";
+  const name = first.replace(/^[`*"'“”]+|[`*"'“”.]+$/g, "").replace(/\s+/g, " ").trim();
+  if (!/[A-Za-z0-9]/.test(name) || name.length > 48) return undefined;
+  return name;
 }
 
 /** Mirrors FileProtocolParser.finish(): an error string, or null when there's something to

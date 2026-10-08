@@ -37,6 +37,8 @@ export interface GenerationRequest {
   /** The plan the user confirmed, verbatim. Absent = an unplanned generation, whose prompt
    *  must stay byte-identical to what it was before the plan gate existed. */
   plan?: string;
+  /** The conversation the plan's brief came out of — see PlanRequest.conversation. */
+  conversation?: string;
 }
 
 const WORKED_EXAMPLE = `<<<FILE path="agent.py">>>
@@ -308,9 +310,32 @@ export interface PlanRequest {
   /** Set when the user asked for a change to a plan they were shown. */
   previousPlan?: string;
   feedback?: string;
+  /**
+   * The conversation the brief came out of, already rendered — earlier turns, oldest first.
+   *
+   * A plan asked for from a chat is asked for by the developer's LATEST message, which is usually
+   * "yes, plan it" rather than the thing being planned. Without the conversation the planner built
+   * from that sentence alone — a plan for "an agent that picks the most famous city" when what had
+   * been agreed was three fun facts about one.
+   */
+  conversation?: string;
 }
 
-const PLAN_EXAMPLE = `<<<PLAN section="tools">>>
+/** The conversation a brief came out of, as a block of the prompt — empty when there is none. */
+function conversationBlock(conversation?: string): string {
+  if (!conversation?.trim()) return "";
+  return `
+THE CONVERSATION THIS CAME FROM — earlier turns, oldest first. The request above is the
+developer's latest message; read it in the light of what was already agreed here.
+
+${conversation.trim()}
+`;
+}
+
+const PLAN_EXAMPLE = `<<<PLAN section="name">>>
+Support Desk
+<<<ENDPLAN>>>
+<<<PLAN section="tools">>>
 - gmail_search — reviewed connector template (gmail)
 - order_lookup — bespoke; looks up an order's status by id
 <<<ENDPLAN>>>
@@ -335,7 +360,10 @@ export function buildPlanSystemPrompt(allConnectors: Connector[]): string {
   return `You plan LangGraph agent projects before they are generated. You output a short, concrete
 plan for the developer to approve or correct. You write NO code.
 
-OUTPUT FORMAT — exact, no deviation, these four sections in this order:
+OUTPUT FORMAT — exact, no deviation, these five sections in this order:
+<<<PLAN section="name">>>
+<a short name for the agent: two or three words, Title Case, saying what it does>
+<<<ENDPLAN>>>
 <<<PLAN section="tools">>>
 - <tool_name> — reviewed connector template (<connector id>)
 - <tool_name> — bespoke; <what it does, one clause>
@@ -435,13 +463,13 @@ ${req.mcpTools
   return `Plan this agent:
 
 ${req.prompt}
-
-Human-readable name: ${req.agentName}
+${conversationBlock(req.conversation)}
+Human-readable name: ${req.agentName || "(none chosen — propose one in the name section)"}
 
 Selected connectors:
 ${selected}
 ${mcp}${revision}
-Output the four plan sections now. No code, no commentary.`;
+Output the five plan sections now. No code, no commentary.`;
 }
 
 // --- editing (the fix loop, doc §8 Week 4) ----------------------------------------------
@@ -692,7 +720,7 @@ ${req.plan.trim()}
   return `Build this agent:
 
 ${req.prompt}
-
+${conversationBlock(req.conversation)}
 Package name (already created): ${req.agentId}
 Human-readable name: ${req.agentName}
 

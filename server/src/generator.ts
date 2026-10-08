@@ -122,6 +122,8 @@ export interface GenerateOptions {
   /** The plan the user confirmed at the pre-generation gate, verbatim (planner.ts). Absent =
    *  an unplanned generation, whose prompt stays byte-identical to the pre-gate one. */
   plan?: string;
+  /** The conversation the plan's brief came out of (planner.ts). Absent = none, byte-identical. */
+  conversation?: string;
   /** What the plan itself cost. Part of what creating this agent cost, so it is reported and
    *  recorded alongside the generation rather than quietly absorbed. */
   planUsage?: UsageSummary;
@@ -222,6 +224,7 @@ export function generationRequest(
     connectors,
     mcpTools: opts.mcpTools ?? [],
     plan: opts.plan,
+    ...(opts.conversation ? { conversation: opts.conversation } : {}),
   };
 }
 

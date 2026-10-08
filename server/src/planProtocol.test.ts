@@ -8,6 +8,9 @@
 //
 //   npm run test:plan
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Connector } from "./connectors.ts";
 import { isDegraded, parsePlan, planProblem, reconcileWithSelection } from "./planProtocol.ts";
 
@@ -372,6 +375,26 @@ const SEARCH_DOCS = mcpTool("notion", "search_docs");
   }
   const real = parsePlan(`<<<PLAN section="tools">>>\n- none_of_your_business — bespoke; a real tool\n<<<ENDPLAN>>>`);
   check("a tool whose name merely starts with none is still a tool", real.tools.length === 1);
+}
+
+// 31 — the plan names the agent, so a brief that was a reply never becomes its name.
+{
+  const p = parsePlan(
+    `<<<PLAN section="name">>>\n**City Fun Facts**\n<<<ENDPLAN>>>\n` +
+      `<<<PLAN section="tools">>>\n- none\n<<<ENDPLAN>>>`,
+  );
+  check("the name section is read, without its markdown", p.name === "City Fun Facts", String(p.name));
+  check("a plan with no name section has no name", parsePlan(`<<<PLAN section="tools">>>\n- none\n<<<ENDPLAN>>>`).name === undefined);
+  check("a 'name' that is a paragraph is not a name",
+    parsePlan(`<<<PLAN section="name">>>\n${"word ".repeat(30)}\n<<<ENDPLAN>>>`).name === undefined);
+}
+
+// 32 — the planner keeps the name it was given, else the plan's, and never the brief's first line.
+{
+  const planner = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "planner.ts"), "utf8");
+  check("the record's name is the chosen one, else the plan's", /name: name\?\.trim\(\) \|\| plan\.name/.test(planner));
+  check("the brief's first line is no longer sent to the model as the agent's name",
+    !/agentName: \(name\?\.trim\(\) \|\| prompt/.test(planner));
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

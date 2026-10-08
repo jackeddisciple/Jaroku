@@ -71,6 +71,8 @@ export interface PlanOptions {
    */
   mcpTools?: McpToolView[];
   name?: string;
+  /** The conversation the brief came out of, rendered — see prompt.ts's PlanRequest.conversation. */
+  conversation?: string;
   /**
    * §6's category and avatar, carried and never read here.
    *
@@ -119,6 +121,11 @@ export interface PendingPlan {
    */
   mcpTools: string[];
   name?: string;
+  /**
+   * The conversation the brief came out of. Recorded so generation is told it too: the plan is
+   * what was approved, but the conversation is where "three facts, a numbered list" was agreed.
+   */
+  conversation?: string;
   /**
    * §6's category and avatar, recorded for the same reason `connectors` and `mcpTools` are:
    * generation builds what was APPROVED. Absent means the neutral category, which is what an agent
@@ -308,6 +315,7 @@ export class Planner extends EventEmitter<PlannerEvents> {
       // a replacement for what the user asked for.
       const prompt = previous?.prompt ?? opts.prompt;
       const name = previous?.name ?? opts.name;
+      const conversation = previous?.conversation ?? opts.conversation;
 
       this.emit("started", { prompt, input: opts.prompt, revision });
 
@@ -334,7 +342,10 @@ export class Planner extends EventEmitter<PlannerEvents> {
           all,
           {
             prompt,
-            agentName: (name?.trim() || prompt.trim().split("\n")[0] || "agent").slice(0, 60),
+            // AN EXPLICIT NAME OR NONE, and with none the model proposes one in its name section —
+            // the brief's first line is what this used to send, and as a name it is usually a reply.
+            agentName: (name?.trim() ?? "").slice(0, 60),
+            conversation,
             connectors: selected,
             mcpTools,
             previousPlan: previous?.plan.raw,
@@ -359,7 +370,9 @@ export class Planner extends EventEmitter<PlannerEvents> {
         prompt,
         connectors: selected.map((c) => c.id),
         mcpTools: mcpTools.map((t) => `${t.server_id}/${t.name}`),
-        name,
+        // The name somebody chose, else the one the plan proposed — never a sentence they typed.
+        name: name?.trim() || plan.name,
+        conversation,
         // CARRIED, NOT USED. It does not reach the model — a category is not a design constraint —
         // so it sits on the record and is read again at generation, which is what makes the gate the
         // single source of what gets built.

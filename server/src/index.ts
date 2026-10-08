@@ -11949,6 +11949,10 @@ async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<voi
     // on the connector catalogue. Refs naming a server or tool that has since gone away
     // resolve to nothing rather than to a guess — the same posture as resolveSelected.
     const mcpTools = await mcpRegistry.resolve(ctx, cmd.mcpTools ?? []);
+    // THE CONVERSATION THE BRIEF CAME OUT OF, for a first plan in a thread that already has one. A
+    // plan asked for from a chat is asked for by its LATEST message — usually "yes, plan it" — and the
+    // planner used to see that sentence and nothing else. A revision keeps the first plan's.
+    const conversation = cmd.revisePlanId ? undefined : await planConversation(ctx, planThread, planTurn);
     void planner.plan({
       runtimeDir: RUNTIME_DIR,
       workspaceId: ctx.workspaceId,
@@ -11963,6 +11967,7 @@ async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<voi
       connectors: cmd.connectors,
       mcpTools,
       name: cmd.name,
+      conversation,
       // §6'S OTHER TWO INPUTS, carried on the record with the name. Neither reaches the model.
       category: cmd.category,
       // The row this build is for, when the onboarding step already wrote one.
@@ -12024,6 +12029,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
   // after planning). Building what was approved is the whole point of the gate.
   let plan: string | undefined;
   let planUsage: UsageSummary | undefined;
+  let conversation: string | undefined;
   let mcpRefs: string[] = cmd.mcpTools ?? [];
   let { prompt, connectors, name, category, intoAgentId } = cmd;
   // THE RECORD `take()` REMOVED, held for as long as this build can still fail. A plan is spent
@@ -12113,6 +12119,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     ({ prompt, connectors, name, category, intoAgentId } = rec);
     mcpRefs = approvedRefs;
     plan = rec.plan.raw;
+    conversation = rec.conversation;
     planUsage = rec.usage;
   }
 
@@ -12267,7 +12274,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     const mcpTools = await mcpRegistry.resolve(genCtx, mcpRefs);
     const mcpServers = await mcpRegistry.list(genCtx);
     void generator.generate({
-      runtimeDir: RUNTIME_DIR, ctx: genCtx, prompt, connectors, mcpTools, mcpServers, name, plan, planUsage,
+      runtimeDir: RUNTIME_DIR, ctx: genCtx, prompt, connectors, mcpTools, mcpServers, name, plan, planUsage, conversation,
       // §6, ARRIVING AT THE ROW. Both are undefined on every path but the New agent dialog, and
       // `agents.create` answers undefined with the neutral category and the hashed avatar.
       category,
@@ -13625,6 +13632,23 @@ async function chatMemory(
     console.warn(`[chat] could not assemble the conversation window: ${(err as Error)?.message ?? err}`);
     return { history: [], truncated: false };
   }
+}
+
+/**
+ * A thread's earlier turns as the planner and generator read them: labelled, oldest first, bounded.
+ *
+ * The chat window's own assembly (`chatMemory`), rendered as text because a plan is one prompt rather
+ * than a list of messages, and cut from the OLD end — what was agreed most recently is what the brief
+ * is replying to. Undefined when there is nothing before the brief.
+ */
+async function planConversation(ctx: TenantContext, threadId: string, briefTurn: string | null): Promise<string | undefined> {
+  const { history } = await chatMemory(ctx, threadId, briefTurn);
+  if (history.length === 0) return undefined;
+  const MAX = 8_000;
+  const lines = history.map((m) => `${m.role === "user" ? "Developer" : "Jaroku"}: ${m.content.trim()}`);
+  let text = lines.join("\n\n");
+  if (text.length > MAX) text = `…${text.slice(text.length - MAX)}`;
+  return text;
 }
 
 /**
