@@ -98,7 +98,7 @@ export interface DeployManagerDeps {
    */
   secretValues?: (ctx: TenantContext, names: string[]) => Promise<Map<string, string>>;
   /** True while a run or an eval job is reading this agent's files. Blocks packaging. */
-  agentBusy: (agentId: string) => boolean;
+  agentBusy: (ctx: TenantContext, agentId: string) => boolean;
   onStage: (e: { deploymentId: string; stage: DeployStage; status: DeployStatus }) => void;
   onLog: (e: { deploymentId: string; seq: number; stage: string; stream: string; text: string }) => void;
   onFinished: (deployment: Deployment) => void;
@@ -243,7 +243,7 @@ export async function planDeploy(
     );
   }
 
-  if (deps.agentBusy(req.agentId)) {
+  if (deps.agentBusy(ctx, req.agentId)) {
     problems.push("cannot deploy while this agent is running — the deploy has to write into its files");
   }
 

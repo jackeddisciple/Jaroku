@@ -127,9 +127,9 @@ export interface EditorDeps {
   runtimeDir: string;
   agents: AgentRepository;
   projects: ProjectStore;
-  /** Returns a refusal message when the project must not be mutated right now (e.g. a run
-   *  of it is in flight), or null when mutation is fine. */
-  canMutate?: () => string | null;
+  /** Returns a refusal message when this agent's project must not be mutated right now (a run of
+   *  it is in flight in this workspace), or null when mutation is fine. */
+  canMutate?: (ctx: TenantContext, agentId: string) => string | null;
   /**
    * The MCP tools an agent is scoped to, for the edit prompt.
    *
@@ -566,7 +566,7 @@ export class Editor extends EventEmitter<EditorEvents> {
     this.pending.delete(proposalId);
     const restore = (): void => { this.pending.set(proposalId, rec); };
 
-    const refusal = this.opts.canMutate?.();
+    const refusal = this.opts.canMutate?.(ctx, rec.agentId);
     if (refusal) {
       restore();
       this.fail({ message: refusal, proposalId, agentId: rec.agentId });
@@ -628,7 +628,7 @@ export class Editor extends EventEmitter<EditorEvents> {
       this.fail({ message: `invalid agent id: ${agentId}`, agentId });
       return;
     }
-    const refusal = this.opts.canMutate?.();
+    const refusal = this.opts.canMutate?.(ctx, agentId);
     if (refusal) {
       this.fail({ message: refusal, agentId });
       return;

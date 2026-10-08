@@ -161,6 +161,21 @@ export interface EvalRunnerDeps {
    */
   bindWorkspace?: (evalId: string, ctx: TenantContext) => void;
   /**
+   * What one of this eval's runs needs besides its job: the workspace it is recorded in and the
+   * credentials it calls its provider with.
+   *
+   * WITHOUT IT AN EVAL RUN CARRIED NEITHER. Locally that was invisible: the subprocess inherited
+   * this process's environment and its events fell back to the only workspace there is. Hosted, the
+   * run had no key and no run token, and its trace was filed in the server's own workspace. Optional, so a runner built without it — every suite — runs as before.
+   */
+  runSetup?: (
+    evalId: string,
+    runId: string,
+    job: { provider: string; agentId: string },
+  ) => Promise<{ workspaceId?: string; env?: NodeJS.ProcessEnv }>;
+  /** `runSetup`'s undo, for a run that was set up and then never started — no exit is coming for it. */
+  releaseRun?: (runId: string) => void;
+  /**
    * Count this eval against the workspace's monthly eval-run quota, per dataset CASE.
    *
    * PER CASE AND NOT PER BATCH, which is the specification's own instruction and is the difference
@@ -628,13 +643,16 @@ export class EvalRunner {
     let started = false;
     try {
       await this.deps.evalStore.markJobRunning(this.deps.context(), payload.jobId, runId, payload.attempt);
+      const setup = (await this.deps.runSetup?.(payload.evalId, runId, { provider: payload.provider, agentId: payload.agentId })) ?? {};
       started = this.deps.pool.tryStart({
         runId,
         runtimeDir: this.deps.runtimeDir,
         agentId: payload.agentId,
         input: payload.input,
         timeoutMs: DEFAULT_JOB_TIMEOUT_MS,
+        ...(setup.workspaceId ? { workspaceId: setup.workspaceId } : {}),
         env: {
+          ...(setup.env ?? {}),
           JAROKU_RUN_ID: runId,
           JAROKU_PROVIDER: payload.provider,
           JAROKU_MODEL: payload.model,
@@ -644,6 +662,7 @@ export class EvalRunner {
       live.runToJob.delete(runId);
       this.leaseByRun.delete(runId);
       this.deps.markEvalRun(runId, false);
+      this.deps.releaseRun?.(runId);
       await provSem.release(provLeaseId);
       await this.deps.dispatcher.ack("run.eval", leaseId);
       await this.requeueVerbatim(job);
@@ -658,6 +677,7 @@ export class EvalRunner {
       live.runToJob.delete(runId);
       this.leaseByRun.delete(runId);
       this.deps.markEvalRun(runId, false);
+      this.deps.releaseRun?.(runId);
       await provSem.release(provLeaseId);
       await this.deps.dispatcher.ack("run.eval", leaseId);
       await this.deps.evalStore.requeueJob(this.deps.context(), payload.jobId);

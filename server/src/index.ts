@@ -1284,19 +1284,37 @@ setInterval(() => {
 }, 5 * 60_000).unref();
 
 
-// True from spawn until run_end (or exit) of the INTERACTIVE run. Deliberately NOT
-// interactivePool.busy: the process outlives its run_end by a beat while it tears down, and
-// refusing an apply/undo in that window is a race the user would hit by clicking right after
-// a run finishes. Once run_end is emitted the graph is done and the project files are no
-// longer being read.
-let runActive = false;
+// EVERY RUN IN FLIGHT, BY ID: whose it is, which agent, and whether the runner has said `run_end`.
+//
+// THIS USED TO BE ONE FLAG AND ONE ID FOR THE WHOLE PROCESS — `runActive` and `activeRunId` — which
+// was right while this server had one user, and on a shared backend meant one person's run refused
+// everybody else's ("an agent is already running"), and refused every edit and deploy in every
+// workspace until it ended. The rules are the same and now apply where they mean something: ONE
+// interactive run per workspace (the timeline focuses the newest run, so two would fight over it),
+// and an agent's files are not rewritten while a run or eval of THAT agent, in THAT workspace, is
+// reading them.
+//
+// `ended` is the old `runActive`'s subtlety, kept: the process outlives its `run_end` by a beat
+// while it tears down, and refusing an apply in that window is a race somebody would hit by
+// clicking right after a run finished. Once `run_end` arrives the graph is done reading files.
+const liveRuns = new Map<string, { workspaceId: string; agentId: string | null; kind: "interactive" | "eval"; ended: boolean }>();
+// Runs that halted at a boundary and will be resumed, so exit-handling leaves them `paused` and
+// keeps what a resume needs. A set rather than one id, for the reason above.
+const pausedRuns = new Set<string>();
 
-// Debug depth (Week 6). The server mints each run's id up front so it can address a live run
-// (e.g. to pause it) before run_start races back. `activeRunId` is the current subprocess's run;
-// `pausedRunId` remembers a run that halted at a boundary so exit-handling leaves it 'paused'
-// rather than clobbering the status. Both are control-plane only.
-let activeRunId: string | null = null;
-let pausedRunId: string | null = null;
+/** The interactive run in flight in this workspace, if there is one. */
+function interactiveRunIn(workspaceId: string): string | null {
+  for (const [runId, r] of liveRuns) if (r.kind === "interactive" && r.workspaceId === workspaceId) return runId;
+  return null;
+}
+
+/** Whether a run or an eval of this agent is still reading its files. */
+function agentRunning(workspaceId: string, agentId: string): boolean {
+  for (const r of liveRuns.values()) {
+    if (r.workspaceId === workspaceId && r.agentId === agentId && !(r.kind === "interactive" && r.ended)) return true;
+  }
+  return false;
+}
 
 // WHERE A RUN'S CHECKPOINTS GO. `sqlite` writes one file per run under .checkpoints/; `postgres`
 // writes rows a worker on another machine can read, which is the point. Resolved once and
@@ -2022,13 +2040,10 @@ const editor = new Editor({
   runtimeDir: RUNTIME_DIR,
   agents: agentRepo,
   projects,
-  // BOTH pools, not just the interactive one: an eval job is reading the agent's files from
-  // a subprocess right now, and rewriting them mid-flight would make the trace describe
-  // code that never ran. `.busy` covers every slot in whichever pool it's asked of.
-  canMutate: () =>
-    runActive || interactivePool.busy || evalPool.busy
-      ? "cannot modify the agent while a run is in progress"
-      : null,
+  // Interactive runs AND evals of this agent: an eval job is reading the agent's files right now,
+  // and rewriting them mid-flight would make the trace describe code that never ran.
+  canMutate: (ctx, agentId) =>
+    agentRunning(ctx.workspaceId, agentId) ? "cannot modify the agent while a run of it is in progress" : null,
   // THE TOOLS AN EDIT COULD NOT USE BECAUSE THEY ARE NOT GRANTED — see `EditorDeps.grantableMcp`.
   // A tool counts as named when its exact name appears as a word; the registry decides what exists.
   grantableMcp: async (ctx, slug, text) => {
@@ -2484,7 +2499,7 @@ const deployDeps: DeployManagerDeps = {
   // The same pool-aware check the editor uses, and for a sharper version of the reason:
   // deploying WRITES into the project, so doing it while a subprocess is importing those
   // files would change code out from under a run in flight.
-  agentBusy: () => runActive || interactivePool.busy || evalPool.busy,
+  agentBusy: (ctx, agentId) => agentRunning(ctx.workspaceId, agentId),
   onStage: (e) => relay.broadcastDeploy(contextForDeploy(), { type: "stage", ...e }),
   onLog: (e) => relay.broadcastDeploy(contextForDeploy(), { type: "log", ...e }),
   onServeToken: (e) => relay.broadcastDeploy(contextForDeploy(), { type: "serveToken", ...e }),
@@ -5567,6 +5582,19 @@ evalRunner = new EvalRunner({
   // that itself, between the eval becoming live and its first job, because nothing outside
   // knows the id before then.
   bindWorkspace: (evalId, ctx) => evalWorkspaces.set(evalId, ctx),
+  // EACH RUN IN THE ASKING WORKSPACE, WITH THE WORKSPACE'S OWN KEY — the two things a fresh
+  // interactive run gets in runAgent, and an eval run got neither of.
+  runSetup: async (evalId, runId, job) => {
+    const ctx = contextForEval(evalId);
+    const credentials = await continuationCredentials(ctx, runId, job.provider, job.agentId);
+    runWorkspaces.set(runId, ctx);
+    liveRuns.set(runId, { workspaceId: ctx.workspaceId, agentId: job.agentId, kind: "eval", ended: false });
+    return { workspaceId: ctx.workspaceId, env: credentials.env };
+  },
+  releaseRun: (runId) => {
+    liveRuns.delete(runId);
+    runWorkspaces.delete(runId);
+  },
   // Fired and caught, like the run counter on the ingest chain: a dispatch that failed because a
   // counter could not be written would be five hundred jobs somebody lost over a figure.
   countEvalCases: (ctx, evalRunId, cases) => {
@@ -11426,7 +11454,10 @@ onBothPools("event", ({ runId, event }) => {
   }
   // Read synchronously: this flag gates whether a NEW run may start, and deferring it would
   // leave a window in which the finished run still looks active.
-  if (runId === activeRunId && event.kind === "run_end") runActive = false;
+  if (event.kind === "run_end") {
+    const live = liveRuns.get(runId);
+    if (live) live.ended = true;
+  }
   // The workspace of whoever asked for this run — recorded at dispatch, not read from
   // whatever context is nearest. A run's events arrive minutes after the command that
   // started it, and they belong to the person who started it.
@@ -11642,7 +11673,7 @@ onBothPools("control", ({ runId: slotRunId, ctrl }) => {
     } else if (ctrl.ctrl === "paused") {
       // The id is recorded immediately — resume reads it, and a pause the process does not
       // know about yet is a pause the user cannot undo. Only the status write is queued.
-      pausedRunId = runId;
+      pausedRuns.add(runId);
       ingest(async () => {
         await store.setRunStatus(runCtx, runId, "paused");
         relay.broadcastDebug(runCtx, { type: "paused", runId, seq: seqHigh });
@@ -11719,11 +11750,13 @@ onBothPools("control", ({ runId: slotRunId, ctrl }) => {
 });
 
 onBothPools("spawnError", ({ runId, error }) => {
-  if (runId === activeRunId) {
-    runActive = false;
-    activeRunId = null;
-  }
+  liveRuns.delete(runId);
+  pausedRuns.delete(runId);
   void releaseInteractiveSlot(contextForRun(runId).workspaceId, runId);
+  // SAID, not only logged. A run that never started has no row and no trace to carry its reason,
+  // and "the desktop app is still setting up Python" is a sentence somebody can act on. Eval runs
+  // carry theirs on the job row instead, so they are left to the eval runner.
+  if (!isEvalRun(runId)) relay.broadcastDebug(contextForRun(runId), { type: "error", runId, message: error.message });
   // A run that never started is a run that ended, as far as §3.3 is concerned — its thread stops
   // being `running` and nothing else would say so. See the `run_end` broadcast for the whole
   // argument; this is the case where there is no `run_end` at all.
@@ -11798,15 +11831,10 @@ onBothPools("exit", ({ runId, code, signal, timedOut, elapsedMs }) => {
   // (see debug depth §S3), so this releases the reservation across the pause too; resumeRun
   // re-acquires a fresh one on its way back in.
   void releaseInteractiveSlot(contextForRun(runId).workspaceId, runId);
-  // Only the interactive run owns the interactive flags; an eval job finishing must not
-  // clear them out from under a run the user is driving.
-  if (runId === activeRunId) {
-    runActive = false; // covers a crash before run_end ever arrived
-    // A run that halted at a boundary keeps its 'paused' status (set from the control
-    // event); a normal completion already updated the run via run_end. Either way this
-    // subprocess is gone.
-    activeRunId = null;
-  }
+  // Gone, whichever way it ended — a crash before run_end ever arrived included. A run that halted
+  // at a boundary keeps its 'paused' status (set from the control event); a completion already
+  // updated its row via run_end.
+  liveRuns.delete(runId);
   // §B.2. A shadow run's row learns how its process ended, from the same place every other run's
   // teardown happens. Looked up by run id rather than tracked in a second map: a shadow run is a
   // rare thing and a per-process map would be a second lifetime to get wrong, where a query that
@@ -11815,7 +11843,7 @@ onBothPools("exit", ({ runId, code, signal, timedOut, elapsedMs }) => {
 
   // A paused run is coming back — resume re-registers it, and dropping it here would send
   // the resumed segment's events to the server's workspace instead of its own.
-  if (runId !== pausedRunId) {
+  if (!pausedRuns.has(runId)) {
     runWorkspaces.delete(runId);
     // ...and the mode it ran under, which is only ever a cache of that conversation's row.
     runPermissionModes.delete(runId);
@@ -12465,8 +12493,11 @@ async function runAgent(
    */
   threadId?: string,
 ): Promise<void> {
-  if (interactivePool.busy) {
-    console.log("[manager] agent already running; ignoring run request");
+  // ONE INTERACTIVE RUN PER WORKSPACE, and said rather than silently ignored — a Run button that
+  // does nothing is the one outcome nobody can act on.
+  if (interactiveRunIn(ctx.workspaceId)) {
+    console.log(`[manager] a run is already in progress in ${ctx.workspaceId}; refusing another`);
+    relay.broadcastDebug(ctx, { type: "error", message: "A run is already in progress in this workspace. Stop it or wait for it to finish." });
     return;
   }
   // The same check loadAgentGraph and agentProjectFiles already make. Without it a
@@ -12856,6 +12887,8 @@ async function runAgent(
   // Before the start, for the same reason: `run_start` is what the ingest chain caches provider
   // and model from, and by then the environment that decided the payer is gone.
   runPayers.set(runId, runPayer);
+  // Before the start, so a spawn error arriving on the next tick finds it to clear.
+  liveRuns.set(runId, { workspaceId: ctx.workspaceId, agentId: agentId ?? null, kind: "interactive", ended: false });
   const outcome = await interactiveSlots.reserveAndStart(ctx.workspaceId, runId, () =>
     interactivePool.tryStart({
       runId, runtimeDir: RUNTIME_DIR, input, agentId, env, workspaceId: ctx.workspaceId,
@@ -12863,6 +12896,7 @@ async function runAgent(
     }),
   );
   if (outcome !== "started") {
+    liveRuns.delete(runId);
     runWorkspaces.delete(runId);
     // The run that never started still holds money. There is no exit event coming for it, so
     // the release has to happen here — the same rule Session 5 learned about the interactive
@@ -12878,9 +12912,7 @@ async function runAgent(
     });
     return;
   }
-  runActive = true;
-  activeRunId = runId;
-  pausedRunId = null;
+  pausedRuns.delete(runId);
   // AFTER THE START, so a run that was refused a slot never gets attached to a shadow row that
   // would then look `running` forever. The row already exists and already says `staging`, which is
   // the honest state for a run that never got one.
@@ -12909,7 +12941,8 @@ async function pauseRun(ctx: TenantContext, runId: string): Promise<void> {
   // subprocess, and several of them can be in flight at once — so gating on `activeRunId` alone
   // is a pause button that does nothing on exactly the runs Part 1 exists to make controllable.
   const deployed = deployRuns.has(runId);
-  if (!deployed && (!runActive || activeRunId !== runId)) {
+  const live = liveRuns.get(runId);
+  if (!deployed && (!live || live.kind !== "interactive" || live.ended)) {
     console.log(`[debug] pauseRun ignored — ${runId} is not the active run`);
     return;
   }
@@ -12925,6 +12958,44 @@ async function pauseRun(ctx: TenantContext, runId: string): Promise<void> {
   requestPause(runId);
 }
 
+/**
+ * The credentials a resumed or branched run needs, resolved the way `runAgent` resolves a fresh one's.
+ *
+ * MISSING UNTIL NOW, and invisible locally: a resumed subprocess inherited this process's environment,
+ * where a developer's own key lives, so a resume "worked" on a laptop. A hosted run inherits nothing
+ * — its environment is exactly what it is handed — so a paused real-provider run resumed with no key
+ * at all and failed its first model call. Resolved here by NAME from the vault, as for a fresh run.
+ */
+async function continuationCredentials(
+  ctx: TenantContext,
+  runId: string,
+  provider: string,
+  agentId: string | null,
+): Promise<{ env: NodeJS.ProcessEnv }> {
+  const env: NodeJS.ProcessEnv = {};
+  try {
+    const agent = agentId ? await agentRepo.bySlug(ctx, agentId).catch(() => undefined) : undefined;
+    const declared = agent?.connectors ?? [];
+    const names = (agent?.required_env ?? []).filter(isSecretName);
+    if (names.length) Object.assign(env, await secrets.getForRun(runId, names));
+    const optional = optionalEnv(resolveSelected(loadConnectors(RUNTIME_DIR), declared))
+      .filter(isSecretName)
+      .filter((name) => !names.includes(name));
+    if (optional.length) Object.assign(env, await secrets.getForRun(runId, optional));
+    Object.assign(env, await providerKeys.runEnv(runId, provider));
+    Object.assign(env, (await connectorRunEnv(ctx, tokenRefresher, oauth, { connectors: declared })).env);
+    for (const [name, value] of Object.entries(env)) {
+      const upper = String(name).toUpperCase();
+      if (isSecretName(name) || upper.endsWith("_TOKEN") || upper.endsWith("_KEY") || upper.endsWith("_SECRET")) {
+        protectSecret(value, name);
+      }
+    }
+  } catch (err) {
+    console.warn(`[manager] could not resolve credentials for ${runId}: ${(err as Error).message}`);
+  }
+  return { env };
+}
+
 // Resume a paused run from its durable checkpoint: a fresh subprocess continues the SAME run id,
 // its seq starting where the paused segment left off (no run_start, no re-run of done nodes).
 async function resumeRun(ctx: TenantContext, runId: string): Promise<void> {
@@ -12935,16 +13006,18 @@ async function resumeRun(ctx: TenantContext, runId: string): Promise<void> {
   // presses Resume as soon as the UI says "paused", which is exactly what the UI invites,
   // hits a slot that is about to free and was told nothing at all. The wait is bounded and
   // short because a paused run is always on its way out.
-  if (interactivePool.busy && pausedRunId === runId) {
-    for (let i = 0; i < 40 && interactivePool.busy; i++) {
+  if (pausedRuns.has(runId) && liveRuns.has(runId)) {
+    const deadline = Date.now() + 2_000;
+    while (liveRuns.has(runId) && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 50));
     }
   }
-  if (interactivePool.busy) {
+  const inFlight = interactiveRunIn(ctx.workspaceId);
+  if (inFlight) {
     // A genuinely different run is executing. Say so ON THE CHANNEL: a console.log is
     // invisible to the client, so the Resume button simply appeared to do nothing.
     const message =
-      activeRunId && activeRunId !== runId
+      inFlight !== runId
         ? "another run is active — stop it before resuming this one"
         : "the previous run has not finished shutting down yet — try again in a moment";
     console.log(`[debug] resumeRun refused for ${runId}: ${message}`);
@@ -12962,11 +13035,13 @@ async function resumeRun(ctx: TenantContext, runId: string): Promise<void> {
     relay.broadcastDebug(ctx, { type: "error", runId, message: `run is ${run.status}, not paused` });
     return;
   }
+  const credentials = await continuationCredentials(ctx, runId, run.provider, run.agent_id);
   const seqOffset = (await store.maxSeqForRun(ctx, runId)) + 1;
   clearControl(runId); // drop the pause request so it doesn't immediately re-pause
   await store.setRunStatus(ctx, runId, "running");
   console.log(`[debug] resuming run ${runId} from seq ${seqOffset} (agent ${run.agent_id})`);
   const env: NodeJS.ProcessEnv = {
+    ...credentials.env,
     JAROKU_RESUME_RUN_ID: runId,
     // The same workspace the run was dispatched in — a resume continues the SAME thread, so it
     // has to compute the same thread id. See runAgent.
@@ -12976,10 +13051,12 @@ async function resumeRun(ctx: TenantContext, runId: string): Promise<void> {
     JAROKU_MODEL: run.model,
   };
   runWorkspaces.set(runId, ctx);
+  liveRuns.set(runId, { workspaceId: ctx.workspaceId, agentId: run.agent_id ?? null, kind: "interactive", ended: false });
   const outcome = await interactiveSlots.reserveAndStart(ctx.workspaceId, runId, () =>
     interactivePool.tryStart({ runId, runtimeDir: RUNTIME_DIR, agentId: run.agent_id, env, workspaceId: ctx.workspaceId }),
   );
   if (outcome !== "started") {
+    liveRuns.delete(runId);
     runWorkspaces.delete(runId);
     relay.broadcastDebug(ctx, {
       type: "error",
@@ -12991,9 +13068,7 @@ async function resumeRun(ctx: TenantContext, runId: string): Promise<void> {
     });
     return;
   }
-  runActive = true;
-  activeRunId = runId;
-  pausedRunId = null;
+  pausedRuns.delete(runId);
   // Announced only once the process is genuinely going — a "resumed" for a run that never
   // restarted leaves the UI showing a live run against a dead id.
   relay.broadcastDebug(ctx, { type: "resumed", runId, seqOffset });
@@ -13012,6 +13087,8 @@ async function cancelRun(ctx: TenantContext, runId: string): Promise<void> {
   }
   console.log(`[debug] cancel requested for run ${runId}`);
   clearControl(runId); // no stale pause/resume request outlives a cancel
+  // A PAUSED run has no process to exit, so nothing else would forget what its resume needed.
+  if (pausedRuns.delete(runId) && !liveRuns.has(runId)) runWorkspaces.delete(runId);
   await store.markRunCancelled(ctx, runId);
   relay.broadcastDebug(ctx, { type: "cancelled", runId });
   // The exit handler (onBothPools("exit", ...)) does the rest once the process actually
@@ -13032,7 +13109,7 @@ async function branchRun(
   editNode?: string,
   editedState?: Record<string, unknown>,
 ): Promise<void> {
-  if (interactivePool.busy) {
+  if (interactiveRunIn(ctx.workspaceId)) {
     relay.broadcastDebug(ctx, { type: "error", runId: fromRunId, message: "a run is active — stop it before branching" });
     return;
   }
@@ -13062,7 +13139,9 @@ async function branchRun(
     return;
   }
 
+  const credentials = await continuationCredentials(ctx, branchId, parent.provider, parent.agent_id);
   const env: NodeJS.ProcessEnv = {
+    ...credentials.env,
     JAROKU_RUN_ID: branchId,
     JAROKU_CONTROL_DIR: CHECKPOINT_DIR,
     JAROKU_WORKSPACE_ID: ctx.workspaceId,
@@ -13085,10 +13164,12 @@ async function branchRun(
   // The branch belongs to the same workspace as its parent, which is the one that could see
   // the parent in order to branch from it.
   runWorkspaces.set(branchId, ctx);
+  liveRuns.set(branchId, { workspaceId: ctx.workspaceId, agentId: parent.agent_id ?? null, kind: "interactive", ended: false });
   const outcome = await interactiveSlots.reserveAndStart(ctx.workspaceId, branchId, () =>
     interactivePool.tryStart({ runId: branchId, runtimeDir: RUNTIME_DIR, agentId: parent.agent_id, env, workspaceId: ctx.workspaceId }),
   );
   if (outcome !== "started") {
+    liveRuns.delete(branchId);
     runWorkspaces.delete(branchId);
     relay.broadcastDebug(ctx, {
       type: "error",
@@ -13100,9 +13181,6 @@ async function branchRun(
     });
     return;
   }
-  runActive = true;
-  activeRunId = branchId;
-  pausedRunId = null;
   console.log(`[debug] branching ${fromRunId} @seq ${seqHigh} -> ${branchId} (agent ${parent.agent_id})`);
   void relay.broadcastHistory(); // surface the new branch run in history immediately
   relay.broadcastDebug(ctx, { type: "branched", parentRunId: fromRunId, branchId, fromSeq: seqHigh });
