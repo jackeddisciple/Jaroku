@@ -411,8 +411,8 @@ automatic publish is worst, so somebody presses the button after checking all fo
 
 | Runner | Produces | For |
 |---|---|---|
-| `macos-14` | `.dmg`, `.app` | Apple silicon |
-| `macos-13` | `.dmg`, `.app` | Intel Macs |
+| `macos-15` | `.dmg`, `.app` | Apple silicon |
+| `macos-15-intel` | `.dmg`, `.app` | Intel Macs |
 | `ubuntu-22.04` | `.deb`, `.AppImage` | Debian/Ubuntu, and everything else |
 | `windows-latest` | `-setup.exe` (NSIS) | Windows, per-user, no administrator |
 

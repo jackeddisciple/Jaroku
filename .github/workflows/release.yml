@@ -41,10 +41,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-14
+          # macos-13 IS GONE: GitHub retired the image, and the Intel job of the last release run sat
+          # for its full 24 hours waiting for a runner that will never come. `macos-15-intel` is the
+          # Intel image that replaced it, and Apple silicon moves to the same macOS beside it.
+          - platform: macos-15
             target: aarch64-apple-darwin
             label: macOS (Apple silicon)
-          - platform: macos-13
+          - platform: macos-15-intel
             target: x86_64-apple-darwin
             label: macOS (Intel)
           - platform: ubuntu-22.04
@@ -68,10 +71,17 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
+          # libdbus-1-dev and pkg-config for the session token's home — `keyring`'s secret-service
+          # backend links libdbus, and without them the crate fails to build at all. libssl-dev and
+          # libxdo-dev are on Tauri's own list of Linux prerequisites.
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
+            libssl-dev \
+            libxdo-dev \
+            libdbus-1-dev \
+            pkg-config \
             patchelf \
             build-essential \
             file
@@ -201,8 +211,8 @@ jobs:
         run: |
           set -eu
           case "${{ matrix.platform }}" in
-            macos-14)       find_glob='*.dmg'      ; stable='Jaroku-macos-arm64.dmg' ;;
-            macos-13)       find_glob='*.dmg'      ; stable='Jaroku-macos-intel.dmg' ;;
+            macos-15)       find_glob='*.dmg'      ; stable='Jaroku-macos-arm64.dmg' ;;
+            macos-15-intel) find_glob='*.dmg'      ; stable='Jaroku-macos-intel.dmg' ;;
             windows-latest) find_glob='*-setup.exe'; stable='Jaroku-windows-x64-setup.exe' ;;
             ubuntu-22.04)   find_glob=''           ; stable='' ;;
           esac
