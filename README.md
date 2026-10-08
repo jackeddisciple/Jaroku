@@ -2824,8 +2824,8 @@ to happen because a browser cannot put a header on a WebSocket:
 | `JAROKU_MCP_ALLOW_LOOPBACK` | on in dev | `0` refuses loopback MCP endpoints locally too. Always off under `NODE_ENV=production`, and no value overrides that — it exists so `npm run mock:mcp` keeps working |
 | `JAROKU_CHECKPOINTER` | `sqlite` | `sqlite` \| `postgres`. Where pause/resume/branch state lives |
 | `JAROKU_CHECKPOINT_PG_URL` | — | The checkpointer's OWN connection. Not `JAROKU_PG_URL`: LangGraph never issues `SET LOCAL`, so it must not borrow the pool whose isolation depends on it |
-| `JAROKU_RUN_SANDBOX` | `local` | `local` \| `fly`. Where a run's code actually executes — see [Sandboxed execution](#sandboxed-execution-and-the-distributed-control-plane) |
-| `JAROKU_CONTROL_PLANE_URL` | — | This server's own public address, told to a hosted run so its control-plane client knows where to push and poll. **Required** when `JAROKU_RUN_SANDBOX=fly` |
+| `JAROKU_RUN_SANDBOX` | `local` | `local` \| `fly` \| `desktop`. Where a run's code actually executes — see [Sandboxed execution](#sandboxed-execution-and-the-distributed-control-plane). `desktop` is what the shipped backend runs: checks and runs go to the asking person's desktop app |
+| `JAROKU_CONTROL_PLANE_URL` | — | This server's own public address, told to a hosted run so its control-plane client knows where to push and poll. **Required** when `JAROKU_RUN_SANDBOX` is `fly` or `desktop` |
 | `JAROKU_FLY_APP` | — | Which Fly app a run's machine is created in. **Required** when `JAROKU_RUN_SANDBOX=fly` |
 | `JAROKU_FLY_API_TOKEN` | — | The Fly Machines API token. Never an agent's own credential — this is the platform's |
 | `JAROKU_FLY_API` | `https://api.machines.dev/v1` | Fly's Machines API endpoint. Overridable to point at the fixture (`npm run mock:fly`) |
@@ -3684,8 +3684,8 @@ different shapes of problem:
 |---|---|---|
 | what it runs | a whole agent execution | one short-lived check |
 | has a run id, a trace, a control plane | yes | no |
-| implementations | `LocalSubprocessSandbox`, `FlyMachinesSandbox` | `LocalCodeCheckSandbox` |
-| selected by | `JAROKU_RUN_SANDBOX=local\|fly` | not yet selectable — see below |
+| implementations | `LocalSubprocessSandbox`, `FlyMachinesSandbox`, `DesktopRunSandbox` | `LocalCodeCheckSandbox`, `DesktopCodeCheckSandbox` |
+| selected by | `JAROKU_RUN_SANDBOX=local\|fly\|desktop` | the same variable: `desktop` routes checks too |
 
 `LocalSubprocessSandbox` is `ProcessManager` unchanged, under the interface's name.
 `FlyMachinesSandbox` turns a `SandboxSpec` into one Fly Machine per run — the image pinned by
@@ -3694,11 +3694,34 @@ and project archive URL, nothing ambient. `RunPool` takes a sandbox factory in i
 rather than building one itself, so which kind a slot runs is a config choice, never a rewrite of
 the pool.
 
-**A documented gap, not a silent one.** `validator.ts` and `graphIntrospect.ts` both moved onto
-`CodeCheckSandbox`, and its only implementation today is local — the same subprocess check this
-codebase always ran, now behind an interface. A hosted implementation running the check inside
-the sandbox image instead of on the control plane is the natural next step (the image already
-carries `jaroku_runner` and Python) and was not built this session.
+### Running on the desktop app (`JAROKU_RUN_SANDBOX=desktop`)
+
+The backend the shipped app talks to has no Python and runs no model-written code. So an agent's
+code runs on the computer of the person who asked for it, in the Jaroku desktop app, with the uv,
+CPython and pinned dependencies the app already carries (`src-tauri/src/exec.rs`):
+
+```
+  server                                   the asking desktop app
+  ──────                                   ──────────────────────
+  check / run ── exec "start" (one socket) ──▶ uv run python …  (project files in the message)
+              ◀── execLog (a run's stderr) ──
+  trace, pause, MCP confirm ◀── HTTPS, run token ── jaroku_runner/controlplane_http.py
+              ◀── execResult (exit, a check's output) ──
+```
+
+- **One app, never a teammate's.** The relay picks the socket that asked, or another app held by
+  the same person in the same workspace (`wsRelay.ts#execTarget`). With none, the request is
+  refused before anything is spent: a generation is not started, a run takes no budget hold.
+- **Only that socket may answer** an execution, and an app that closes gets 45 seconds to
+  reconnect and claim what it is still running; past that the execution ends with a reason.
+- **What a run is handed** is its own environment and nothing of the server's: no server paths, a
+  local SQLite checkpointer (pause, resume and branch work on the machine that ran the parent), and
+  never a platform key — a desktop run uses the workspace's own key from Secrets.
+- **The app speaks a protocol version.** An app too old to execute is told to update.
+
+Every code-check call site takes its sandbox per request (`codeCheckFor(ctx)` in `index.ts`), and a
+check names the project it reads by token rather than by path, so the same check runs here or on
+the app (`codeCheck.ts#placeProject`).
 
 ### The egress policy
 
