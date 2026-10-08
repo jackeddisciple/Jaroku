@@ -328,7 +328,12 @@ function dispatch(msg: ServerMessage): void {
         // row), so this agrees with what a reload would show rather than inventing a fifth state.
         s.setRunStatus(msg.runId, "error");
         s.addLog({ level: "stderr", text: "debug: run cancelled" });
-      } else if (msg.type === "error") s.addLog({ level: "stderr", text: `debug: ${msg.message}` });
+      } else if (msg.type === "error") {
+        s.addLog({ level: "stderr", text: `debug: ${msg.message}` });
+        // A refused pause, resume or branch was said only in a log no panel shows, so pressing
+        // "Re-run from here" on a run that could not branch did nothing anyone could see.
+        useUiStore.getState().showToast(msg.message, "err");
+      }
       break;
     }
     case "eval": {
