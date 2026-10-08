@@ -193,7 +193,7 @@ try {
     t.open.add("req-a");
     const broker = new DesktopExecBroker(t.transport);
     const bus = new RunEventBus();
-    const sandbox = new DesktopRunSandbox({ broker, bus });
+    const sandbox = new DesktopRunSandbox({ broker, bus, instance: "machine-7" });
     const editFile = join(project, "branch.edit.json");
     writeFileSync(editFile, JSON.stringify({ topic: "edited" }));
     const runtimeDir = project;
@@ -227,6 +227,7 @@ try {
       check("it calls home over HTTP with a run token", start.env.JAROKU_CONTROL_PLANE_URL === "https://api.example" && start.env.JAROKU_RUN_TOKEN === "tok");
       check("this server's control and checkpoint directories are not handed over", !("JAROKU_CONTROL_DIR" in start.env) && !("JAROKU_CHECKPOINT_DIR" in start.env));
       check("it checkpoints to a local file, never to this server's database", start.env.JAROKU_CHECKPOINTER === "sqlite");
+      check("its calls home are pinned to the replica holding its event bus", start.env.JAROKU_CONTROL_PLANE_INSTANCE === "machine-7");
       check("the project travels, and the run is pointed at where it lands",
         start.files.some((f) => f.path === "project/agent.py") && start.env.JAROKU_AGENT_DIR === `${EXEC_DIR_TOKEN}/project`);
       check("a branch's edit travels as a file of its own",

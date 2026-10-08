@@ -419,7 +419,7 @@ export class DesktopRunSandbox extends EventEmitter<SandboxEvents> implements Ru
   private runId: string | null = null;
   private active = false;
 
-  constructor(private opts: { broker: DesktopExecBroker; bus: RunEventBus }) {
+  constructor(private opts: { broker: DesktopExecBroker; bus: RunEventBus; instance?: string }) {
     super();
   }
 
@@ -451,6 +451,11 @@ export class DesktopRunSandbox extends EventEmitter<SandboxEvents> implements Ru
     if (spec.workspaceId) env.JAROKU_WORKSPACE_ID = spec.workspaceId;
     env.JAROKU_CONTROL_PLANE_URL = spec.controlPlane.url;
     env.JAROKU_RUN_TOKEN = spec.controlPlane.runToken;
+    // THIS replica, when there are several: the run's event bus lives in this process's memory, and a
+    // push the load balancer handed to another machine would reach a bus with no run on it. Fly sets
+    // FLY_MACHINE_ID, and the runner sends it back as the header Fly routes by.
+    const instance = this.opts.instance ?? process.env.FLY_MACHINE_ID;
+    if (instance) env.JAROKU_CONTROL_PLANE_INSTANCE = instance;
     // A local file per run on the app's machine: no database credential ever leaves this server.
     env.JAROKU_CHECKPOINTER = "sqlite";
 

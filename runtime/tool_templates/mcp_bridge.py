@@ -286,7 +286,13 @@ def _http_confirm(
         f"{base_url}/v1/runs/{run_id}/mcp-confirm",
         data=body,
         method="POST",
-        headers={"content-type": "application/json", "authorization": f"Bearer {token}"},
+        headers={
+            "content-type": "application/json",
+            "authorization": f"Bearer {token}",
+            # Pinned to the replica that started the run — see controlplane_http.py's note.
+            **({"fly-force-instance-id": os.environ["JAROKU_CONTROL_PLANE_INSTANCE"]}
+               if os.environ.get("JAROKU_CONTROL_PLANE_INSTANCE") else {}),
+        },
     )
     try:
         # A little slack over the server's own timeout, so its denial-on-timeout is what

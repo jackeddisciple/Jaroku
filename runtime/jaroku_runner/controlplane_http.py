@@ -65,9 +65,18 @@ def _run_id() -> str:
     return run_id
 
 
+# The replica that started this run, when the control plane has more than one. Each keeps its runs'
+# event bus in memory, so a push that a load balancer hands to ANOTHER replica reaches a bus with
+# no run on it and is dropped — on Fly that header pins the request to the named machine.
+CONTROL_PLANE_INSTANCE_ENV = "JAROKU_CONTROL_PLANE_INSTANCE"
+
+
 def _request(method: str, path: str, body: dict | None, timeout_s: float) -> dict:
     url = f"{_base_url()}{path}"
     headers = {"authorization": f"Bearer {os.environ[RUN_TOKEN_ENV]}"}
+    instance = os.environ.get(CONTROL_PLANE_INSTANCE_ENV)
+    if instance:
+        headers["fly-force-instance-id"] = instance
     # No body at all for a bodyless call (the long-poll GET) rather than an empty JSON object —
     # a GET carrying a Content-Length is legal HTTP but an unforced edge case neither side needs
     # to exercise, and the four routes this client speaks to never expect one on GET.
