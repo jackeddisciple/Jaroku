@@ -311,5 +311,17 @@ console.log("\n§4.3 — a thread the client did not name is opened, not merely 
   check("...and a failure to navigate is caught", /could not open the thread for this client/.test(region));
 }
 
+console.log("\na topic title is not overwritten by the next message");
+{
+  // THE NEXT MESSAGE RE-TITLED FROM THE FIRST ONE. `noteUserMessage` auto-titles a chat from its
+  // first message, and a topic title the plan wrote is ALSO an auto-title — so asking for a plan in
+  // a chat titled "City Fun Facts Agent" put "Build an agent that takes a city name…" back.
+  const index = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+  const at = index.indexOf("function noteUserMessage(");
+  const note = at >= 0 ? index.slice(at, at + 4000) : "";
+  check("the first-message title is written only while the chat is still untitled",
+    /thread\?\.title === UNTITLED \? await threadStore\.firstMessage/.test(note));
+}
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 process.exit(fail === 0 ? 0 : 1);

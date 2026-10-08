@@ -7937,8 +7937,13 @@ function noteUserMessage(
     // be wrong for a different reason — §5 says the first — and `autoTitle` is a no-op on a thread
     // somebody has renamed, a guarantee that lives in its UPDATE's own WHERE rather than in a branch
     // here, so two clients racing cannot get past it either.
+    //
+    // ONLY WHILE THE CHAT IS STILL UNTITLED. A topic title the plan wrote after the first exchange is
+    // also an auto-title — not a rename — so this used to overwrite it on the NEXT message that came
+    // through here: asking for a plan in a chat titled "City Fun Facts Agent" put its first line back.
     if (opts.title !== false) {
-      const first = await threadStore.firstMessage(ctx, threadId);
+      const thread = await threadStore.get(ctx, threadId);
+      const first = thread?.title === UNTITLED ? await threadStore.firstMessage(ctx, threadId) : null;
       if (first) await threadStore.autoTitle(ctx, threadId, threadTitle(first));
     }
     scheduleListRefresh(ctx);
