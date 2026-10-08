@@ -24,6 +24,24 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends tini ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
+# THE RAILWAY CLI, which is how an agent is deployed. Railway's API cannot take a directory —
+# `server/src/railwayCli.ts` runs `railway up` to upload one — and this image never had the binary,
+# so every deploy from the hosted backend stopped at "the Railway CLI is not installed". Pinned by
+# version AND by checksum: it runs holding a workspace's Railway token, so it is not a thing to take
+# from whatever a release URL happens to serve. curl comes and goes in the same layer.
+ARG RAILWAY_CLI_VERSION=5.58.0
+ARG RAILWAY_CLI_SHA256=9b054087fc70e2c02e5aa6a178156908ef105d4fb91939dbe349791319542593
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends curl \
+  && curl -fsSL -o /tmp/railway.tgz \
+     "https://github.com/railwayapp/cli/releases/download/v${RAILWAY_CLI_VERSION}/railway-v${RAILWAY_CLI_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+  && echo "${RAILWAY_CLI_SHA256}  /tmp/railway.tgz" | sha256sum -c - \
+  && tar -xzf /tmp/railway.tgz -C /usr/local/bin railway \
+  && chmod 0755 /usr/local/bin/railway \
+  && rm /tmp/railway.tgz \
+  && apt-get purge -y curl && apt-get autoremove -y \
+  && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # THE DEPENDENCY LAYER, BEFORE THE SOURCE. Only these two files invalidate it, so editing a route
