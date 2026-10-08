@@ -107,8 +107,14 @@ function splitOnDash(line: string): [string, string] {
   return [line.slice(0, m.index).trim(), line.slice(m.index + m[0].length).trim()];
 }
 
+/** "(none)", "none", "N/A", "no tools" — a tools section saying there are none, not a tool. */
+const NO_TOOLS_RE = /^[`*(]*\s*(?:none|n\/a|no\s+tools?(?:\s+needed)?)\s*[`*).:]*$/i;
+
 function parseTool(line: string): PlannedTool | null {
   const [head, rest] = splitOnDash(line);
+  // A tool-less agent's plan says so as a bullet, and that bullet was being rendered on the plan
+  // card as a bespoke tool called "(none)" — a NEW badge on a thing that does not exist.
+  if (NO_TOOLS_RE.test(head.trim())) return null;
   // "name (bespoke)" / "name: ..." are both common — take the leading identifier.
   const name = (/^[`*]*([A-Za-z_][A-Za-z0-9_]*)/.exec(head)?.[1] ?? head).trim();
   if (!name) return null;

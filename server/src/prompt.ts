@@ -340,6 +340,7 @@ OUTPUT FORMAT — exact, no deviation, these four sections in this order:
 - <tool_name> — reviewed connector template (<connector id>)
 - <tool_name> — bespoke; <what it does, one clause>
 - <tool_name> — mcp: <server id>/<tool_name>; <what it does, one clause>
+(An agent that needs no tools has this one line instead: - none)
 <<<ENDPLAN>>>
 <<<PLAN section="state">>>
 - <field>: <type> — <what it holds>

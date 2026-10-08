@@ -364,5 +364,15 @@ const SEARCH_DOCS = mcpTool("notion", "search_docs");
     reconcileWithSelection(p, [GMAIL], [CREATE_ISSUE]));
 }
 
+// 30 — a tool-less agent's tools section says so, and that is not a tool.
+{
+  for (const line of ["- (none) — pure LLM reasoning, no external data needed", "- none", "- N/A", "- No tools needed."]) {
+    const p = parsePlan(`<<<PLAN section="tools">>>\n${line}\n<<<ENDPLAN>>>`);
+    check(`"${line}" is no tools, not a tool`, p.tools.length === 0, JSON.stringify(p.tools));
+  }
+  const real = parsePlan(`<<<PLAN section="tools">>>\n- none_of_your_business — bespoke; a real tool\n<<<ENDPLAN>>>`);
+  check("a tool whose name merely starts with none is still a tool", real.tools.length === 1);
+}
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 process.exit(fail === 0 ? 0 : 1);
