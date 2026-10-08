@@ -276,33 +276,33 @@ shell environment, which is the whole reason the value is baked at build time.
 
 ## First run
 
-The first time you open the UI on a machine, Jaroku walks you from nothing to a live trace in
-four screens, then gets out of the way permanently.
+The first time you sign in, Jaroku walks you through five screens, then gets out of the way
+permanently.
 
-1. **Welcome** — what the product does, one button.
-2. **Connect a provider** — Anthropic, OpenAI or Meta, with the key's destination stated before
-   the field that wants it. **Test connection** is free and writes nothing; **Save** writes.
-   There is a real skip: you can look around everything, and whatever would run a model asks
-   for a key first.
-3. **First prompt** — the ordinary composer, alone, with a few real agents to describe.
-   Planning and generation go through Anthropic, so without a Claude key a send opens Secrets
-   at it instead.
-4. **First run** — the sidebar arrives when a plan card does, the right panel when files start
-   streaming, and the Trace tab when the first run does. Nothing appears before it has something
-   in it.
-
-Reaching `run_end` ends onboarding. The three-column app is then just the same layout with the
-last two columns mounted — no reload, no reset, and it never appears again.
+1. **Welcome** — what the product does, and **Skip setup**, which lands you in the app with a
+   persistent *Finish setting up your workspace* banner that reopens the flow.
+2. **Workspace** — the one step that is not optional. It names the personal workspace signing in
+   already created rather than making a second one; its skip accepts the pre-filled name.
+3. **Connect your subscription** — the Claude or Codex plan you already pay for, which is what
+   planning and building run on. You sign in with `claude auth login` or `codex login` in your own
+   terminal and Jaroku asks the CLI what happened; there is no button that signs you in, because
+   neither provider lets a third party run its sign-in. An API key is not asked for here: it is what
+   an agent *runs* on, and it lives in Secrets.
+4. **Your first agent** — two questions: what sort of agent it is, and what it should help you with.
+   Neither builds anything. The answer is a **draft** that arrives already named and wearing one of
+   the [eleven faces](#agents), with your sentence on its card; generating it is a deliberate act in
+   the composer.
+5. **Ready** — three things to try next, and **Open Jaroku**.
 
 **Whether you have onboarded is a fact about your account**, not about this browser:
-`users.onboarded_at`, reported as `user.onboarded` on `/v1/auth/session`. So it follows you to a
-second device and it does not follow the *machine* to the next person who signs in on it — see
+`users.onboarded_at`, reported as `user.onboarded` on `/v1/auth/session`. It is set by Open Jaroku,
+or by closing the flow anywhere past step 3. So it follows you to a second device and it does not
+follow the *machine* to the next person who signs in on it — see
 [onboarding belongs to the person](#onboarding-belongs-to-the-person-not-the-browser) for why
 that distinction had to be made explicit.
 
-Where you are *up to* stays local, under `jaroku.onboarding.<user id>` (`onboardingStep`,
-`onboardingHintsShown`), so a reload mid-flow resumes rather than restarting. A workspace that
-already contains a generated agent is treated as onboarded and skips it.
+Where you are *up to* is on the account too — `users.onboarding_step`, written on every advance — so
+somebody who stops on step 3 resumes on step 3 on a different machine.
 
 ---
 
@@ -597,17 +597,29 @@ exists so a fresh checkout has something to run before anything has been generat
 
 ### Putting an agent away, and giving it a name
 
-**Archived, never deleted** — the answer threads got, for the same reasons. An agent's versions,
-runs, traces, evals and costs are the record every past comparison and every invoice line points at,
-so "tidy the sidebar" must not be the same button as "destroy the history". Archiving takes an agent
-out of the lists that offer work — the sidebar, the eval picker, the composer's targets, the deploy
-form, every sweep — and out of nothing else: the row still resolves by id, so nothing pointing at it
-dangles, and its threads stay attached rather than rendering `(deleted)`. It is one press back, from
-the sidebar's **Archived** tab, which only appears when there is something in it.
+**Archive first; delete only on purpose.** An agent's versions, runs, traces, evals and costs are
+the record every past comparison and every invoice line points at, so "tidy the sidebar" must not be
+the same button as "destroy the history". Archiving takes an agent out of the lists that offer
+work — the sidebar, the eval picker, the composer's targets, the deploy form, every sweep — and out
+of nothing else: the row still resolves by id, so nothing pointing at it dangles, and its threads
+stay attached rather than rendering `(deleted)`. It is one press back, from the sidebar's
+**Archived** tab, which only appears when there is something in it.
 
 A **deployed** agent is refused: archiving one would take it out of every list while it is still
 serving traffic in your hosting account, which is the same trap "forgetting a deployment does not
 stop the thing it described" is careful about. Cancel or forget the deployment first.
+
+**Delete is permanent, and it is confirmed by typing the slug** — checked on the server as well as
+in the client, so a command built against a row the client has since replaced cannot delete a
+different agent. It refuses a live deployment for the same reason archiving does. It removes the row
+and everything that cascades from it, then the stored objects, then the directory, in that order:
+`upsertFromDisk` recreates a row for any project directory it finds, so a directory left behind would
+bring the agent back on the next boot with a new id and no history. The agent's conversations are
+**archived**, not deleted — they leave Recents with it and keep every turn — and Inbox cards about it
+resolve on their own.
+
+**A new agent arrives with a name.** It takes one of the [eleven faces](#agents), and each face
+carries a name — `agent-06` is always Stacey — so a draft is "Iris", never "Untitled agent".
 
 **A rename changes the name, never the slug.** The slug is the identity: the directory on disk, the
 key `datasets.agent_id` and `eval_runs.agent_id` hold, the working directory of every job's
@@ -818,6 +830,16 @@ cheapest first:
    executes the project's top-level code exactly as the runner would, in the same venv, with
    stdout captured and a 20-second timeout.
 
+**A project that fails is repaired once before it is thrown away.** Most failures are one line — a
+`print()`, an import of a module that was never written, a project with no tools that never defined
+`TOOLS` — and discarding the whole project for one made half the generations in a live pass a dead
+end. So the model is shown its own files and exactly what the checks found, re-emits what changes, and
+the whole project is checked again from the start. The `gen` channel says `repairing`, with the
+problems, because the files stream a second time and silence would read as the build starting over.
+One pass, not a loop, and the two calls are paid for as one generation. A project that fails twice is
+reported, and the failed build offers its plan again — **Build it again** at the failure, rather than
+a Generate button far up the thread.
+
 ---
 
 ## The fix loop: propose → apply → undo
@@ -857,6 +879,10 @@ instruction ──▶ staged copy of the project + the model's files
 - **A no-op is a valid outcome.** If the model declines and explains why, or re-emits files
   byte-identical to what is already there, you get a proposal with zero files and the
   summary explaining it — not a fake diff.
+- **An edit never grants an MCP tool, but it says which one it needed.** When a change could
+  not be made because the agent is not granted a tool this workspace has connected, the reply
+  names it and offers **Grant … to <agent>** — the Capabilities tab's own `setAgentTools` — and
+  then **Try the change again**. The grant stays a person's decision.
 
 ---
 
@@ -924,8 +950,19 @@ one touch, what version is live and is it drifting from what is deployed, and is
 live trace, the plan card and the diff card are deliberately not in it — they live where they
 already live, one tab away.
 
-**A card is a glance, not a dashboard.** Every element on it is one line or one badge, and the
-densest of them is the tag row, which is the main reason forty agents are scannable at all.
+**A card is a glance, not a dashboard.** It reads top to bottom in one order: the agent's face over
+its banner, its **name** (the loudest thing on the card, at 16px/600), its category, the recent
+conversation — or, for a draft nobody has built, the sentence it was created with — then one quiet
+line of figures, then the tags, then **New Thread**. The figures line is threads, activity and spend
+as one sentence on the left, with the sparkline, the deploy dot, the date chip, the creator's initial
+and the model the newest run used on the right. That last one is only there once the agent has run:
+`agents` has no model column, so what the card can honestly show is what its last run used, resolved
+server-side from `pricing.json` (`claude-opus-5` → "Opus 5"). The slug is not on the card — it is
+written once, on the detail header — and every card in the grid is the same height.
+
+The tags sit under the figures rather than under the name, because they are state and secondary:
+`IDLE UNVERIFIED DRAFT`, the same three on nearly every card in a young workspace, used to be the
+second thing read.
 
 | Family | Members | Colour |
 |---|---|---|
@@ -957,10 +994,34 @@ The validator's verdict costs nothing to read: it is the gate on publishing, so 
 `source` is `generation`, `edit` or `deploy` passed it by construction, and `import` — the backfill
 and the hand-dropped directory — is what `Unverified` means.
 
-**The gradient on a card is a pure function of `agents.id`.** FNV-1a over the uuid, modulo an
-explicitly sorted list built at build time (`scripts/gen-agent-art.mjs`), so the same agent shows the
-same gradient on every replica, for every member of the workspace, forever. Sorting is not a detail:
-directory iteration order is not stable across platforms, and the sort order *is* the mapping.
+**Every agent wears one of eleven illustrated faces.** Each is a square portrait on its own flat hue,
+paired with a banner cut from the same artwork and a human name that travels with it: `agent-06` is
+Stacey, with Stacey's colours, wherever it appears. They ship from `client/public/agent-faces/`,
+generated from the artwork under `assets/` by `client/scripts/gen-agent-faces.mjs`, which ships
+about a megabyte of it. The choice is written to **`agents.picture`** (migration 079) when the agent is
+created and never recomputed, so it is stable on every replica and for every member without being a
+hash. It is the agent's **position** in its workspace's creation order, modulo eleven, which
+guarantees the first eleven agents are eleven different people; a hash over eleven buckets puts a
+duplicate on the fourth or fifth agent more often than not. The count includes archived rows, so
+archiving the third agent gives the next one the fourth face rather than repeating the third. The
+face list exists twice — `server/src/agents/faces.ts` assigns, `client/src/lib/agentFaces.ts` draws —
+and `test:agent-faces` and `test:agent-picture` hold the two copies to each other and to the
+directory.
+
+This replaced three identity systems that did not agree with each other: a generated gradient, an
+emoji, and a procedurally generated 3D character on a shared WebGL context. All three are gone,
+along with `agents.emoji` and `agents.avatar_id` (migration 080, shipped as its own deploy because
+the running version still selected both columns).
+
+**A new agent is two questions and no build.** The **New agent** dialog and onboarding's agent step
+ask the same two things — what sort of agent it is, and what it should help you with — and both are
+optional. The dialog puts the second first, as the field, with the category behind one line under
+it. `createDraftAgent` writes a row with that sentence as its description, a face and the face's
+name, and nothing else: no version, no files, no plan. The category picker's search field doubles as
+the way to name your own category (`Use "<what you typed>"`). Nothing outside the composer raises a
+plan or starts a build; the first generation builds **into** the draft (`generate` carries
+`intoAgentId`) rather than beside it. **Export current version** is not offered on a draft, which
+has no version to export.
 
 **The whole grid is one bounded set of reads.** Per agent the card needs a thread count, a 7-day run
 count and spend, a last-run time, its latest session's title and last turn, health inputs, deploy
@@ -1052,6 +1113,18 @@ two states that are both simply true**: a name in `required_env` with no configu
 deployed version behind the current one, a server that last answered a day ago, spend three times
 its own average, a high-impact grant with the confirmation gate off. Nothing was added to the frozen
 event schema for any of it.
+
+**"Its own average" is the last day against the seven days before it.** The two windows share no
+dollar: an earlier version compared the week's total with the same week divided by seven, so every
+agent that had spent anything read exactly 7.0× its usual. An agent with no history before today has
+no usual, and is not an anomaly.
+
+**A card about an agent that has been deleted is resolved**, whatever its own predicate says — most
+predicates ask about the agent's state, and a deleted agent has none. **A missing provider key does
+not block a new workspace**: planning and building run on the person's own subscription, and a key
+is only what an agent *runs* on, so it is not counted toward the badge. The board's header says what
+each number counts — `6 open · 2 need you` — because it sits beside a sidebar badge that counts only
+the second: what is blocked or waiting on a decision.
 
 **Three verbs, and they stay three.** Resolve is shared, because the problem is. Snooze is personal
 and *returns* — evaluated at read time, so there is no job that can fail to run and leave work away
@@ -1614,15 +1687,22 @@ Before a **high-impact** MCP tool runs for the first time in a run, the run halt
 └──────────────────────────────────────────────┘
 ```
 
-The **arguments are the body of the dialog**, not a detail behind a disclosure. The tool was
+The **arguments are the body of the ask**, not a detail behind a disclosure. The tool was
 already approved in principle when it was selected during planning; what has never been
 approved is *this* call, with these values, which the model made up a second ago.
 
 - **Denying or timing out raises**, so a refusal lands as a red `tool_call` step the model is
   told about — never as silence. Timing out **denies**; a gate that opens when nobody answers
   is a gate that opens whenever someone steps away from their desk.
-- **Escape denies**, and the scrim does not dismiss. The run has already stopped; the only
-  outcomes are allow and refuse.
+- **It is a tray, not a modal, and no key answers it.** It stays on screen until every ask is
+  answered, but it never covers the window and never takes focus, so the waiting job, its detail,
+  its **Stop** and the composer all stay usable. A stray space, Return or Escape typed elsewhere
+  cannot deny a tool: its buttons ignore a press for the first 700ms after an ask appears, and
+  Escape inside it only folds it away. An earlier modal put focus on Deny, which made exactly that
+  happen.
+- **Every ask is on screen at once, most urgent first, each with its own clock.** One at a time
+  meant a fourth ask opened with forty seconds left, because every clock starts when its run began
+  waiting.
 - **"Allow for this run" lasts exactly as long as the process.** Nothing persists to the next
   run, and nothing persists to another agent.
 - The mechanism is the one pause/resume already uses: a `@@JAROKU_CTRL@@` line out on
@@ -1963,11 +2043,21 @@ The first time a credential leaves this machine. The rule everywhere:
 | **Never in the image** | `.dockerignore` excludes `.env`, and no artifact contains a credential. Secrets arrive only as host environment variables at runtime, which is exactly what `env.py`'s "environment wins" precedence was built for. |
 | **Verified before anything is created** | `testRailwayToken` proves a token works and writes nothing — the same two-command split as `testProviderKey`. |
 
-The Railway token itself takes the established path: `RAILWAY_API_TOKEN` in `runtime/.env`,
-through the one shared credential writer, `chmod 600`, never logged, never echoed back. (The
-*account*-scoped variable, not `RAILWAY_TOKEN`, which Railway's own tooling reads as
-project-scoped and which cannot create a project.) It is also stripped from every agent
-subprocess: an agent's own keys have to be there, a deploy credential does not.
+**The Railway token belongs to the workspace, not the server.** It is held in the deploying
+workspace's own vault, behind `SecretStore.getRailwayToken` / `setRailwayToken`: envelope-encrypted
+in `workspace_secrets` on a hosted server, and `RAILWAY_API_TOKEN` in `runtime/.env` through the one
+shared credential writer under the local store (`chmod 600`, never logged, never echoed back). It
+used to be one `process.env` value, which on a hosted server meant every tenant deployed into
+whichever account set it last. The deploy, its pre-check, Logs, Reconnect and Kill all read the
+**asking** workspace's token and its credential names. It is not listed among the workspace's
+credentials — the Deploy panel owns it. (The *account*-scoped token, not `RAILWAY_TOKEN`, which
+Railway's own tooling reads as project-scoped and which cannot create a project.)
+
+**No agent is ever given it, nor any deployed agent's serve token.** The process manager strips
+`RAILWAY_API_TOKEN` and every `JAROKU_DEPLOY_<…>_SERVE_TOKEN` from a run's environment, `getForRun`
+refuses the Railway token by name, and the runner's own `.env` loader skips both — it used to read
+the token straight back out of the file after the server had removed it. An agent's own keys have
+to be there; the account that hosts it, and the tokens that spend other agents' keys, do not.
 
 ### The bearer token
 
@@ -2005,8 +2095,12 @@ A copied-out project proceeds on a high-impact MCP tool with a warning, because 
 a script on their own machine *is* the authorisation. A container is not that: nobody is there to
 ask, and the bridge's "allow for this run" grant is module-global, so one approval would leak
 across every later request for the life of the process. Deployed agents therefore run with
-`JAROKU_MCP_CONFIRM=require` — set in the Dockerfile *and* on the host — and refuse them. Their
-read-only tools are unaffected.
+`JAROKU_MCP_CONFIRM=require` — set in the Dockerfile *and* on the host. A call to the URL from
+outside Jaroku is refused; a job given from the Cockpit or an agent's conversation carries its run
+token and control-plane address, so the same tool stops and **asks a person** through the
+confirmation tray instead, and is refused if nobody answers within two minutes (see
+[what a deployed run is now](#what-a-deployed-run-is-now)). The ask carries the tool's real
+high-impact reason. Read-only tools are unaffected either way.
 
 ### The deploy record
 
@@ -2029,6 +2123,12 @@ they end up deploying a second copy.
 replaced it. Exactly one row may claim to be `live` on a service, because two would be two URLs
 both described as the current one.
 
+**The row names the version the upload was actually built from.** Deploying publishes the four
+artifacts above as a version, and the row used to name the version *before* that publish, so every
+fresh deploy read as one version stale and offered a Redeploy straight away. A redeploy of an
+unchanged agent publishes nothing new and keeps the version it has. Build-log lines are written in
+order per deployment and never throw, so a burst of build output cannot take the backend down.
+
 ### Redeploying
 
 **A redeploy goes back into the same Railway project and service.** The button says *Redeploy*
@@ -2045,6 +2145,29 @@ its URL, when you press it.
 
 **Forget** detaches a record from Jaroku and touches nothing in your account — the notice tells
 you where the real thing still is.
+
+**A redeploy takes the slot it already has.** The plan's live-deployment limit counts agents with
+something serving or on its way up, and nothing else: a failed, cancelled, interrupted, superseded
+or removed row is history. Counting the latest row per agent let a single failed deploy fill Free's
+one slot so that even its retry was refused, and made an agent's own live deployment block its
+replacement.
+
+**Kill removes the service, and the project once nothing else is in it.** A Jaroku project left
+empty would go on using your Railway allowance, so Kill deletes it, and a deploy that fails while
+provisioning undoes the project it half-made. The killed agent leaves the fleet before Railway
+answers, so nothing is dispatched to a URL that is going away.
+
+### Railway's own rules
+
+- **A project is created in the token's Railway workspace.** Railway refuses `projectCreate`
+  without one, so the deploy lists the workspaces the token can reach, uses the account's own, and
+  the log says which.
+- **Project and service names fit Railway's 32-character limit.** An agent planned from a
+  sentence can have a 40-character slug, so names are cut at a word, keeping the suffix that makes
+  a project unique.
+- **Railway's plan limits are said to be Railway's.** "Free plan resource provision limit
+  exceeded" comes from your Railway account, and reaching a Pro Jaroku workspace unattributed it
+  read as Jaroku's own limit.
 
 ### What a deployed run is now
 
@@ -2080,8 +2203,8 @@ What follows from it, none of which is a new mechanism:
 | **Traces** | The runner's own `JarokuTracer`, pushed to the control plane that was already listening. A deployed trace and a local trace of the same agent on the same input differ in run id and timing and nothing else — asserted, in `test:serve-trace`. |
 | **Cost** | Summed from `steps`, by the same `aggregateJob` the eval engine uses. Never read from `runs.cost`: a run whose container died never emitted a `run_end`, and its row still reads 0 while its steps record real money. |
 | **Pause / resume** | The control-plane actions that already existed. A pause stops at a node boundary and leaves a durable checkpoint; a resume continues the same run, with the same id, from the seq it stopped at. |
-| **Cancel** | A third action beside those two, read at the same boundary. Never a kill: the node in flight finishes, and the run ends with a `run_end` that says it was cancelled. |
-| **Confirmation** | `mcp_bridge.py`'s existing HTTP gate. A high-impact tool in a deployed run stops and asks a person, and the modal cannot tell it from a local run. |
+| **Cancel** | A third action beside those two, read at the same boundary: the node in flight finishes, and the run ends with a `run_end` that says it was cancelled. A run that has not reached a boundary within `JAROKU_CANCEL_GRACE_S` (5s) has its process ended instead, and its `run_end` says that too — see [Stop always stops](#six-statuses-and-what-closes-a-job). |
+| **Confirmation** | `mcp_bridge.py`'s existing HTTP gate. A high-impact tool in a deployed run stops and asks a person, and the confirmation tray cannot tell it from a local run. A denied or unanswered call is recorded on the job (migration 082). |
 | **Health, logs, kill** | On the server, so the screen is only a screen. Health asks the agent's own `/health` rather than Railway, because Railway reports a crash-looping service as deployed. |
 
 **The image now contains Jaroku's own reviewed code** — `jaroku_interceptor` and `jaroku_runner`,
@@ -2178,7 +2301,7 @@ and conclude it is working.
 |---|---|---|
 | **connected** | Jaroku holds a serve token for this deployment's Railway service. | nothing |
 | **unconnected** | No stored token. Every agent deployed before the production bridge is here. | Reconnect |
-| **unauthorised** | A token exists and the agent refused it — rotated on Railway out from under us. | Reconnect |
+| **unauthorised** | A token exists and the agent refused it — rotated on Railway out from under us. Set by the 401 itself, and held until a Reconnect or an accepted job. | Reconnect |
 | **public** | `JAROKU_SERVE_PUBLIC=1`. A **warning** state, not a healthy one: anyone with the URL can spend your provider key. | decide whether you meant it |
 
 **Reconnect restarts the service, and says so before you press it.** Setting a variable on Railway
@@ -2226,11 +2349,24 @@ it reachable, it is the only state where a human is the blocker, and it is the o
 sidebar badge counts — a badge that counts everything never reaches zero, and a badge that is never
 zero is one people train themselves to ignore.
 
-`cancelled` means genuinely cancelled **at a node boundary**. A cancel is a request, not an
-outcome: the node in flight finishes, the runner emits its boundary line, and the run's own
+`cancelled` means genuinely cancelled, **at a node boundary** when one comes in time. A cancel is a
+request, not an outcome: the node in flight finishes, the runner emits its boundary line, and the run's own
 `run_end` is what closes the item. A cancelled run and a crashed one arrive as the *same* event —
 the frozen schema has three run statuses and none of them is `cancelled` — so what separates them
 is the boundary line, watched for rather than matched out of the error text.
+
+**Stop always stops.** A job that cannot reach a node boundary — a single-node graph, or one
+stuck in a long model call — used to run to completion after Stop and get billed for it. Now the
+container gives a cancelled run `JAROKU_CANCEL_GRACE_S` (5 seconds) to reach its boundary and then
+ends the process; the run still closes as `cancelled`, and its `run_end` says that it was ended
+mid-step and that a model call in flight may still be billed. The request itself is recorded
+(`work_items.stop_requested_at`, migration 083), so the job shows the stop it was asked for.
+
+**A job that was refused a tool says so.** A job whose high-impact tool was denied, or not answered
+in time, carries on without it and usually ends `succeeded` — with an apology for an answer and a
+bill. Each refusal is kept on the job (`work_items.tool_refusals`, migration 082) and shown on its
+row, its detail and its record, and a denial (somebody's decision) reads differently from a timeout
+(nobody's).
 
 ### Six failure kinds
 
@@ -2253,10 +2389,31 @@ is the boundary line, watched for rather than matched out of the error text.
   column on `work_items` so that this cannot quietly become two answers.
 - **`stopped_reporting` says what it means** — the container went quiet, it may have completed, it
   may have spent money.
-- **Three zero states, three sentences.** No live agents → *"No agents are live yet"*, with a route
-  to Deploy. Live agents, no jobs → *"Nothing has been asked of them yet"*. A filter with nothing
-  behind it says the filter is on. Nothing blocked should feel like an achievement; nothing
-  deployed should feel like a next step.
+- **Three zero states, three sentences.** No live agents → *"No agents are live yet"*, offering
+  each deployable agent and opening that agent's own Deploy panel. Live agents, no jobs →
+  *"Nothing has been asked of them yet"*. A filter with nothing behind it says the filter is on.
+  Nothing blocked should feel like an achievement; nothing deployed should feel like a next step.
+  Killing the last live agent does not hide the history: a one-line notice sits above a list that
+  stays.
+
+### Keeping the screen true
+
+- **Counts follow every dispatch.** A settled row moves its own count, and the client re-reads the
+  server's counts once a burst settles; a dispatch used to leave `queued 1` on the chips for good.
+  One dispatched job is never drawn as two rows, whichever of its answer and its delta lands first.
+- **The workspace's in-flight cap is checked in the composer**, before the pre-flight gate, from
+  the cap the work snapshot carries. A dispatch refused anyway shows as an uncounted **Not sent**
+  row that opens on its reason, never as a stuck failed job.
+- **Retry is offered only while the job's agent is live**, and says why when it is not.
+- **A hung server is noticed.** A frozen backend keeps its TCP connections open, so the socket now
+  pings every 10 seconds, and a ping unanswered for 25 is a dropped connection that the ordinary
+  reconnect takes over. A dispatch nobody answers stops saying *Sending…* and says the job may still
+  have reached the agent.
+- **"Today" is the reader's day.** Fleet cards count jobs and spend from the reader's own midnight,
+  which the client reports, rather than UTC's. Relative times keep moving.
+- **The job panel docks beside the list** when there is room, rather than covering the composer
+  and the filters. **The waiting count is in the desktop window's own title**, not only the page's,
+  so a minimised window shows it.
 
 ### What it costs to read
 
@@ -2273,11 +2430,10 @@ is what keeps it from being asked for an arbitrary credential.
   `agent_grants` must not be repeated.
 - **External users** — everything here is inside the workspace.
 - **Per-agent conversation** — asking an agent "did you send that mail" is answered from
-  `work_items`, not by the agent, which has no memory across runs. That is Part 3, and it extends
-  the existing threads machinery rather than adding a second one. Two constraints it puts on this
-  release now: `work_items.id` must be stable and citable, because Part 3's answers cite it and the
-  citation is clickable; and the work detail must be reachable by id alone, because a citation chip
-  opens it without a list in between. Both hold.
+  `work_items`, not by the agent, which has no memory across runs. It is built now, as Part 3:
+  see [Talking to an agent](#talking-to-an-agent). It relies on two things this tab holds:
+  `work_items.id` is stable and citable, and the work detail is reachable by id alone, because a
+  citation chip opens it without a list in between.
 - **Voice and calls** — the layer above. It is now buildable, because `waiting` exists and means
   something.
 - **Schedules and triggers, rollback and environment variables, per-agent spend ceilings, and
@@ -2353,6 +2509,15 @@ Tracey"* versus *"This reads the record"*. An ambiguous message classified as a 
 Part 2's existing pre-flight gate, which is the answer to classification uncertainty; there is no
 second confirmation dialog beside it, and both composers render the same `WorkGate`.
 
+**Saying "job" decides it.** For a question-answering agent every real job *is* a question — *"what
+is 17 times 23?"* — so no verb list can tell it from a question about the record. A message that
+hands a job over outright (*"Give Bruno this job: what is 17 times 23?"*) is dispatched, and the
+agent is asked what follows the hand-over rather than the sentence handing it over. For everything
+else **the label is a toggle**: pressing it overrides the guess for this message, and is forgotten
+when the box empties. A command chosen that way still meets the gate. A job given from the
+conversation is drawn there in full — the person's message and, once it settles, the job's answer —
+from the live job row.
+
 ### How a question gets answered
 
 1. **A fact pack**, built by `server/src/work/factPack.ts` — recent work items with status, timing
@@ -2366,7 +2531,9 @@ second confirmation dialog beside it, and both composers render the same `WorkGa
 4. **Every claim cites a work item**, as `[work:<id>]`, and the chip opens the Part 2 work detail.
    A citation resolves only against the pack the model was handed — so another workspace's real job
    id fails exactly as an invented one does, and an invented one stays visible as bare text rather
-   than being quietly stripped.
+   than being quietly stripped. A reopened conversation resolves its stored answers' citations
+   again, against this workspace's jobs, so its chips come back as chips rather than raw
+   `[work:…]` markers.
 
 ### Cost
 
@@ -2511,7 +2678,7 @@ frozen event schema, and everything added since rides beside it.
 | `eval` | Datasets, examples, rubrics, eval progress, scores, results, estimates |
 | `mcp` | MCP registry snapshots, discovery progress, and the first-use confirmation request |
 | `deploy` | Deployment snapshots, the pre-deploy plan, live stage transitions, scrubbed build-log lines, and the one-shot serve token |
-| `session` | The only channel about the CONNECTION rather than the work: `expiring`, `expired`, `revoked`, `workspace_changed`, `role_changed` |
+| `session` | The only channel about the CONNECTION rather than the work: `expiring`, `renewed`, `expired`, `revoked`, `workspace_changed`, `role_changed` |
 | `members` | Who is in the workspace, who has been invited, and the one-shot invite link |
 | `audit` | The workspace's own record of what has been done to it, newest first. Answered to the socket that asked and never broadcast — the rows name who revealed which credential and who removed whom |
 | `enforcement` | Which rung of the abuse ladder is in force, its own sentence, the history, and the workspace's appeal. Broadcast, because a rung refuses every member's work |
@@ -2546,7 +2713,8 @@ frozen event schema, and everything added since rides beside it.
 thread set: `listThreads` · `loadThread` ·
 `createThread` · `renameThread` · `archiveThread` · `restoreThread` · the agent set:
 `listAgentGrid` · `loadAgentDetail` · `loadAgentVersion` · `archiveAgent` · `restoreAgent` ·
-`renameAgent` · `forkAgent` · `restoreAgentVersion` · and the GitHub set:
+`renameAgent` · `forkAgent` · `restoreAgentVersion` · `createDraftAgent` · `setAgentCategory` ·
+`deleteAgent` · and the GitHub set:
 `listGithub` · `listGithubRepos` · `checkGithubRepo` · `linkGithub` · `unlinkGithub` ·
 `refreshGithub` · `pushGithub` · `pullGithub` · `switchGithubBranch` · `createGithubBranch` ·
 `openGithubPr` · `commitGithub` · `generateGithubMessage` · `diagnoseFile` ·
@@ -2556,7 +2724,7 @@ thread set: `listThreads` · `loadThread` ·
 `answerMemoryProposal` · and `getActivity` · `getActivityFeed` · and the access set:
 `loadAccess` · `loadExposure` · `loadSessions` · `loadAccessHistory` · `grantAccess` ·
 `modifyGrant` · `revokeGrant` · `endSession` · and `setAgentTools` · `setByok` ·
-`listConnections` · `connectConnector` · `disconnectConnector` · `leaveWorkspace`
+`listConnections` · `connectConnector` · `disconnectConnector` · `leaveWorkspace` · `renewSession`
 
 Accepting an invitation is deliberately **not** a command: the accepter is not a member yet, so
 there is no socket scoped to the workspace they are joining. It is `POST /v1/invites/accept`.
@@ -2610,6 +2778,7 @@ to happen because a browser cannot put a header on a WebSocket:
 | `GET /healthz` | Liveness. Touches nothing — a probe that checks a dependency turns one database blip into every instance restarting at once |
 | `GET /readyz` | Readiness. Probes the database under a deadline |
 | `POST /v1/auth/session` | Token → account + the workspaces you may act in. Provisions on first sight |
+| `POST /v1/auth/refresh` | The same session with a new expiry, for a still-valid token this server signed. Keeps the original sign-in time; refused 30 days after it — see [sessions renew](#sessions-renew) |
 | `POST /v1/ws-ticket` | A single-use, 30-second, workspace-scoped ticket for one socket |
 | `POST /v1/invites/accept` | Redeem an invitation |
 | `POST /v1/workspaces` | Create a workspace, owned by the caller. `{name, kind}`, both required |
@@ -2619,7 +2788,7 @@ to happen because a browser cannot put a header on a WebSocket:
 | `GET /v1/workspace/export/:id` | Whether that archive is ready, and a presigned link with a stated expiry |
 | `POST /v1/workspace/delete` | Destroy the workspace. `{confirm: "<its id>"}`, and the answer is a receipt |
 | `GET /v1/auth/jwks.json` | The **local issuer's** public key. Absent in provider mode |
-| `POST /v1/auth/dev-login` | Mint a local token. Absent in provider mode |
+| `POST /v1/auth/dev-login` | Mint a local token. Absent in provider mode, and refused (403) to any request that did not come from this machine |
 
 ---
 
@@ -2690,7 +2859,7 @@ to happen because a browser cannot put a header on a WebSocket:
 | `JAROKU_GITHUB_API` | `https://api.github.com` | GitHub's API host. Overridable for GitHub Enterprise Server, or to point at the fixture (`npm run mock:github`) |
 | `JAROKU_GITHUB_WEB` | `https://github.com` | GitHub's **web** host — the App install screens and the OAuth token exchange, which do not live on the API host. Overridable for the same two reasons |
 | `JAROKU_GITHUB_TIMEOUT_MS` | `20000` | Per-request ceiling on a GitHub API call |
-| `RAILWAY_API_TOKEN` | — | Your Railway **account** token. Written by the deploy panel, never by hand |
+| `RAILWAY_API_TOKEN` | — | Your Railway **account** token, under the local `runtime/.env` secret store. Written by the deploy panel, never by hand; a hosted server keeps one per workspace in its vault instead, and never gives it to a run |
 | `JAROKU_RAILWAY_API` | `https://backboard.railway.com/graphql/v2` | Railway's GraphQL endpoint |
 | `JAROKU_RAILWAY_CLI` | `railway` | The CLI binary used to upload a project |
 | `JAROKU_RAILWAY_TIMEOUT_MS` | `20000` | Per-request ceiling on a Railway API call |
@@ -2746,6 +2915,7 @@ should not disagree about who is doing the thinking.
 | `JAROKU_SERVE_PUBLIC` | `1` to serve `/run` with **no** authentication. Refuses to start otherwise |
 | `JAROKU_SERVE_CONCURRENCY` | `4` — simultaneous requests; over it, `429` |
 | `JAROKU_SERVE_TIMEOUT_S` | `30` — how long one client may hold a connection before it is dropped |
+| `JAROKU_CANCEL_GRACE_S` | `5` — how long a cancelled run has to reach a node boundary before its process is ended |
 | `JAROKU_PROVIDER` / `JAROKU_MODEL` | What the deployed agent runs on. `fake` is refused |
 
 ### Client
@@ -2925,7 +3095,7 @@ npm run billing:stuck    # webhook events that arrived and never finished — th
 npm run test:http        # the HTTP layer: error envelope, body caps, log redaction
 npm run test:jwks        # key caching, forced refresh with a leash, symmetric keys refused
 npm run test:jwt         # alg:none, algorithm confusion, wrong issuer/audience, expiry, skew
-npm run test:session     # first-sight provisioning, concurrent sign-in, workspace adoption
+npm run test:session     # first-sight provisioning, concurrent sign-in, workspace adoption, renewal, dev-login from this machine only
 npm run test:resolve     # membership lookup, denial auditing, the cache's staleness window
 npm run test:capabilities # the role matrix, and that every relay command is classified
 npm run test:tickets     # single use under concurrency, hashing, the origin allowlist
@@ -2956,6 +3126,10 @@ npm run test:mcp-hardening # a server's own advertisement, bounded at the point 
 npm run test:deploy-artifacts # the image's deps, and that no artifact carries a secret
 npm run test:deploy-secrets   # names out, values never; the log scrubber's hard cases
 npm run test:deploy-store     # deploy status transitions, restart reconciliation, Railway failure kinds
+npm run test:deploy-plan      # the pre-check reads the ASKING workspace's token and credential names
+npm run test:deploy-version   # the row names the version the upload was built from; no-op redeploys mint none
+npm run test:runner-env       # the Railway token and every serve token stay out of an agent's environment
+npm run test:edit-grant       # an edit that needed an ungranted MCP tool names it
 
 # the two lineages — see "GitHub"
 npm run test:github-app       # the App's seven permissions, the JWT, the token cache, the state
@@ -2984,6 +3158,7 @@ npm run test:thread-status   # §3.3's precedence, one fixture per rung, and the
 npm run test:thread-channel   # two sockets in two workspaces; a read answers one, a write tells all
 npm run test:thread-binding   # ownership from the items, liveness from the owner, through the app
 npm run test:agent-lifecycle  # archive leaves the pickers and nothing else; a rename survives the sync
+npm run test:agent-picture    # a workspace's first eleven agents wear eleven different faces
 npm run test:thread-title     # the cut: one line, at a word boundary, saying it was cut
 npm run test:thread-archive   # the ABSENCE: 208 source files audited for a path that deletes one
 
@@ -3052,8 +3227,6 @@ npm run test:truncate-path # a filename survives the width; the middle of the pa
 npm run test:composer-triggers # #, @ and ! fire only where they are triggers
 npm run test:thread-store    # a snapshot replaces; one row navigates nothing; the live cost delta
 npm run test:thread-cost     # three states, and a projection that refuses to extrapolate from zero
-npm run test:thread-groups   # §4.2's two sorting rules, and the input it must not reorder
-npm run test:thread-filter   # the five chips and the text match, over one list
 npm run test:thread-resume   # which turn §4.5 opens at, and the hint the row shows for it
 npm run test:thread-archive  # what §3.4's notice names, and the archive that gets none
 npm run test:host-config     # what a HOST may tell this bundle, and the four shapes it may not
@@ -3070,6 +3243,16 @@ npm run test:access-tab      # every assertion is about a sentence or an ABSENCE
 npm run test:permission-ui   # the client's copy of the matrix, held to the server's own file
 npm run test:type-scale      # the ladder, and which face carries what — a property of ALL of it
 npm run test:colour-system   # the palette, and the hex literal that stays the colour it was
+npm run test:agent-faces     # the face list matches the directory and the server's copy, both ways
+npm run test:session-renewal # renewal falls due in the last half hour; an expiry keeps the workspace in use
+npm run test:sign-in-landing # a sign-in landing in another workspace empties the tab
+npm run test:sign-in-recovery # a stalled Google sign-in never disables the other way in
+npm run test:pane-identity   # every pane has an id, so a layout is remembered per person, not per width
+npm run test:socket-heartbeat # an unanswered ping is a dropped connection
+npm run test:window-title    # the waiting count reaches the desktop window's own title
+npm run test:inbox-counts    # the header says what each of its numbers counts
+npm run test:deploy-panel-agent # the Deploy panel shows the selected agent's deployment and token
+npm run test:grant-and-retry # a change refused for a missing grant offers the grant, then the change
 ```
 
 The client's test scripts invoke `../server/node_modules/.bin/tsx`, so install the server's
@@ -3593,7 +3776,7 @@ an explicit flush at run end for whatever never crossed a threshold. `mcp_bridge
 it is copied byte-for-byte into every generated project, and a generated project must never
 import anything named `jaroku`.
 
-A hosted MCP confirmation raises the identical modal a local one does — the same `pendingConfirms`
+A hosted MCP confirmation raises the identical ask a local one does — the same `pendingConfirms`
 registration on the server, the same `confirmRequest` broadcast — so the UI cannot tell which kind
 of run it is looking at, and answering one resolves both the local approval file and the event bus
 so `resolveMcpConfirm` never has to know either.
@@ -4130,6 +4313,7 @@ its own:
 | | Free | Pro | Team |
 |---|---|---|---|
 | Agents | 3 | unlimited | unlimited |
+| Live deployments | 1 | 5 | unlimited |
 | Runs / month | 500 | 10,000 | 50,000 |
 | Seats | 1 | **1** | 20 |
 | Trace retention | 7 days | 90 days | 365 days |
@@ -4143,6 +4327,13 @@ Free's figures are small deliberately rather than stingily: they are the whole o
 exposure, and the abuse economics of a tier that runs arbitrary Python are the reason. A monthly
 credit **resets rather than accumulating** — an unused allowance that compounds is a liability
 nobody priced — while *purchased* credit is a different column and does carry.
+
+**The agent limit counts built agents, not rows.** An agent counts once it has a current version
+with an `agent.py` and is not archived. A draft is a name, a face and a sentence, so it costs nothing
+— counting rows refused the build of the draft the New agent dialog had just made, "3 of 3" — and a
+generation building into an agent never counts that agent against itself, so a rebuild is not a new
+agent. **The live-deployment limit counts agents with something serving or on its way up**; a failed
+or superseded deploy is history, and a redeploy takes the slot it already has.
 
 **Pro is single-seat, and that is the pricing's shape rather than an oversight** — Pro is the
 single-operator tier and Team is what collaboration costs. It is also the only place in the table
@@ -4889,9 +5080,16 @@ the day it is in front of users.
 
 What is missing locally is a password, not a signature: `POST /v1/auth/dev-login` takes an email
 and hands back a token for it. That is exactly as dangerous as it sounds, which is why it says
-so at every boot and **refuses to start under `NODE_ENV=production`**. The signing key is
-persisted to `server/.devauth.json` (`chmod 600`, gitignored) so a `tsx` restart does not sign
-you out — the predictable alternative is somebody reaching for a bypass to stop being logged out.
+so at every boot, **refuses to start under `NODE_ENV=production`**, and **refuses any request that
+did not come from this machine**. A tunnel such as cloudflared or ngrok connects from loopback, so
+the peer address alone proves nothing; what gives one away is its public host name in `Host` and its
+forwarding headers. So the route answers only a loopback peer, naming a loopback host, with no
+`X-Forwarded-*`, `Forwarded`, `CF-*` or similar header — and answers anything else with a 403. A raw
+port-forward that also spoofs `Host` is not caught, which is what the boot warning is for.
+
+The signing key is persisted to `server/.devauth.json` (`chmod 600`, gitignored) so a `tsx` restart
+does not sign you out — the predictable alternative is somebody reaching for a bypass to stop being
+logged out.
 
 ### Why the ticket exists
 
@@ -5019,7 +5217,8 @@ So every open socket is re-checked on a timer, and told the outcome on a `sessio
 
 | Event | What happens |
 |---|---|
-| `expiring` | The token has under five minutes left. A **warning**, not a close — cutting somebody off mid-generation would be the server causing the outage it is warning about |
+| `expiring` | The token has under five minutes left. A **warning**, not a close — cutting somebody off mid-generation would be the server causing the outage it is warning about. The client takes it as a prompt to [renew](#sessions-renew) |
+| `renewed` | A renewed token for the same person was accepted on this socket; this is its new expiry |
 | `expired` | Closed, with the "sign in again" close code |
 | `revoked` | No longer a member. Closed immediately |
 | `workspace_changed` | The workspace itself is gone. Closed with the **reconnect** code — a different instruction |
@@ -5047,6 +5246,25 @@ cache expiring, a request on another replica may still be authorised at the old 
 membership mutation invalidates explicitly, which makes it exact on the replica that made the
 change; Session 5's Redis pub/sub is what makes it exact everywhere.
 
+### Sessions renew
+
+A token this server signs — local, Google or email link — lasts **12 hours**, and the app renews it
+**30 minutes before** it runs out, on the server's `expiring` warning, and whenever the window
+regains focus or the network comes back. `POST /v1/auth/refresh` answers the same session with a new
+expiry, and `renewSession` hands the new token to the socket already open, which otherwise closes
+when the token it was opened with does — mid-generation, if one is running. Before this every session
+ended on the hour, mid-task, because the session route promised a refresh that did not exist.
+
+Two rules keep renewal from being a way round signing in. **The original sign-in time travels
+unchanged**, so a token renewed in the background never satisfies the Secrets step-up, which asks
+for a sign-in within minutes. And **renewal stops 30 days after that sign-in**. Only a still-valid
+token this server signed can be renewed, for an account that still exists; a provider's token is the
+provider's to renew.
+
+When a session does run out, signing back in reopens the workspace you were in. A sign-in that lands
+in a different workspace empties the open tab rather than asking for a conversation that belongs to
+the old one.
+
 ### The client
 
 `lib/socket.ts` makes one distinction that everything else depends on, because "disconnected" and
@@ -5059,6 +5277,13 @@ change; Session 5's Redis pub/sub is what makes it exact everywhere.
 
 Getting that backwards produces the worst behaviour this client is capable of: retrying a 401
 every second, forever, behind a spinner, while the user has no idea they need to sign in.
+
+**A socket that stays open is not proof the server is alive.** A frozen backend keeps its TCP
+connections open, so the socket never closes and the app went on saying "connected". An open socket
+now pings every 10 seconds, any frame counts as an answer, and a ping unanswered for 25 seconds is a
+dropped connection: the socket is abandoned and the ordinary reconnect takes over. The clock runs
+from the ping rather than from the last frame, because a quiet workspace sends nothing and a
+background tab's timers are throttled.
 
 **Every store fully resets on a workspace switch.** A perfectly-scoped server still leaks if the
 browser keeps the rows — a `traceStore` still holding the previous workspace's step payloads is a
@@ -5554,9 +5779,10 @@ An interactive run *or* an eval job is reading the project's files right now. Wa
 cancel the eval.
 
 **A generation was rejected**
+It has already been repaired once: the model was shown what the checks found and tried again.
 The problem list names the rule and the file:line. That is the system working — the staged
-project was discarded and whatever was there before is untouched. Re-plan with the problem
-addressed, or ask for the same agent more specifically.
+project was discarded and whatever was there before is untouched. Press **Build it again** at the
+failure, re-plan with the problem addressed, or ask for the same agent more specifically.
 
 **The trace is empty but the agent "ran"**
 Check stderr in the server console. `run_start` is emitted before the agent is even imported,
@@ -5579,9 +5805,16 @@ had already been created still exists in your Railway account — check there be
 again, or you will end up with two projects.
 
 **The deployed agent returns 401**
-`/run` needs `Authorization: Bearer <token>`. The token is shown once, when the deploy goes live,
-and Jaroku keeps no copy — rotate it by setting `JAROKU_SERVE_TOKEN` in Railway yourself, or
-deploy again for a fresh one.
+`/run` needs `Authorization: Bearer <token>`. The token is shown once, when the deploy goes live.
+Jaroku keeps its own sealed copy to dispatch Cockpit jobs with, and if the agent refuses that copy —
+the variable was changed in Railway — its fleet card says **Credential refused** until you press
+**Reconnect**, which mints a fresh token, sets it and stores it. Setting a variable restarts the
+service.
+
+**A deploy says "Railway refused: … That is your Railway account's plan, not Jaroku's"**
+Railway's own plan limits, such as the number of projects a free Railway account may hold. Delete a
+project you no longer use in Railway, or upgrade the Railway plan. Kill deletes the project it
+empties, so killed agents no longer leave empty projects behind.
 
 **The deployed agent 500s on every request**
 Usually a credential the container does not have. The deploy warns before it starts if a declared
@@ -5593,6 +5826,17 @@ in Railway's variables and redeploy.
 That is the [local issuer](#the-local-issuer). Type any email address; there is no password. It
 exists so the code that authenticates you locally is the same code that authenticates a user in
 production, rather than a flag that skips it.
+
+**The passwordless sign-in answers 403 "only works on this machine"**
+The request came through a tunnel or a proxy — its `Host` named a public address, or it carried a
+forwarding header. That route signs anybody in as any email, so it only answers this machine. Open
+the app at `localhost` rather than through the tunnel.
+
+**Google sign-in says `redirect_uri_mismatch` on a locally run app**
+Configuration, not code. The redirect URI is `JAROKU_AUTH_ORIGIN` + `/oauth/google/callback`, and a
+local server's is `http://localhost:4317/oauth/google/callback`, which has to be registered on the
+Google client beside the deployed one. Pointing a local server at the deployed origin cannot work:
+the OAuth state is minted and spent on the same server. Sign in with the email link meanwhile.
 
 **"open this socket with a ticket from POST /v1/ws-ticket"**
 Something connected to the WebSocket without doing the credential exchange first. The React
