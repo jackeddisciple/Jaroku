@@ -8,9 +8,9 @@
 // These checks mirror the hard rules in prompt.ts. The prompt asks; this enforces.
 
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
-import { basename, dirname, join, relative, sep } from "node:path";
+import { basename, join, relative, sep } from "node:path";
 import type { Manifest } from "./mcpManifest.ts";
-import { LocalCodeCheckSandbox, type CodeCheckSandbox } from "./sandbox/codeCheck.ts";
+import { LocalCodeCheckSandbox, PROJECT_PARENT_TOKEN, PROJECT_TOKEN, type CodeCheckSandbox } from "./sandbox/codeCheck.ts";
 
 /** Shared unless a caller injects its own — see codeCheck.ts's module comment on why the local
  *  path stays exactly what it was, and what a hosted implementation would replace this with. */
@@ -341,7 +341,8 @@ print(json.dumps({"problems": problems, "warnings": warnings}))
   return sandbox
     .run({
       runtimeDir,
-      args: ["-c", script, projectDir, JSON.stringify(toolNames), JSON.stringify(reviewedFiles), JSON.stringify(mcpTools)],
+      args: ["-c", script, PROJECT_TOKEN, JSON.stringify(toolNames), JSON.stringify(reviewedFiles), JSON.stringify(mcpTools)],
+      project: projectDir,
       // No timeout existed here before this commit — AST-walking our own script over a staged
       // project is near-instant, so this is a defensive ceiling rather than a behaviour change
       // anything legitimate could ever reach.
@@ -428,7 +429,8 @@ print(json.dumps(problems))
   return sandbox
     .run({
       runtimeDir,
-      args: ["-c", script, dirname(projectDir), basename(projectDir)],
+      args: ["-c", script, PROJECT_PARENT_TOKEN, basename(projectDir)],
+      project: projectDir,
       // Top-level code can loop forever; a hung import must reject, not hang validation.
       timeoutMs: 20_000,
     })

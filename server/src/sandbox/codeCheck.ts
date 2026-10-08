@@ -21,6 +21,7 @@
 // what it does and does not yet prove.
 
 import { spawn } from "node:child_process";
+import { dirname } from "node:path";
 
 /**
  * The most either stream may produce before the check is killed.
@@ -54,6 +55,16 @@ export interface CodeCheckSpec {
    */
   stdin?: string;
   env?: NodeJS.ProcessEnv;
+  /**
+   * The directory this check reads, when it reads one — a staged project, or a materialised version.
+   *
+   * NAMED HERE RATHER THAN BY PATH IN `args`, because the check may not run on this machine. The
+   * shipped app's backend runs no model-written code, so a check is handed to the desktop app that
+   * asked for it (`desktopExec.ts`), where this server's temp directory does not exist. So the
+   * arguments and environment say `PROJECT_TOKEN` or `PROJECT_PARENT_TOKEN`, and whichever sandbox
+   * runs the check puts the project somewhere and says where. Locally that is the directory itself.
+   */
+  project?: string;
   /** Override MAX_OUTPUT_BYTES. Exists so the test can cross the cap without producing four
    *  megabytes; no caller in the server sets it. */
   maxOutputBytes?: number;
@@ -76,17 +87,41 @@ export interface CodeCheckSandbox {
   run(spec: CodeCheckSpec): Promise<CodeCheckResult>;
 }
 
+/** Stands for `CodeCheckSpec.project` in a check's arguments and environment. */
+export const PROJECT_TOKEN = "{{PROJECT}}";
+/** Stands for the directory holding `CodeCheckSpec.project` — what an import puts on `sys.path`. */
+export const PROJECT_PARENT_TOKEN = "{{PROJECT_PARENT}}";
+
+/**
+ * The spec's arguments and environment with the project tokens replaced by where it actually is.
+ *
+ * Every sandbox calls this with its own answer, so the tokens have exactly one meaning.
+ */
+export function placeProject(
+  spec: CodeCheckSpec,
+  where: { project: string; parent: string },
+): { args: string[]; env: NodeJS.ProcessEnv } {
+  const swap = (v: string) => v.split(PROJECT_PARENT_TOKEN).join(where.parent).split(PROJECT_TOKEN).join(where.project);
+  const env: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(spec.env ?? {})) if (v !== undefined) env[k] = swap(v);
+  return { args: spec.args.map(swap), env };
+}
+
 /** The trusted-developer's-own-machine implementation — see the module comment for why this is
  *  exactly what validator.ts and graphIntrospect.ts already did, just named and shared now. */
 export class LocalCodeCheckSandbox implements CodeCheckSandbox {
   run(spec: CodeCheckSpec): Promise<CodeCheckResult> {
+    // On this machine the project is exactly where it is.
+    const placed = spec.project
+      ? placeProject(spec, { project: spec.project, parent: dirname(spec.project) })
+      : { args: spec.args, env: spec.env ?? {} };
     return new Promise((resolve) => {
-      const child = spawn("uv", ["run", "python", ...spec.args], {
+      const child = spawn("uv", ["run", "python", ...placed.args], {
         cwd: spec.runtimeDir,
         env: {
           ...process.env,
           PATH: `/opt/homebrew/bin:${process.env.PATH ?? ""}`,
-          ...spec.env,
+          ...placed.env,
         },
       });
 

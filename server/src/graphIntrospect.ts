@@ -19,7 +19,8 @@
 // this module also exposes a caching wrapper the caller uses to introspect a given version at
 // most once, ever, rather than once per graph view.
 
-import { LocalCodeCheckSandbox, type CodeCheckSandbox } from "./sandbox/codeCheck.ts";
+import { join } from "node:path";
+import { LocalCodeCheckSandbox, PROJECT_TOKEN, type CodeCheckSandbox } from "./sandbox/codeCheck.ts";
 
 export interface GraphNode {
   id: string;
@@ -69,14 +70,15 @@ export async function introspectGraph(
   projectDir?: string,
   sandbox: CodeCheckSandbox = defaultCodeCheckSandbox,
 ): Promise<GraphResult> {
-  const env: NodeJS.ProcessEnv = {};
-  if (projectDir) env.JAROKU_AGENT_DIR = projectDir;
-
+  // ALWAYS A DIRECTORY, even for a hand-dropped agent under `runtime/agents/`, because the check
+  // may run on another machine (see codeCheck.ts's `project`) and the project has to travel with it.
+  // `JAROKU_AGENT_DIR` imports it under the same dotted name the runtime directory would have.
   const { stdout, stderr, spawnError, timedOut } = await sandbox.run({
     runtimeDir,
     args: ["-m", "jaroku_runner.graph", agentId],
     timeoutMs: TIMEOUT_MS,
-    env,
+    env: { JAROKU_AGENT_DIR: PROJECT_TOKEN },
+    project: projectDir ?? join(runtimeDir, "agents", agentId),
   });
 
   if (spawnError) return { agent_id: agentId, error: `spawn failed: ${spawnError}` };
