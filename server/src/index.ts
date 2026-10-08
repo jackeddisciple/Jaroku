@@ -2634,9 +2634,13 @@ async function agentGraph(ctx: TenantContext, agentId: string): Promise<GraphRes
       try {
         const written = await projects.materialise(ctx, agent.id, agent.current_version, dir);
         if (written.includes("agent.py")) {
+          // BY THE AGENT'S UUID, NOT THE SLUG `introspectGraphCached` is keyed by. `agent_versions.agent_id`
+          // is a uuid: on SQLite a slug simply matched nothing, so the cache never worked and nobody
+          // noticed; on Postgres it is "invalid input syntax for type uuid", which threw out of the
+          // read and turned every Graph tab on the hosted backend into an error.
           const store = {
-            getGraphCache: (id: string, v: number) => agentRepo.getGraphCache(ctx, id, v),
-            setGraphCache: (id: string, v: number, g: unknown) => agentRepo.setGraphCache(ctx, id, v, g),
+            getGraphCache: (_slug: string, v: number) => agentRepo.getGraphCache(ctx, agent.id, v),
+            setGraphCache: (_slug: string, v: number, g: unknown) => agentRepo.setGraphCache(ctx, agent.id, v, g),
           };
           return await introspectGraphCached(RUNTIME_DIR, agentId, agent.current_version, store, dir);
         }

@@ -103,6 +103,14 @@ console.log("\nan unreadable object explains itself without putting a key in the
     /error: "could not read this agent's files"/.test(branch) && !/\$\{.*key.*\}/.test(branch),
   );
 
+  // THE CACHE IS KEYED BY THE AGENT'S UUID. `introspectGraphCached` hands its store the slug it was
+  // called with; `agent_versions.agent_id` is a uuid, so passing that through was "invalid input
+  // syntax for type uuid" on Postgres — every Graph tab on the hosted backend was an error — and on
+  // SQLite a cache that silently never hit. The wrapper in index.ts is where the uuid is in hand.
+  const wrapper = /const store = \{[\s\S]*?\n {10}\};/.exec(source)?.[0] ?? "";
+  check("the graph cache is read by the agent's uuid, not by the slug it was called with",
+    /getGraphCache\(ctx, agent\.id, v\)/.test(wrapper) && /setGraphCache\(ctx, agent\.id, v, g\)/.test(wrapper), wrapper.slice(0, 200));
+
   // AND THE SHAPE IS ON THE TYPE, both sides. A field the server sends and the client's copy of
   // the type does not declare is a field no component can read, which is the same silence the
   // whole finding is about.
