@@ -161,18 +161,19 @@ export interface EvalRunnerDeps {
    */
   bindWorkspace?: (evalId: string, ctx: TenantContext) => void;
   /**
-   * What one of this eval's runs needs besides its job: the workspace it is recorded in and the
-   * credentials it calls its provider with.
+   * What one of this eval's runs needs besides its job: the workspace it is recorded in, the app it
+   * runs on, and the credentials it calls its provider with — or the sentence saying it cannot run.
    *
-   * WITHOUT IT AN EVAL RUN CARRIED NEITHER. Locally that was invisible: the subprocess inherited
-   * this process's environment and its events fell back to the only workspace there is. Hosted, the
-   * run had no key and no run token, and its trace was filed in the server's own workspace. Optional, so a runner built without it — every suite — runs as before.
+   * WITHOUT IT AN EVAL RUN CARRIED NONE OF THE THREE. Locally that was invisible: the subprocess
+   * inherited this process's environment and its events fell back to the only workspace there is.
+   * Hosted, the run had no key, no run token and no app to run on, and its trace was filed in the
+   * server's own workspace. Optional, so a runner built without it — every suite — runs as before.
    */
   runSetup?: (
     evalId: string,
     runId: string,
     job: { provider: string; agentId: string },
-  ) => Promise<{ workspaceId?: string; env?: NodeJS.ProcessEnv }>;
+  ) => Promise<{ workspaceId?: string; host?: TenantContext; env?: NodeJS.ProcessEnv; refusal?: string | null }>;
   /** `runSetup`'s undo, for a run that was set up and then never started — no exit is coming for it. */
   releaseRun?: (runId: string) => void;
   /**
@@ -644,6 +645,12 @@ export class EvalRunner {
     try {
       await this.deps.evalStore.markJobRunning(this.deps.context(), payload.jobId, runId, payload.attempt);
       const setup = (await this.deps.runSetup?.(payload.evalId, runId, { provider: payload.provider, agentId: payload.agentId })) ?? {};
+      if (setup.refusal) {
+        // It cannot start, and saying so is a failed job with the reason on it — the same ending a
+        // spawn error gets, through the same path, so its leases come back exactly once.
+        this.guard("refused run", this.onRunExit(runId, false, setup.refusal));
+        return "started";
+      }
       started = this.deps.pool.tryStart({
         runId,
         runtimeDir: this.deps.runtimeDir,
@@ -651,6 +658,7 @@ export class EvalRunner {
         input: payload.input,
         timeoutMs: DEFAULT_JOB_TIMEOUT_MS,
         ...(setup.workspaceId ? { workspaceId: setup.workspaceId } : {}),
+        ...(setup.host ? { host: setup.host } : {}),
         env: {
           ...(setup.env ?? {}),
           JAROKU_RUN_ID: runId,

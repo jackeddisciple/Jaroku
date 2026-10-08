@@ -22,6 +22,7 @@
 
 import type { EventEmitter } from "node:events";
 import type { TraceEvent } from "../types.ts";
+import type { TenantContext } from "../db/tenant.ts";
 import type { EgressPolicy } from "./egressPolicy.ts";
 
 /** Resource ceilings a sandbox enforces on the code it runs. Every field is required on the
@@ -73,6 +74,13 @@ export interface SandboxSpec {
    * on the hosted path: a hosted sandbox with no policy is a configuration error, not a wildcard.
    */
   egress?: EgressPolicy;
+  /**
+   * Who asked for this run — the request whose app a DESKTOP sandbox hands it to.
+   *
+   * Ignored by the local and Fly sandboxes, which run it where they stand. `desktopExec.ts` runs it
+   * on the asking person's own desktop app, and needs to know which one that is.
+   */
+  host?: TenantContext;
 }
 
 /** Typed events every RunSandbox implementation emits. Identical to what processManager.ts
@@ -104,12 +112,12 @@ export interface RunSandbox extends EventEmitter<SandboxEvents> {
 
 /** Which RunSandbox a server builds. Mirrors JAROKU_DB_DRIVER / JAROKU_OBJECT_STORE: local is
  *  the default and needs nothing installed; a hosted kind is added as Session 4 implements one. */
-export type SandboxKind = "local" | "fly";
+export type SandboxKind = "local" | "fly" | "desktop";
 
 export function sandboxKind(): SandboxKind {
   const raw = (process.env.JAROKU_RUN_SANDBOX ?? "local").trim().toLowerCase();
-  if (raw !== "local" && raw !== "fly") {
-    throw new Error(`JAROKU_RUN_SANDBOX must be "local" or "fly", not ${JSON.stringify(raw)}`);
+  if (raw !== "local" && raw !== "fly" && raw !== "desktop") {
+    throw new Error(`JAROKU_RUN_SANDBOX must be "local", "fly" or "desktop", not ${JSON.stringify(raw)}`);
   }
   return raw;
 }

@@ -159,7 +159,7 @@ pub fn environment() -> HashMap<String, String> {
 /// the sync's own decision about whether there is anything to sync WITH. A fourth copy of
 /// `install.join("bin").join(if cfg!(windows) { "uv.exe" } else { "uv" })` is a fourth place that
 /// stops being true the day the layout moves.
-fn uv_binary() -> Option<PathBuf> {
+pub(crate) fn uv_binary() -> Option<PathBuf> {
     let install = install_dir()?;
     let uv = install.join("bin").join(if cfg!(windows) { "uv.exe" } else { "uv" });
     uv.is_file().then_some(uv)
@@ -271,7 +271,10 @@ pub fn sync(
     // user's machine is how "it works on the release build" stops being a true sentence.
     let mut command = Command::new(uv);
     command
-        .args(["sync", "--frozen"])
+        // `--extra connectors` because a generated agent's Gmail, Slack, Stripe, Postgres and MCP
+        // tools import those SDKs, and a run on this machine is the only place they can run. The
+        // staging script caches the same extra, so this stays an offline install.
+        .args(["sync", "--frozen", "--extra", "connectors"])
         .current_dir(&runtime)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

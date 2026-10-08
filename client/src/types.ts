@@ -2094,6 +2094,23 @@ export type ServerMessage =
   | ({ channel: "work" } & WorkMessage)
   /** The answer to `ping`. Its arrival is the whole of its meaning. */
   | { channel: "heartbeat"; type: "pong" }
+  /**
+   * An agent's code check or run, handed to THIS app to execute on this machine — see lib/hostExec.ts.
+   *
+   * Sent to one socket, never broadcast. The app settles it with `execResult` whichever way it ends.
+   */
+  | {
+      channel: "exec";
+      type: "start";
+      execId: string;
+      kind: "check" | "run";
+      args: string[];
+      env?: Record<string, string>;
+      stdin?: string;
+      timeoutMs: number;
+      files?: { path: string; text?: string; b64?: string }[];
+    }
+  | { channel: "exec"; type: "stop"; execId: string; graceMs?: number }
   // `complete` and `window` are present only on the answer to `loadHistory` — a growing WINDOW
   // rather than a cursor, so the channel keeps its full-snapshot discipline and `applyHistory` keeps
   // merging by run id. A broadcast that carries neither leaves the flags alone.
@@ -2475,6 +2492,26 @@ export type ClientCommand =
       model?: string | null; effort?: string | null;
       inputTokens?: number | null; outputTokens?: number | null;
       agentId?: string | null; threadId?: string;
+    }
+  // Executing the server's Python on this machine — see lib/hostExec.ts.
+  | {
+      cmd: "reportExecHost";
+      protocol: number;
+      state: "ready" | "preparing" | "failed" | "unavailable";
+      detail: string | null;
+      /** Executions this app is still running, so a reconnected socket can claim them. */
+      running: string[];
+    }
+  | { cmd: "execLog"; execId: string; text: string }
+  | {
+      cmd: "execResult";
+      execId: string;
+      code: number | null;
+      timedOut: boolean;
+      truncated: boolean;
+      error: string | null;
+      stdout?: string;
+      stderr?: string;
     }
   | {
       cmd: "reportProviderHost";

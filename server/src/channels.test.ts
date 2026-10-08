@@ -157,6 +157,12 @@ const TENANT_CHANNELS = new Set([
   // carries the asking client's FILTER, and broadcasting one would replace a colleague's list with
   // somebody else's choice of what to look at.
   "work",
+  // An agent's code check or run, handed to ONE desktop app to execute — see sandbox/desktopExec.ts.
+  // The most sensitive payload on this list by a distance: it carries the workspace's generated
+  // source AND the credentials a run is given, its own provider key among them. It is never
+  // broadcast; `sendExec` delivers it to the one socket the broker chose, in the workspace the
+  // execution belongs to, and the broker accepts its answer from that socket alone.
+  "exec",
 ]);
 
 /**
@@ -673,6 +679,8 @@ console.log("\nfired live, in A, and B receives none of it");
   // that is not an answer to a specific read — and the delta beside it, which IS broadcast and is
   // therefore the one that has to be checked for leaking across the boundary.
   relay.sendWork(ctxA, ctxA.requestId, { type: "error", message: MARK });
+  // An execution goes to ONE socket in ONE workspace — ctxA's own — and must reach nobody in B.
+  relay.sendExec({ workspaceId: ctxA.workspaceId, requestId: ctxA.requestId }, { channel: "exec", type: "stop", execId: MARK });
   relay.broadcastWorkItem(ctxA, { id: "work-a", input_preview: MARK });
   // §7's recheck, which is the ONE message on this channel that is broadcast. It is fired here so
   // the assertion below can read its payload — see the block after this one.

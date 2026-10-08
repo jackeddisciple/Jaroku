@@ -495,6 +495,11 @@ export async function validateProject(
      * internally consistent, and must stay editable.
      */
     requireToolErrorHandling?: boolean;
+    /**
+     * Where the syntax and import checks run — this machine locally, the asking desktop app hosted.
+     * See codeCheck.ts. Absent means this machine, which is what every suite and `npm run dev` want.
+     */
+    sandbox?: CodeCheckSandbox;
   },
 ): Promise<ValidationResult> {
   const problems: string[] = [];
@@ -561,6 +566,7 @@ export async function validateProject(
     opts.connectorToolNames ?? [],
     reviewed,
     mcpToolMap(opts.mcpTools),
+    opts.sandbox,
   );
   problems.push(...analysis.problems);
   warnings.push(...analysis.warnings);
@@ -569,7 +575,7 @@ export async function validateProject(
   // Only reached when every cheaper check passed: we never execute code that is
   // already known to be bad, and a syntax error isn't reported twice.
   if (problems.length === 0) {
-    problems.push(...(await importCheck(opts.runtimeDir, projectDir)));
+    problems.push(...(await importCheck(opts.runtimeDir, projectDir, opts.sandbox)));
   }
 
   return { ok: problems.length === 0, problems, warnings };

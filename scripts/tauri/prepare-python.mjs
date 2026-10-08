@@ -144,7 +144,9 @@ console.log(`interpreter ${version}`);
 // it produced a cache that failed on the one command this whole script exists to make work —
 // verified, rather than reasoned about: an offline sync against that cache stopped at
 // "hatchling was not found in the cache".
-uv(["sync", "--frozen"], {
+// `--extra connectors`, matching python.rs's sync: a generated agent's connector tools import those
+// SDKs on the user's machine, and their wheels have to be in the cache for that to work offline.
+uv(["sync", "--frozen", "--extra", "connectors"], {
   UV_PROJECT_ENVIRONMENT: join(STAGE, ".build-venv"),
 });
 rmSync(join(STAGE, ".build-venv"), { recursive: true, force: true });

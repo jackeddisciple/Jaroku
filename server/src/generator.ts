@@ -32,6 +32,7 @@ import { FileProtocolParser, type ProtocolEvent } from "./fileProtocol.ts";
 import { round8 } from "./pricing.ts";
 import type { AgentRepository } from "./db/repositories/agents.ts";
 import type { TenantContext } from "./db/tenant.ts";
+import type { CodeCheckSandbox } from "./sandbox/codeCheck.ts";
 import { newStagingId, safeObjectPath } from "./storage/keys.ts";
 import type { ProjectStore } from "./storage/projectStore.ts";
 import { buildRepairPrompt, buildSystemPrompt, buildUserPrompt, type GenerationRequest } from "./prompt.ts";
@@ -54,6 +55,8 @@ export interface GeneratorDeps {
   runtimeDir: string;
   agents: AgentRepository;
   projects: ProjectStore;
+  /** Where this request's validation runs — see codeCheck.ts. Absent means this machine. */
+  codeCheckFor?: (ctx: TenantContext) => CodeCheckSandbox;
 }
 
 export interface GenerateOptions {
@@ -419,6 +422,7 @@ export class Generator extends EventEmitter<GeneratorEvents> {
           mcpTools: manifest,
           // Fresh project: the connector templates raise, so the tool node has to survive a raise.
           requireToolErrorHandling: true,
+          sandbox: this.deps.codeCheckFor?.(ctx),
         });
       };
       let result = await stageAndValidate();

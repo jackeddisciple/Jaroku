@@ -314,6 +314,12 @@ jobs:
           npm run test:backpressure
           npm run test:escape-suite
           npm run test:tenancy-isolation
+          # AND THE SANDBOX THE SHIPPED BACKEND ACTUALLY USES: the asking person's own desktop app. The
+          # backend runs no model-written code, so a check or a run is handed to ONE socket and only
+          # that socket may answer it; an app that closes gets its executions back for a while and
+          # then they end with a reason; and a run is never handed this server's paths, its
+          # checkpointer, or a platform key.
+          npm run test:desktop-exec
 
       # THE DEPLOY PATH, in a step of its own from its first suite — and the whole of it is new
       # to this file. `test:deploy-artifacts` and `test:deploy-secrets` have existed since the
@@ -1376,6 +1382,7 @@ jobs:
           # desktop log showed fifteen in a minute — six of them 316ms apart — from asks that overlapped:
           # the socket opening, Settings mounting, Check again pressed twice.
           npm run test:host-providers
+          npm run test:host-exec
           # WHAT THE SHELL SAYS THIS COMPUTER IS CALLED, for the header over the conversation: asked
           # once per page, and validated so a malformed answer leaves the header empty.
           npm run test:host-machine

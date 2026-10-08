@@ -67,6 +67,10 @@ tokio = { version = "1", features = ["time"] }
 # not a hole worth hand-rolling around. Already in the tree via tauri, so this names a version
 # rather than adding a dependency.
 url = "2"
+# DECODING THE FILES AN EXECUTION IS HANDED. A generated project is almost all text and travels as
+# text; the rare binary file in one travels as base64 rather than being dropped. Already in the tree
+# via tauri at this version, so this names it rather than adding a package.
+base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # The updater is behind a feature because a build of it needs a signing key pair that does not

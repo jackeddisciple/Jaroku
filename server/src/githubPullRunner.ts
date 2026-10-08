@@ -43,6 +43,7 @@ import type { Agent, AgentRepository } from "./db/repositories/agents.ts";
 import type { ProjectStore } from "./storage/projectStore.ts";
 import { newStagingId } from "./storage/keys.ts";
 import type { TenantContext } from "./db/tenant.ts";
+import type { CodeCheckSandbox } from "./sandbox/codeCheck.ts";
 import { isSafeAgentId, readOnlyPaths } from "./projectFs.ts";
 import { validateProject, type ValidationResult } from "./validator.ts";
 import type { StageReport } from "./githubPushRunner.ts";
@@ -94,6 +95,8 @@ export interface GithubPullerDeps {
   runtimeDir: string;
   connectorFilesFor: (agent: Agent | undefined, slug: string) => string[];
   log?: (line: string) => void;
+  /** Where this pull's validation runs — see codeCheck.ts. Absent means this machine. */
+  codeCheckFor?: (ctx: TenantContext) => CodeCheckSandbox;
 }
 
 export class GithubPuller {
@@ -241,6 +244,7 @@ export class GithubPuller {
         // had it. An agent generated before the templates started raising is internally consistent
         // and must stay pullable.
         requireToolErrorHandling: current.some((f) => /handle_tool_errors\s*=\s*True/.test(f.content)),
+        sandbox: this.deps.codeCheckFor?.(ctx),
       });
       if (!result.ok && !req.force) {
         const first = result.problems[0] ?? "validation failed";

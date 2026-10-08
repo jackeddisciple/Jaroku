@@ -13,6 +13,7 @@
 mod backend;
 mod clock;
 mod deeplink;
+mod exec;
 mod firstrun;
 mod logs;
 mod machine;
@@ -117,6 +118,9 @@ pub fn run() {
             provider_auth::provider_hosts,
             provider_turn::provider_turn_start,
             provider_turn::provider_turn_cancel,
+            exec::exec_host,
+            exec::exec_start,
+            exec::exec_stop,
             sidecar::restart_backend,
             deeplink::drain_deep_links,
             deeplink::open_checkout,
@@ -266,7 +270,12 @@ pub fn run() {
             // left is a window pointed at a URL, which is the entire application in that shape.
             let handle = app.handle().clone();
             if backend.is_remote() {
-                logs::detail("remote backend — nothing to extract, unpack or start");
+                logs::detail("remote backend — nothing to start; preparing Python to run agents here");
+                // BUT THE CODE STILL RUNS HERE. The remote backend has no Python and must never run
+                // model-written code, so checks and runs come back to this machine — see exec.rs.
+                // Prepared in the background: everything except running an agent works meanwhile,
+                // and the one surface that needs Python says so while this finishes.
+                std::thread::spawn(move || exec::prepare(&handle));
                 return Ok(());
             }
             tauri::async_runtime::spawn(async move {
@@ -406,6 +415,8 @@ pub fn run() {
                 sidecar::stop(app);
                 // AND ANY CHAT TURN STILL SPENDING SOMEBODY'S PLAN — see `provider_turn::cancel_all`.
                 provider_turn::cancel_all();
+                // AND ANY AGENT CODE STILL RUNNING FOR THE REMOTE BACKEND — see `exec::cancel_all`.
+                exec::cancel_all();
             }
         });
 }
@@ -437,6 +448,9 @@ fn with_updater(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         // comment claiming the contract suite compared the two lists. It does now, entry by entry.
         provider_turn::provider_turn_start,
         provider_turn::provider_turn_cancel,
+        exec::exec_host,
+        exec::exec_start,
+        exec::exec_stop,
         sidecar::restart_backend,
         deeplink::drain_deep_links,
         // ABSENT FROM THIS LIST ONCE TOO, which is why `desktopContract.test.ts` compares this list

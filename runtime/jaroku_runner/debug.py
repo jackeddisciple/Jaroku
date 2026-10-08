@@ -97,6 +97,29 @@ def checkpoint_db_path(run_id: str) -> Path:
 CHECKPOINT_SCHEMA = "langgraph"
 
 
+def adopt_parent_checkpoint(branch_run_id: str, parent_run_id: str) -> None:
+    """Copy a parent run's checkpoint file to a branch's, on the machine about to run the branch.
+
+    WHAT THE SERVER'S ``FileCheckpointStore.fork`` DOES, done here instead when the server cannot:
+    a run on the user's desktop app keeps its checkpoints in a file on THAT machine, so only that
+    machine can copy one. The parent is only read, exactly as there. A file already in place is
+    left alone — the server forked it, which is the local ``npm run dev`` path.
+    """
+    if checkpointer_kind() != "sqlite":
+        return
+    target = checkpoint_db_path(branch_run_id)
+    if target.exists():
+        return
+    source = checkpoint_db_path(parent_run_id)
+    if not source.exists():
+        raise RuntimeError(
+            "this run's checkpoints are not on this computer — branch it from the computer that ran it"
+        )
+    import shutil
+
+    shutil.copyfile(source, target)
+
+
 def checkpointer_kind() -> str:
     """``sqlite`` or ``postgres``. Anything else is a configuration error, not a fallback."""
     kind = (os.environ.get("JAROKU_CHECKPOINTER") or "sqlite").strip().lower()

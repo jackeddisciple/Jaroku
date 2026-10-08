@@ -326,6 +326,10 @@ import { DeployRuns } from "./deployRuns.ts";
 import { DeployReconciler, STOPPED_REPORTING } from "./deployReconcile.ts";
 import { sandboxImageRef } from "./sandbox/image.ts";
 import { FlyMachinesSandbox } from "./sandbox/flySandbox.ts";
+import {
+  DESKTOP_EXEC_PROTOCOL, DesktopCodeCheckSandbox, DesktopExecBroker, DesktopRunSandbox, hostRefOf,
+} from "./sandbox/desktopExec.ts";
+import { LocalCodeCheckSandbox, type CodeCheckSandbox } from "./sandbox/codeCheck.ts";
 import { TraceIngestMetrics } from "./sandbox/traceIngestMetrics.ts";
 import { BackpressureTracker } from "./sandbox/backpressure.ts";
 import { Dispatcher, defaultQueueBackend } from "./queue/dispatcher.ts";
@@ -413,9 +417,9 @@ setInterval(() => runTokenRevocations.sweep(), 10 * 60_000).unref();
 const CONTROL_PLANE_URL = process.env.JAROKU_CONTROL_PLANE_URL;
 const RUN_SANDBOX_KIND = sandboxKind();
 const FLY_APP = process.env.JAROKU_FLY_APP;
-if (RUN_SANDBOX_KIND === "fly" && !CONTROL_PLANE_URL) {
+if ((RUN_SANDBOX_KIND === "fly" || RUN_SANDBOX_KIND === "desktop") && !CONTROL_PLANE_URL) {
   throw new Error(
-    "JAROKU_RUN_SANDBOX=fly needs JAROKU_CONTROL_PLANE_URL — a hosted run has to be told where " +
+    `JAROKU_RUN_SANDBOX=${RUN_SANDBOX_KIND} needs JAROKU_CONTROL_PLANE_URL — a hosted run has to be told where ` +
       "to push its trace and poll for control, and there is no address to guess it from.",
   );
 }
@@ -809,10 +813,44 @@ function noteInbox(what: string, write: Promise<unknown>): void {
 // touching a slot an interactive run could have used. Both share the same sandbox factory,
 // event bus and run-token machinery — a run token only has to verify, not be unique to a
 // pool, and sharing them is simpler than two separate control-plane wiring paths.
+// AND THE DESKTOP KIND, which is what the shipped app's backend runs: an agent's code executes on
+// the desktop app of whoever asked for it, never here — see sandbox/desktopExec.ts. The broker hands
+// each execution to one socket; `relay` is resolved when an execution starts, long after boot.
+const desktopExec =
+  RUN_SANDBOX_KIND === "desktop"
+    ? new DesktopExecBroker({
+        pick: (ctx) => relay.execTarget(ctx, DESKTOP_EXEC_PROTOCOL),
+        send: (to, message) => relay.sendExec(to, message),
+      })
+    : null;
 const sandboxFactory =
   RUN_SANDBOX_KIND === "fly"
     ? () => new FlyMachinesSandbox({ app: FLY_APP!, bus: runEventBus, image: sandboxImageRef() })
-    : undefined;
+    : desktopExec
+      ? () => new DesktopRunSandbox({ broker: desktopExec, bus: runEventBus })
+      : undefined;
+
+/**
+ * Where this request's code checks run: on this machine locally, on the asking desktop app hosted.
+ *
+ * PER REQUEST, because a desktop check goes to one person's app and a module-level default cannot
+ * know whose. Every validation, graph and diagnostic call site asks this rather than reaching for a
+ * default — the default is the local one, and on the shipped backend there is no `uv` to run it.
+ */
+const localCodeCheck = new LocalCodeCheckSandbox();
+function codeCheckFor(ctx: TenantContext): CodeCheckSandbox {
+  return desktopExec ? new DesktopCodeCheckSandbox(desktopExec, ctx, randomUUID) : localCodeCheck;
+}
+
+/**
+ * Why this request's agent code cannot run right now, or null when it can.
+ *
+ * Asked BEFORE anything is spent — a generation's model turn, a run's budget hold — so "open the
+ * desktop app" is the first thing somebody hears rather than the last line of a failed build.
+ */
+function codeCannotRun(ctx: TenantContext): string | null {
+  return desktopExec ? desktopExec.unavailable(ctx) : null;
+}
 const poolOpts = {
   controlPlaneUrl: CONTROL_PLANE_URL,
   bus: runEventBus,
@@ -828,9 +866,11 @@ const poolOpts = {
 // The per-workspace RESERVATION (see acquireInteractiveSlot below) is real infrastructure
 // today regardless; widening activeRunId into a per-workspace map, so this number starts
 // doing something, is the documented next step — not delivered this session.
-const INTERACTIVE_CONCURRENCY = Math.max(1, Number(process.env.JAROKU_INTERACTIVE_CONCURRENCY ?? 1));
+// ON THE DESKTOP KIND A SLOT COSTS THIS SERVER NOTHING — the process is on somebody's own machine —
+// so the pool is sized for the people using it rather than for this machine's cores.
+const INTERACTIVE_CONCURRENCY = Math.max(1, Number(process.env.JAROKU_INTERACTIVE_CONCURRENCY ?? (desktopExec ? 64 : 1)));
 const interactivePool = new RunPool(INTERACTIVE_CONCURRENCY, poolOpts);
-const EVAL_CONCURRENCY = Math.max(1, Number(process.env.JAROKU_EVAL_CONCURRENCY ?? 4));
+const EVAL_CONCURRENCY = Math.max(1, Number(process.env.JAROKU_EVAL_CONCURRENCY ?? (desktopExec ? 32 : 4)));
 const evalPool = new RunPool(EVAL_CONCURRENCY, poolOpts);
 const planner = new Planner();
 
@@ -2032,7 +2072,7 @@ const projects = new ProjectStore(objects, agentRepo);
 // The builder, which now writes a version rather than a directory. Constructed here rather
 // than beside the run pool because it needs both of the two things above it: the table that
 // says which agents exist, and the store that says what they contain.
-const generator = new Generator({ runtimeDir: RUNTIME_DIR, agents: agentRepo, projects });
+const generator = new Generator({ runtimeDir: RUNTIME_DIR, agents: agentRepo, projects, codeCheckFor });
 
 // The fix loop, for the same reason: an edit reads the current version out of the store and
 // applies by publishing the next one.
@@ -2040,6 +2080,7 @@ const editor = new Editor({
   runtimeDir: RUNTIME_DIR,
   agents: agentRepo,
   projects,
+  codeCheckFor,
   // Interactive runs AND evals of this agent: an eval job is reading the agent's files right now,
   // and rewriting them mid-flight would make the trace describe code that never ran.
   canMutate: (ctx, agentId) =>
@@ -2657,7 +2698,7 @@ async function agentGraph(ctx: TenantContext, agentId: string): Promise<GraphRes
             getGraphCache: (_slug: string, v: number) => agentRepo.getGraphCache(ctx, agent.id, v),
             setGraphCache: (_slug: string, v: number, g: unknown) => agentRepo.setGraphCache(ctx, agent.id, v, g),
           };
-          return await introspectGraphCached(RUNTIME_DIR, agentId, agent.current_version, store, dir);
+          return await introspectGraphCached(RUNTIME_DIR, agentId, agent.current_version, store, dir, codeCheckFor(ctx));
         }
       } catch (err) {
         // THE KEY TRAVELS AS ITS OWN FIELD, and the sentence stays a sentence. `ObjectNotFound`
@@ -2679,7 +2720,7 @@ async function agentGraph(ctx: TenantContext, agentId: string): Promise<GraphRes
       // globally — so building the graph from there would show one tenant the topology of
       // another's agent. Only the workspace this process acts in may read a hand-dropped one.
       if (ctx.workspaceId === serverContext().workspaceId) {
-        return await introspectGraph(RUNTIME_DIR, agentId);
+        return await introspectGraph(RUNTIME_DIR, agentId, undefined, codeCheckFor(ctx));
       }
       return { agent_id: agentId, error: "this agent has no published version to build a graph from" };
     })();
@@ -5223,6 +5264,8 @@ const relay = new WsRelay({
   // every handler reached for the server's own instead. With one workspace the two are the
   // same object, which is exactly why it would have gone unnoticed until it was not.
   onCommand: (cmd: ForwardedCommand, ctx: TenantContext) => void dispatchCommand(cmd, ctx),
+  // What a closed app was executing waits for it to reconnect and claim it — see desktopExec.ts.
+  onSocketClosed: (closed) => desktopExec?.socketClosed(closed),
   entitles: (ctx: TenantContext, cmd: string, agentId: string | null) => entitlementRefusalFor(ctx, cmd, agentId),
   // The per-agent half of the same question — see the option's own doc, and
   // `agentAccessRefusalFor`, which is the only thing in this file that touches a grant.
@@ -5375,6 +5418,11 @@ async function dispatchCommand(cmd: ForwardedCommand, ctx: TenantContext): Promi
     // `recordBuildTurn` ends it. Neither touches the conversation.
     else if (cmd.cmd === "buildChunk") feedBuildTurn(ctx, cmd);
     else if (cmd.cmd === "recordBuildTurn") settleBuildTurn(ctx, cmd);
+    // An execution handed to a desktop app, reporting back. The broker checks it came from the socket
+    // the execution is on; a server that runs code itself has no broker and ignores all three.
+    else if (cmd.cmd === "reportExecHost") desktopExec?.hostReport(hostRefOf(ctx), cmd.running ?? []);
+    else if (cmd.cmd === "execLog") desktopExec?.log(hostRefOf(ctx), cmd.execId, cmd.text);
+    else if (cmd.cmd === "execResult") desktopExec?.result(hostRefOf(ctx), { ...cmd, error: cmd.error ?? null });
     else if (cmd.cmd === "stopChat") stopChat(ctx, cmd);
     else if (cmd.cmd === "selectVariant") void selectVariant(ctx, cmd);
     else if (AGENT_COMMAND_NAMES.has(cmd.cmd)) void handleAgentCommand(ctx, cmd as AgentCommand);
@@ -5582,14 +5630,17 @@ evalRunner = new EvalRunner({
   // that itself, between the eval becoming live and its first job, because nothing outside
   // knows the id before then.
   bindWorkspace: (evalId, ctx) => evalWorkspaces.set(evalId, ctx),
-  // EACH RUN IN THE ASKING WORKSPACE, WITH THE WORKSPACE'S OWN KEY — the two things a fresh
-  // interactive run gets in runAgent, and an eval run got neither of.
+  // EACH RUN IN THE ASKING WORKSPACE, ON THE ASKING PERSON'S APP, WITH THE WORKSPACE'S OWN KEY —
+  // the three things a fresh interactive run gets in runAgent, and an eval run got none of.
   runSetup: async (evalId, runId, job) => {
     const ctx = contextForEval(evalId);
+    const cannot = codeCannotRun(ctx);
+    if (cannot) return { refusal: cannot };
     const credentials = await continuationCredentials(ctx, runId, job.provider, job.agentId);
+    if (credentials.refusal) return { refusal: credentials.refusal };
     runWorkspaces.set(runId, ctx);
     liveRuns.set(runId, { workspaceId: ctx.workspaceId, agentId: job.agentId, kind: "eval", ended: false });
-    return { workspaceId: ctx.workspaceId, env: credentials.env };
+    return { workspaceId: ctx.workspaceId, host: ctx, env: credentials.env };
   },
   releaseRun: (runId) => {
     liveRuns.delete(runId);
@@ -9654,6 +9705,7 @@ const githubPusher = new GithubPusher({
         // agent that already had it, so a version generated before the templates started raising
         // stays reorderable.
         requireToolErrorHandling: files.some((f) => /handle_tool_errors\s*=\s*True/.test(f.content)),
+        sandbox: codeCheckFor(ctx),
       });
       return { ok: result.ok, problems: result.problems };
     } finally {
@@ -9816,6 +9868,7 @@ async function postCheckResult(evalId: string): Promise<void> {
 }
 
 const githubPuller = new GithubPuller({
+  codeCheckFor,
   repo: githubRepo,
   identity: githubIdentity,
   agents: agentRepo,
@@ -10678,8 +10731,8 @@ async function handleGithubCommand(ctx: TenantContext, cmd: GithubCommand): Prom
 
         const local = await projects.readCurrent(ctx, agent.id, agent.current_version);
         const [before, after] = await Promise.all([
-          readShape(remote, { runtimeDir: RUNTIME_DIR }),
-          readShape(local, { runtimeDir: RUNTIME_DIR }),
+          readShape(remote, { runtimeDir: RUNTIME_DIR, sandbox: codeCheckFor(ctx) }),
+          readShape(local, { runtimeDir: RUNTIME_DIR, sandbox: codeCheckFor(ctx) }),
         ]);
 
         // THE STORED CLASSIFICATION, LOOKED UP — never computed here. §B.7.2 mirrors the McpImpact
@@ -10804,6 +10857,7 @@ async function handleGithubCommand(ctx: TenantContext, cmd: GithubCommand): Prom
         const diagnostics = await liveDiagnostics(path, source, {
           runtimeDir: RUNTIME_DIR,
           knownTools,
+          sandbox: codeCheckFor(ctx),
         });
         relay.broadcastGithub(ctx, {
           type: "diagnostics",
@@ -12025,6 +12079,14 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     relay.broadcastGen(ctx, { type: "error", message: NO_SUBSCRIPTION });
     return;
   }
+  // A GENERATION IS VALIDATED BY RUNNING IT, and on the shipped backend that happens on the asking
+  // desktop app. Refused before the model turn rather than after it — a build that writes every file
+  // and then cannot check one has spent somebody's plan on nothing. The plan stays takeable.
+  const cannotCheck = codeCannotRun(ctx);
+  if (cannotCheck) {
+    relay.broadcastGen(ctx, cmd.planId ? { type: "plan_error", message: cannotCheck } : { type: "error", message: cannotCheck });
+    return;
+  }
   if (generating) {
     // On the planned path this must NOT be the plain "error" member: that one paints the
     // build pane as a failed generation, and the pending plan is still perfectly good. The
@@ -12407,6 +12469,12 @@ async function editAgent(
     relay.broadcastEdit(ctx, { type: "error", message: NO_SUBSCRIPTION, agentId });
     return;
   }
+  // An edit is validated by running it too — see generateAgent. Refused before the model turn.
+  const cannotCheck = codeCannotRun(ctx);
+  if (cannotCheck) {
+    relay.broadcastEdit(ctx, { type: "error", message: cannotCheck, agentId });
+    return;
+  }
   // Refused here rather than inside `propose`, so the refusal is answered to the asker and the
   // edit scope is left pointing at the workspace whose edit is actually running. The editor
   // refuses a second edit either way; what this adds is that a refused one cannot redirect the
@@ -12498,6 +12566,13 @@ async function runAgent(
   if (interactiveRunIn(ctx.workspaceId)) {
     console.log(`[manager] a run is already in progress in ${ctx.workspaceId}; refusing another`);
     relay.broadcastDebug(ctx, { type: "error", message: "A run is already in progress in this workspace. Stop it or wait for it to finish." });
+    return;
+  }
+  // AND WHERE IT WOULD RUN, before a budget hold or a key is touched: on the shipped backend an
+  // agent's code runs on the asking person's desktop app, and "open the app" is the first thing to say.
+  const cannotRun = codeCannotRun(ctx);
+  if (cannotRun) {
+    relay.broadcastDebug(ctx, { type: "error", message: cannotRun });
     return;
   }
   // The same check loadAgentGraph and agentProjectFiles already make. Without it a
@@ -12782,6 +12857,17 @@ async function runAgent(
   // which is why the refusals below say "connect a key" rather than "you are over budget". For
   // the population this can refuse, connecting a key is genuinely the fix.
   if (runPayer === "platform" && isRealProvider(provider)) {
+    // NEVER LENT TO A DESKTOP RUN. That run executes on somebody's own computer, and a key put in
+    // its environment is a key handed to whoever owns the machine. Their own key is the only one.
+    if (desktopExec) {
+      const envKey = PROVIDER_ENV_KEY[provider as ProviderId];
+      console.log(`[manager] refused run ${runId}: no ${envKey} of the workspace's own for a desktop run`);
+      relay.broadcastDebug(ctx, {
+        type: "error",
+        message: `Runs use your own ${provider} API key. Add ${envKey} in the Secrets tab, then run again.`,
+      });
+      return;
+    }
     const lent = await platformKeyGate.mayUsePlatformKey(ctx, billingPeriod().start);
     if (!lent.allowed) {
       console.log(`[billing] refused run ${runId} on the platform key (${lent.reason}): ${lent.message}`);
@@ -12892,7 +12978,7 @@ async function runAgent(
   const outcome = await interactiveSlots.reserveAndStart(ctx.workspaceId, runId, () =>
     interactivePool.tryStart({
       runId, runtimeDir: RUNTIME_DIR, input, agentId, env, workspaceId: ctx.workspaceId,
-      egress: runEgress,
+      egress: runEgress, host: ctx,
     }),
   );
   if (outcome !== "started") {
@@ -12965,13 +13051,16 @@ async function pauseRun(ctx: TenantContext, runId: string): Promise<void> {
  * where a developer's own key lives, so a resume "worked" on a laptop. A hosted run inherits nothing
  * — its environment is exactly what it is handed — so a paused real-provider run resumed with no key
  * at all and failed its first model call. Resolved here by NAME from the vault, as for a fresh run.
+ *
+ * A refusal only on the desktop kind, where a platform key is never lent; locally the inherited key
+ * still applies, as it always has.
  */
 async function continuationCredentials(
   ctx: TenantContext,
   runId: string,
   provider: string,
   agentId: string | null,
-): Promise<{ env: NodeJS.ProcessEnv }> {
+): Promise<{ env: NodeJS.ProcessEnv; refusal: string | null }> {
   const env: NodeJS.ProcessEnv = {};
   try {
     const agent = agentId ? await agentRepo.bySlug(ctx, agentId).catch(() => undefined) : undefined;
@@ -12993,7 +13082,11 @@ async function continuationCredentials(
   } catch (err) {
     console.warn(`[manager] could not resolve credentials for ${runId}: ${(err as Error).message}`);
   }
-  return { env };
+  if (desktopExec && isRealProvider(provider) && !env[PROVIDER_ENV_KEY[provider as ProviderId]]) {
+    const envKey = PROVIDER_ENV_KEY[provider as ProviderId];
+    return { env, refusal: `Runs use your own ${provider} API key. Add ${envKey} in the Secrets tab, then try again.` };
+  }
+  return { env, refusal: null };
 }
 
 // Resume a paused run from its durable checkpoint: a fresh subprocess continues the SAME run id,
@@ -13006,8 +13099,9 @@ async function resumeRun(ctx: TenantContext, runId: string): Promise<void> {
   // presses Resume as soon as the UI says "paused", which is exactly what the UI invites,
   // hits a slot that is about to free and was told nothing at all. The wait is bounded and
   // short because a paused run is always on its way out.
+  // Longer on the desktop kind: the exit is reported by an app over a socket, not by a local pipe.
   if (pausedRuns.has(runId) && liveRuns.has(runId)) {
-    const deadline = Date.now() + 2_000;
+    const deadline = Date.now() + (desktopExec ? 10_000 : 2_000);
     while (liveRuns.has(runId) && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 50));
     }
@@ -13035,7 +13129,16 @@ async function resumeRun(ctx: TenantContext, runId: string): Promise<void> {
     relay.broadcastDebug(ctx, { type: "error", runId, message: `run is ${run.status}, not paused` });
     return;
   }
+  const cannotResume = codeCannotRun(ctx);
+  if (cannotResume) {
+    relay.broadcastDebug(ctx, { type: "error", runId, message: cannotResume });
+    return;
+  }
   const credentials = await continuationCredentials(ctx, runId, run.provider, run.agent_id);
+  if (credentials.refusal) {
+    relay.broadcastDebug(ctx, { type: "error", runId, message: credentials.refusal });
+    return;
+  }
   const seqOffset = (await store.maxSeqForRun(ctx, runId)) + 1;
   clearControl(runId); // drop the pause request so it doesn't immediately re-pause
   await store.setRunStatus(ctx, runId, "running");
@@ -13053,7 +13156,7 @@ async function resumeRun(ctx: TenantContext, runId: string): Promise<void> {
   runWorkspaces.set(runId, ctx);
   liveRuns.set(runId, { workspaceId: ctx.workspaceId, agentId: run.agent_id ?? null, kind: "interactive", ended: false });
   const outcome = await interactiveSlots.reserveAndStart(ctx.workspaceId, runId, () =>
-    interactivePool.tryStart({ runId, runtimeDir: RUNTIME_DIR, agentId: run.agent_id, env, workspaceId: ctx.workspaceId }),
+    interactivePool.tryStart({ runId, runtimeDir: RUNTIME_DIR, agentId: run.agent_id, env, workspaceId: ctx.workspaceId, host: ctx }),
   );
   if (outcome !== "started") {
     liveRuns.delete(runId);
@@ -13113,6 +13216,11 @@ async function branchRun(
     relay.broadcastDebug(ctx, { type: "error", runId: fromRunId, message: "a run is active — stop it before branching" });
     return;
   }
+  const cannotBranch = codeCannotRun(ctx);
+  if (cannotBranch) {
+    relay.broadcastDebug(ctx, { type: "error", runId: fromRunId, message: cannotBranch });
+    return;
+  }
   const parent = await store.getRun(ctx, fromRunId);
   if (!parent) {
     relay.broadcastDebug(ctx, { type: "error", runId: fromRunId, message: "unknown run to branch from" });
@@ -13120,7 +13228,10 @@ async function branchRun(
   }
   // Resolve the node boundary containing `atSeq` — we fork at a whole-node boundary, never mid-node.
   const boundary = await store.boundaryForStep(ctx, fromRunId, atSeq);
-  if (!boundary || !(await checkpoints.has(ctx, fromRunId))) {
+  // ON THE DESKTOP KIND THE CHECKPOINTS ARE A FILE ON THE MACHINE THAT RAN THE PARENT, which this
+  // server cannot see — so the boundary is what is checked here, and the runner forks the file
+  // itself (`JAROKU_BRANCH_FROM_RUN_ID` below) and says so plainly if it is not on that machine.
+  if (!boundary || (!desktopExec && !(await checkpoints.has(ctx, fromRunId)))) {
     relay.broadcastDebug(ctx, { type: "error", runId: fromRunId, message: "no durable checkpoint for that step (branching needs a checkpointed run)" });
     return;
   }
@@ -13133,13 +13244,17 @@ async function branchRun(
     // inspectable. What "copy the checkpoints" means is the store's business: a file copy
     // locally, a scoped row copy hosted, and the parent read-only in both.
     await store.copyRunPrefix(ctx, fromRunId, branchId, seqHigh, seqHigh);
-    await checkpoints.fork(ctx, { fromRunId, toRunId: branchId, checkpointId });
+    if (!desktopExec) await checkpoints.fork(ctx, { fromRunId, toRunId: branchId, checkpointId });
   } catch (err) {
     relay.broadcastDebug(ctx, { type: "error", runId: fromRunId, message: `branch prep failed: ${(err as Error).message}` });
     return;
   }
 
   const credentials = await continuationCredentials(ctx, branchId, parent.provider, parent.agent_id);
+  if (credentials.refusal) {
+    relay.broadcastDebug(ctx, { type: "error", runId: fromRunId, message: credentials.refusal });
+    return;
+  }
   const env: NodeJS.ProcessEnv = {
     ...credentials.env,
     JAROKU_RUN_ID: branchId,
@@ -13147,8 +13262,10 @@ async function branchRun(
     JAROKU_WORKSPACE_ID: ctx.workspaceId,
     // The parent's thread, spelled the same way the parent spelled it. A branch re-enters an
     // existing thread, so this is the parent's full id rather than its run id — computing it
-    // here rather than in the runner keeps one definition of what a thread is called.
-    JAROKU_BRANCH_THREAD_ID: checkpointThreadId(ctx.workspaceId, fromRunId),
+    // here rather than in the runner keeps one definition of what a thread is called. A desktop
+    // run checkpoints to a local SQLite file, whatever this server's own checkpointer is.
+    JAROKU_BRANCH_THREAD_ID: checkpointThreadId(ctx.workspaceId, fromRunId, desktopExec ? "sqlite" : undefined),
+    ...(desktopExec ? { JAROKU_BRANCH_FROM_RUN_ID: fromRunId } : {}),
     JAROKU_BRANCH_CHECKPOINT_ID: checkpointId,
     JAROKU_SEQ_OFFSET: String(seqHigh + 1),
     JAROKU_PROVIDER: parent.provider,
@@ -13166,7 +13283,7 @@ async function branchRun(
   runWorkspaces.set(branchId, ctx);
   liveRuns.set(branchId, { workspaceId: ctx.workspaceId, agentId: parent.agent_id ?? null, kind: "interactive", ended: false });
   const outcome = await interactiveSlots.reserveAndStart(ctx.workspaceId, branchId, () =>
-    interactivePool.tryStart({ runId: branchId, runtimeDir: RUNTIME_DIR, agentId: parent.agent_id, env, workspaceId: ctx.workspaceId }),
+    interactivePool.tryStart({ runId: branchId, runtimeDir: RUNTIME_DIR, agentId: parent.agent_id, env, workspaceId: ctx.workspaceId, host: ctx }),
   );
   if (outcome !== "started") {
     liveRuns.delete(branchId);

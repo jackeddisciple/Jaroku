@@ -682,6 +682,36 @@ export type RecordChatTurnCommand = {
   threadId?: string;
 };
 
+/**
+ * The desktop shell saying whether it can execute an agent's code, and what it is still executing.
+ *
+ * THE SHIPPED BACKEND RUNS NO MODEL-WRITTEN CODE — see sandbox/desktopExec.ts — so a check or a run
+ * is handed to the app that asked. This is how the relay knows which apps can take one, and how a
+ * reconnected app claims the executions its previous socket was carrying.
+ */
+export type ReportExecHostCommand = {
+  cmd: "reportExecHost";
+  protocol: number;
+  state: "ready" | "preparing" | "failed" | "unavailable";
+  detail?: string | null;
+  running?: string[];
+};
+
+/** A run's stderr, relayed by the app executing it. Batched by the sender and bounded by the broker. */
+export type ExecLogCommand = { cmd: "execLog"; execId: string; text: string };
+
+/** How an execution handed to this app ended. Only the socket it was handed to may say. */
+export type ExecResultCommand = {
+  cmd: "execResult";
+  execId: string;
+  code: number | null;
+  timedOut?: boolean;
+  truncated?: boolean;
+  error?: string | null;
+  stdout?: string;
+  stderr?: string;
+};
+
 export type ReportProviderHostCommand = {
   cmd: "reportProviderHost";
   hosts: {
@@ -1841,6 +1871,9 @@ export type ClientCommand =
   | ProviderCommand
   | ListProvidersCommand
   | ReportProviderHostCommand
+  | ReportExecHostCommand
+  | ExecLogCommand
+  | ExecResultCommand
   | RecordChatTurnCommand
   | RecordBuildTurnCommand
   | BuildChunkCommand
@@ -1886,6 +1919,9 @@ const EVAL_COMMANDS = new Set([
 /** Commands the relay forwards to the app rather than answering locally. */
 export type ForwardedCommand =
   | RunCommand
+  | ReportExecHostCommand
+  | ExecLogCommand
+  | ExecResultCommand
   | RecordChatTurnCommand
   | RecordBuildTurnCommand
   | BuildChunkCommand
@@ -3807,6 +3843,13 @@ export interface SocketSession {
    * Absent until something reports, which is the state every browser client stays in forever.
    */
   hostProviders?: Map<string, HostObservation>;
+  /**
+   * Whether the desktop shell at the other end can execute an agent's code — see
+   * sandbox/desktopExec.ts. On the socket for `hostProviders`' reason: it describes a machine.
+   *
+   * Absent until something reports, which is the state every browser client stays in forever.
+   */
+  execHost?: { protocol: number; state: string; detail: string | null; observedAt: number };
   /** Unix seconds, or null when the socket was opened without a token (the dev path). */
   expiresAt?: number | null;
   /** The client's UTC offset, east-positive, as its last `listFleet` reported it. See ListFleetCommand. */
@@ -3930,6 +3973,9 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   setMcpServerAuth: "mcp", setMcpToolImpact: "mcp", resolveMcpConfirm: "mcp",
   listProviders: "providers", setOwnKeyForPlatform: "providers",
   reportProviderHost: "providers",
+  // An execution handed to a desktop app — see sandbox/desktopExec.ts. Nothing about one is shown on a
+  // panel of its own: a check settles into whatever asked for it, a run into its trace.
+  reportExecHost: "exec", execLog: "exec", execResult: "exec",
   recordChatTurn: "reply",
   // A build turn's refusal belongs where the build pane is watching, for `recordChatTurn`'s reason
   // one channel over: a refusal on `log` would leave the pane waiting on an answer that had already
@@ -4115,6 +4161,11 @@ export interface RelayOptions {
   // "loadRun", "listAgents", "loadAgentFiles", "loadAgentGraph", "listMcpServers" and
   // "listProviders" are answered locally; the rest are forwarded.
   onCommand?: (cmd: ForwardedCommand, ctx: TenantContext) => void;
+  /**
+   * A socket closed. Told so the executions it was carrying can wait for it to come back — see
+   * sandbox/desktopExec.ts — rather than holding a validation or a run's slot until a timeout.
+   */
+  onSocketClosed?: (closed: { workspaceId: string; requestId: string; userId: string | null }) => void;
   /**
    * May this workspace do one more of what this command does?
    *
@@ -4632,9 +4683,17 @@ export class WsRelay {
         }
       });
       const forget = (): void => {
+        const session = this.sessions.get(ws);
         this.clients.delete(ws);
         this.contexts.delete(ws);
         this.sessions.delete(ws);
+        if (session?.execHost) {
+          this.opts.onSocketClosed?.({
+            workspaceId: session.context.workspaceId,
+            requestId: session.context.requestId,
+            userId: session.userId ?? session.context.actorUserId ?? null,
+          });
+        }
       };
       ws.on("close", forget);
       ws.on("error", forget);
@@ -5164,6 +5223,31 @@ export class WsRelay {
               });
               this.sendSubscriptions(ws);
             });
+          } else if (msg.cmd === "reportExecHost") {
+            // STORED HERE, because the relay is what picks an app to execute on (`execTarget`), and
+            // FORWARDED, because the broker is what re-binds the executions a reconnected app names.
+            // Validated rather than trusted for `reportProviderHost`'s reason: a socket is a socket.
+            const states = ["ready", "preparing", "failed", "unavailable"];
+            if (typeof msg.protocol === "number" && Number.isInteger(msg.protocol) && states.includes(msg.state)) {
+              const session = this.sessions.get(ws);
+              if (session) {
+                session.execHost = {
+                  protocol: msg.protocol,
+                  state: msg.state,
+                  detail: typeof msg.detail === "string" ? msg.detail.slice(0, 400) : null,
+                  observedAt: Date.now(),
+                };
+              }
+              const running = Array.isArray(msg.running)
+                ? msg.running.filter((id): id is string => typeof id === "string").slice(0, 64)
+                : [];
+              void withContext((ctx) => this.onCommand?.({ ...msg, running }, ctx));
+            }
+          } else if (msg.cmd === "execLog" && typeof msg.execId === "string" && typeof msg.text === "string") {
+            void withContext((ctx) => this.onCommand?.(msg, ctx));
+          } else if (msg.cmd === "execResult" && typeof msg.execId === "string") {
+            // Only the socket an execution was handed to can settle it; the broker checks that.
+            void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "reportProviderHost") {
             // ANSWERED LOCALLY, like `listProviders` beside it: the relay holds the session this
             // describes, so there is nothing to forward and nobody better placed to answer.
@@ -5797,6 +5881,65 @@ export class WsRelay {
       sent++;
     }
     return sent;
+  }
+
+  /**
+   * The desktop app this request's agent code should execute on — see sandbox/desktopExec.ts.
+   *
+   * THE ASKING SOCKET FIRST, and otherwise another app held by THE SAME PERSON in the same workspace:
+   * a check started by a background step of somebody's own work still runs on their machine. Never a
+   * teammate's app. When there is none, the sentence says what would fix it, because "it did not
+   * run" is not something anybody can act on.
+   */
+  execTarget(ctx: TenantContext, minProtocol: number): { workspaceId: string; requestId: string; userId: string | null } | { refusal: string } {
+    let asking: SocketSession | undefined;
+    let best: SocketSession | undefined;
+    for (const [ws, session] of this.sessions) {
+      if (ws.readyState !== WebSocket.OPEN || session.context.workspaceId !== ctx.workspaceId) continue;
+      const mine = session.context.requestId === ctx.requestId;
+      if (mine) asking = session;
+      const sameUser = ctx.actorUserId !== null && (session.userId ?? session.context.actorUserId) === ctx.actorUserId;
+      if (!mine && !sameUser) continue;
+      const host = session.execHost;
+      if (!host || host.state !== "ready" || host.protocol < minProtocol) continue;
+      if (mine) {
+        best = session;
+        break;
+      }
+      if (!best || (best.execHost?.observedAt ?? 0) < host.observedAt) best = session;
+    }
+    if (best) {
+      return {
+        workspaceId: best.context.workspaceId,
+        requestId: best.context.requestId,
+        userId: best.userId ?? best.context.actorUserId ?? null,
+      };
+    }
+    const host = asking?.execHost;
+    if (host && host.protocol < minProtocol) {
+      return { refusal: "This version of Jaroku is too old to run agents. Update it (re-run the one-line install), then try again." };
+    }
+    if (host?.state === "preparing") {
+      return { refusal: `Jaroku is still setting up Python on this computer${host.detail ? ` (${host.detail})` : ""}. Try again in a minute.` };
+    }
+    if (host?.state === "failed") {
+      return { refusal: `Jaroku could not set up Python on this computer: ${host.detail ?? "unknown error"}. Quit and reopen Jaroku to retry.` };
+    }
+    if (asking) {
+      return { refusal: "Agents run in the Jaroku desktop app on your computer. Open this in the app (or update it), then try again." };
+    }
+    return { refusal: "Agents run in the Jaroku desktop app on your computer. Open Jaroku, then try again." };
+  }
+
+  /** Deliver an execution message to exactly one socket. False when it has gone. */
+  sendExec(to: { workspaceId: string; requestId: string }, message: unknown): boolean {
+    for (const [ws, session] of this.sessions) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      if (session.context.workspaceId !== to.workspaceId || session.context.requestId !== to.requestId) continue;
+      this.sendTo(ws, message);
+      return true;
+    }
+    return false;
   }
 
   /** Whether the socket with this request id is still open in this workspace. */

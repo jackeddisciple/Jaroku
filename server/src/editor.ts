@@ -46,6 +46,7 @@ import { validateProject } from "./validator.ts";
 import { BRIDGE_FILE, MANIFEST_FILE, type Manifest } from "./mcpManifest.ts";
 import type { AgentRepository, VersionFileStat } from "./db/repositories/agents.ts";
 import type { TenantContext } from "./db/tenant.ts";
+import type { CodeCheckSandbox } from "./sandbox/codeCheck.ts";
 import { newStagingId, safeObjectPath } from "./storage/keys.ts";
 import type { ProjectStore, StoredFile } from "./storage/projectStore.ts";
 
@@ -127,6 +128,8 @@ export interface EditorDeps {
   runtimeDir: string;
   agents: AgentRepository;
   projects: ProjectStore;
+  /** Where this request's validation runs — see codeCheck.ts. Absent means this machine. */
+  codeCheckFor?: (ctx: TenantContext) => CodeCheckSandbox;
   /** Returns a refusal message when this agent's project must not be mutated right now (a run of
    *  it is in flight in this workspace), or null when mutation is fine. */
   canMutate?: (ctx: TenantContext, agentId: string) => string | null;
@@ -503,6 +506,7 @@ export class Editor extends EventEmitter<EditorEvents> {
         // Agents generated before the connector templates started raising carry swallowing copies
         // of those templates, are internally consistent, and must stay editable.
         requireToolErrorHandling: hadToolErrorHandling,
+        sandbox: this.opts.codeCheckFor?.(ctx),
       });
       if (!result.ok) {
         await projects.discardStaging(ctx, agent.id, stagingId);

@@ -37,6 +37,7 @@ import { useActivityStore } from "../store/activityStore.ts";
 import { useAgentGridStore } from "../store/agentGridStore.ts";
 import { resetWorkspaceStores } from "../store/reset.ts";
 import { INPUT_KEY_PREFIX, useUiStore } from "../store/uiStore.ts";
+import { onExecHostChange, readExecHost, runningExecs, startExec, stopExec } from "./hostExec.ts";
 // A thread this client just created is opened here, which is a navigation — see the `threads`
 // handler. `threadNav` imports this module for `sendLoadThread`; the cycle is fine because both
 // sides only reach each other from inside a function, never at module scope.
@@ -631,6 +632,12 @@ function dispatch(msg: ServerMessage): void {
     case "heartbeat":
       // Nothing to do: arriving at all is what `onmessage` counts. See `startHeartbeat`.
       break;
+    case "exec":
+      // An agent's code check or run, to execute on this machine. The server waits on the
+      // `execResult` that `startExec` always sends, however the execution ends.
+      if (msg.type === "start") void startExec(msg, send);
+      else if (msg.type === "stop") stopExec(msg.execId, msg.graceMs);
+      break;
     case "work": {
       // A SNAPSHOT REPLACES AND A DELTA TOUCHES ONE ROW, and here the delta is the common case
       // rather than the exception: §5 makes a transition a single item precisely because a work
@@ -921,6 +928,11 @@ async function connect(): Promise<void> {
     // AND AGAIN WHENEVER SOMEBODY COMES BACK TO THE WINDOW, which is what signing in from a terminal
     // looks like from here. Installed once, by the first socket to open.
     watchForReturn();
+    // AND WHETHER THIS MACHINE CAN RUN AN AGENT'S CODE, which the server hands to the app that asks
+    // rather than running itself — see lib/hostExec.ts. Also on this socket's session, and for the
+    // same reason; the executions still running are named so a reconnect keeps them.
+    void reportExecHostNow();
+    watchExecHost();
   };
 
   socket.onmessage = (ev) => {
@@ -1926,6 +1938,29 @@ async function sendHostReport(): Promise<void> {
       authMode: h.authMode,
       note: h.note,
     })),
+  });
+}
+
+/**
+ * Tell the server whether this machine can execute an agent's code, and what it is still running.
+ *
+ * A no-op in a browser, where nothing is reported and the server says agents run in the desktop app.
+ */
+async function reportExecHostNow(): Promise<void> {
+  const report = await readExecHost();
+  if (!report) return;
+  send({ cmd: "reportExecHost", ...report, running: runningExecs() });
+}
+
+/** Whether the readiness listener is installed. Once per page, like the return listeners below. */
+let watchingExec = false;
+
+/** Re-report whenever the shell's readiness changes — a first launch finishing its Python setup. */
+function watchExecHost(): void {
+  if (watchingExec) return;
+  watchingExec = true;
+  void onExecHostChange((report) => {
+    if (ws && ws.readyState === WebSocket.OPEN) send({ cmd: "reportExecHost", ...report, running: runningExecs() });
   });
 }
 

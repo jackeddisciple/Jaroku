@@ -12,6 +12,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { RAILWAY_ENV_KEY } from "./railwayApi.ts";
 import { BackpressureTracker, describeViolation, type BackpressureViolation } from "./sandbox/backpressure.ts";
+import type { TenantContext } from "./db/tenant.ts";
 import type { EgressPolicy } from "./sandbox/egressPolicy.ts";
 import type { RunSandbox, SandboxEvents, SandboxSpec } from "./sandbox/runSandbox.ts";
 import { isTraceEvent, type TraceEvent } from "./types.ts";
@@ -43,6 +44,8 @@ export interface AgentRunOptions {
    * path would be a policy nobody exercises until production.
    */
   egress?: EgressPolicy;
+  /** Who asked — see SandboxSpec.host. Ignored here: a local run happens on this machine. */
+  host?: TenantContext;
 }
 
 /** Accepts both the pool's existing loose options and a full SandboxSpec — the local path

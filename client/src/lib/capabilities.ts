@@ -253,6 +253,12 @@ export const COMMAND_CAPABILITY: Record<string, string> = {
   // providers
   listProviders: "provider:read",
   reportProviderHost: "provider:read",
+  // An agent's code executed on THIS socket's app, reporting back — see sandbox/desktopExec.ts. The
+  // lowest read grant, because whoever can open a Graph tab has a check run on their own machine;
+  // the broker accepts a result only from the socket the execution was handed to.
+  reportExecHost: "agent:read",
+  execLog: "agent:read",
+  execResult: "agent:read",
   recordChatTurn: "agent:read",
   // Answering the plan/generation turn this app was handed, and the text arriving while it does.
   // Mirrors server/src/auth/capabilities.ts — and has no agent-level entry there for the reason

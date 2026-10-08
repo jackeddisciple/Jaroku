@@ -31,7 +31,7 @@ from jaroku_interceptor.schema import bind_trace_sink, emit_run_end, emit_run_st
 
 from . import controlplane_http
 from .contract import ContractError, load_agent, tools_of
-from .debug import emit_ctrl, run_with_checkpoints, thread_id_for
+from .debug import adopt_parent_checkpoint, emit_ctrl, run_with_checkpoints, thread_id_for
 from .guard import install_stdout_guard
 from .models import RUN_PROVIDERS, build_model, resolve_model_name
 
@@ -117,6 +117,12 @@ def main(argv: list[str]) -> int:
 
     paused = False
     try:
+        # A branch run on a desktop app forks its parent's checkpoint file here, because that file
+        # is on this machine and nowhere else. Inside the try, so a parent that is not here ends as
+        # an errored run that says so rather than as silence.
+        branch_from = os.environ.get("JAROKU_BRANCH_FROM_RUN_ID") or None
+        if branching and branch_from:
+            adopt_parent_checkpoint(run.id, branch_from)
         module = load_agent(agent_id)
         tools = tools_of(module)
         llm, provider, model_name = build_model(provider, model_name, tools)
