@@ -56,6 +56,13 @@ primary_region = "iad"
   # deploy, because the gateway image carries no Python toolchain and is not the tier that would
   # run one anyway — that is the sandbox.
   JAROKU_NO_AUTORUN = "1"
+  # WHERE AN AGENT'S CODE RUNS: on the desktop app of whoever asked for it. This image has no
+  # Python and must never run model-written code, so without this every generation failed its own
+  # import check (`spawn uv ENOENT`) and no run, eval or Graph tab could start. See
+  # server/src/sandbox/desktopExec.ts. The public address is where a run on somebody's machine
+  # pushes its trace back to; it is not a secret.
+  JAROKU_RUN_SANDBOX = "desktop"
+  JAROKU_CONTROL_PLANE_URL = "https://jaroku-api.fly.dev"
 
 [http_service]
   internal_port = 4317
