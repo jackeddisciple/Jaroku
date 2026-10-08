@@ -1509,6 +1509,7 @@ jobs:
           # a `+` or a `/` in them, with "that invitation is not valid" as the only symptom.
           npm run test:invite
           npm run test:plan-flow
+          npm run test:plan-stream
           npm run test:deploy-store
           npm run test:note-kind
           npm run test:inline-code

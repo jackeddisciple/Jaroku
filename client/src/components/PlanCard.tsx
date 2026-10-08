@@ -24,6 +24,7 @@ import { Icon } from "../lib/icons/registry.ts";
 import { ACCENT, ICON } from "../lib/tokens.ts";
 import { noteKind } from "../lib/noteKind.ts";
 import { useStreamedText } from "../lib/useStreamedText.ts";
+import { readablePlanStream } from "../lib/planStream.ts";
 import { BRAND_COLOR } from "../lib/icons.tsx";
 import { actionForToolOrigin } from "../lib/actionIcons.tsx";
 import { ActionRow } from "./ActionRow.tsx";
@@ -372,7 +373,7 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
         <div className="text-run">{turn.revision > 1 ? "Revising the plan…" : "Planning…"}</div>
         {streamingRaw && (
           <div className="mt-2 whitespace-pre-wrap break-words text-muted">
-            {streamingRaw}
+            {readablePlanStream(streamingRaw)}
             <span className="animate-stream-pulse text-faint motion-reduce:animate-none">▋</span>
           </div>
         )}
