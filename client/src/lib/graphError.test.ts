@@ -108,5 +108,16 @@ console.log("\nevery mapped class offers a retry, and none of them promises one 
   check("...and an import failure does offer one", graphErrorCopy(AUDIT).next !== null);
 }
 
+console.log("\nthe checks a desktop app could not take");
+for (const raw of [
+  "spawn failed: Agents run in the Jaroku desktop app on your computer. Open Jaroku, then try again.",
+  "spawn failed: Jaroku is still setting up Python on this computer (unpacking Python). Try again in a minute.",
+  "spawn failed: This version of Jaroku is too old to run agents. Update it (re-run the one-line install), then try again.",
+  "spawn failed: the Jaroku app running this closed before it finished",
+]) {
+  const copy = graphErrorCopy(raw);
+  check(`"${raw.slice(14, 60)}…" says the graph is drawn on your computer`, copy.title === "This graph is drawn on your computer" && copy.raw === raw && copy.retryable);
+}
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 (globalThis as { process?: { exit(code: number): void } }).process?.exit(fail === 0 ? 0 : 1);

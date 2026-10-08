@@ -46,6 +46,19 @@ export interface GraphErrorCopy {
  */
 const CLASSES: { id: string; match: RegExp; copy: Omit<GraphErrorCopy, "raw"> }[] = [
   {
+    // FIRST, because the check never reached the project at all. The graph is introspected by the
+    // desktop app that asked (the hosted backend runs no agent code), and these are the ways that
+    // app could not take it: not open, still setting up Python, or too old to know how.
+    id: "host",
+    match: /Jaroku desktop app|setting up Python|preparing Python|could not set up Python|too old to run agents|app (?:that asked for this|running this) closed/i,
+    copy: {
+      title: "This graph is drawn on your computer",
+      sentence: "An agent's code runs in the Jaroku app on your computer, and it could not run this check just now.",
+      next: "Open Jaroku (or update it), give it a moment, then try again.",
+      retryable: true,
+    },
+  },
+  {
     id: "import",
     match: /ModuleNotFoundError|ImportError|No module named|cannot import|ContractError/i,
     copy: {
