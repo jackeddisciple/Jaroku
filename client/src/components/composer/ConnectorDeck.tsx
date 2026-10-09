@@ -22,6 +22,7 @@ import { useRef, useState } from "react";
 import { Glyph, GLYPH, HIT_TARGET } from "../icons.ts";
 import { Icon } from "../../lib/icons/registry.ts";
 import { Popover, PopoverNote } from "./Popover.tsx";
+import { Tip } from "../ui/tooltip.tsx";
 import { Checkbox } from "../Checkbox.tsx";
 import { Truncate } from "../Truncate.tsx";
 import { EmptyState } from "../EmptyState.tsx";
@@ -44,7 +45,6 @@ function Tile({
 }) {
   return (
     <span
-      title={`${connector.label}${connector.enabled ? "" : " — off for this conversation"}`}
       className="inline-flex shrink-0 items-center justify-center overflow-hidden transition-[margin] duration-fast motion-reduce:transition-none"
       style={{
         width: DECK.tile,
@@ -100,52 +100,56 @@ export function ConnectorDeck({
   const layout = deckLayout(connectors);
 
   const enabledCount = connectors.filter((c) => c.enabled).length;
+  // THE NAMES RIDE ON THE DECK'S OWN TOOLTIP. Each tile used to carry a native `title` of its own,
+  // which inside a trigger that now has a `Tip` would put two tooltips under one pointer.
+  const deckLabel = connectors.length === 0
+    ? "No connectors in this workspace"
+    : `${enabledCount} of ${connectors.length} connector${connectors.length === 1 ? "" : "s"} available here · ${
+      connectors.map((c) => `${c.label}${c.enabled ? "" : " (off)"}`).join(", ")
+    }`;
 
   return (
     <div className="relative shrink-0">
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-        disabled={disabled}
-        aria-label={`Connectors — ${enabledCount} of ${connectors.length} available to this conversation`}
-        aria-expanded={open}
-        aria-haspopup="menu"
-        title={
-          connectors.length === 0
-            ? "No connectors in this workspace"
-            : `${enabledCount} of ${connectors.length} connector${connectors.length === 1 ? "" : "s"} available here`
-        }
-        className="inline-flex items-center gap-1.5 rounded-control px-1 text-muted transition-colors duration-fast
-          hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring
-          disabled:cursor-not-allowed disabled:opacity-30"
-        style={{ minWidth: HIT_TARGET, minHeight: HIT_TARGET }}
-      >
-        {layout.present && (
-          <span className="inline-flex items-center" aria-hidden>
-            {layout.tiles.map((c, i) => (
-              <Tile key={c.id} connector={c} index={i} total={layout.tiles.length} hovered={hovered} />
-            ))}
-            {layout.overflow > 0 && (
-              // "+N in the same footprint" — the same 20px box, so the deck's width does not jump
-              // between a workspace with three connectors and one with nine.
-              <span
-                className="inline-flex shrink-0 items-center justify-center text-tiny text-muted"
-                style={{
-                  width: DECK.tile, height: DECK.tile, borderRadius: DECK.radius,
-                  marginLeft: tileOffset(1, hovered), background: SURFACE.active,
-                  boxShadow: `0 0 0 ${DECK.ring}px ${SURFACE.panel}`, zIndex: 0,
-                }}
-              >
-                +{layout.overflow}
-              </span>
-            )}
-          </span>
-        )}
-        <Glyph icon={Icon.composer.connectors} size={GLYPH.toolbar} />
-      </button>
+      <Tip label={deckLabel} hide={open}>
+        <button
+          ref={triggerRef}
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
+          disabled={disabled}
+          aria-label={`Connectors — ${enabledCount} of ${connectors.length} available to this conversation`}
+          aria-expanded={open}
+          aria-haspopup="menu"
+          className="inline-flex items-center gap-1.5 rounded-control px-1 text-muted transition-colors duration-fast
+            hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring
+            disabled:cursor-not-allowed disabled:opacity-30"
+          style={{ minWidth: HIT_TARGET, minHeight: HIT_TARGET }}
+        >
+          {layout.present && (
+            <span className="inline-flex items-center" aria-hidden>
+              {layout.tiles.map((c, i) => (
+                <Tile key={c.id} connector={c} index={i} total={layout.tiles.length} hovered={hovered} />
+              ))}
+              {layout.overflow > 0 && (
+                // "+N in the same footprint" — the same 20px box, so the deck's width does not jump
+                // between a workspace with three connectors and one with nine.
+                <span
+                  className="inline-flex shrink-0 items-center justify-center text-tiny text-muted"
+                  style={{
+                    width: DECK.tile, height: DECK.tile, borderRadius: DECK.radius,
+                    marginLeft: tileOffset(1, hovered), background: SURFACE.active,
+                    boxShadow: `0 0 0 ${DECK.ring}px ${SURFACE.panel}`, zIndex: 0,
+                  }}
+                >
+                  +{layout.overflow}
+                </span>
+              )}
+            </span>
+          )}
+          <Glyph icon={Icon.composer.connectors} size={GLYPH.toolbar} />
+        </button>
+      </Tip>
 
       <Popover open={open} onClose={() => setOpen(false)} triggerRef={triggerRef} label="Connectors" width={320}>
         {connectors.length === 0 ? (

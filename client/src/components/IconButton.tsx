@@ -6,10 +6,11 @@
 // without a name is a rule nobody has to remember. An icon-only button with no accessible name is
 // unusable with a screen reader and unguessable with a mouse, and this product had a dozen of them.
 //
-// `title` is the tooltip primitive, deliberately. §8 says use the existing one and do not add a
-// second, and the existing one in this codebase is the native title attribute — it is what every
-// `title=` in these components already is, it needs no portal, and it works while the app is
-// mid-render. Introducing a floating tooltip here would mean two tooltip behaviours in one row.
+// `title` is still the tooltip here. §8's rule was one tooltip primitive, and it was the native
+// title attribute. On 2026-10-09 the product owner chose shadcn's (`Tip`, ui/tooltip.tsx), and the
+// app moves to it ONE WHOLE ROW AT A TIME — the right-hand rail and the composer's bottom row first —
+// because a row that answers hovers two different ways is worse than either way. This component
+// moves when the rows it sits in do.
 //
 // HIT TARGET IS 32×32 REGARDLESS OF THE MARK INSIDE IT, from `HIT_TARGET`. A 14px icon in a 14px
 // button is a control you miss on a trackpad and cannot hit at all on touch, and the composer's

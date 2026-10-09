@@ -212,7 +212,8 @@ console.log("\n§16 — a disabled Send says why");
   // `missingKey` is false on a fresh disconnect and would otherwise win the ternary.
   check("the button's label names it first",
     /aria-label=\{!connected \? OFFLINE_SEND/.test(pane), "aria-label order");
-  check("...and so does its tooltip", /title=\{!connected \? OFFLINE_SEND/.test(pane), "title order");
+  // The tooltip is a `Tip` now (2026-10-09, the composer row moved off the native `title`).
+  check("...and so does its tooltip", /<Tip\s+label=\{!connected \? OFFLINE_SEND/.test(pane), "tooltip order");
   check("...from one string, so hover and screen reader agree",
     (pane.match(/OFFLINE_SEND/g) ?? []).length === 3, String((pane.match(/OFFLINE_SEND/g) ?? []).length));
 }

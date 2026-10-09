@@ -31,6 +31,7 @@ import { StepDetailPanel } from "./StepDetailPanel.tsx";
 import { AgentDetail } from "./AgentDetail.tsx";
 import { useAgentGridStore } from "../store/agentGridStore.ts";
 import { ICON } from "../lib/tokens.ts";
+import { Tip } from "./ui/tooltip.tsx";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import {
   AlertTriangleIcon, ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, ChevronLeftIcon, RefreshIcon,
@@ -97,8 +98,8 @@ function GithubBadge({ badge, syncing }: { badge: string; syncing: boolean }) {
       : ArrowDownIcon;
   const tone = head === "⟳" ? "text-run" : head === "⚠" || head === "↕" ? "text-err" : "text-muted";
   return (
+    // No tooltip of its own: the tab it sits in says "GitHub: <this>" (see the rail below).
     <span
-      title={`GitHub: ${badge}`}
       className={`absolute -right-1 -top-1 inline-flex items-center rounded-xs bg-bg px-0.5 leading-none ${tone}`}
     >
       {/* The circular arrow IS the spinner — it is drawn as three quarters of a turn for exactly
@@ -302,16 +303,17 @@ export function RightPanelRail() {
           other edge of the window, one glyph in two states with a label that names the action.
           Outside the tablist because it is not a destination: it shows or hides whichever tab is
           chosen, and a closed panel opens on the tab it last had. */}
-      <button
-        type="button"
-        title={toggleLabel}
-        aria-label={toggleLabel}
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-active/40 hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
-      >
-        <Icon.panel.toggle size={ICON.md} />
-      </button>
+      <Tip label={toggleLabel} side="left">
+        <button
+          type="button"
+          aria-label={toggleLabel}
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-active/40 hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+        >
+          <Icon.panel.toggle size={ICON.md} />
+        </button>
+      </Tip>
 
       {/* A hairline between the control and the destinations, and the reason the ten marks sit a
           little lower than they did: the toggle acts on the panel, the marks choose what is in it. */}
@@ -340,54 +342,59 @@ export function RightPanelRail() {
           // LIT ONLY WHILE THE PANEL SHOWS IT. A closed panel still has a tab in the store and
           // nothing on screen, and a highlighted cell would say otherwise.
           const shown = open && active;
+          const tip = t.id === "github" && githubBadge
+            ? `GitHub: ${githubBadge}`
+            : t.id === "secrets" && secretsNeedAttention
+              ? `${t.label} · A credential needs attention`
+              : t.label;
           return (
-            <button
-              key={t.id}
-              type="button"
-              role="tab"
-              aria-selected={shown}
-              tabIndex={active ? 0 : -1}
-              ref={(el) => {
-                // Focus follows selection only while the rail already has it — an arrow press
-                // should move the focus ring with the choice, but a click from the trace pane
-                // must not yank focus out of what somebody was reading.
-                if (active && el && el.parentElement?.contains(document.activeElement)) el.focus();
-              }}
-              // The tooltip is not decoration here — it is the label. A glyph nobody can name is
-              // a worse control than the word it replaced, so every cell in this rail carries
-              // both a title for the pointer and a name for assistive tech.
-              title={t.label}
-              aria-label={t.label}
-              onClick={() => (shown ? setOpen(false) : setTab(t.id))}
-              className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
-                shown ? "bg-active text-accent" : "text-muted hover:bg-active/40 hover:text-ink"
-              }`}
-            >
-              {/* `lg`, MATCHING THE SIDEBAR'S DESTINATIONS. These two rails are the same kind of
-                  control on opposite edges of the window — a column of marks that each swap what
-                  fills the middle — and two of them at different sizes reads as one of them being
-                  a lesser version of the other. The cell grows with the mark so the padding around
-                  it is unchanged. */}
-              <t.Mark size={ICON.lg} />
-              {/* THE ONE BADGE IN THIS RAIL, and it is computable while the tab is locked — the
-                  health route answers in counts, without elevation, so somebody is not asked for a
-                  passcode to be told whether they need to care. Carries a title as well as a colour,
-                  because a coloured dot alone says nothing to a screen reader. */}
-              {/* Amber for anything in flight, the error tone for a stopped state. Diverged is NOT
-                  amber, deliberately: it is not something working, it is something waiting for a
-                  person, and wearing the running colour would make it read as progress. */}
-              {t.id === "github" && githubBadge ? (
-                <GithubBadge badge={githubBadge} syncing={githubBadge === "⟳"} />
-              ) : null}
-              {t.id === "secrets" && secretsNeedAttention ? (
-                <span
-                  title="A credential needs attention"
-                  aria-label="A credential needs attention"
-                  role="img"
-                  className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-run"
-                />
-              ) : null}
-            </button>
+            // The tooltip is not decoration here — it is the label. A glyph nobody can name is a
+            // worse control than the word it replaced, so every cell carries both a tooltip for the
+            // pointer and a name for assistive tech. A cell's badge rides on the cell's tooltip
+            // rather than on one of its own, so one pointer never raises two.
+            <Tip key={t.id} label={tip} side="left">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={shown}
+                tabIndex={active ? 0 : -1}
+                ref={(el) => {
+                  // Focus follows selection only while the rail already has it — an arrow press
+                  // should move the focus ring with the choice, but a click from the trace pane
+                  // must not yank focus out of what somebody was reading.
+                  if (active && el && el.parentElement?.contains(document.activeElement)) el.focus();
+                }}
+                aria-label={t.label}
+                onClick={() => (shown ? setOpen(false) : setTab(t.id))}
+                className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+                  shown ? "bg-active text-accent" : "text-muted hover:bg-active/40 hover:text-ink"
+                }`}
+              >
+                {/* `lg`, MATCHING THE SIDEBAR'S DESTINATIONS. These two rails are the same kind of
+                    control on opposite edges of the window — a column of marks that each swap what
+                    fills the middle — and two of them at different sizes reads as one of them being
+                    a lesser version of the other. The cell grows with the mark so the padding around
+                    it is unchanged. */}
+                <t.Mark size={ICON.lg} />
+                {/* THE ONE BADGE IN THIS RAIL, and it is computable while the tab is locked — the
+                    health route answers in counts, without elevation, so somebody is not asked for a
+                    passcode to be told whether they need to care. Carries a title as well as a colour,
+                    because a coloured dot alone says nothing to a screen reader. */}
+                {/* Amber for anything in flight, the error tone for a stopped state. Diverged is NOT
+                    amber, deliberately: it is not something working, it is something waiting for a
+                    person, and wearing the running colour would make it read as progress. */}
+                {t.id === "github" && githubBadge ? (
+                  <GithubBadge badge={githubBadge} syncing={githubBadge === "⟳"} />
+                ) : null}
+                {t.id === "secrets" && secretsNeedAttention ? (
+                  <span
+                    aria-label="A credential needs attention"
+                    role="img"
+                    className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-run"
+                  />
+                ) : null}
+              </button>
+            </Tip>
           );
         })}
       </div>

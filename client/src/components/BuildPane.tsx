@@ -40,6 +40,7 @@ import { absTime, fmtCost, fmtTokens } from "../lib/format.ts";
 import { isProviderId, type ProviderModel } from "../types.ts";
 import { primaryBtn, secondaryBtn } from "./buttons.ts";
 import { Chip, chipClass } from "./Chip.tsx";
+import { Tip } from "./ui/tooltip.tsx";
 import { ChoiceRow, type Choice } from "./ChoiceRow.tsx";
 import { DiffCard } from "./DiffCard.tsx";
 import { EmptyState } from "./EmptyState.tsx";
@@ -1391,35 +1392,38 @@ function ModelSelector({
     // are `shrink-0` and therefore paint straight over the control beside them. 3.5rem is the chip
     // with no label at all: the padding, the provider mark, the gap and the chevron.
     <div ref={ref} className="relative min-w-[3.5rem]">
-      <Chip
-        size="lg"
-        className="max-w-full"
-        selected={open}
-        onClick={() => setOpen((o) => !o)}
-        // THE WHOLE LABEL IS IN THE TOOLTIP, and it names BOTH — because the chip shows one of the
-        // two and somebody hovering it wants to know what the other is set to without opening the
-        // menu.
-        title={`You talk to Jaroku on ${chatLabel} · this agent runs on ${label}`}
-        icon={<ProviderMark provider={chatProvider || provider} size={12} />}
-      >
-        {/* A model's name is prose — "GPT-5.6 Luna" — so it is not set in mono. */}
-        {/* `truncate` RATHER THAN THE CHIP'S OWN BREAK RULE. `chipClass` sets
-            `overflow-wrap:anywhere` on every chip, for the good reason that a tool id or a file
-            path should break rather than overflow the row it sits in — but this chip sits in a row
-            that may not wrap, and prose breaks in a way an identifier does not: at a narrow
-            composer "Dry run (free)" came out one character per line, fifteen lines tall, and
-            pushed the mic and the send button out of a bar whose own rule is that those two never
-            collapse. A control's label shortens; it never breaks. */}
-        <span className="min-w-0 truncate">{chatLabel}</span>
-        {/* Points down at a closed menu and up at an open one — this popover opens upward, and a
-            chevron that keeps pointing down while the list is above it is pointing at nothing. */}
-        <span
-          className={`shrink-0 transition-transform duration-fast ${open ? "rotate-180" : ""}`}
-          aria-hidden
-        >
-          <ChevronDownIcon size={ICON.xs} />
+      {/* THE WHOLE LABEL IS IN THE TOOLTIP, and it names BOTH — because the chip shows one of the
+          two and somebody hovering it wants to know what the other is set to without opening the
+          menu. On a wrapping span because `Chip` takes no ref, which a tooltip's trigger needs. */}
+      <Tip label={`You talk to Jaroku on ${chatLabel} · this agent runs on ${label}`} hide={open}>
+        <span className="flex max-w-full">
+          <Chip
+            size="lg"
+            className="max-w-full"
+            selected={open}
+            onClick={() => setOpen((o) => !o)}
+            icon={<ProviderMark provider={chatProvider || provider} size={12} />}
+          >
+            {/* A model's name is prose — "GPT-5.6 Luna" — so it is not set in mono. */}
+            {/* `truncate` RATHER THAN THE CHIP'S OWN BREAK RULE. `chipClass` sets
+                `overflow-wrap:anywhere` on every chip, for the good reason that a tool id or a file
+                path should break rather than overflow the row it sits in — but this chip sits in a row
+                that may not wrap, and prose breaks in a way an identifier does not: at a narrow
+                composer "Dry run (free)" came out one character per line, fifteen lines tall, and
+                pushed the mic and the send button out of a bar whose own rule is that those two never
+                collapse. A control's label shortens; it never breaks. */}
+            <span className="min-w-0 truncate">{chatLabel}</span>
+            {/* Points down at a closed menu and up at an open one — this popover opens upward, and a
+                chevron that keeps pointing down while the list is above it is pointing at nothing. */}
+            <span
+              className={`shrink-0 transition-transform duration-fast ${open ? "rotate-180" : ""}`}
+              aria-hidden
+            >
+              <ChevronDownIcon size={ICON.xs} />
+            </span>
+          </Chip>
         </span>
-      </Chip>
+      </Tip>
       {open && (
         <div className="absolute bottom-full left-0 z-30 mb-1 min-w-[260px] animate-slide-in rounded-card border border-edge bg-elevated p-1 shadow-floating motion-reduce:animate-none">
           {connectHelp ? (() => {
@@ -3955,22 +3959,24 @@ export function BuildPane({
                     {(["chat", "test"] as const).map((m) => {
                       const active = composerMode === m;
                       return (
-                        <Chip
+                        // On a span for the same reason as the model chip: `Chip` takes no ref.
+                        <Tip
                           key={m}
-                          size="lg"
-                          onClick={() => setComposerMode(m)}
-                          variant={active ? "fill" : "bare"}
-                          color={active ? INTERACTION.accent : undefined}
-                          background={active ? SURFACE.panel : undefined}
-                          className="!rounded-full"
-                          title={
-                            m === "chat"
-                              ? "Talk to Jaroku — plan, edit, explain"
-                              : "Send this as the agent's own input and run it"
-                          }
+                          label={m === "chat" ? "Talk to Jaroku — plan, edit, explain" : "Send this as the agent's own input and run it"}
                         >
-                          {m === "chat" ? "Chat" : "Test"}
-                        </Chip>
+                          <span className="flex">
+                            <Chip
+                              size="lg"
+                              onClick={() => setComposerMode(m)}
+                              variant={active ? "fill" : "bare"}
+                              color={active ? INTERACTION.accent : undefined}
+                              background={active ? SURFACE.panel : undefined}
+                              className="!rounded-full"
+                            >
+                              {m === "chat" ? "Chat" : "Test"}
+                            </Chip>
+                          </span>
+                        </Tip>
                       );
                     })}
                   </div>
@@ -3998,45 +4004,50 @@ export function BuildPane({
               },
               send: {
                 bar: () => (
-                  <button
-                    type="button"
-                    onClick={submit}
-                    // §9: over the context budget, or holding an attachment that would not
-                    // resolve, send is BLOCKED rather than allowed to truncate. The notice above
-                    // the input says which, so a disabled button is never unexplained.
-                    disabled={
-                      !connected || !text.trim() || overBudget
-                      || (composerMode === "test" ? !canRun : busy)
-                    }
-                    // §3.4: THE BUTTON AND THE PREVIEW MUST AGREE, BEFORE THE PRESS. The line above
-                    // the bar has named the route since v0.1.7 and this said only "Send" — which was
-                    // survivable while the default was one thing, and is not now that the router
-                    // makes a judgement call on every message. A preview that reads one route beside
-                    // a button that describes none is the class of defect v0.2.2 already paid for
-                    // ("the composer described a context it was about to ignore").
-                    // NOT CONNECTED IS CHECKED FIRST, ahead of the key and the mode: it is the one
-                    // state where none of the other labels is true yet, and a tooltip promising a
-                    // route on a button that cannot dispatch is the mismatch §3.4 already paid for.
-                    aria-label={!connected ? OFFLINE_SEND : noSubscription ? SUBSCRIPTION_ASK : missingKey ? keyAsk : composerMode === "test" ? "Run the agent on this input" : operating ? operateSendLabel(operateRoute, activeThread?.agent_name ?? "this agent") : `Send — ${routeLabel(intent, routing.planEvidence)}`}
-                    title={!connected ? OFFLINE_SEND : noSubscription ? SUBSCRIPTION_ASK : missingKey ? keyAsk : composerMode === "test" ? "Run the agent on this input" : operating ? `${operateSendLabel(operateRoute, activeThread?.agent_name ?? "this agent")} (${keyHint("⌘↵")})` : `Send — ${routeLabel(intent, routing.planEvidence)} (${keyHint("⌘↵")})`}
-                    // The one ink-filled control on the screen, and the only one in this bar that
-                    // is not a glyph on open background.
-                    //
-                    // THE DISC IS SMALLER THAN THE BUTTON. It draws at 28px with a 14px arrow —
-                    // the product owner's call on 2026-09-10 — inside the same 32px hit target
-                    // the rest of the bar shares, so it got smaller to look at and not to hit.
-                    className="flex shrink-0 items-center justify-center rounded-full transition-opacity
-                      focus-visible:outline-none focus-visible:shadow-focusring
-                      disabled:cursor-not-allowed disabled:opacity-30"
-                    style={{ width: HIT_TARGET, height: HIT_TARGET }}
+                  // The tooltip adds the shortcut to the name; disabled — no draft, offline — it still
+                  // opens, on the span `Tip` puts around a button that takes no pointer events.
+                  <Tip
+                    label={!connected ? OFFLINE_SEND : noSubscription ? SUBSCRIPTION_ASK : missingKey ? keyAsk : composerMode === "test" ? "Run the agent on this input" : operating ? `${operateSendLabel(operateRoute, activeThread?.agent_name ?? "this agent")} (${keyHint("⌘↵")})` : `Send — ${routeLabel(intent, routing.planEvidence)} (${keyHint("⌘↵")})`}
                   >
-                    <span
-                      className="flex items-center justify-center rounded-full"
-                      style={{ width: 28, height: 28, background: TEXT.ink, color: SURFACE.bg }}
+                    <button
+                      type="button"
+                      onClick={submit}
+                      // §9: over the context budget, or holding an attachment that would not
+                      // resolve, send is BLOCKED rather than allowed to truncate. The notice above
+                      // the input says which, so a disabled button is never unexplained.
+                      disabled={
+                        !connected || !text.trim() || overBudget
+                        || (composerMode === "test" ? !canRun : busy)
+                      }
+                      // §3.4: THE BUTTON AND THE PREVIEW MUST AGREE, BEFORE THE PRESS. The line above
+                      // the bar has named the route since v0.1.7 and this said only "Send" — which was
+                      // survivable while the default was one thing, and is not now that the router
+                      // makes a judgement call on every message. A preview that reads one route beside
+                      // a button that describes none is the class of defect v0.2.2 already paid for
+                      // ("the composer described a context it was about to ignore").
+                      // NOT CONNECTED IS CHECKED FIRST, ahead of the key and the mode: it is the one
+                      // state where none of the other labels is true yet, and a tooltip promising a
+                      // route on a button that cannot dispatch is the mismatch §3.4 already paid for.
+                      aria-label={!connected ? OFFLINE_SEND : noSubscription ? SUBSCRIPTION_ASK : missingKey ? keyAsk : composerMode === "test" ? "Run the agent on this input" : operating ? operateSendLabel(operateRoute, activeThread?.agent_name ?? "this agent") : `Send — ${routeLabel(intent, routing.planEvidence)}`}
+                      // The one ink-filled control on the screen, and the only one in this bar that
+                      // is not a glyph on open background.
+                      //
+                      // THE DISC IS SMALLER THAN THE BUTTON. It draws at 28px with a 14px arrow —
+                      // the product owner's call on 2026-09-10 — inside the same 32px hit target
+                      // the rest of the bar shares, so it got smaller to look at and not to hit.
+                      className="flex shrink-0 items-center justify-center rounded-full transition-opacity
+                        focus-visible:outline-none focus-visible:shadow-focusring
+                        disabled:cursor-not-allowed disabled:opacity-30"
+                      style={{ width: HIT_TARGET, height: HIT_TARGET }}
                     >
-                      <Glyph icon={Icon.composer.send} size={GLYPH.meta} />
-                    </span>
-                  </button>
+                      <span
+                        className="flex items-center justify-center rounded-full"
+                        style={{ width: 28, height: 28, background: TEXT.ink, color: SURFACE.bg }}
+                      >
+                        <Glyph icon={Icon.composer.send} size={GLYPH.meta} />
+                      </span>
+                    </button>
+                  </Tip>
                 ),
               },
             }}

@@ -30,6 +30,7 @@ import {
 } from "../../lib/composerBar.ts";
 import { GLYPH, HIT_TARGET } from "../icons.ts";
 import { Popover } from "./Popover.tsx";
+import { Tip } from "../ui/tooltip.tsx";
 import { Icon } from "../../lib/icons/registry.ts";
 
 /** What the bar needs from a control: how to draw it, in the bar and in the overflow menu. */
@@ -94,23 +95,24 @@ export function ComposerBar({
   if (slot >= 0) {
     left.splice(slot, 0, (
       <div key="__overflow" className="relative shrink-0">
-        <button
-          ref={overflowRef}
-          type="button"
-          onClick={() => setMenuOpen((v) => !v)}
-          aria-label="More composer controls"
-          aria-expanded={menuOpen}
-          aria-haspopup="menu"
-          title="Effort, permissions and connectors"
-          className="inline-flex items-center justify-center rounded-control text-muted transition-colors
-            duration-fast hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
-          style={{ minWidth: HIT_TARGET, minHeight: HIT_TARGET, fontSize: GLYPH.toolbar }}
-        >
-          {/* A REAL MARK, NOT A CHARACTER. This was a literal `⋯` set in the text font, so the
-              one control in this bar that is not an icon rendered at the FONT's weight beside six
-              that render at `ICON.strokeWidth`. */}
-          <Icon.composer.more size={GLYPH.toolbar} />
-        </button>
+        <Tip label="Effort, permissions and connectors" hide={menuOpen}>
+          <button
+            ref={overflowRef}
+            type="button"
+            onClick={() => setMenuOpen((v) => !v)}
+            aria-label="More composer controls"
+            aria-expanded={menuOpen}
+            aria-haspopup="menu"
+            className="inline-flex items-center justify-center rounded-control text-muted transition-colors
+              duration-fast hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+            style={{ minWidth: HIT_TARGET, minHeight: HIT_TARGET, fontSize: GLYPH.toolbar }}
+          >
+            {/* A REAL MARK, NOT A CHARACTER. This was a literal `⋯` set in the text font, so the
+                one control in this bar that is not an icon rendered at the FONT's weight beside six
+                that render at `ICON.strokeWidth`. */}
+            <Icon.composer.more size={GLYPH.toolbar} />
+          </button>
+        </Tip>
         <Popover
           open={menuOpen}
           onClose={() => setMenuOpen(false)}

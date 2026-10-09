@@ -11,14 +11,15 @@
 // box, which is what you get by padding to the glyph. `minWidth`/`minHeight` rather than a fixed
 // square, so the label can extend it without a second recipe.
 //
-// AND THE NAME IS NOT THE TOOLTIP. `title` is a hover affordance and screen readers do not
-// reliably announce it; `aria-label` is the name. §10 requires both on every icon-only button
+// AND THE NAME IS NOT THE TOOLTIP. The tooltip (`Tip`, from ui/tooltip.tsx — this row moved off the
+// native `title` on 2026-10-09) is a hover affordance; `aria-label` is the name. §10 requires both on every icon-only button
 // here, and requires `aria-pressed` on the ones that carry state — which is why `pressed` is a
 // tri-state prop: `undefined` means this control is not a toggle, and rendering
 // `aria-pressed="false"` on a button that is not one tells a screen reader it is a toggle that is
 // off.
 
 import { GLYPH, HIT_TARGET, Glyph } from "../icons.ts";
+import { Tip } from "../ui/tooltip.tsx";
 import { type IconComponent } from "../../lib/icons/registry.ts";
 
 export function ControlButton({
@@ -56,28 +57,30 @@ export function ControlButton({
   buttonRef?: React.Ref<HTMLButtonElement>;
 }) {
   return (
-    <button
-      ref={buttonRef}
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      aria-label={name}
-      aria-pressed={pressed}
-      aria-expanded={expanded}
-      title={title ?? name}
-      // `px-1.5` only when there is a label — an icon-only control is centred in its minimum box,
-      // and padding it would make the box wider than the minimum for no reason.
-      className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-control text-caption
-        transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring
-        disabled:cursor-not-allowed disabled:opacity-30
-        ${label ? "px-1.5" : ""}
-        ${active ? "text-ink" : "text-muted"}
-        ${disabled ? "" : "hover:bg-active hover:text-ink"}
-        ${className}`}
-      style={{ minWidth: HIT_TARGET, minHeight: HIT_TARGET }}
-    >
-      <Glyph icon={icon} size={size} />
-      {label && <span className="whitespace-nowrap">{label}</span>}
-    </button>
+    // Quiet while its own popover is open: the popover is what the tooltip would be pointing at.
+    <Tip label={title ?? name} hide={expanded === true}>
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+        aria-label={name}
+        aria-pressed={pressed}
+        aria-expanded={expanded}
+        // `px-1.5` only when there is a label — an icon-only control is centred in its minimum box,
+        // and padding it would make the box wider than the minimum for no reason.
+        className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-control text-caption
+          transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring
+          disabled:cursor-not-allowed disabled:opacity-30
+          ${label ? "px-1.5" : ""}
+          ${active ? "text-ink" : "text-muted"}
+          ${disabled ? "" : "hover:bg-active hover:text-ink"}
+          ${className}`}
+        style={{ minWidth: HIT_TARGET, minHeight: HIT_TARGET }}
+      >
+        <Glyph icon={icon} size={size} />
+        {label && <span className="whitespace-nowrap">{label}</span>}
+      </button>
+    </Tip>
   );
 }

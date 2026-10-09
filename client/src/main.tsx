@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
 import { App } from "./App.tsx";
+import { TooltipProvider } from "./components/ui/tooltip.tsx";
 import { onDeepLink } from "./lib/deepLink.ts";
 import { openWorkLink, workLinkFrom } from "./lib/workLink.ts";
 import { offerAuthCallback, readAuthCallback } from "./lib/authLink.ts";
@@ -112,7 +113,9 @@ void hydrateSession().finally(() => {
   startSessionRenewal();
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
-      <App />
+      <TooltipProvider>
+        <App />
+      </TooltipProvider>
     </StrictMode>,
   );
 });
