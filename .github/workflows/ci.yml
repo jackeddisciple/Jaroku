@@ -1510,6 +1510,7 @@ jobs:
           npm run test:invite
           npm run test:plan-flow
           npm run test:plan-stream
+          npm run test:agent-output
           npm run test:deploy-store
           npm run test:note-kind
           npm run test:inline-code

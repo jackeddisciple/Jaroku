@@ -2,11 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import { orderedSteps, useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import type { Step } from "../types.ts";
+import { extractAgentOutput } from "../lib/agentOutput.ts";
 import { fmtCost, fmtDuration, fmtTokens } from "../lib/format.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { StepRow } from "./StepRow.tsx";
 import { EmptyState } from "./EmptyState.tsx";
+import { Markdown } from "./Markdown.tsx";
 import { PauseResumeControls } from "./PauseResumeControls.tsx";
+import { CopyTurn } from "./composer/CopyTurn.tsx";
 import { ActivityIcon, XIcon } from "./panelIcons.tsx";
 
 /**
@@ -51,6 +54,28 @@ function FirstTraceHint() {
   );
 }
 
+/**
+ * What the agent said, above the steps that got it there.
+ *
+ * A Test run's whole point is its answer, and without this it was raw JSON inside the last model
+ * call's step detail. ABOVE the timeline rather than at its end, because a finished run opens
+ * scrolled to the top and an answer below twenty-five rows is an answer nobody sees. Only once
+ * the run has completed: a closing turn read mid-run is whichever call happened to finish last.
+ */
+function RunAnswer({ text }: { text: string }) {
+  return (
+    <section className="mb-3 rounded-card border border-edge bg-panel px-3 py-2" aria-label="Answer">
+      <div className="flex items-center">
+        <span className={TYPE.sectionLabel}>Answer</span>
+        <CopyTurn source={text} className="ml-auto" />
+      </div>
+      <div className={`${TYPE.body} break-words pb-1`}>
+        <Markdown text={text} />
+      </div>
+    </section>
+  );
+}
+
 /** Re-render on an interval while `active` (drives the live "Working Xs" ticker). */
 function useTick(active: boolean, ms = 200): number {
   const [now, setNow] = useState(() => Date.now());
@@ -79,6 +104,10 @@ export function TraceTimeline() {
 
   const steps = useMemo(() => orderedSteps(bucket), [bucket]);
   const { tokens, cost } = useMemo(() => aggregate(steps), [steps]);
+  const answer = useMemo(
+    () => (run?.status === "completed" ? extractAgentOutput(steps) : ""),
+    [run?.status, steps],
+  );
 
   const running = run?.status === "running";
   const now = useTick(running);
@@ -138,6 +167,7 @@ export function TraceTimeline() {
           // top edge up beside the text.
           <>
             <FirstTraceHint />
+            {answer && <RunAnswer text={answer} />}
             <div className="relative">
               {/* thin vertical connector line — steps float on it, no bordered table */}
               <div className="absolute left-[9px] top-3 bottom-3 w-px bg-hair" />
