@@ -14,13 +14,21 @@
 // ESC IS ORDERED, AND THAT ORDER IS §3.3'S: "close popover → exit fullscreen → clear focus". Which
 // means this component must stop the event from travelling once it has consumed it — otherwise
 // pressing Esc inside a popover in the fullscreen composer closes both, and the user loses an
-// editor they had not finished with.
+// editor they had not finished with. (Radix's Escape, stopped in `onEscapeKeyDown` below.)
 
-import { useEffect, useId, useRef } from "react";
+import type { RefObject } from "react";
+import { Popover as Root, PopoverAnchor, PopoverContent } from "../ui/popover.tsx";
 
 /** A menu row's own arrow-key membership. Anything focusable inside a `role="menu"` counts. */
 const FOCUSABLE = 'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
+/**
+ * A RADIX POPOVER UNDERNEATH (ui/popover.tsx, 2026-10-09), behind the API the eleven call sites
+ * already use. What Radix took over: placement against the trigger (and a flip downward when there
+ * is no room above, which the always-upward panel could not do), the press outside, Escape, and
+ * focus moved in on open. What stays here is what a popover does not know it is: a `role="menu"`
+ * whose rows the arrow keys walk.
+ */
 export function Popover({
   open,
   onClose,
@@ -47,97 +55,68 @@ export function Popover({
   bare?: boolean;
   children: React.ReactNode;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const id = useId();
+  /** The arrow keys: rows a ring, and a field or a slider keeping its own. */
+  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
+    const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE));
+    if (items.length === 0) return;
+    // A control INSIDE a row — a text field in the file picker — keeps its own arrow keys. Only
+    // navigate when focus is on a row itself.
+    const active = document.activeElement as HTMLElement | null;
+    if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return;
+    // AND A SLIDER OWNS ITS ARROWS, Home and End included: they move its value, not the focus. Taken
+    // here, End jumped focus to the last row while the slider still moved, and every key after it
+    // landed on something else. The effort slider is the one inside a popover today.
+    if (active?.getAttribute("role") === "slider") return;
+    e.preventDefault();
+    const at = active ? items.indexOf(active) : -1;
+    const next =
+      e.key === "Home" ? 0
+      : e.key === "End" ? items.length - 1
+      // Wrapping, because a menu of four items should not require knowing which end you are at.
+      : e.key === "ArrowDown" ? (at + 1) % items.length
+      : (at - 1 + items.length) % items.length;
+    items[next]?.focus();
+  };
 
-  useEffect(() => {
-    if (!open) return;
-    const el = ref.current;
-    if (!el) return;
-
-    // Focus the first row on open, so the keyboard path starts inside the menu rather than one Tab
-    // away from it. `requestAnimationFrame` because the element is mounted but not yet laid out on
-    // the tick the effect runs.
-    const raf = requestAnimationFrame(() => {
-      el.querySelector<HTMLElement>(FOCUSABLE)?.focus();
-    });
-
-    const rows = (): HTMLElement[] => Array.from(el.querySelectorAll<HTMLElement>(FOCUSABLE));
-
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") {
-        // CONSUMED HERE. See the header: without this the same Esc also collapses the fullscreen
-        // composer this popover may be sitting inside.
-        e.stopPropagation();
-        e.preventDefault();
-        onClose();
-        return;
-      }
-      if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
-      const items = rows();
-      if (items.length === 0) return;
-      // A control INSIDE a row — a text field in the file picker — keeps its own arrow keys. Only
-      // navigate when focus is on a row itself.
-      const active = document.activeElement as HTMLElement | null;
-      if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return;
-      // AND A SLIDER OWNS ITS ARROWS, Home and End included: they move its value, not the focus. Taken
-      // here, End jumped focus to the last row while the slider still moved, and every key after it
-      // landed on something else. The effort slider is the one inside a popover today.
-      if (active?.getAttribute("role") === "slider") return;
-      e.preventDefault();
-      const at = active ? items.indexOf(active) : -1;
-      const next =
-        e.key === "Home" ? 0
-        : e.key === "End" ? items.length - 1
-        // Wrapping, because a menu of four items should not require knowing which end you are at.
-        : e.key === "ArrowDown" ? (at + 1) % items.length
-        : (at - 1 + items.length) % items.length;
-      items[next]?.focus();
-    };
-
-    const onDown = (e: MouseEvent): void => {
-      const target = e.target as Node;
-      // The trigger is excluded deliberately: it toggles, and closing here as well would make a
-      // second click on it close-then-reopen, which reads as the menu not responding.
-      if (el.contains(target) || triggerRef.current?.contains(target)) return;
-      onClose();
-    };
-
-    document.addEventListener("keydown", onKey, true);
-    document.addEventListener("mousedown", onDown);
-    return () => {
-      cancelAnimationFrame(raf);
-      document.removeEventListener("keydown", onKey, true);
-      document.removeEventListener("mousedown", onDown);
-    };
-  }, [open, onClose, triggerRef]);
-
-  // Focus back to the trigger on close. In its own effect rather than in `onClose`, because the
-  // popover also closes by way of a selection, an outside click and an Esc — three call sites that
-  // would each have to remember.
-  const wasOpen = useRef(false);
-  useEffect(() => {
-    if (wasOpen.current && !open) triggerRef.current?.focus();
-    wasOpen.current = open;
-  }, [open, triggerRef]);
-
-  if (!open) return null;
+  const onTrigger = (target: EventTarget | null): boolean =>
+    target instanceof Node && Boolean(triggerRef.current?.contains(target));
 
   return (
-    <div
-      ref={ref}
-      id={id}
-      role="menu"
-      aria-label={label}
-      className={`absolute bottom-full z-30 mb-1.5 ${align === "right" ? "right-0" : "left-0"} ${
-        bare
-          ? ""
-          : "animate-slide-in rounded-card border border-edge bg-elevated p-1 shadow-floating motion-reduce:animate-none"
-      }`}
-      style={{ minWidth: width ?? 240 }}
-    >
-      {children}
-    </div>
+    <Root open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+      {/* ANCHORED TO THE CALL SITE'S OWN BUTTON. Each control renders its trigger itself and hands
+          this a ref, so the anchor is that element rather than a wrapper Radix would own. */}
+      <PopoverAnchor virtualRef={triggerRef as RefObject<HTMLElement>} />
+      <PopoverContent
+        // IN PLACE, NOT IN A PORTAL — see ui/popover.tsx: the fullscreen composer's Tab trap walks
+        // its own subtree, and a popover inside it has to be in it.
+        inline
+        role="menu"
+        aria-label={label}
+        // IT OPENS UPWARD. The composer is pinned to the bottom of its column, so a menu opening
+        // downward is a menu off the screen — and Radix flips it only when there is no room above.
+        side="top"
+        align={align === "right" ? "end" : "start"}
+        onKeyDown={onKeyDown}
+        // ESC IS ORDERED, AND THAT ORDER IS §3.3'S: "close popover → exit fullscreen → clear focus".
+        // Radix hears it on the document in the capture phase; stopping it there means the
+        // fullscreen composer's own listener never sees the Esc that closed a menu.
+        onEscapeKeyDown={(e) => e.stopPropagation()}
+        // THE TRIGGER IS NOT "OUTSIDE". It toggles, and closing here as well would make a second
+        // click on it close-then-reopen, which reads as the menu not responding.
+        onInteractOutside={(e) => { if (onTrigger(e.target)) e.preventDefault(); }}
+        // Focus back to the trigger on close, whichever way it closed — §10: never to the document.
+        onCloseAutoFocus={(e) => { e.preventDefault(); triggerRef.current?.focus(); }}
+        className={bare ? "" : "animate-slide-in rounded-card border border-edge bg-elevated p-1 shadow-floating motion-reduce:animate-none"}
+        // `min-content` IS THE WIDTH THE PANEL ALWAYS HAD. Hung `absolute` off a 32px control, it
+        // shrank to its narrowest — the minimum below, or its longest word — and its footnotes wrapped.
+        // Placed against the window it would grow to its widest instead: the permission popover's
+        // one-line footnote drew it 686px across.
+        style={{ minWidth: width ?? 240, width: "min-content" }}
+      >
+        {children}
+      </PopoverContent>
+    </Root>
   );
 }
 

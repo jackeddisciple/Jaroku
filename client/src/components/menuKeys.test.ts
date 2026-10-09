@@ -80,13 +80,16 @@ console.log("\nevery component that declares a menu also drives one");
     // the agent filter is single-select, so its options are `menuitemradio`.
     check(`${f.path} contains items to move between`,
       /role="menuitem(radio|checkbox)?"/.test(f.text));
+    // ON A RADIX POPOVER, ESCAPE AND THE PRESS OUTSIDE ARE ITS DISMISSABLE LAYER'S (2026-10-09) — the
+    // composer's popover keeps only its arrow keys. Built by hand, a menu still has to show both.
+    const radixLayer = /from "\.\.?\/ui\/popover\.tsx"/.test(f.text);
     // Escape was already handled everywhere; asserted so a new menu does not arrive without it.
-    check(`${f.path} closes on Escape`, /"Escape"/.test(f.text));
+    check(`${f.path} closes on Escape`, radixLayer || /"Escape"/.test(f.text));
     // And the click-away, which is the mouse half of the same "a menu is dismissible" promise.
     // Either a document listener or a full-screen catcher under the panel — the agent card uses
     // the catcher so that the click that dismisses its menu cannot also open the card beneath it.
     check(`${f.path} closes on a click outside`,
-      /mousedown/.test(f.text) || /fixed inset-0[^>]*onClick=/.test(f.text));
+      radixLayer || /mousedown/.test(f.text) || /fixed inset-0[^>]*onClick=/.test(f.text));
   }
 }
 

@@ -239,6 +239,8 @@ console.log("\n§07: where each level is allowed to appear");
     "components/ui/tooltip.tsx",
     // AND THE DROPDOWN MENU, the same way: Radix's popper wrapper carries the position.
     "components/ui/dropdown-menu.tsx",
+    // AND THE COMPOSER'S POPOVER, built on Radix's since 2026-10-09: the same wrapper, rendered in place.
+    "components/composer/Popover.tsx",
   ]);
   /**
    * THE IN-FLOW SURFACES THAT REST LIFTED, AND EACH IS A DECISION RATHER THAN A SLIP — the product
