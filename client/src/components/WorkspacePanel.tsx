@@ -34,7 +34,6 @@ import { AccountSection } from "./AccountSection.tsx";
 import { absTime, fmtUntil, isExpired, relTime } from "../lib/format.ts";
 import { avatarColor, avatarLetter, orderMembers } from "../lib/memberList.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
-import { useDialog } from "../lib/dialog.ts";
 import { primaryBtn, quietBtn, secondaryBtn } from "./buttons.ts";
 import { Chip } from "./Chip.tsx";
 import { DateChip } from "./Chip.tsx";
@@ -46,6 +45,7 @@ import { BillingSection } from "./BillingSection.tsx";
 import { UpsellCard } from "./UpsellCard.tsx";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { IconButton } from "./IconButton.tsx";
+import { Dialog, DialogContent, DialogTitle } from "./ui/dialog.tsx";
 
 /**
  * §6'S SIX-TAB STRIP, AND D6 IS SETTLED HERE: ALL SIX CARRY A MARK AND A WORD.
@@ -399,14 +399,16 @@ function TransferConfirm({ member, onDone }: { member: Member; onDone: () => voi
   };
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Transfer ownership of ${name}`}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/35 px-4"
-    >
-      <div className="w-full max-w-md rounded-lg border border-edge bg-elevated p-4 shadow-overlay">
-        <div className={TYPE.sectionLabel}>Transfer ownership</div>
+    // A RADIX DIALOG ABOVE THE PANEL (ui/dialog.tsx, 2026-10-09). Nested, so Escape and the scrim
+    // close this one and leave the panel open — they used to close both and lose the typing.
+    <Dialog open onOpenChange={(next) => { if (!next) onDone(); }}>
+      <DialogContent
+        aria-label={`Transfer ownership of ${name}`}
+        aria-describedby={undefined}
+        overlayClassName="items-center bg-ink/35 px-4"
+        className="w-full max-w-md rounded-lg border border-edge bg-elevated p-4 shadow-overlay"
+      >
+        <DialogTitle className={TYPE.sectionLabel}>Transfer ownership</DialogTitle>
         {/* §6.3's sentence, close to verbatim, because both halves of it are the point: who is
             getting it, and what happens to you. An owner who reads only the first half is an owner
             who has not been told they are about to stop being one. */}
@@ -440,8 +442,8 @@ function TransferConfirm({ member, onDone }: { member: Member; onDone: () => voi
           </button>
           <button onClick={onDone} className={quietBtn}>Cancel</button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -474,14 +476,14 @@ function ConfirmDialog({
   onCancel: () => void;
 }) {
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/35 px-4"
-    >
-      <div className="w-full max-w-md rounded-lg border border-edge bg-elevated p-4 shadow-overlay">
-        <div className={TYPE.sectionLabel}>{title}</div>
+    // A RADIX DIALOG ABOVE THE PANEL, nested the same way as the transfer above.
+    <Dialog open onOpenChange={(next) => { if (!next) onCancel(); }}>
+      <DialogContent
+        aria-describedby={undefined}
+        overlayClassName="items-center bg-ink/35 px-4"
+        className="w-full max-w-md rounded-lg border border-edge bg-elevated p-4 shadow-overlay"
+      >
+        <DialogTitle className={TYPE.sectionLabel}>{title}</DialogTitle>
         <p className="mt-2 text-caption leading-[1.55] text-ink">{body}</p>
         {detail && <p className="mt-1.5 text-tiny leading-[1.55] text-muted">{detail}</p>}
         <div className="mt-3 flex items-center gap-2">
@@ -494,8 +496,8 @@ function ConfirmDialog({
           </button>
           <button onClick={onCancel} className={quietBtn}>Cancel</button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1207,6 +1209,11 @@ function DataSection() {
  * A constant rather than two string literals, because the whole value of the attribute is that the
  * two match — and two literals in two places in one file is exactly the pair that stops matching.
  */
+/**
+ * The id the dialog's name is read from. NAMED HERE RATHER THAN LEFT TO RADIX, whose own link from the
+ * dialog to its title is made after mount — so markup read without a browser, which is how
+ * `test:dialog` reads it, carried no name at all. Set on both ends, it is there from the first render.
+ */
 const WORKSPACE_DIALOG_LABEL_ID = "workspace-panel-title";
 
 export function WorkspacePanel() {
@@ -1248,44 +1255,28 @@ export function WorkspacePanel() {
    */
   const shown = sections.some((s) => s.id === section) ? section : sections[0]?.id ?? null;
 
-  useEffect(() => {
-    if (!section) return;
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") close();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [section, close]);
-
   // IT DIMS THE APPLICATION, SO IT HAS TO BE A DIALOG. It had the scrim, the Escape and the
   // outside-click and none of the semantics: no `role`, no `aria-modal`, no initial focus, no
   // containment and no scroll lock — so a screen reader was told nothing had opened, and Tab walked
-  // straight out of the panel into a sidebar that is visibly greyed out. See lib/dialog.
-  //
-  // CALLED ABOVE THE EARLY RETURN, because a hook that stops being called on close is a hook whose
-  // cleanup never runs — and the cleanup is what gives the focus back.
-  const { ref: card, dialogProps } = useDialog(Boolean(section), WORKSPACE_DIALOG_LABEL_ID);
-
-  if (!section) return null;
-
+  // straight out of the panel into a sidebar that is visibly greyed out. A Radix dialog now
+  // (ui/dialog.tsx, 2026-10-09), IN PLACE so `test:dialog` can read its markup without a browser.
+  // Dismissed by the backdrop as well as by Escape. Nothing here is a form somebody is halfway
+  // through except the invite box, and that costs an email address to retype.
   return (
-    <div
-      className="fixed inset-0 z-40 flex items-start justify-center bg-ink/40 p-8"
-      // Dismissed by the backdrop as well as by Escape. Nothing here is a form somebody is
-      // halfway through except the invite box, and that costs an email address to retype.
-      onMouseDown={(e) => {
-        if (!card.current?.contains(e.target as Node)) close();
-      }}
-    >
-      <div
-        ref={card}
-        {...dialogProps}
+    <Dialog open={Boolean(section)} onOpenChange={(next) => { if (!next) close(); }}>
+      <DialogContent
+        inline
+        aria-labelledby={WORKSPACE_DIALOG_LABEL_ID}
+        aria-describedby={undefined}
+        overlayClassName="items-start bg-ink/40 p-8"
         className="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-edge bg-elevated shadow-overlay focus-visible:outline-none"
       >
         <div className="flex shrink-0 items-center gap-1 border-b border-hair px-4 py-2.5">
-          {/* THE DIALOG'S OWN NAME, and the reason it has an id. A dialog whose accessible name is
-              "dialog" announces that something opened and nothing about what. */}
-          <span id={WORKSPACE_DIALOG_LABEL_ID} className={TYPE.panelLabel}>Workspace</span>
+          {/* THE DIALOG'S OWN NAME. A dialog whose accessible name is "dialog" announces that
+              something opened and nothing about what. */}
+          <DialogTitle asChild>
+            <span id={WORKSPACE_DIALOG_LABEL_ID} className={TYPE.panelLabel}>Workspace</span>
+          </DialogTitle>
           <div className="ml-3 flex items-center gap-1">
             {sections.map((s) => (
               <button
@@ -1317,7 +1308,7 @@ export function WorkspacePanel() {
             : shown === "account" ? <AccountSection />
             : <MembersSection />}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

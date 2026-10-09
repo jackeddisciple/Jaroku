@@ -78,9 +78,13 @@ console.log("\nthe panel announces itself — asserted on the markup, not on the
 
   check("it is a dialog", /role="dialog"/.test(html));
   check("...and says it is modal", /aria-modal="true"/.test(html));
-  // A dialog whose accessible name is "dialog" tells somebody that SOMETHING opened.
-  check("...and points at a name", /aria-labelledby="workspace-panel-title"/.test(html));
-  check("...which is a real element on the page", /id="workspace-panel-title"/.test(html));
+  // A dialog whose accessible name is "dialog" tells somebody that SOMETHING opened. WHICHEVER ID IT
+  // IS: the panel is a Radix dialog since 2026-10-09, and Radix names it after its title with an id
+  // of its own making — what matters is that the name points at an element that is there.
+  const labelledBy = /aria-labelledby="([^"]+)"/.exec(html)?.[1] ?? null;
+  check("...and points at a name", labelledBy !== null);
+  check("...which is a real element on the page", labelledBy !== null && html.includes(`id="${labelledBy}"`));
+  check("...that says what opened", labelledBy !== null && new RegExp(`id="${labelledBy}"[^>]*>Workspace<`).test(html));
   // The container has to be focusable for the case where it holds nothing focusable itself, and
   // for the initial focus the panel never performed.
   check("...and is a focus target itself", /tabindex="-1"/.test(html));
