@@ -22,6 +22,7 @@ import { useMemo, useState } from "react";
 import { CheckboxField } from "./Checkbox.tsx";
 import { Select } from "./Select.tsx";
 import { primaryBtn, quietBtn } from "./buttons.ts";
+import { Dialog, DialogContent } from "./ui/dialog.tsx";
 import { sendInviteMember } from "../lib/socket.ts";
 import {
   AGENT_CAPABILITIES, agentCeiling, closeAgentCapabilities, type AgentCapability,
@@ -81,13 +82,19 @@ export function InviteWithGrantDialog({
   };
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Invite somebody to ${workspaceName} with access to ${agentSlug}`}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/35 px-4"
-    >
-      <div className="w-full max-w-lg rounded-lg border border-edge bg-elevated p-4 shadow-overlay">
+    // A RADIX DIALOG (ui/dialog.tsx, 2026-10-09): it had the role and none of the behaviour — no
+    // Escape, and Tab walked out into the page under the scrim. Escape and Cancel close it; the
+    // backdrop does not, as in the grant dialog beside it, because an address may be half typed.
+    <Dialog open onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent
+        // IN PLACE, so `test:access-tab` reads its markup without a browser.
+        inline
+        aria-label={`Invite somebody to ${workspaceName} with access to ${agentSlug}`}
+        aria-describedby={undefined}
+        onInteractOutside={(e) => e.preventDefault()}
+        overlayClassName="items-center bg-ink/35 px-4"
+        className="w-full max-w-lg rounded-lg border border-edge bg-elevated p-4 shadow-overlay"
+      >
         <div className={TYPE.sectionLabel}>Invite to workspace</div>
 
         <label className="mt-2 block">
@@ -179,7 +186,7 @@ export function InviteWithGrantDialog({
             Cancel
           </button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
