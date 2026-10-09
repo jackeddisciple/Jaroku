@@ -631,32 +631,6 @@ const runHolds = new Map<string, string>();
 const runPayers = new Map<string, Payer>();
 
 /**
- * Whose key the one in-flight plan / generation / edit is spending.
- *
- * Module state beside `planContext`, `genContext` and `editContext`, and safe for the same
- * reason those are: each of the three is single-slot and refuses a second while one is running.
- * Recorded where the key is resolved and read where the usage row is written, because the
- * emitter in between carries a UsageSummary and no notion of who paid for it.
- */
-let planPayer: Payer = "platform";
-let genPayer: Payer = "platform";
-
-/**
- * WHAT EACH IN-FLIGHT DISPATCH ASKED FOR AND WHAT IT GOT, so the turn can report the second.
- *
- * §3.2: "Never report an effort that wasn't used." The metadata row reads `effort` off the usage
- * payload and nothing set it, so the chip was either absent or describing a setting that changed
- * nothing — and §6.2's clamp marker could never fire, because `effort_requested` and
- * `effort_applied` were only ever equal or both null. These carry the plan from the dispatch to
- * the `done` handler that builds the payload, alongside the payer and the thread which travel the
- * same way and for the same reason.
- */
-let genEffort: EffortPlan | null = null;
-let planEffortPlan: EffortPlan | null = null;
-let editEffort: EffortPlan | null = null;
-let editPayer: Payer = "platform";
-
-/**
  * evalId -> the hold taken for it. Same shape and same caveat as `runHolds`.
  *
  * Separate from it rather than one map with a prefixed key, because the two settle from
@@ -1146,8 +1120,8 @@ void mcpDiscoveryLoop.run();
 // at boot and therefore have no argument to carry a context on.
 //
 // An eval is keyed, because several can be recorded even though only one runs at a time. A
-// build and a deploy are single variables, because the app enforces one of each in flight —
-// `generating`, and `deployManager.busy`, both of which refuse a second outright.
+// deploy is a single variable, because the app enforces one in flight — `deployManager.busy`
+// refuses a second outright. Plans, generations, edits and answers are per workspace; see below.
 //
 // Getting this wrong is no longer harmless. Before the broadcasts were scoped, an eval
 // started by one workspace was announced to everybody, which was a leak; now it would be
@@ -1171,32 +1145,52 @@ const contextForEval = (evalId: string): TenantContext => evalWorkspaces.get(eva
 // So each gets its own, and each is claimed only once its operation has actually STARTED,
 // after every guard that could refuse it. A refusal is broadcast to the context of whoever
 // asked, which is always in hand at the point of refusal and never needs a variable at all.
-let planContext: TenantContext | null = null;
-let genContext: TenantContext | null = null;
-let editContext: TenantContext | null = null;
-let replyContext: TenantContext | null = null;
+//
+// AND THEN THEY STOPPED BEING SINGLE-FLIGHT, except the deploy. A plan and an edit keep a session
+// per workspace (`planSessions`, `editSessions` below), and a generation and an answer keep theirs
+// in their own call — so one workspace's build no longer refuses another's.
 let deployContext: TenantContext | null = null;
-const contextForPlan = (): TenantContext => planContext ?? serverContext();
-const contextForGen = (): TenantContext => genContext ?? serverContext();
-const contextForEdit = (): TenantContext => editContext ?? serverContext();
-const contextForReply = (): TenantContext => replyContext ?? serverContext();
 const contextForDeploy = (): TenantContext => deployContext ?? serverContext();
 
 // Every event a piece of work emits goes out with the SESSION it belongs to as well as the
-// workspace, which is what lets a client file the turns under the right thread (§3.1, §4.5).
-//
-// Four wrappers rather than a `threadId` argument at forty call sites, and function declarations
-// rather than consts because the listeners below are registered above where `planThread` and its
-// siblings are declared. Each pairs the scope with the session that scope's work is filed under, so
-// the two can never be given from different operations — which is the same reason each subsystem
-// has its own context in the first place.
+// workspace, which is what lets a client file the turns under the right thread (§3.1, §4.5). Each
+// wrapper pairs the workspace's context with the session its work is filed under, so the two can
+// never be given from different operations.
 //
 // A refusal answered to whoever asked still calls `relay.broadcast*` directly with their own ctx
 // and no session: it belongs to no thread, and attaching one would file somebody else's error in it.
-function genOut(e: GenEvent): void { relay.broadcastGen(contextForGen(), e, genThread); }
-function planOut(e: GenEvent): void { relay.broadcastGen(contextForPlan(), e, planThread); }
-function editOut(e: EditEvent): void { relay.broadcastEdit(contextForEdit(), e, editThread); }
-function replyOut(e: ReplyEvent): void { relay.broadcastReply(contextForReply(), e, replyThread); }
+
+/**
+ * EACH WORKSPACE'S PLAN IN FLIGHT: who asked, the session it is filed under, who pays, and the effort.
+ *
+ * One per workspace rather than one for the server. These were four module variables, the planner had
+ * one slot, and so one workspace writing a plan refused every other workspace's — while the variables
+ * were right only because nothing could run beside them. The planner names the workspace on every
+ * event now, and this is where the listener finds the rest. An entry stays until that workspace's next
+ * plan replaces it, because a plan's discard can come long after the plan itself.
+ */
+interface PlanSession { ctx: TenantContext; thread: string | null; payer: Payer; effort: EffortPlan | null }
+const planSessions = new Map<string, PlanSession>();
+function planOut(workspaceId: string, e: GenEvent): void {
+  const session = planSessions.get(workspaceId);
+  relay.broadcastGen(session?.ctx ?? systemContextFor(workspaceId, newRequestId()), e, session?.thread ?? null);
+}
+/**
+ * EACH WORKSPACE'S EDIT IN FLIGHT: who asked, the session it is filed under, who pays, the effort.
+ *
+ * Per workspace, for the planner's reason: these were module variables beside a single editor slot,
+ * so one workspace's edit refused everybody else's — and every editor event, an Apply included, went
+ * to whichever workspace had edited last. The editor names the workspace on each event now.
+ */
+interface EditSession { ctx: TenantContext; thread: string | null; payer: Payer; effort: EffortPlan | null }
+const editSessions = new Map<string, EditSession>();
+/** Who to tell about an edit event in this workspace: the editing session's context, else the workspace's. */
+function contextForEdit(workspaceId: string): TenantContext {
+  return editSessions.get(workspaceId)?.ctx ?? systemContextFor(workspaceId, newRequestId());
+}
+function editOut(workspaceId: string, e: EditEvent): void {
+  relay.broadcastEdit(contextForEdit(workspaceId), e, editSessions.get(workspaceId)?.thread ?? null);
+}
 
 // The orchestrator. Constructed after the relay exists (it broadcasts progress), so it's
 // declared here and assigned below.
@@ -2072,7 +2066,10 @@ const projects = new ProjectStore(objects, agentRepo);
 // The builder, which now writes a version rather than a directory. Constructed here rather
 // than beside the run pool because it needs both of the two things above it: the table that
 // says which agents exist, and the store that says what they contain.
-const generator = new Generator({ runtimeDir: RUNTIME_DIR, agents: agentRepo, projects, codeCheckFor });
+// ONE GENERATOR PER GENERATION, built from these. A generation's events are listened for per call, and
+// one shared emitter meant two workspaces generating at once each heard the other's files — so
+// generation was one at a time for the whole server. A Generator holds nothing between calls.
+const generatorDeps = { runtimeDir: RUNTIME_DIR, agents: agentRepo, projects, codeCheckFor };
 
 // The fix loop, for the same reason: an edit reads the current version out of the store and
 // applies by publishing the next one.
@@ -6596,8 +6593,8 @@ function noticeAgent(ctx: TenantContext, message: string, agentId?: string): voi
  */
 function buildingAgents(ctx: TenantContext): Set<string> {
   const out = new Set<string>();
-  const editing = editor.editingAgentId;
-  if (editing && editContext?.workspaceId === ctx.workspaceId) out.add(editing);
+  const editing = editor.editingAgentId(ctx.workspaceId);
+  if (editing) out.add(editing);
   return out;
 }
 
@@ -7889,20 +7886,6 @@ const THREAD_COMMAND_NAMES = new Set([
   // `handleEvalCommand` the day somebody reorders the dispatch chain.
   "editTurn",
 ]);
-
-/**
- * Which thread the one in-flight plan / generation / edit / explanation belongs to.
- *
- * MODULE STATE BESIDE `planContext`, `genContext`, `editContext` AND `replyContext`, and safe for
- * exactly the reason those are: each of the four subsystems is single-slot and refuses a second
- * while one is running. It is claimed after the guard that can refuse, for the same reason those
- * are — a refused request that repointed this would file the in-flight work's plan under the
- * refused caller's session.
- */
-let planThread: string | null = null;
-let genThread: string | null = null;
-let editThread: string | null = null;
-let replyThread: string | null = null;
 
 /**
  * THREADS whose latest generation the validator refused.
@@ -11920,24 +11903,25 @@ onBothPools("exit", ({ runId, code, signal, timedOut, elapsedMs }) => {
 // Every failure here goes out as plan_error, never as the gen channel's plain "error". That
 // one is wired to buildStore.fail() on the client and paints the build pane as a failed
 // generation — which, at plan time, would be reporting a failure that never happened.
-planner.on("started", (e) => planOut({ type: "plan_started", ...e }));
-planner.on("delta", (e) => planOut({ type: "plan_delta", ...e }));
+planner.on("started", ({ workspaceId, ...e }) => planOut(workspaceId, { type: "plan_started", ...e }));
+planner.on("delta", ({ workspaceId, ...e }) => planOut(workspaceId, { type: "plan_delta", ...e }));
 // ROUTED TO THE PLAN'S OWN WORKSPACE, not to the planner's current scope. A supersede fires while
 // the scope belongs to whoever asked for the NEW plan — so the tenant whose card just died was told
 // nothing, and the tenant who caused it received a plan id it had never seen. The event carries its
 // owner for exactly this, and the thread on it is meaningless to anybody but that owner.
 planner.on("discarded", ({ planId, workspaceId }) => {
-  const ctx = workspaceId === contextForPlan().workspaceId
-    ? contextForPlan()
-    : systemContextFor(workspaceId, newRequestId());
-  relay.broadcastGen(ctx, { type: "plan_discarded", planId }, ctx === planContext ? planThread : null);
+  const session = planSessions.get(workspaceId);
+  const ctx = session?.ctx ?? systemContextFor(workspaceId, newRequestId());
+  relay.broadcastGen(ctx, { type: "plan_discarded", planId }, session?.thread ?? null);
   // §3.3 counts a plan awaiting a decision as blocked work, read live off the planner's slot — so a
   // discard un-blocks the thread and nothing was saying so. The row went on reading `plan awaiting`
   // until something else in the workspace forced a snapshot.
   scheduleListRefresh(ctx);
 });
 
-planner.on("plan", (e) => {
+planner.on("plan", ({ workspaceId, ...e }) => {
+  const session = planSessions.get(workspaceId);
+  const planCtx = session?.ctx ?? systemContextFor(workspaceId, newRequestId());
   const usage = e.usage as { cost_usd?: number; output_tokens?: number };
   console.log(
     `[plan] ${e.planId} (rev ${e.revision}) — ${e.plan.tools.length} tool(s), ` +
@@ -11948,22 +11932,22 @@ planner.on("plan", (e) => {
   // The plan gate is a paid call the platform made for this workspace, and it is metered here
   // — once, at the moment it happened. The generation that follows meters itself; it must not
   // also meter `planUsage`, which is the same call reported a second time for display.
-  meterPlatformCall(contextForPlan(), "llm.plan", {
+  meterPlatformCall(planCtx, "llm.plan", {
     // §11.2: THE MODEL THE PLAN ACTUALLY RAN ON. This read `GENERATION_MODEL` — the constant
     // `claude.ts` held — which is v0.1.10's recorded open issue reaching the LEDGER as well as the
     // card. `costFor` prices whatever id it is handed, so a plan on a dearer model was billed at
     // the cheapest one's rate.
-    model: PLAN_MODEL, ...tokensOf(e.usage), payer: planPayer, threadId: planThread,
+    model: PLAN_MODEL, ...tokensOf(e.usage), payer: session?.payer ?? "workspace", threadId: session?.thread ?? null,
   });
-  planOut({ type: "plan", ...e, usage: { ...e.usage, ...effortFields(planEffortPlan) } });
+  planOut(workspaceId, { type: "plan", ...e, usage: { ...e.usage, ...effortFields(session?.effort ?? null) } });
   // The plan is now awaiting a decision, which is §3.3's `needs_you`. The item is what lets the
   // derivation find it: liveness comes from the planner's own slot, ownership from here.
-  if (planThread) noteThreadItem(contextForPlan(), planThread, { kind: "plan", refId: e.planId });
+  if (session?.thread) noteThreadItem(planCtx, session.thread, { kind: "plan", refId: e.planId });
 });
 
-planner.on("error", (e) => {
-  console.error(`[plan] failed: ${e.message}`);
-  planOut({ type: "plan_error", message: e.message });
+planner.on("error", ({ workspaceId, message }) => {
+  console.error(`[plan] failed: ${message}`);
+  planOut(workspaceId, { type: "plan_error", message });
 });
 
 async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<void> {
@@ -11982,18 +11966,19 @@ async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<voi
   // REFUSED TO THE ASKER, and the plan scope is not touched: a refusal belongs to whoever
   // asked, and repointing the scope here would send the in-flight plan's remaining deltas to
   // them instead of to the workspace that started it.
-  if (generating) {
+  if (generatingIn.has(ctx.workspaceId)) {
     relay.broadcastGen(ctx, { type: "plan_error", message: "a generation is already in progress" });
     return;
   }
   // TESTS AND SETS IN ONE STATEMENT. Reading `planner.inFlight` here and calling `planner.plan()`
   // three awaits later tested a flag `plan()` had not set yet, so two workspaces both passed and
   // the second repointed `planContext` at itself while the first one's plan was still streaming.
-  if (!planner.tryClaim()) {
+  if (!planner.tryClaim(ctx.workspaceId)) {
     relay.broadcastGen(ctx, { type: "plan_error", message: "a plan is already being written" });
     return;
   }
-  planContext = ctx;
+  const planSession: PlanSession = { ctx, thread: null, payer: "workspace", effort: null };
+  planSessions.set(ctx.workspaceId, planSession);
   // A REVISION STAYS IN THE SESSION THE PLAN IT REVISES WAS WRITTEN IN, which is why this looks up
   // the thread by the plan's own id before falling back. Three revisions of one brief are one build
   // session (§1.1) — filing each in a thread of its own would put three rows in a list whose whole
@@ -12003,13 +11988,14 @@ async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<voi
   // otherwise leave the slot held for the life of the process — a refusal every workspace would
   // then get forever. The claim is given back on the way out.
   try {
-    planThread =
+    planSession.thread =
       (cmd.revisePlanId ? await threadStore.threadForRef(ctx, "plan", cmd.revisePlanId) : undefined) ??
       (await threadForWork(ctx, cmd.threadId));
     // The brief, or the feedback on a revision — which is what the user actually typed this turn and
     // therefore what §4.3's preview should show.
     // ATTACHED TO THE TURN THE MESSAGE JUST BECAME, which is why this awaits an id it used to
     // throw away. The refs came in on the command because at Send there was no turn to POST to.
+    const planThread = planSession.thread;
     const planTurn = await noteUserMessage(ctx, planThread, cmd.prompt);
     // A PLAN HAS NO AGENT YET, which is why the agent id here is empty: `attachables` resolves a
     // file ref against an agent, and a brief is written before one exists. In practice the picker
@@ -12017,7 +12003,7 @@ async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<voi
     // dataset case or a tool schema, none of which is agent-relative.
     const planBlock = planTurn
       ? await attachToTurn(ctx, "", planTurn, requestedAttachments(cmd.attachments), (m) =>
-          planOut({ type: "error", message: `attachments were not sent: ${m}` }))
+          planOut(ctx.workspaceId, { type: "error", message: `attachments were not sent: ${m}` }))
       : "";
     console.log(
       `[plan] planning${cmd.revisePlanId ? " (revision)" : ""} — "${cmd.prompt.slice(0, 80)}"`,
@@ -12026,7 +12012,7 @@ async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<voi
     // more: an API key pays for agent RUNS and for what an agent does inside itself, never for this.
     // `planPayer` stays for the accounting row, and a subscription is neither of the two payers the
     // platform knows about — nothing is booked, so it reports the workspace's own plan.
-    planPayer = "workspace";
+    planSession.payer = "workspace";
     // Resolved here rather than in the planner, so the planner keeps its single dependency
     // on the connector catalogue. Refs naming a server or tool that has since gone away
     // resolve to nothing rather than to a guess — the same posture as resolveSelected.
@@ -12057,10 +12043,10 @@ async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<voi
       revisePlanId: cmd.revisePlanId,
       // §3.2, REACHING THE REQUEST. Resolved against the thread the brief was written in, so a
       // conversation set to High plans at High rather than at the provider default.
-      effort: (planEffortPlan = await effortForThread(ctx, planThread, PLAN_MODEL, PLAN_MAX_TOKENS)),
+      effort: (planSession.effort = await effortForThread(ctx, planThread, PLAN_MODEL, PLAN_MAX_TOKENS)),
     });
   } catch (err) {
-    planner.releaseClaim();
+    planner.releaseClaim(ctx.workspaceId);
     console.error(`[plan] could not start: ${(err as Error)?.message ?? err}`);
     relay.broadcastGen(ctx, { type: "plan_error", message: "could not start the plan" });
   }
@@ -12069,7 +12055,10 @@ async function planAgent(ctx: TenantContext, cmd: PlanAgentCommand): Promise<voi
 // --- generation -------------------------------------------------------------
 // Streams into the "gen" channel. Nothing here touches the trace store or the frozen
 // event schema; a generation and a run are independent concerns that share only a socket.
-let generating = false;
+// THE WORKSPACES WITH A GENERATION IN FLIGHT. One per workspace, as there always was — a second in the
+// same workspace is refused — and no longer one for the whole server: everything a generation needs
+// is scoped to its own call below, so two workspaces building at once cannot hear each other.
+const generatingIn = new Set<string>();
 
 async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<void> {
   // BUILDING RUNS ON THE USER'S OWN SUBSCRIPTION AND ON NOTHING ELSE — the same rule the plan that
@@ -12087,7 +12076,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     relay.broadcastGen(ctx, cmd.planId ? { type: "plan_error", message: cannotCheck } : { type: "error", message: cannotCheck });
     return;
   }
-  if (generating) {
+  if (generatingIn.has(ctx.workspaceId)) {
     // On the planned path this must NOT be the plain "error" member: that one paints the
     // build pane as a failed generation, and the pending plan is still perfectly good. The
     // check also comes before take(), so a refused click doesn't spend the plan.
@@ -12110,8 +12099,17 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
   // so two planned generations both passed, both repointed `genContext`, and both registered a
   // listener set, which made one model call emit `done` twice and meter itself twice under two
   // different random idempotency keys. Every refusal below has to hand the slot back.
-  generating = true;
-  genContext = ctx;
+  generatingIn.add(ctx.workspaceId);
+  const genContext = ctx;
+  // THIS GENERATION'S OWN SCOPE: who asked (above), the session its turns are filed under, what it was
+  // billed to, the effort it ran at, and an emitter nobody else's generation shares. They were module
+  // state, which is what made generation one at a time for every workspace on the server.
+  const contextForGen = (): TenantContext => genContext;
+  let genThread: string | null = null;
+  let genPayer: Payer = "workspace";
+  let genEffort: EffortPlan | null = null;
+  const genOut = (e: GenEvent): void => relay.broadcastGen(genContext, e, genThread);
+  const generator = new Generator(generatorDeps);
 
   // The confirmed plan, if there is one. Everything downstream comes from the RECORD, not
   // from this command: the composer draft and the plan card's Generate button are separate
@@ -12150,7 +12148,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
       // Never fall through to an unplanned generation here. The user approved a specific
       // plan; quietly building something they never reviewed is the exact failure this gate
       // exists to prevent.
-      generating = false;
+      generatingIn.delete(ctx.workspaceId);
       genOut({
         type: "plan_error",
         message: "that plan is no longer available — describe the agent again",
@@ -12166,7 +12164,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     const known = new Set(loadConnectors(RUNTIME_DIR).map((c) => c.id));
     const missing = (rec.connectors ?? []).filter((id) => !known.has(id));
     if (missing.length) {
-      generating = false;
+      generatingIn.delete(ctx.workspaceId);
       genOut({
         type: "plan_error",
         message:
@@ -12186,7 +12184,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
     );
     const goneMcp = approvedRefs.filter((r) => !stillThere.has(r));
     if (goneMcp.length) {
-      generating = false;
+      generatingIn.delete(ctx.workspaceId);
       genOut({
         type: "plan_error",
         message:
@@ -12246,7 +12244,7 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
   const onRepair = (e: { problems: string[] }) => genOut({ type: "repairing", ...e });
 
   const cleanup = () => {
-    generating = false;
+    generatingIn.delete(ctx.workspaceId);
     generator.off("file_start", onStart);
     generator.off("file_delta", onDelta);
     generator.off("file_end", onEnd);
@@ -12395,62 +12393,63 @@ async function generateAgent(ctx: TenantContext, cmd: GenerateCommand): Promise<
 // --- editing (fix loop) -----------------------------------------------------
 // Streams into the "edit" channel. Like generation, nothing here touches the trace store
 // or the frozen event schema. Listeners are permanent — every event carries its ids.
-editor.on("file_start", (e) => editOut({ type: "file_start", ...e }));
-editor.on("file_delta", (e) => editOut({ type: "file_delta", ...e }));
-editor.on("file_end", (e) => editOut({ type: "file_end", ...e }));
+editor.on("file_start", ({ workspaceId, ...e }) => editOut(workspaceId, { type: "file_start", ...e }));
+editor.on("file_delta", ({ workspaceId, ...e }) => editOut(workspaceId, { type: "file_delta", ...e }));
+editor.on("file_end", ({ workspaceId, ...e }) => editOut(workspaceId, { type: "file_end", ...e }));
 
-editor.on("proposal", (e) => {
+editor.on("proposal", ({ workspaceId, ...e }) => {
+  const session = editSessions.get(workspaceId);
   console.log(
     `[edit] proposal for ${e.agentId} — ${e.files.length} file(s): ${e.summary}`,
   );
   // Metered on the PROPOSAL, not on apply. The model call is what costs money; applying a
   // proposal is a version pointer moving, and undoing one is the same pointer moving back.
   // Billing on apply would mean a rejected proposal was free, which it was not.
-  meterPlatformCall(contextForEdit(), "llm.edit", {
+  meterPlatformCall(contextForEdit(workspaceId), "llm.edit", {
     // §11.2: THE MODEL THE EDIT ACTUALLY RAN ON. `JAROKU_EDIT_MODEL` is its own variable, so
     // this was wrong independently of the other two.
-    model: EDIT_MODEL, ...tokensOf(e.usage), payer: editPayer, threadId: editThread,
+    model: EDIT_MODEL, ...tokensOf(e.usage), payer: session?.payer ?? "workspace", threadId: session?.thread ?? null,
   });
-  editOut({ type: "proposal", ...e, usage: { ...e.usage, ...effortFields(editEffort) } });
+  editOut(workspaceId, { type: "proposal", ...e, usage: { ...e.usage, ...effortFields(session?.effort ?? null) } });
   // An unapplied diff is the most common thing a thread is blocked on, and this row is how the
   // derivation finds which thread. Whether it is still pending stays the editor's answer —
   // `openProposals` — so applying or discarding needs no row of its own here.
-  if (editThread) noteThreadItem(contextForEdit(), editThread, { kind: "proposal", refId: e.proposalId });
+  if (session?.thread) noteThreadItem(session.ctx, session.thread, { kind: "proposal", refId: e.proposalId });
 });
 
-editor.on("applied", (e) => {
+editor.on("applied", ({ workspaceId, ...e }) => {
   console.log(`[edit] applied v${e.version} to ${e.agentId}: ${e.summary}`);
-  editOut({ type: "applied", ...e });
+  editOut(workspaceId, { type: "applied", ...e });
   // The proposal has left `openProposals`, so the thread is no longer blocked. Nothing is written —
   // the row that bound the proposal is still true — but the list has to be told, because the glyph
   // it is rendering has just stopped being amber.
-  scheduleListRefresh(contextForEdit());
+  scheduleListRefresh(contextForEdit(workspaceId));
   void syncAgents().then(() => relay.broadcastAgents());
-  relay.broadcastAgentFiles(contextForEdit(), e.agentId);
+  relay.broadcastAgentFiles(contextForEdit(workspaceId), e.agentId);
   // An edit changed the version, and the graph cache is keyed by it — so there is nothing to
   // invalidate, and re-pushing simply builds the new one.
-  void relay.broadcastAgentGraph(contextForEdit(), e.agentId);
+  void relay.broadcastAgentGraph(contextForEdit(workspaceId), e.agentId);
 });
 
-editor.on("undone", (e) => {
+editor.on("undone", ({ workspaceId, ...e }) => {
   console.log(`[edit] undid v${e.version} on ${e.agentId}`);
-  editOut({ type: "undone", ...e });
+  editOut(workspaceId, { type: "undone", ...e });
   void syncAgents().then(() => relay.broadcastAgents());
-  relay.broadcastAgentFiles(contextForEdit(), e.agentId);
+  relay.broadcastAgentFiles(contextForEdit(workspaceId), e.agentId);
   // Same as apply: the pointer moved, so the cache key did too.
-  void relay.broadcastAgentGraph(contextForEdit(), e.agentId);
+  void relay.broadcastAgentGraph(contextForEdit(workspaceId), e.agentId);
 });
 
-editor.on("discarded", (e) => {
-  editOut({ type: "discarded", ...e });
+editor.on("discarded", ({ workspaceId, ...e }) => {
+  editOut(workspaceId, { type: "discarded", ...e });
   // Same as `applied`: the diff is gone from the editor, so the row is no longer blocked.
-  scheduleListRefresh(contextForEdit());
+  scheduleListRefresh(contextForEdit(workspaceId));
 });
 
-editor.on("error", (e) => {
+editor.on("error", ({ workspaceId, ...e }) => {
   console.error(`[edit] failed: ${e.message}`);
   for (const p of e.problems ?? []) console.error(`  - ${p}`);
-  editOut({ type: "error", ...e });
+  editOut(workspaceId, { type: "error", ...e });
 });
 
 async function editAgent(
@@ -12483,11 +12482,12 @@ async function editAgent(
   // reached until the key lookup below resolves — so reading `editor.inFlight` here tested a flag
   // nothing had set yet, and a second workspace passed the same guard and repointed `editContext`
   // at itself while the first one's source files were still streaming out on that scope.
-  if (!editor.tryClaim()) {
+  if (!editor.tryClaim(ctx.workspaceId)) {
     relay.broadcastEdit(ctx, { type: "error", message: "an edit is already in progress", agentId });
     return;
   }
-  editContext = ctx;
+  const editSession: EditSession = { ctx, thread: null, payer: "workspace", effort: null };
+  editSessions.set(ctx.workspaceId, editSession);
   console.log(`[edit] ${agentId} — "${instruction.slice(0, 80)}"`);
   // BOUND BEFORE THE FIRST EVENT GOES OUT, not alongside it. Every edit event now names the session
   // it belongs to, and `started` is the one that opens the turn — resolved in a floating `.then()`,
@@ -12498,33 +12498,34 @@ async function editAgent(
   // refused edit that had already repointed this would file the running edit's proposal under
   // whoever asked second. The instruction is what the user said, so it is the thread's message.
   try {
-    editThread = await threadForWork(ctx, threadId, agentId);
-    const editTurn = await noteUserMessage(ctx, editThread, instruction);
+    editSession.thread = await threadForWork(ctx, threadId, agentId);
+    const editTurn = await noteUserMessage(ctx, editSession.thread, instruction);
     if (editTurn) {
       instruction += await attachToTurn(ctx, agentId, editTurn, attached, (m) =>
-        editOut({ type: "error", message: `attachments were not sent: ${m}`, agentId }));
+        editOut(ctx.workspaceId, { type: "error", message: `attachments were not sent: ${m}`, agentId }));
     }
   } catch (err) {
     console.error(`[threads] could not bind the edit:`, (err as Error)?.message ?? err);
-    editThread = null;
+    editSession.thread = null;
   }
-  editOut({ type: "started", agentId, instruction });
+  editOut(ctx.workspaceId, { type: "started", agentId, instruction });
   // AN EDIT THINKS ON THE USER'S OWN SUBSCRIPTION, like the plan and the generation before it. No
   // key is resolved: an API key pays for agent runs and for evaluating what was built, never for
   // work somebody asked for and is waiting on.
   void (async () => {
-    editPayer = "workspace";
+    editSession.payer = "workspace";
     // Resolved against the thread the instruction was written in — see effortForThread.
+    const editThread = editSession.thread;
     return editor.propose(
       ctx, agentId, instruction, undefined,
-      (editEffort = await effortForThread(ctx, editThread, EDIT_MODEL, EDIT_MAX_TOKENS)),
+      (editSession.effort = await effortForThread(ctx, editThread, EDIT_MODEL, EDIT_MAX_TOKENS)),
       askOnSubscription(ctx, editSub, "edit", editThread ?? ""),
     );
   })()
     .catch((err) => {
       // The claim never became an edit, so it has to go back — otherwise one failed key lookup
       // refuses every edit in the deployment until the process restarts.
-      editor.releaseClaim();
+      editor.releaseClaim(ctx.workspaceId);
       console.error(`[edit] could not start: ${(err as Error)?.message ?? err}`);
       relay.broadcastEdit(ctx, { type: "error", message: "could not start the edit", agentId });
     });
@@ -13307,7 +13308,10 @@ async function branchRun(
 // A prose answer about a step / node / the agent, streamed to the conversation. Reuses only
 // already-available context (the step the client selected, the agent's on-disk prompt/tools);
 // never a code change, never on the trace stream.
-let explaining = false;
+// THE WORKSPACES WITH AN ANSWER STREAMING — one each. It was one flag for the server, so one person's
+// explanation refused every other workspace's question, and the answer's session was module state
+// that the next question repointed while the first was still streaming. Both now belong to the call.
+const explainingIn = new Set<string>();
 
 function truncateJson(v: unknown, cap = 800): string {
   let s: string;
@@ -13349,14 +13353,16 @@ async function explainAgent(ctx: TenantContext, cmd: ExplainCommand): Promise<vo
     relay.broadcastReply(ctx, { type: "error", agentId: cmd.agentId, message: NO_SUBSCRIPTION });
     return;
   }
-  if (explaining) {
+  if (explainingIn.has(ctx.workspaceId)) {
     // To the asker, not to the scope: the answer still streaming belongs to somebody else, and
     // an explanation quotes the agent's system prompt and tool source back to the reader.
     relay.broadcastReply(ctx, { type: "error", agentId: cmd.agentId, message: "already answering — one at a time" });
     return;
   }
-  replyContext = ctx;
-  explaining = true;
+  explainingIn.add(ctx.workspaceId);
+  const replyContext = ctx;
+  let replyThread: string | null = null;
+  const replyOut = (e: ReplyEvent): void => relay.broadcastReply(replyContext, e, replyThread);
   // After the guard, like `replyContext`. A question is something the user said, so it becomes the
   // thread's message and therefore §4.3's preview — asking "why is it 401ing on refresh?" is exactly
   // the line that makes a session recognisable a week later.
@@ -13439,7 +13445,7 @@ ${attached}`;
       settleReply({ tokensIn: u.input, tokensOut: u.output });
     },
     onDone: () => {
-      explaining = false;
+      explainingIn.delete(ctx.workspaceId);
       settleReply({ body: explained });
       // THE COUNTS, ON THE PAYLOAD THAT RENDERS THEM. Absent when there is one variant, so the
       // metadata row's slot collapses rather than showing `‹ 1/1 ›` on every turn in the product.
@@ -13452,7 +13458,7 @@ ${attached}`;
       );
     },
     onError: (message) => {
-      explaining = false;
+      explainingIn.delete(ctx.workspaceId);
       // WHATEVER ARRIVED IS WHAT THE CONVERSATION REMEMBERS. `streamExplain`'s error path hands back
       // the factual context rather than nothing, and an answer that got half way there is still
       // half an answer — dropping it would make the next turn's memory disagree with the screen.
@@ -13538,7 +13544,7 @@ async function answerFromRecord(ctx: TenantContext, cmd: AskRecordCommand): Prom
     relay.broadcastReply(ctx, { type: "error", agentId: cmd.agentId, message: "ask something" });
     return;
   }
-  if (explaining) {
+  if (explainingIn.has(ctx.workspaceId)) {
     // To the asker's scope, like `explainAgent`'s: the answer still streaming belongs to somebody
     // else, and an answer from the record quotes what an agent was asked to do back to the reader.
     relay.broadcastReply(ctx, { type: "error", agentId: cmd.agentId, message: "already answering — one at a time" });
@@ -13557,8 +13563,10 @@ async function answerFromRecord(ctx: TenantContext, cmd: AskRecordCommand): Prom
   // snapshots one. An agent with no display name gets its slug and no personality.
   const agentName = agent.display_name ?? agent.slug;
 
-  replyContext = ctx;
-  explaining = true;
+  explainingIn.add(ctx.workspaceId);
+  const replyContext = ctx;
+  let replyThread: string | null = null;
+  const replyOut = (e: ReplyEvent): void => relay.broadcastReply(replyContext, e, replyThread);
   try {
     // AN OPERATE THREAD, NOT WHICHEVER THREAD THIS AGENT LAST HAD. `ensureForAgent` filters on mode
     // for exactly this call: reusing a build thread would put the answer beside an Apply button.
@@ -13649,7 +13657,7 @@ async function answerFromRecord(ctx: TenantContext, cmd: AskRecordCommand): Prom
     // RELEASED IN A `finally`, unlike the explain path's, because everything above it is awaited:
     // a throw between claiming the slot and starting the stream would otherwise leave the whole
     // conversation surface answering "one at a time" until a restart.
-    explaining = false;
+    explainingIn.delete(ctx.workspaceId);
   }
 }
 

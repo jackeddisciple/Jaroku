@@ -70,11 +70,15 @@ export interface FileDiff {
   hunks: FileDiffHunk[];
 }
 
+// EVERY EVENT NAMES ITS WORKSPACE, because edits run for several at once and the listener routes each
+// to its own tenant. The listener used to send all of them to whichever workspace had edited LAST —
+// so workspace B applying its own diff while A was editing told A's tabs about B's agent.
 export interface EditorEvents {
-  file_start: [{ path: string }];
-  file_delta: [{ path: string; text: string }];
-  file_end: [{ path: string }];
+  file_start: [{ workspaceId: string; path: string }];
+  file_delta: [{ workspaceId: string; path: string; text: string }];
+  file_end: [{ workspaceId: string; path: string }];
   proposal: [{
+    workspaceId: string;
     proposalId: string; agentId: string; instruction: string; summary: string;
     files: FileDiff[]; usage: UsageSummary;
     /**
@@ -84,10 +88,10 @@ export interface EditorEvents {
      */
     grantable?: string[];
   }];
-  applied: [{ proposalId: string; agentId: string; version: number; summary: string }];
-  undone: [{ agentId: string; version: number; summary: string }];
-  discarded: [{ proposalId: string; agentId: string }];
-  error: [{ message: string; problems?: string[]; agentId?: string; proposalId?: string }];
+  applied: [{ workspaceId: string; proposalId: string; agentId: string; version: number; summary: string }];
+  undone: [{ workspaceId: string; agentId: string; version: number; summary: string }];
+  discarded: [{ workspaceId: string; proposalId: string; agentId: string }];
+  error: [{ workspaceId: string; message: string; problems?: string[]; agentId?: string; proposalId?: string }];
 }
 
 interface PendingProposal {
@@ -186,7 +190,14 @@ function readManifest(files: Map<string, string>): Manifest | undefined {
 
 export class Editor extends EventEmitter<EditorEvents> {
   private pending = new Map<string, PendingProposal>();
-  private busy = false;
+  /**
+   * The workspaces with an edit in flight, and the agent each is writing files for.
+   *
+   * ONE PER WORKSPACE, NOT ONE FOR THE SERVER. It was a single flag, so one workspace's edit refused
+   * every other workspace's. The agent slug rides along for the Agents grid's `Generating` tag —
+   * see `editingAgentId` — and is set and cleared with the slot, so it cannot outlive the edit.
+   */
+  private busy = new Map<string, string>();
   /**
    * The slot won by a caller that has not reached `propose` yet.
    *
@@ -196,21 +207,7 @@ export class Editor extends EventEmitter<EditorEvents> {
    * set. Two workspaces both passed it, and the second one repointed the edit scope the first
    * one's source files were still streaming to.
    */
-  private claimed = false;
-  /**
-   * The agent whose edit holds the slot right now, or null.
-   *
-   * WHY A SECOND FIELD RATHER THAN A LOOK AT `pending`. The two mean opposite things and the Agents
-   * grid needs exactly this one: `pending` holds proposals that have ARRIVED and are waiting for a
-   * person to apply or discard them — work that has stopped — while this is the agent a model is
-   * writing files for at this instant. A card that read the first and called it `Generating` would
-   * wear the running colour for a diff that is sitting still, which is both wrong and the precise
-   * inversion of what the tag means: an unapplied diff is somebody's turn, not the machine's.
-   *
-   * Set in the same synchronous block as `busy` and cleared wherever `busy` is, so it can never
-   * outlive the edit it names.
-   */
-  private editing: string | null = null;
+  private claimed = new Set<string>();
 
   constructor(private readonly opts: EditorDeps) {
     super();
@@ -225,8 +222,8 @@ export class Editor extends EventEmitter<EditorEvents> {
    * has handed the in-flight edit's diff to whoever asked second. See `editContext` in
    * index.ts.
    */
-  get inFlight(): boolean {
-    return this.busy || this.claimed;
+  inFlight(workspaceId: string): boolean {
+    return this.busy.has(workspaceId) || this.claimed.has(workspaceId);
   }
 
   /**
@@ -238,8 +235,8 @@ export class Editor extends EventEmitter<EditorEvents> {
    *
    * The SLUG, because that is what a card is keyed by and what `propose` is given.
    */
-  get editingAgentId(): string | null {
-    return this.editing;
+  editingAgentId(workspaceId: string): string | null {
+    return this.busy.get(workspaceId) ?? null;
   }
 
   /**
@@ -250,9 +247,9 @@ export class Editor extends EventEmitter<EditorEvents> {
    * caller reads the same false. Nothing in JavaScript protects a flag across an `await`, so the
    * flag has to be claimed before the first one.
    */
-  tryClaim(): boolean {
-    if (this.busy || this.claimed) return false;
-    this.claimed = true;
+  tryClaim(workspaceId: string): boolean {
+    if (this.inFlight(workspaceId)) return false;
+    this.claimed.add(workspaceId);
     return true;
   }
 
@@ -262,8 +259,8 @@ export class Editor extends EventEmitter<EditorEvents> {
    * Only the pre-`propose` claim: an edit that has genuinely started clears itself when it ends,
    * and this must not be able to unlock one that is still streaming.
    */
-  releaseClaim(): void {
-    this.claimed = false;
+  releaseClaim(workspaceId: string): void {
+    this.claimed.delete(workspaceId);
   }
 
   /**
@@ -297,8 +294,8 @@ export class Editor extends EventEmitter<EditorEvents> {
     return out;
   }
 
-  private fail(e: EditorEvents["error"][0]): void {
-    this.emit("error", e);
+  private fail(workspaceId: string, e: Omit<EditorEvents["error"][0], "workspaceId">): void {
+    this.emit("error", { workspaceId, ...e });
   }
 
   async propose(
@@ -317,17 +314,17 @@ export class Editor extends EventEmitter<EditorEvents> {
     /** WHO DOES THE THINKING — the user's own subscription. See askModel.ts. */
     ask?: AskModel,
   ): Promise<void> {
-    if (this.busy) {
-      this.fail({ message: "an edit is already in progress", agentId });
+    const workspaceId = ctx.workspaceId;
+    if (this.busy.has(workspaceId)) {
+      this.fail(workspaceId, { message: "an edit is already in progress", agentId });
       return;
     }
-    this.busy = true;
     // Named in the same breath as the slot is taken, so the grid can say WHICH agent is being
-    // written to rather than only that something is. Cleared wherever `busy` is.
-    this.editing = agentId;
+    // written to rather than only that something is. Cleared with the slot.
+    this.busy.set(workspaceId, agentId);
     // The claim, if the caller took one, has now become the edit it was holding the slot for.
-    // A direct caller that never claimed clears a flag that was already false.
-    this.claimed = false;
+    // A direct caller that never claimed clears a flag that was already absent.
+    this.claimed.delete(workspaceId);
     const { runtimeDir, agents, projects } = this.opts;
     const stagingId = newStagingId();
     let agentUuid = "";
@@ -401,15 +398,15 @@ export class Editor extends EventEmitter<EditorEvents> {
             );
           }
           buffers.set(event.path, "");
-          this.emit("file_start", { path: safe });
+          this.emit("file_start", { workspaceId, path: safe });
         } else if (event.type === "file_delta") {
           buffers.set(event.path, (buffers.get(event.path) ?? "") + event.text);
-          this.emit("file_delta", { path: event.path, text: event.text });
+          this.emit("file_delta", { workspaceId, path: event.path, text: event.text });
         } else {
           // Recorded on close, into the staged copy — the live version is never touched here.
           const safe = safeObjectPath(event.path)!;
           staged.set(safe, buffers.get(event.path) ?? "");
-          this.emit("file_end", { path: safe });
+          this.emit("file_end", { workspaceId, path: safe });
         }
       };
       const parser = new FileProtocolParser(onEvent);
@@ -471,6 +468,7 @@ export class Editor extends EventEmitter<EditorEvents> {
       if (emitted.length === 0) {
         // A valid no-op: the model declined (rule E5) and said why in the summary.
         this.emit("proposal", {
+          workspaceId,
           proposalId: randomUUID(), agentId, instruction, summary, files: [], usage, ...(await grantable()),
         });
         return;
@@ -480,6 +478,7 @@ export class Editor extends EventEmitter<EditorEvents> {
       if (files.length === 0) {
         // Everything the model re-emitted was byte-identical — nothing to apply.
         this.emit("proposal", {
+          workspaceId,
           proposalId: randomUUID(), agentId, instruction, summary, files: [], usage, ...(await grantable()),
         });
         return;
@@ -510,7 +509,7 @@ export class Editor extends EventEmitter<EditorEvents> {
       });
       if (!result.ok) {
         await projects.discardStaging(ctx, agent.id, stagingId);
-        this.fail({
+        this.fail(ctx.workspaceId, {
           message: "the proposed edit failed validation and was discarded",
           problems: result.problems,
           agentId,
@@ -523,17 +522,15 @@ export class Editor extends EventEmitter<EditorEvents> {
         proposalId, ctx, agentUuid: agent.id, agentId, stagingId,
         baseVersion: agent.current_version, instruction, summary, files,
       });
-      this.emit("proposal", { proposalId, agentId, instruction, summary, files, usage });
+      this.emit("proposal", { workspaceId, proposalId, agentId, instruction, summary, files, usage });
     } catch (err) {
       if (agentUuid) await this.opts.projects.discardStaging(ctx, agentUuid, stagingId).catch(() => {});
-      this.fail({ message: (err as Error).message, agentId });
+      this.fail(ctx.workspaceId, { message: (err as Error).message, agentId });
     } finally {
       rmSync(scratch, { recursive: true, force: true });
-      this.busy = false;
-      // WITH `busy`, IN THE SAME `finally`, so the two can never disagree. An `editing` that outlived
-      // its edit would leave a card wearing `Generating` until the next one started — which on a
-      // workspace that edits once a week is forever.
-      this.editing = null;
+      // THE SLOT AND THE AGENT IT NAMES GO TOGETHER — one map entry — so an agent cannot outlive its
+      // edit and leave a card wearing `Generating` until the next one starts.
+      this.busy.delete(workspaceId);
     }
   }
 
@@ -554,7 +551,7 @@ export class Editor extends EventEmitter<EditorEvents> {
   async apply(ctx: TenantContext, proposalId: string): Promise<void> {
     const rec = this.pending.get(proposalId);
     if (!rec || rec.ctx.workspaceId !== ctx.workspaceId) {
-      this.fail({ message: "that proposal is no longer available", proposalId });
+      this.fail(ctx.workspaceId, { message: "that proposal is no longer available", proposalId });
       return;
     }
     // CLAIMED SYNCHRONOUSLY, BEFORE THE FIRST `await`. It used to be deleted after two of them —
@@ -573,7 +570,7 @@ export class Editor extends EventEmitter<EditorEvents> {
     const refusal = this.opts.canMutate?.(ctx, rec.agentId);
     if (refusal) {
       restore();
-      this.fail({ message: refusal, proposalId, agentId: rec.agentId });
+      this.fail(ctx.workspaceId, { message: refusal, proposalId, agentId: rec.agentId });
       return;
     }
 
@@ -584,7 +581,7 @@ export class Editor extends EventEmitter<EditorEvents> {
     const agent = await this.opts.agents.bySlug(rec.ctx, rec.agentId);
     if (!agent) {
       restore();
-      this.fail({ message: `agent "${rec.agentId}" was not found`, proposalId, agentId: rec.agentId });
+      this.fail(ctx.workspaceId, { message: `agent "${rec.agentId}" was not found`, proposalId, agentId: rec.agentId });
       return;
     }
     if (agent.current_version !== rec.baseVersion) {
@@ -592,7 +589,7 @@ export class Editor extends EventEmitter<EditorEvents> {
       // and tells the workspace, and this proposal genuinely is over.
       restore();
       await this.discard(rec.ctx, proposalId);
-      this.fail({
+      this.fail(ctx.workspaceId, {
         message:
           `this agent changed while the proposal was open (it was v${rec.baseVersion}, it is now ` +
           `v${agent.current_version}), so the diff you reviewed is no longer against what is live. ` +
@@ -615,32 +612,32 @@ export class Editor extends EventEmitter<EditorEvents> {
         ),
       });
       await this.materialise(rec.ctx, rec.agentUuid, version, rec.agentId);
-      this.emit("applied", { proposalId, agentId: rec.agentId, version, summary: rec.summary });
+      this.emit("applied", { workspaceId: ctx.workspaceId, proposalId, agentId: rec.agentId, version, summary: rec.summary });
     } catch (err) {
       // NOT put back. The publish either happened or it did not, and this catch cannot tell which:
       // `materialise` runs after `publishStaging`, so a throw here may sit on the far side of a
       // version that already exists. Restoring would offer an Apply button that could publish it a
       // second time, which is the bug this claim was added to close. The user asks for the edit
       // again, which is what the staleness guard would tell them anyway.
-      this.fail({ message: `apply failed: ${(err as Error).message}`, proposalId, agentId: rec.agentId });
+      this.fail(ctx.workspaceId, { message: `apply failed: ${(err as Error).message}`, proposalId, agentId: rec.agentId });
     }
   }
 
   /** Revert the last applied edit: move the pointer back, and mark what it left behind. */
   async undo(ctx: TenantContext, agentId: string): Promise<void> {
     if (!isSafeAgentId(agentId)) {
-      this.fail({ message: `invalid agent id: ${agentId}`, agentId });
+      this.fail(ctx.workspaceId, { message: `invalid agent id: ${agentId}`, agentId });
       return;
     }
     const refusal = this.opts.canMutate?.(ctx, agentId);
     if (refusal) {
-      this.fail({ message: refusal, agentId });
+      this.fail(ctx.workspaceId, { message: refusal, agentId });
       return;
     }
 
     const agent = await this.opts.agents.bySlug(ctx, agentId);
     if (!agent) {
-      this.fail({ message: `agent "${agentId}" was not found`, agentId });
+      this.fail(ctx.workspaceId, { message: `agent "${agentId}" was not found`, agentId });
       return;
     }
     // Read BEFORE the undo: afterwards this version is marked and no longer on the line, and
@@ -652,16 +649,17 @@ export class Editor extends EventEmitter<EditorEvents> {
 
     const moved = await this.opts.agents.undoVersion(ctx, agent.id);
     if (!moved) {
-      this.fail({ message: "nothing to undo — no applied edits", agentId });
+      this.fail(ctx.workspaceId, { message: "nothing to undo — no applied edits", agentId });
       return;
     }
     try {
       await this.materialise(ctx, agent.id, moved.to, agentId);
     } catch (err) {
-      this.fail({ message: `undo failed: ${(err as Error).message}`, agentId });
+      this.fail(ctx.workspaceId, { message: `undo failed: ${(err as Error).message}`, agentId });
       return;
     }
     this.emit("undone", {
+      workspaceId: ctx.workspaceId,
       agentId,
       version: moved.from,
       summary: reverting?.summary ?? "the last applied edit",
@@ -676,7 +674,7 @@ export class Editor extends EventEmitter<EditorEvents> {
     if (!rec || rec.ctx.workspaceId !== ctx.workspaceId) return;
     this.pending.delete(proposalId);
     await this.opts.projects.discardStaging(rec.ctx, rec.agentUuid, rec.stagingId).catch(() => {});
-    this.emit("discarded", { proposalId, agentId: rec.agentId });
+    this.emit("discarded", { workspaceId: ctx.workspaceId, proposalId, agentId: rec.agentId });
   }
 
   private async discardForAgent(agentId: string): Promise<void> {

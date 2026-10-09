@@ -140,5 +140,15 @@ console.log("\na plan on the subscription, on a server with no key");
   if (savedKey !== undefined) process.env.ANTHROPIC_API_KEY = savedKey;
 }
 
+console.log("\nthe planning slot is one per workspace, not one for the server");
+{
+  const slots = new Planner();
+  check(slots.tryClaim("ws-a"), "workspace A can claim a plan slot");
+  check(slots.tryClaim("ws-b"), "...and workspace B can claim its own while A's is held");
+  check(!slots.tryClaim("ws-a"), "...but A cannot claim a second");
+  slots.releaseClaim("ws-b");
+  check(slots.inFlight("ws-a") && !slots.inFlight("ws-b"), "B's release leaves A's slot in flight");
+}
+
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);

@@ -364,7 +364,7 @@ console.log("\nan in-flight operation's channel scope belongs to it alone");
     "every broadcast of an agent's files is followed by its graph",
     unpaired.map((i) => `index.ts:${i + 1}`).join(", "));
 
-  for (const scope of ["planContext", "genContext", "editContext", "replyContext", "deployContext"]) {
+  for (const scope of ["deployContext"]) {
     check(
       new RegExp(`let ${scope}: TenantContext \\| null`).test(indexSource),
       `${scope} is its own scope`,
@@ -375,16 +375,21 @@ console.log("\nan in-flight operation's channel scope belongs to it alone");
   // that could refuse the request, so a refused command from another workspace repointed it
   // while the real operation was still streaming. Every claim must now come after its guard.
   const claims = [
-    { scope: "genContext", guard: "if (generating)", flag: "generating = true", fn: "async function generateAgent" },
-    { scope: "planContext", guard: "if (!planner.tryClaim())", flag: "if (!planner.tryClaim())", fn: "async function planAgent" },
-    { scope: "editContext", guard: "if (!editor.tryClaim())", flag: "if (!editor.tryClaim())", fn: "function editAgent" },
-    { scope: "replyContext", guard: "if (explaining)", flag: "explaining = true", fn: "function explainAgent" },
+    // A GENERATION'S SCOPE IS ITS OWN CALL'S, and the slot is one per workspace rather than one per
+    // server — but it is still claimed after its guard and before the first await.
+    { scope: "genContext", guard: "if (generatingIn.has(ctx.workspaceId))", flag: "generatingIn.add(ctx.workspaceId)", fn: "async function generateAgent" },
+    // A PLAN'S SCOPE IS ITS WORKSPACE'S SESSION, and the planner's slot is one per workspace.
+    { scope: "planContext", guard: "if (!planner.tryClaim(ctx.workspaceId))", flag: "if (!planner.tryClaim(ctx.workspaceId))", fn: "async function planAgent", claim: "planSessions.set(ctx.workspaceId" },
+    // AND AN EDIT'S, likewise: its workspace's session, behind a per-workspace slot.
+    { scope: "editContext", guard: "if (!editor.tryClaim(ctx.workspaceId))", flag: "if (!editor.tryClaim(ctx.workspaceId))", fn: "function editAgent", claim: "editSessions.set(ctx.workspaceId" },
+    // AND AN ANSWER'S: the call's own context, behind a per-workspace slot.
+    { scope: "replyContext", guard: "if (explainingIn.has(ctx.workspaceId))", flag: "explainingIn.add(ctx.workspaceId)", fn: "function explainAgent" },
   ];
-  for (const { scope, guard, flag, fn } of claims) {
+  for (const { scope, guard, flag, fn, claim } of claims as { scope: string; guard: string; flag: string; fn: string; claim?: string }[]) {
     const start = indexSource.indexOf(fn);
     const body = indexSource.slice(start, start + 2500);
     const guardAt = body.indexOf(guard);
-    const claimAt = body.indexOf(`${scope} = ctx`);
+    const claimAt = body.indexOf(claim ?? `${scope} = ctx`);
     check(
       guardAt !== -1 && claimAt !== -1 && guardAt < claimAt,
       `${fn.split(" ").pop()} claims ${scope} only AFTER "${guard}"`,
@@ -402,6 +407,32 @@ console.log("\nan in-flight operation's channel scope belongs to it alone");
       `${fn.split(" ").pop()} takes the slot with no await between the guard and the flag`,
       flagAt === -1 ? "the flag is never set" : "an await sits between the guard and the flag it reads",
     );
+  }
+
+  // EVERY EDITOR AND PLANNER EVENT NAMES ITS WORKSPACE, and the listener routes by it. The editor's
+  // used to go to whichever workspace had edited last, so B applying its own diff while A was
+  // editing announced B's agent and summary to A's tabs.
+  {
+    const editorSource = readFileSync(new URL("./editor.ts", import.meta.url), "utf8");
+    const plannerSource = readFileSync(new URL("./planner.ts", import.meta.url), "utf8");
+    for (const [name, src] of [["editor", editorSource], ["planner", plannerSource]] as const) {
+      const emits = [...src.matchAll(/this\.emit\("(\w+)", \{([^}]*)/g)];
+      const unnamed = emits.filter((m) => !/workspaceId|\.\.\.rec/.test(m[2]!)).map((m) => m[1]);
+      check(emits.length > 0 && unnamed.length === 0, `every ${name} event names its workspace`, unnamed.join(", "));
+    }
+    check(!/editOut\(\{/.test(indexSource) && !/planOut\(\{/.test(indexSource),
+      "edit and plan events are sent to their own workspace, never to a shared current one");
+  }
+
+  // AND EACH GENERATION HEARS ONLY ITSELF. Listeners are attached per call, so a shared emitter made
+  // two concurrent generations each receive the other's files — the reason generation used to be
+  // one at a time for every workspace on the server.
+  {
+    const gen = indexSource.slice(indexSource.indexOf("async function generateAgent"));
+    check(/const generator = new Generator\(generatorDeps\);/.test(gen.slice(0, 6000)) && !/^const generator = new Generator/m.test(indexSource),
+      "every generation builds its own Generator, and there is no shared one");
+    check(!/^let genContext|^let genThread|^function genOut/m.test(indexSource),
+      "a generation's context, thread and output live in its own call, not in module state");
   }
 
   // `deploy` is a switch case rather than a function, so its guard is located the same way.

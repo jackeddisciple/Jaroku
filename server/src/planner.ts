@@ -145,10 +145,15 @@ export interface PlannerEvents {
   // the brief on the first plan, the feedback on a revision. The conversation renders
   // `input`, because echoing the original brief back on every revision would be a lie about
   // what was said.
-  started: [{ prompt: string; input: string; revision: number }];
-  delta: [{ text: string }];
+  //
+  // EVERY EVENT NAMES ITS WORKSPACE, because plans are written for several at once now and the
+  // listener routes each to its own tenant. There used to be one slot for the whole server, so the
+  // listener's single "current scope" was the answer — and one workspace planning refused all others.
+  started: [{ workspaceId: string; prompt: string; input: string; revision: number }];
+  delta: [{ workspaceId: string; text: string }];
   plan: [
     {
+      workspaceId: string;
       planId: string;
       prompt: string;
       connectors: string[];
@@ -162,7 +167,7 @@ export interface PlannerEvents {
   // `workspaceId` so the listener can route it to the plan's OWN tenant rather than to whichever
   // one the planner's scope happens to point at — see `discard`.
   discarded: [{ planId: string; workspaceId: string }];
-  error: [{ message: string }];
+  error: [{ workspaceId: string; message: string }];
 }
 
 export class Planner extends EventEmitter<PlannerEvents> {
@@ -182,7 +187,8 @@ export class Planner extends EventEmitter<PlannerEvents> {
    * next plan or removed by its Generate — the same lifetime the single slot had.
    */
   private pending = new Map<string, PendingPlan>();
-  private busy = false;
+  /** The workspaces with a plan being written. One each, and no longer one for the server. */
+  private busy = new Set<string>();
   /**
    * The slot won by a caller that has not reached `plan()` yet.
    *
@@ -190,7 +196,7 @@ export class Planner extends EventEmitter<PlannerEvents> {
    * key and the MCP catalogue between its guard and this call. For all three awaits `busy` was
    * false, so the guard was testing a flag nothing had set — see `tryClaim`.
    */
-  private claimed = false;
+  private claimed = new Set<string>();
 
   /** This workspace's plan awaiting confirmation, if any. Read-only — use take() to consume it. */
   peek(workspaceId: string): PendingPlan | null {
@@ -204,8 +210,8 @@ export class Planner extends EventEmitter<PlannerEvents> {
    * refused request never repoints the workspace scope the in-flight plan's deltas are being
    * broadcast to. See `planContext` in index.ts.
    */
-  get inFlight(): boolean {
-    return this.busy || this.claimed;
+  inFlight(workspaceId: string): boolean {
+    return this.busy.has(workspaceId) || this.claimed.has(workspaceId);
   }
 
   /**
@@ -214,15 +220,15 @@ export class Planner extends EventEmitter<PlannerEvents> {
    * Test and set in one synchronous statement, for the reason spelled out on `Editor.tryClaim`:
    * a guard separated from its flag by an `await` is not a guard.
    */
-  tryClaim(): boolean {
-    if (this.busy || this.claimed) return false;
-    this.claimed = true;
+  tryClaim(workspaceId: string): boolean {
+    if (this.inFlight(workspaceId)) return false;
+    this.claimed.add(workspaceId);
     return true;
   }
 
   /** Give back a claim that never became a plan — the caller threw before `plan()` ran. */
-  releaseClaim(): void {
-    this.claimed = false;
+  releaseClaim(workspaceId: string): void {
+    this.claimed.delete(workspaceId);
   }
 
   /**
@@ -280,13 +286,14 @@ export class Planner extends EventEmitter<PlannerEvents> {
   }
 
   async plan(opts: PlanOptions): Promise<void> {
-    if (this.busy) {
-      this.emit("error", { message: "a plan is already being written" });
+    const workspaceId = opts.workspaceId;
+    if (this.busy.has(workspaceId)) {
+      this.emit("error", { workspaceId, message: "a plan is already being written" });
       return;
     }
-    this.busy = true;
+    this.busy.add(workspaceId);
     // The caller's claim has become the plan it was holding the slot for.
-    this.claimed = false;
+    this.claimed.delete(workspaceId);
 
     try {
       const all = loadConnectors(opts.runtimeDir);
@@ -297,6 +304,7 @@ export class Planner extends EventEmitter<PlannerEvents> {
       const previous = opts.revisePlanId ? this.take(opts.workspaceId, opts.revisePlanId) : null;
       if (opts.revisePlanId && !previous) {
         this.emit("error", {
+          workspaceId,
           message: "that plan is no longer available — describe the agent again",
         });
         return;
@@ -317,7 +325,7 @@ export class Planner extends EventEmitter<PlannerEvents> {
       const name = previous?.name ?? opts.name;
       const conversation = previous?.conversation ?? opts.conversation;
 
-      this.emit("started", { prompt, input: opts.prompt, revision });
+      this.emit("started", { workspaceId, prompt, input: opts.prompt, revision });
 
       let raw = "";
       let usage = emptyUsage();
@@ -333,7 +341,7 @@ export class Planner extends EventEmitter<PlannerEvents> {
             `built against the FIXTURE's plan, not yours. Unset it for real planning.`,
         );
         raw = readFileSync(fixture, "utf8");
-        await replayPlan(raw, (chunk) => this.emit("delta", { text: chunk }));
+        await replayPlan(raw, (chunk) => this.emit("delta", { workspaceId, text: chunk }));
       } else {
         // NO KEY CHECK HERE. A plan thinks on the subscription `opts.ask` carries, which needs no
         // key on this server — a deployment with none refused every plan while the call below it
@@ -351,7 +359,7 @@ export class Planner extends EventEmitter<PlannerEvents> {
             previousPlan: previous?.plan.raw,
             feedback: previous ? opts.prompt : undefined,
           },
-          (chunk) => this.emit("delta", { text: chunk }),
+          (chunk) => this.emit("delta", { workspaceId, text: chunk }),
           (u) => (usage = u),
           opts.apiKey,
           opts.effort,
@@ -387,9 +395,9 @@ export class Planner extends EventEmitter<PlannerEvents> {
       this.pending.set(opts.workspaceId, rec);
       this.emit("plan", { ...rec });
     } catch (err) {
-      this.emit("error", { message: (err as Error).message });
+      this.emit("error", { workspaceId, message: (err as Error).message });
     } finally {
-      this.busy = false;
+      this.busy.delete(workspaceId);
     }
   }
 
