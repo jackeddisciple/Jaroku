@@ -3,8 +3,7 @@
 // Bottom-anchored: Settings and the user/plan chip. Restraint-first: rows float on the panel,
 // separated by spacing and a thin accent on the active one — never boxed.
 
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useState } from "react";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import type { AgentSummary, ThreadView } from "../types.ts";
@@ -32,14 +31,22 @@ import { Truncate } from "./Truncate.tsx";
 import { AgentIdentityLine, identityTitle } from "./AgentIdentityLine.tsx";
 import { FACE_SIZE, AgentFace } from "./AgentFace.tsx";
 import { Capable } from "./Capable.tsx";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuPlainItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu.tsx";
 import { keyHint } from "../lib/modKey.ts";
 import { startNewChat } from "../lib/newChat.ts";
 import { goBack, goForward } from "../lib/navHistory.ts";
 import { canGoBack, canGoForward, useHistoryStore } from "../store/historyStore.ts";
 import { hasHostWindow } from "../lib/windowStage.ts";
 import { useAvatar } from "../lib/avatar.ts";
-import { useMenuFocus } from "../lib/menuFocus.ts";
-import { useAnchoredMenu } from "../lib/anchoredMenu.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { Collapse } from "./Collapse.tsx";
 import { MOTION_ROW, MOTION_SCOPE, withRowMotion } from "../lib/rowMotion.ts";
@@ -272,42 +279,7 @@ function AgentRowMenu({ agent }: { agent: AgentSummary }) {
   const [typed, setTyped] = useState("");
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(agent.name);
-  const ref = useRef<HTMLDivElement>(null);
-  // The panel is portalled out of the list, so it needs a ref of its own: `ref` no longer contains
-  // it, and every listener below that used to ask one element now has to ask both.
-  const panelRef = useRef<HTMLDivElement>(null);
   const pinned = useUiStore((st) => st.pinnedAgents.includes(agent.agent_id));
-
-  useEffect(() => {
-    if (!open) return;
-    const away = (e: MouseEvent): void => {
-      // BOTH, OR THE MENU CANNOT BE CLICKED. Once the panel is portalled it is no longer inside
-      // `ref`, so a press on one of its own items counted as a click outside: the menu closed on
-      // `mousedown` and the item it was closing over never received the `click`. Every item in it
-      // was dead for exactly as long as the portal existed without this line.
-      const t = e.target as Node;
-      if (ref.current?.contains(t) || panelRef.current?.contains(t)) return;
-      // A DECISION IN PROGRESS IS NOT DISMISSED BY A STRAY CLICK. The delete confirmation vanished on
-      // any press outside it, and the slug typed next went nowhere — somebody had to start the
-      // delete over without being told it had gone. Escape and Cancel still close it.
-      if (confirming || renaming) return;
-      setOpen(false);
-    };
-    const key = (e: KeyboardEvent): void => { if (e.key === "Escape") setOpen(false); };
-    document.addEventListener("mousedown", away);
-    document.addEventListener("keydown", key);
-    return () => {
-      document.removeEventListener("mousedown", away);
-      document.removeEventListener("keydown", key);
-    };
-  }, [open, confirming, renaming]);
-
-  // See lib/menuFocus.ts — the panel renders before its trigger, so without this the keyboard
-  // steps over the menu it just opened. The items live in the portal and the button stays in the
-  // row, which is why this one names both.
-  useMenuFocus(open, panelRef, ref);
-  // ...and lib/anchoredMenu.ts, which puts the portalled panel back where the row expects it.
-  useAnchoredMenu(open, ref, panelRef);
 
   // CLOSING RESETS THE TWO SUB-STATES. A menu reopened on a half-typed delete confirmation, or on
   // a rename field holding a name somebody abandoned, is a menu that remembers a decision they
@@ -320,148 +292,153 @@ function AgentRowMenu({ agent }: { agent: AgentSummary }) {
     setName(agent.name);
   }, [open, agent.name]);
 
-  const choose = (run: () => void) => () => { setOpen(false); run(); };
+  /**
+   * TYPING STAYS IN THE FIELD. A menu jumps to the item whose name starts with a typed letter and
+   * keeps Tab to itself, so without this the slug typed into the delete confirmation moved the
+   * highlight instead, and Tab could not reach Rename or Cancel. Escape still closes the menu —
+   * Radix hears it on the document, before this handler sees anything.
+   */
+  const keepKeys = (e: React.KeyboardEvent): void => { e.stopPropagation(); };
 
   return (
-    <div ref={ref} className="relative shrink-0">
-      <button
-        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title={`Actions for ${agent.name}`}
-        aria-label={`Actions for ${agent.name}`}
-        // VISIBLE WHILE OPEN, which the portal made necessary. The panel used to be a child of the
-        // row, so moving the pointer onto it kept the row hovered and this button shown; now that
-        // it is in `document.body` the row un-hovers the moment somebody reaches for the menu, and
-        // the trigger faded out from under its own open panel. `RunOverflow` above has always
-        // spelled it this way.
-        className={`flex h-6 w-6 items-center justify-center rounded-control text-faint transition-[color,opacity] duration-fast hover:bg-sidebar-hover hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring ${
-          open ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-        }`}
-      >
-        <Icon.agents.rowMore size={ICON.sm} />
-      </button>
-
-      {/* INTO `document.body`, NOT INTO THE ROW — see lib/anchoredMenu.ts. This is the only menu in
-          the application that opens from inside a scroller, and an `overflow` ancestor clips its
-          absolutely-positioned descendants no matter what `z-index` they carry.
-          `top-0 left-0` IS THE STARTING POINT, NOT THE POSITION. `useAnchoredMenu` overwrites both
-          in a layout effect — before paint, so nothing is ever seen in the corner — and it has to
-          be after mount because choosing between opening down and opening up means measuring a
-          panel that has been laid out. */}
-      {open && createPortal(
-        <div
-          ref={panelRef}
-          role="menu"
+    // A RADIX MENU (ui/dropdown-menu.tsx), which brings what this component used to wire by hand:
+    // the portal out of the scrolling list that clipped it, placement against the row with a flip
+    // upward near the bottom, focus into the menu and back to this button, and a press outside that
+    // closes it without landing on whatever was under it.
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>
+        <button
+          onClick={(e) => e.stopPropagation()}
+          title={`Actions for ${agent.name}`}
           aria-label={`Actions for ${agent.name}`}
-          className="fixed left-0 top-0 z-50 min-w-[210px] origin-top animate-menu-in overflow-hidden rounded-card border border-sidebar-border bg-elevated p-1 shadow-floating motion-reduce:animate-none"
+          // VISIBLE WHILE OPEN, which the portal makes necessary. The panel used to be a child of the
+          // row, so moving the pointer onto it kept the row hovered and this button shown; now that
+          // it is in `document.body` the row un-hovers the moment somebody reaches for the menu, and
+          // the trigger faded out from under its own open panel. `RunOverflow` above has always
+          // spelled it this way.
+          className={`flex h-6 w-6 items-center justify-center rounded-control text-faint transition-[color,opacity] duration-fast hover:bg-sidebar-hover hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring ${
+            open ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+          }`}
         >
-          {renaming ? (
-            // IN PLACE, NOT IN A DIALOG. A rename is one short string and the row it belongs to is
-            // three pixels away; taking over the screen to ask for it would be more ceremony than
-            // the change deserves.
-            <form
-              className="flex flex-col gap-1 p-1"
-              onSubmit={(e) => {
-                e.preventDefault();
-                const next = name.trim();
-                if (next && next !== agent.name) sendRenameAgent(agent.agent_id, next);
-                setOpen(false);
-              }}
-            >
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                autoFocus
-                aria-label="Agent name"
-                className="w-full rounded-input border border-edge bg-panel px-2 py-1 text-body text-ink outline-none focus-visible:shadow-focusring"
-              />
-              <div className="flex gap-2 px-1 pb-0.5">
-                <button type="submit" className="text-body font-medium text-ink underline underline-offset-2">Rename</button>
-                <button type="button" onClick={() => setRenaming(false)} className="text-body font-medium text-muted underline underline-offset-2">Cancel</button>
-              </div>
-            </form>
-          ) : confirming ? (
-            <form
-              className="flex flex-col gap-1 p-1"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (typed.trim() !== agent.agent_id) return;
-                sendDeleteAgent(agent.agent_id, agent.agent_id);
-                setOpen(false);
-              }}
-            >
-              {/* THE SLUG, NOT THE NAME, and not a yes/no. A name can be anything including another
-                  agent's; the slug is what identifies this one, and typing it is the only part of
-                  this flow that requires having read which agent is about to go. */}
-              <p className="px-1 py-0.5 text-body font-medium leading-[1.5] text-muted">
-                This removes {agent.name}, its runs and its history. Type <span className="text-ink">{agent.agent_id}</span> to confirm.
-              </p>
-              <input
-                value={typed}
-                onChange={(e) => setTyped(e.target.value)}
-                autoFocus
-                // A SLUG IS NOT A WORD, AND macOS TREATS IT AS ONE. In the desktop app autocorrect
-                // turned `margot` into `Margot` and drew its suggestion over "Delete for good" — so
-                // the typed slug no longer matched, the button stayed disabled, and the delete could
-                // not be confirmed at all. The field compares exact characters; nothing may change them.
-                spellCheck={false}
-                autoCorrect="off"
-                autoCapitalize="off"
-                autoComplete="off"
-                aria-label={`Type ${agent.agent_id} to confirm deletion`}
-                className="w-full rounded-input border border-edge bg-panel px-2 py-1 text-body text-ink outline-none focus-visible:shadow-focusring"
-              />
-              <div className="flex gap-2 px-1 pb-0.5">
-                <button
-                  type="submit"
-                  disabled={typed.trim() !== agent.agent_id}
-                  className="text-body font-medium text-err underline underline-offset-2 disabled:cursor-default disabled:text-disabled disabled:no-underline"
-                >
-                  Delete for good
-                </button>
-                <button type="button" onClick={() => setConfirming(false)} className="text-body font-medium text-muted underline underline-offset-2">Cancel</button>
-              </div>
-            </form>
-          ) : (
-            <>
-              <button role="menuitem" onClick={choose(() => useUiStore.getState().togglePinnedAgent(agent.agent_id))} className={ACCOUNT_MENU_ROW}>
-                <Icon.agents.pin size={ICON.sm} />
-                <span className="min-w-0 flex-1 truncate">{pinned ? "Unpin" : "Pin"}</span>
-              </button>
-              <button role="menuitem" onClick={() => setRenaming(true)} className={ACCOUNT_MENU_ROW}>
-                <Icon.agents.rename size={ICON.sm} />
-                <span className="min-w-0 flex-1 truncate">Rename</span>
-              </button>
+          <Icon.agents.rowMore size={ICON.sm} />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        aria-label={`Actions for ${agent.name}`}
+        className="min-w-[210px]"
+        // A DECISION IN PROGRESS IS NOT DISMISSED BY A STRAY CLICK. The delete confirmation vanished
+        // on any press outside it, and the slug typed next went nowhere — somebody had to start the
+        // delete over without being told it had gone. Escape and Cancel still close it.
+        onInteractOutside={(e) => { if (confirming || renaming) e.preventDefault(); }}
+      >
+        {renaming ? (
+          // IN PLACE, NOT IN A DIALOG. A rename is one short string and the row it belongs to is
+          // three pixels away; taking over the screen to ask for it would be more ceremony than
+          // the change deserves.
+          <form
+            className="flex flex-col gap-1 p-1"
+            onKeyDown={keepKeys}
+            onSubmit={(e) => {
+              e.preventDefault();
+              const next = name.trim();
+              if (next && next !== agent.name) sendRenameAgent(agent.agent_id, next);
+              setOpen(false);
+            }}
+          >
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              autoFocus
+              aria-label="Agent name"
+              className="w-full rounded-input border border-edge bg-panel px-2 py-1 text-body text-ink outline-none focus-visible:shadow-focusring"
+            />
+            <div className="flex gap-2 px-1 pb-0.5">
+              <button type="submit" className="text-body font-medium text-ink underline underline-offset-2">Rename</button>
+              <button type="button" onClick={() => setRenaming(false)} className="text-body font-medium text-muted underline underline-offset-2">Cancel</button>
+            </div>
+          </form>
+        ) : confirming ? (
+          <form
+            className="flex flex-col gap-1 p-1"
+            onKeyDown={keepKeys}
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (typed.trim() !== agent.agent_id) return;
+              sendDeleteAgent(agent.agent_id, agent.agent_id);
+              setOpen(false);
+            }}
+          >
+            {/* THE SLUG, NOT THE NAME, and not a yes/no. A name can be anything including another
+                agent's; the slug is what identifies this one, and typing it is the only part of
+                this flow that requires having read which agent is about to go. */}
+            <p className="px-1 py-0.5 text-body font-medium leading-[1.5] text-muted">
+              This removes {agent.name}, its runs and its history. Type <span className="text-ink">{agent.agent_id}</span> to confirm.
+            </p>
+            <input
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              autoFocus
+              // A SLUG IS NOT A WORD, AND macOS TREATS IT AS ONE. In the desktop app autocorrect
+              // turned `margot` into `Margot` and drew its suggestion over "Delete for good" — so
+              // the typed slug no longer matched, the button stayed disabled, and the delete could
+              // not be confirmed at all. The field compares exact characters; nothing may change them.
+              spellCheck={false}
+              autoCorrect="off"
+              autoCapitalize="off"
+              autoComplete="off"
+              aria-label={`Type ${agent.agent_id} to confirm deletion`}
+              className="w-full rounded-input border border-edge bg-panel px-2 py-1 text-body text-ink outline-none focus-visible:shadow-focusring"
+            />
+            <div className="flex gap-2 px-1 pb-0.5">
               <button
-                role="menuitem"
-                onClick={choose(() => { selectAgent(agent.agent_id); useUiStore.getState().openNav("agents"); })}
-                className={ACCOUNT_MENU_ROW}
+                type="submit"
+                disabled={typed.trim() !== agent.agent_id}
+                className="text-body font-medium text-err underline underline-offset-2 disabled:cursor-default disabled:text-disabled disabled:no-underline"
               >
-                <Icon.agents.configure size={ICON.sm} />
-                <span className="min-w-0 flex-1 truncate">Configure agent</span>
+                Delete for good
               </button>
-              {/* HIDDEN RATHER THAN REFUSED. Deleting an agent is gated at `workspace:manage` — the
-                  owner alone — and at `admin` on the agent itself; without this, everybody else
-                  would see the item, press it, type an agent's slug to confirm, and only then be
-                  told no. `Capable` asks the same two questions the relay asks, in the same order,
-                  from the copy of the matrix `test:permission-ui` holds to the server's.
+              <button type="button" onClick={() => setConfirming(false)} className="text-body font-medium text-muted underline underline-offset-2">Cancel</button>
+            </div>
+          </form>
+        ) : (
+          <>
+            <DropdownMenuItem onSelect={() => useUiStore.getState().togglePinnedAgent(agent.agent_id)}>
+              <Icon.agents.pin size={ICON.sm} />
+              <span className="min-w-0 flex-1 truncate">{pinned ? "Unpin" : "Pin"}</span>
+            </DropdownMenuItem>
+            {/* `preventDefault` KEEPS THE MENU OPEN: choosing Rename or Delete turns the menu into
+                the form that asks for the name or the slug, rather than closing it. */}
+            <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setRenaming(true); }}>
+              <Icon.agents.rename size={ICON.sm} />
+              <span className="min-w-0 flex-1 truncate">Rename</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => { selectAgent(agent.agent_id); useUiStore.getState().openNav("agents"); }}>
+              <Icon.agents.configure size={ICON.sm} />
+              <span className="min-w-0 flex-1 truncate">Configure agent</span>
+            </DropdownMenuItem>
+            {/* HIDDEN RATHER THAN REFUSED. Deleting an agent is gated at `workspace:manage` — the
+                owner alone — and at `admin` on the agent itself; without this, everybody else
+                would see the item, press it, type an agent's slug to confirm, and only then be
+                told no. `Capable` asks the same two questions the relay asks, in the same order,
+                from the copy of the matrix `test:permission-ui` holds to the server's.
 
-                  THE SEPARATOR GOES WITH IT, because a divider above nothing is a line at the
-                  bottom of a menu that says something was removed. */}
-              <Capable cmd="deleteAgent" agentId={agent.agent_id}>
-                <div className="my-1 h-px bg-sidebar-border" role="separator" />
-                <button role="menuitem" onClick={() => setConfirming(true)} className={`${ACCOUNT_MENU_ROW} text-err`}>
-                  <Icon.agents.delete size={ICON.sm} />
-                  <span className="min-w-0 flex-1 truncate">Delete</span>
-                </button>
-              </Capable>
-            </>
-          )}
-        </div>,
-        document.body,
-      )}
-    </div>
+                THE SEPARATOR GOES WITH IT, because a divider above nothing is a line at the
+                bottom of a menu that says something was removed. */}
+            <Capable cmd="deleteAgent" agentId={agent.agent_id}>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={(e) => { e.preventDefault(); setConfirming(true); }}
+                className="text-err data-[highlighted]:text-err"
+              >
+                <Icon.agents.delete size={ICON.sm} />
+                <span className="min-w-0 flex-1 truncate">Delete</span>
+              </DropdownMenuItem>
+            </Capable>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -744,32 +721,6 @@ function AccountRow() {
    */
   const label = user?.username || name;
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  /**
-   * The three ways out, on one listener — the shape `WorkspaceSwitcher` already uses.
-   *
-   * `mousedown` RATHER THAN `click`, so a press that starts outside closes the menu before the
-   * thing underneath it receives the release. With `click` the first press anywhere else both
-   * closes this and activates whatever it landed on, which is one gesture doing two things.
-   */
-  useEffect(() => {
-    if (!open) return;
-    const away = (e: MouseEvent): void => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const key = (e: KeyboardEvent): void => { if (e.key === "Escape") setOpen(false); };
-    document.addEventListener("mousedown", away);
-    document.addEventListener("keydown", key);
-    return () => {
-      document.removeEventListener("mousedown", away);
-      document.removeEventListener("keydown", key);
-    };
-  }, [open]);
-
-  // See lib/menuFocus.ts — the panel is rendered BEFORE its trigger, so without this the
-  // keyboard steps straight over the menu it just opened, and Escape drops focus to <body>.
-  useMenuFocus(open, ref);
 
   // Before the session lands there is no account to name. An empty row is quieter than a
   // placeholder that flashes into somebody else's initial.
@@ -781,72 +732,62 @@ function AccountRow() {
    * do, and they are the two things somebody clicking their own name is reaching for. The menu is
    * the near thing, anchored to the row; the dialog is the far thing, over everything.
    */
-  const choose = (run: () => void) => () => { setOpen(false); run(); };
-
   return (
-    <div ref={ref} className="relative">
-      {open && (
-        // ANCHORED TO THE BOTTOM OF THE SIDEBAR, opening UPWARD, because the row it belongs to is
-        // the last one in the column: a menu that dropped down would open off the bottom edge.
-        <div
-          role="menu"
-          aria-label="Account"
-          className="absolute bottom-full left-0 z-30 mb-1 w-full origin-bottom animate-menu-in-up overflow-hidden rounded-control border border-sidebar-border bg-panel py-1 shadow-pop motion-reduce:animate-none"
-        >
-          <button role="menuitem" onClick={choose(() => openWorkspacePanel("account"))} className={ACCOUNT_MENU_ROW}>
-            <Icon.workspace.settings size={ICON.md} />
-            <span className="min-w-0 flex-1 truncate">Account &amp; workspace</span>
-          </button>
-          <button role="menuitem" onClick={choose(() => setProviderPanel(true))} className={ACCOUNT_MENU_ROW}>
-            <Icon.nav.providerKeys size={ICON.md} />
-            <span className="min-w-0 flex-1 truncate">Provider keys</span>
-          </button>
-          <AdminModeToggle />
-          {/* THE PLAN IS NOT HERE AND NOT ON THE ROW. It was a `Free` chip beside the name, which
-              put a fact about the WORKSPACE'S BILLING on a row whose subject is a human being, and
-              made three things out of what should read as one name. It is not relocated into this
-              menu either: "Account & workspace" above already opens the surface that owns billing,
-              and a second, shallower copy of the same fact is how two places to read a plan end up
-              disagreeing. */}
-          {/* SIGN OUT, LAST AND SEPARATED. It was its own control beside the name, on the argument
-              that ending a session is irreversible-feeling and a menu row is easy to hit by
-              mistake — which is a real risk and is answered better by a divider and last place
-              than by leaving a permanent one-click exit on the row. What the old arrangement cost
-              was the row itself: a name, a chip and two buttons, where the whole point of the
-              footer is to say who you are. */}
-          <div className="my-1 h-px bg-sidebar-border" role="separator" />
-          <button role="menuitem" onClick={choose(signOut)} className={ACCOUNT_MENU_ROW}>
-            <Icon.auth.signOut size={ICON.md} />
-            <span className="min-w-0 flex-1 truncate">Sign out</span>
-          </button>
-        </div>
-      )}
-
+    // A RADIX MENU (ui/dropdown-menu.tsx): focus into the menu and back to this row, Escape, and a
+    // press outside that closes it without also landing on whatever was under it — which is what
+    // the `mousedown` listener here used to be for.
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       {/* ONE CONTROL, AND ONE SUBJECT. The row was a button with a chip and a second button beside
           it; it is a picture, a name and a disclosure now — press it and everything else is in the
           menu. Nothing is nested, which is what the two-control arrangement was avoiding: the
           sign-out glyph that used to sit here would have fired the row's own click as well. */}
-      <button
-        onClick={() => setOpen((v) => !v)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title={label}
-        className="flex w-full min-w-0 items-center gap-2 rounded-control px-2 py-1.5 text-left transition-colors hover:bg-sidebar-hover active:bg-sidebar-active focus-visible:outline-none focus-visible:shadow-focusring"
-      >
-        <Avatar name={label} />
-        {/* THE USERNAME IF THEY CHOSE ONE, and their name if they did not. See `label` above. */}
-        <Truncate className="min-w-0 flex-1 text-body font-medium text-ink" title={label}>{label}</Truncate>
-        <span className="shrink-0 text-faint">
-          {open ? <Icon.workspace.switcherOpen size={ICON.sm} /> : <Icon.workspace.switcherClosed size={ICON.sm} />}
-        </span>
-      </button>
-    </div>
+      <DropdownMenuTrigger asChild>
+        <button
+          title={label}
+          className="flex w-full min-w-0 items-center gap-2 rounded-control px-2 py-1.5 text-left transition-colors hover:bg-sidebar-hover active:bg-sidebar-active focus-visible:outline-none focus-visible:shadow-focusring"
+        >
+          <Avatar name={label} />
+          {/* THE USERNAME IF THEY CHOSE ONE, and their name if they did not. See `label` above. */}
+          <Truncate className="min-w-0 flex-1 text-body font-medium text-ink" title={label}>{label}</Truncate>
+          <span className="shrink-0 text-faint">
+            {open ? <Icon.workspace.switcherOpen size={ICON.sm} /> : <Icon.workspace.switcherClosed size={ICON.sm} />}
+          </span>
+        </button>
+      </DropdownMenuTrigger>
+      {/* ANCHORED TO THE BOTTOM OF THE SIDEBAR, opening UPWARD and as wide as the row, because the
+          row it belongs to is the last one in the column: a menu that dropped down would open off
+          the bottom edge. */}
+      <DropdownMenuContent side="top" align="start" aria-label="Account" className="w-[var(--radix-dropdown-menu-trigger-width)]">
+        <DropdownMenuItem onSelect={() => openWorkspacePanel("account")}>
+          <Icon.workspace.settings size={ICON.md} />
+          <span className="min-w-0 flex-1 truncate">Account &amp; workspace</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => setProviderPanel(true)}>
+          <Icon.nav.providerKeys size={ICON.md} />
+          <span className="min-w-0 flex-1 truncate">Provider keys</span>
+        </DropdownMenuItem>
+        <AdminModeToggle />
+        {/* THE PLAN IS NOT HERE AND NOT ON THE ROW. It was a `Free` chip beside the name, which
+            put a fact about the WORKSPACE'S BILLING on a row whose subject is a human being, and
+            made three things out of what should read as one name. It is not relocated into this
+            menu either: "Account & workspace" above already opens the surface that owns billing,
+            and a second, shallower copy of the same fact is how two places to read a plan end up
+            disagreeing. */}
+        {/* SIGN OUT, LAST AND SEPARATED. It was its own control beside the name, on the argument
+            that ending a session is irreversible-feeling and a menu row is easy to hit by
+            mistake — which is a real risk and is answered better by a divider and last place
+            than by leaving a permanent one-click exit on the row. What the old arrangement cost
+            was the row itself: a name, a chip and two buttons, where the whole point of the
+            footer is to say who you are. */}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => signOut()}>
+          <Icon.auth.signOut size={ICON.md} />
+          <span className="min-w-0 flex-1 truncate">Sign out</span>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
-
-/** One row of the account menu. Spelled once so the three cannot drift apart. */
-const ACCOUNT_MENU_ROW =
-  "flex w-full items-center gap-2.5 px-2.5 py-1.5 text-left text-body text-muted transition-colors hover:bg-sidebar-hover hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring";
 
 function AdminModeToggle() {
   const user = useSessionStore((s) => s.user);
@@ -869,13 +810,15 @@ function AdminModeToggle() {
     // While it is ON the banner across the top is the primary control. This stays as a second door
     // so the switch is where somebody looks for it, and reads as a state rather than an offer.
     return (
-      <button
-        onClick={() => void apply(false)}
-        className="mt-0.5 flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-body font-medium text-err transition-colors hover:bg-sidebar-hover"
+      // ITEMS, NOT BUTTONS, so the arrow keys reach them inside the menu; `preventDefault` keeps the
+      // menu open so the change is seen happening rather than vanishing with it.
+      <DropdownMenuPlainItem
+        onSelect={(e) => { e.preventDefault(); void apply(false); }}
+        className="mt-0.5 flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-body font-medium text-err transition-colors data-[highlighted]:bg-active"
       >
         <span className="shrink-0"><AlertTriangleIcon size={ICON.badge} /></span>
         <span>Admin mode on — turn off</span>
-      </button>
+      </DropdownMenuPlainItem>
     );
   }
 
@@ -887,10 +830,12 @@ function AdminModeToggle() {
           while it is on is logged as admin-privileged.
         </p>
         <div className="mt-1.5 flex items-center gap-1.5">
-          <button className={secondaryBtn} onClick={() => void apply(true)}>Enable</button>
-          <button className={quietBtn} onClick={() => { setConfirming(false); setError(null); }}>
+          <DropdownMenuPlainItem className={secondaryBtn} onSelect={(e) => { e.preventDefault(); void apply(true); }}>
+            Enable
+          </DropdownMenuPlainItem>
+          <DropdownMenuPlainItem className={quietBtn} onSelect={(e) => { e.preventDefault(); setConfirming(false); setError(null); }}>
             Cancel
-          </button>
+          </DropdownMenuPlainItem>
         </div>
         {error && <p className="mt-1 text-body font-medium text-err">{error}</p>}
       </div>
@@ -898,13 +843,13 @@ function AdminModeToggle() {
   }
 
   return (
-    <button
-      onClick={() => setConfirming(true)}
-      className="mt-0.5 flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-body font-medium text-faint transition-colors hover:bg-sidebar-hover hover:text-muted"
+    <DropdownMenuPlainItem
+      onSelect={(e) => { e.preventDefault(); setConfirming(true); }}
+      className="mt-0.5 flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-body font-medium text-faint transition-colors data-[highlighted]:bg-active data-[highlighted]:text-muted"
     >
       <span>Admin mode</span>
       <span className="ml-auto shrink-0">off</span>
-    </button>
+    </DropdownMenuPlainItem>
   );
 }
 
@@ -934,27 +879,6 @@ function FilterMenu({
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
-  // See lib/menuFocus.ts — the panel is rendered BEFORE its trigger, so without this the
-  // keyboard steps straight over the menu it just opened, and Escape drops focus to <body>.
-  useMenuFocus(open, ref);
 
   const entries: { id: Filter; label: string; count?: number }[] = [
     { id: "all", label: "All" },
@@ -980,60 +904,42 @@ function FilterMenu({
   const filtering = filter !== "all";
 
   return (
-    <div ref={ref} className={`relative ${className}`}>
-      <button
-        onClick={() => setOpen((v) => !v)}
-        title={filtering ? `Filtered: ${current?.label}` : "Filter agents"}
-        aria-label={filtering ? `Filtered: ${current?.label}` : "Filter agents"}
-        aria-expanded={open}
-        className={`flex h-6 shrink-0 items-center gap-1 rounded-control px-1 transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
-          filtering || open ? "bg-sidebar-active text-accent" : "text-muted hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink"
-        }`}
-      >
-        {/* `sm`, A RUNG UNDER THE TAB ICONS. Those are `md` now, and a navigation row's mark is what
-            anchors a line you scan the column for; this is a control sitting beside a 13px section
-            label, so it takes the rung below — the product owner's call on 2026-09-11, when `md`
-            read as big as the tabs themselves. */}
-        <Icon.agents.filter size={ICON.sm} />
-        {filtering && current?.count != null && (
-          <span className="text-body tabular-nums">{current.count}</span>
-        )}
-      </button>
-      {open && (
-        // A MENU WITH NO ROLE AT ALL, WHICH IS WHY `test:menu-keys` NEVER SAW IT. The panel was a
-        // bare `<div>` of buttons: the suite scans for `role="menu"`, so the one sidebar dropdown
-        // that never declared itself was the one it could not check — and `useMenuFocus` found no
-        // items in it either, so the arrow keys it was wired for did nothing.
-        //
-        // `menuitemradio` RATHER THAN `menuitem`, because this is a single-select: exactly one
-        // filter is in force and the others are not. `aria-checked` is what says which, and it is
-        // the difference between a screen reader announcing "Running" and "Running, checked".
-        <div
-          role="menu"
-          aria-label="Filter agents"
-          className="absolute right-0 top-full z-30 mt-1 min-w-[170px] origin-top animate-menu-in rounded-card border border-sidebar-border bg-elevated p-1 shadow-floating motion-reduce:animate-none"
-        >
-          {entries.map((e) => (
-            <button
-              key={e.id}
-              role="menuitemradio"
-              aria-checked={filter === e.id}
-              onClick={() => {
-                setFilter(e.id);
-                setOpen(false);
-              }}
-              className={`flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-body transition-colors duration-fast ${
-                filter === e.id ? "bg-sidebar-active text-ink" : "text-muted hover:bg-sidebar-hover hover:text-ink"
-              }`}
-            >
-              {e.label}
-              {e.count != null && e.count > 0 && (
-                <span className="ml-auto text-body font-medium tabular-nums text-faint">{e.count}</span>
-              )}
-            </button>
-          ))}
-        </div>
-      )}
+    <div className={`relative ${className}`}>
+      {/* A RADIX MENU (ui/dropdown-menu.tsx), and a RADIO GROUP inside it because this is a
+          single-select: exactly one filter is in force, and `aria-checked` on the chosen row is the
+          difference between a screen reader announcing "Running" and "Running, checked". */}
+      <DropdownMenu open={open} onOpenChange={setOpen}>
+        <DropdownMenuTrigger asChild>
+          <button
+            title={filtering ? `Filtered: ${current?.label}` : "Filter agents"}
+            aria-label={filtering ? `Filtered: ${current?.label}` : "Filter agents"}
+            className={`flex h-6 shrink-0 items-center gap-1 rounded-control px-1 transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+              filtering || open ? "bg-sidebar-active text-accent" : "text-muted hover:bg-sidebar-hover active:bg-sidebar-active hover:text-ink"
+            }`}
+          >
+            {/* `sm`, A RUNG UNDER THE TAB ICONS. Those are `md` now, and a navigation row's mark is what
+                anchors a line you scan the column for; this is a control sitting beside a 13px section
+                label, so it takes the rung below — the product owner's call on 2026-09-11, when `md`
+                read as big as the tabs themselves. */}
+            <Icon.agents.filter size={ICON.sm} />
+            {filtering && current?.count != null && (
+              <span className="text-body tabular-nums">{current.count}</span>
+            )}
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" aria-label="Filter agents">
+          <DropdownMenuRadioGroup value={filter} onValueChange={(v) => setFilter(v as Filter)}>
+            {entries.map((e) => (
+              <DropdownMenuRadioItem key={e.id} value={e.id}>
+                {e.label}
+                {e.count != null && e.count > 0 && (
+                  <span className="ml-auto text-body font-medium tabular-nums text-faint">{e.count}</span>
+                )}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }

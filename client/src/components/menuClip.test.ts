@@ -82,11 +82,21 @@ const inTheList = ((): Set<string> => {
 
 console.log("\nevery menu that opens from inside the scrolling list is portalled out of it");
 {
-  const menus = [...inTheList].filter((n) => /role="menu"/.test(bodies.get(n) ?? ""));
+  // A RADIX MENU COUNTS, AND IS PORTALLED BY CONSTRUCTION. The sidebar's menus moved to
+  // `ui/dropdown-menu.tsx` on 2026-10-09, whose content renders through Radix's Portal — so a menu
+  // drawn with `DropdownMenuContent` is checked by checking that component once, below.
+  const menus = [...inTheList].filter((n) => /role="menu"|<DropdownMenuContent/.test(bodies.get(n) ?? ""));
   check("found the menus in the list", menus.length >= 1, `${menus.join(", ") || "none"}`);
+  const ui = withoutComments(read("components/ui/dropdown-menu.tsx"));
+  check("the shared menu renders its content through a portal",
+    /<MenuPrimitive\.Portal>[\s\S]*<MenuPrimitive\.Content/.test(ui));
 
   for (const name of menus) {
     const body = bodies.get(name)!;
+    if (/<DropdownMenuContent/.test(body)) {
+      check(`${name} does not position its panel inside the row`, !/className="absolute/.test(body));
+      continue;
+    }
     check(`${name} renders its panel through a portal`, /createPortal\(/.test(body));
     check(`${name} portals into the body, which has no scrolling ancestor`,
       /document\.body,/.test(body));
@@ -126,15 +136,17 @@ console.log("\n...and a portalled panel keeps the wiring the portal breaks");
   // trigger's subtree, a `mousedown` on one of its own items counts as a click outside: the menu
   // closes on mousedown and the item never receives the click. Every item is dead, and the menu
   // still looks completely normal.
+  // ONE HAND-BUILT PORTALLED MENU IS LEFT IN THESE TWO FILES (the Runs tab's); the sidebar's moved to
+  // Radix, which owns click-away, focus and placement for its own portalled content.
   check("click-away tests the panel as well as the trigger",
-    (both.match(/panelRef\.current\?\.contains\(t\)/g) ?? []).length >= 2,
+    (both.match(/panelRef\.current\?\.contains\(t\)/g) ?? []).length >= 1,
     "a portalled panel is `outside` its own trigger, so its items stop receiving clicks");
   // And the keyboard: `useMenuFocus` looks for items in the element it is given, so a portalled
   // menu has to hand it the panel — and the trigger separately, since they are no longer one tree.
   check("the focus hook is given the panel and the trigger separately",
-    (both.match(/useMenuFocus\(open, panelRef, ref\)/g) ?? []).length >= 2);
+    (both.match(/useMenuFocus\(open, panelRef, ref\)/g) ?? []).length >= 1);
   check("both are anchored back to their trigger",
-    (both.match(/useAnchoredMenu\(open, ref, panelRef\)/g) ?? []).length >= 2);
+    (both.match(/useAnchoredMenu\(open, ref, panelRef\)/g) ?? []).length >= 1);
 }
 
 console.log("\n...and the trigger does not fade out from under its own open menu");
@@ -181,9 +193,11 @@ console.log("\na delete half-confirmed survives a stray click");
 {
   // CLICKING ANYWHERE OUTSIDE THE DELETE CONFIRMATION DISMISSED IT, and the slug typed next went
   // nowhere. While a delete or a rename is being typed, only Escape or Cancel closes the menu.
+  // ON THE RADIX MENU NOW: an outside press is refused while either form is open.
   check("an outside press does not close a confirmation or a rename in progress",
-    /if \(confirming \|\| renaming\) return;\s*setOpen\(false\);/.test(sidebar));
-  check("...and the listener knows which one is in progress", /\}, \[open, confirming, renaming\]\);/.test(sidebar));
+    /onInteractOutside=\{\(e\) => \{ if \(confirming \|\| renaming\) e\.preventDefault\(\); \}\}/.test(sidebar));
+  check("...and typing in either form stays in the form", /onKeyDown=\{keepKeys\}[\s\S]*onKeyDown=\{keepKeys\}/.test(sidebar)
+    && /const keepKeys = \(e: React\.KeyboardEvent\): void => \{ e\.stopPropagation\(\); \};/.test(sidebar));
 }
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
