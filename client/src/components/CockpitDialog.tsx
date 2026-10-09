@@ -14,8 +14,8 @@
 // world". §8 also says "Everything else about it is the app's existing dialog. Do not write a
 // bespoke one" — which is what this file is, one dialog rather than three.
 //
-// THE CONFIRMING CONTROL IS NOT THE DEFAULT FOCUS. §8 and §21 both require it, and `useDialog`
-// focuses the FIRST focusable element in the container — so Cancel is simply written first, which
+// THE CONFIRMING CONTROL IS NOT THE DEFAULT FOCUS. §8 and §21 both require it, and the dialog
+// (Radix's, through `ui/dialog.tsx`, since 2026-10-09) focuses the FIRST focusable element in it — so Cancel is simply written first, which
 // is also where a confirmation conventionally draws it. Reading order, focus order and visual order
 // are one list, and the rule costs nothing: no `ref`, no effect fighting the hook, and above all no
 // `autoFocus` on the one control that must not have it.
@@ -25,13 +25,10 @@
 // and nowhere else, because two places one question can be answered would race for one nonce.
 // These are destructive-action confirmations, which §21 asks for by name.
 
-import { useEffect, useId } from "react";
-
 import { DESTRUCTIVE } from "../lib/cockpitCopy.ts";
-import { useDialog } from "../lib/dialog.ts";
-import { LAYER } from "../lib/tokens.ts";
 import { type IconComponent } from "../lib/icons/registry.ts";
 import { ICON } from "../lib/tokens.ts";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./ui/dialog.tsx";
 
 export function CockpitDialog({
   open,
@@ -70,49 +67,26 @@ export function CockpitDialog({
   onCancel: () => void;
   destructive?: boolean;
 }) {
-  const labelId = useId();
-  const { ref, dialogProps } = useDialog(open, labelId);
-  // The hook must run unconditionally — its own cleanup is what restores focus — so the early
-  // return is below it rather than above. `dialog.ts` says so in as many words.
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent): void => {
-      // ESCAPE CANCELS, and it is here rather than in `useDialog` because that hook deliberately
-      // does not own Escape: every overlay in this client already closes on it, and a second
-      // listener in the hook would mean two closers per dialog and a nested pair closing both.
-      if (e.key === "Escape") { e.stopPropagation(); onCancel(); }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onCancel]);
-
-  if (!open) return null;
-
   return (
     // A SCRIM, WHICH THE DETAIL PANEL DELIBERATELY DOES NOT HAVE. §3D: a panel says "here is more
     // about this" and a modal says "deal with this now" — and these three genuinely do. The scrim
-    // is also the dismissal, which is what every other overlay in this client offers.
-    <div
-      className="fixed inset-0 flex items-center justify-center bg-ink/20 p-6"
-      style={{ zIndex: LAYER.modal }}
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel(); }}
-    >
-      <div
-        ref={ref}
-        {...dialogProps}
-        aria-labelledby={labelId}
+    // is also the dismissal, which is what every other overlay in this client offers — as is Escape,
+    // and both cancel. Radix names the dialog by its title and returns focus to whatever opened it.
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onCancel(); }}>
+      <DialogContent
         // `RADIUS.lg` AND `SURFACE.elevated`, which is what §8 asks of the gate and what the
         // other two inherit by being the same component. `shadow-overlay` is the hairline-plus-
         // shadow pair at the top rung — never the shadow alone, which `tokens.ts` states and §3D
         // restates.
         className="w-full max-w-[400px] rounded-lg border border-edge bg-elevated p-4 shadow-overlay"
       >
-        <h2 id={labelId} className="text-label text-ink">{title}</h2>
-        <div className="mt-2 text-caption leading-[1.55] text-muted">{body}</div>
+        <DialogTitle className="text-label text-ink">{title}</DialogTitle>
+        <DialogDescription asChild>
+          <div className="mt-2 text-caption leading-[1.55] text-muted">{body}</div>
+        </DialogDescription>
 
         {/* CANCEL FIRST IN THE DOM, WHICH IS ALSO CANCEL FIRST ON SCREEN — and that is the happy
-            case rather than a compromise. `useDialog` focuses the first focusable element, and the
+            case rather than a compromise. The dialog focuses the first focusable element, and the
             conventional left-to-right order of a confirmation already puts the dismissal on the
             left, so §21's "the destructive control not focused by default" costs nothing but
             writing the two buttons in the order they are read. No `ref`, no effect fighting the
@@ -142,7 +116,7 @@ export function CockpitDialog({
             {confirmLabel}
           </button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

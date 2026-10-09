@@ -218,7 +218,9 @@ console.log("\n§07: where each level is allowed to appear");
   // than one: a surface that blurs what is behind it demonstrably has something behind it. It is
   // what the sign-in card and React Flow's own controls are, and both are floating in every sense
   // §07 means except the one a `position` property can state.
-  const FLOATS = /\b!?(?:absolute|fixed|inset-0|backdrop-blur)\b|role="dialog"/;
+  // `<DialogContent` IS `role="dialog"` WRITTEN THE RADIX WAY — `ui/dialog.tsx` puts the role on it
+  // and an overlay under it (2026-10-09), so it floats as surely as the attribute says.
+  const FLOATS = /\b!?(?:absolute|fixed|inset-0|backdrop-blur)\b|role="dialog"|<DialogContent\b/;
   /**
    * THE SURFACES THAT FLOAT BY SOMETHING OTHER THAN A CLASS, named rather than pattern-matched
    * because a pattern wide enough to cover them would cover every card in the app as well.
