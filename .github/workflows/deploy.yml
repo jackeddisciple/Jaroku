@@ -44,7 +44,7 @@ concurrency:
 
 jobs:
   deploy:
-    # THE TAG AND MANUAL PATH, unchanged.
+    # THE TAG AND MANUAL PATH, for the gateway topology — once it exists on Fly (see below).
     if: github.event_name != 'workflow_run'
     runs-on: ubuntu-latest
     environment: production
@@ -71,12 +71,29 @@ jobs:
 
       - uses: superfly/flyctl-actions/setup-flyctl@master
 
+      # THE GATEWAY AND THE WORKERS HAVE NEVER BEEN CREATED ON FLY. jaroku-api is the deployment, and
+      # `deploy-api` below ships it from every green main; until `jaroku-gateway` exists (and the
+      # token can reach it), a release tag says so here rather than going red on an app that isn't there.
+      - name: is the gateway on Fly
+        id: topology
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          if flyctl status --config deploy/fly/gateway.fly.toml > /dev/null 2>&1; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::jaroku-gateway does not exist on Fly, or this token cannot reach it, so there is nothing to deploy here. jaroku-api deploys from every green main."
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: gateway - migrations run in the release command, before traffic
+        if: steps.topology.outputs.deploy == 'true'
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: flyctl deploy --config deploy/fly/gateway.fly.toml --strategy rolling --wait-timeout 10m
 
       - name: workers
+        if: steps.topology.outputs.deploy == 'true'
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: flyctl deploy --config deploy/fly/worker.fly.toml --strategy immediate --wait-timeout 10m
