@@ -167,26 +167,9 @@ console.log("\n...and the trigger does not fade out from under its own open menu
   check("an open menu pins its trigger visible", openStays.length >= 2, `${openStays.length} found`);
 }
 
-console.log("\nthe anchoring hook does what the portal owes the row");
-{
-  const hook = withoutComments(read("lib/anchoredMenu.ts"));
-  check("it measures the trigger", /getBoundingClientRect\(\)/.test(hook));
-  // A LAYOUT EFFECT, NOT AN EFFECT. It runs before paint, so the panel is never seen at the
-  // top-left corner it is rendered at before being placed.
-  check("it places the panel before the frame is painted", /useLayoutEffect/.test(hook));
-  // Opening downward off the bottom of the window is the same invisible-menu bug in a new place.
-  check("it flips up when there is no room below", /window\.innerHeight/.test(hook));
-  check("...and stays inside the window horizontally", /window\.innerWidth/.test(hook));
-  // CAPTURE, because scroll does not bubble from an element — without it the panel stays where the
-  // row used to be the moment the list moves under it.
-  check("it follows its trigger when the list scrolls",
-    /addEventListener\("scroll", place, true\)/.test(hook));
-  check("...and when the window is resized", /addEventListener\("resize", place\)/.test(hook));
-  // SCROLLING MUST NOT CLOSE IT. Two of this menu's items open a form in the panel — a rename
-  // field, and the one that asks for an agent's slug before deleting it — so a scroll that
-  // dismissed the panel would throw away what somebody had typed.
-  check("scrolling repositions rather than closes", !/setOpen\(false\)/.test(hook));
-}
+// THE ANCHORING HOOK'S SECTION IS GONE WITH THE HOOK. `lib/anchoredMenu.ts` was deleted on
+// 2026-10-09 once the last portalled menu moved to `ui/dropdown-menu.tsx`, whose content Radix places
+// against its trigger, flips at the window's edge and keeps there while a list scrolls.
 
 console.log("\nthe fleet card's menu leaves the card");
 {

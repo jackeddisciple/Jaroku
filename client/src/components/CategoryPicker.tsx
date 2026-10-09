@@ -42,8 +42,9 @@ import { ICON, LAYER, TYPE } from "../lib/tokens.ts";
 import { CheckIcon, ChevronDownIcon } from "./panelIcons.tsx";
 
 /**
- * Distance from the trigger and the closest the popover may come to the window's edge — the same
- * two numbers, for the same reasons, as `lib/anchoredMenu.ts`.
+ * Distance from the trigger and the closest the popover may come to the window's edge. The 4px gap
+ * is the one the dropdown menus open at (`ui/dropdown-menu.tsx`); the 8px is what keeps a panel off
+ * the window's edge, so it never sits flush against it.
  */
 const GAP = 4;
 const EDGE = 8;

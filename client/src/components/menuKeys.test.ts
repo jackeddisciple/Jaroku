@@ -36,7 +36,7 @@ const read = (path: string): string => readFileSync(`${SRC}/${path}`, "utf8");
 /**
  * The source with its comments blanked out.
  *
- * THIS SUITE HAS NOW BEEN FOOLED BY ITS OWN PROSE TWICE — first by the paragraph in `menuFocus.ts`
+ * THIS SUITE HAS NOW BEEN FOOLED BY ITS OWN PROSE TWICE — first by the paragraph in the old `menuFocus.ts`
  * explaining that focus is not an `aria-activedescendant`, then by the one in `IconButton.tsx`
  * explaining why that component accepts a role at all. Both mention the exact string being scanned
  * for. A file that TALKS about menus is not a file that HAS one, and the difference is the thing a
@@ -90,41 +90,9 @@ console.log("\nevery component that declares a menu also drives one");
   }
 }
 
-console.log("\n...and the hook actually implements what the role promises");
-{
-  const hook = withoutComments(read("lib/menuFocus.ts"));
-  // The selector has to know all three item roles, or a single-select menu is invisible to it.
-  for (const role of ["menuitem", "menuitemradio", "menuitemcheckbox"]) {
-    check(`it moves between ${role}s`, hook.includes(`[role="${role}"]`));
-  }
-  for (const key of ["ArrowDown", "ArrowUp", "Home", "End"]) {
-    check(`it moves on ${key}`, hook.includes(`"${key}"`));
-  }
-  // WRAPPING IS THE BEHAVIOUR, and `%` is how it is spelled. A menu is a ring: Down from the last
-  // item returns to the first, because a dead end at the bottom is what people press past.
-  check("...and wraps rather than stopping at the ends", /% items\.length/.test(hook));
-  // Focus IS the position — no `aria-activedescendant`, no virtual cursor — which is what makes
-  // Enter and Space work with no extra handling. A change to a virtual cursor should fail here.
-  // STRIPPED OF COMMENTS FIRST, because this file's own paragraph explaining that there is no
-  // virtual cursor contains the very string it is looking for — the check passed on the code and
-  // failed on the prose describing it.
-  check("focus is the cursor, not an aria-activedescendant", !/aria-activedescendant/.test(hook));
-  // The two halves of the original bug, asserted directly.
-  check("it focuses the first item when a menu opens", /role="menuitem"/.test(hook) && /first\?\.focus/.test(hook));
-  check("...and returns focus to the trigger when one closes", /aria-haspopup="menu"/.test(hook));
-  // AND ONLY WHEN FOCUS WOULD OTHERWISE BE DESTROYED. Closing by clicking elsewhere must leave
-  // focus where the person put it; yanking it back to the trigger would fight them.
-  check("...only when focus is still inside the panel", /root\.contains\(active\)/.test(hook));
-  // A PORTALLED PANEL IS UNMOUNTED WHEN IT CLOSES, so the effect that tracks open/closed must not
-  // bail out on a missing panel before recording the transition — it did, and every open after the
-  // first skipped the focus above, and no close ever handed focus back.
-  const tracker = /useEffect\(\(\) => \{[\s\S]*?wasOpen\.current = open;/.exec(hook)?.[0] ?? "";
-  check("...and records every open and close, even of a panel that is no longer mounted",
-    tracker.length > 0 && !/if \(!root\) return;/.test(tracker));
-  // Tab is not swallowed: these panels are not modal, and trapping focus in one would be worse
-  // than the bug this replaced.
-  check("Tab is left alone — these menus are not modal", !/"Tab"/.test(hook));
-}
+// THE HOOK'S OWN SECTION IS GONE WITH THE HOOK. `lib/menuFocus.ts` was deleted on 2026-10-09 once the
+// last menu that used it moved to `ui/dropdown-menu.tsx`, whose roles, arrows, wrapping, typeahead and
+// focus return are Radix's. A menu wired by hand again is still held to the checks above.
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);
 (globalThis as { process?: { exit(code: number): void } }).process?.exit(failures === 0 ? 0 : 1);

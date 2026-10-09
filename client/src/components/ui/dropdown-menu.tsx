@@ -3,8 +3,9 @@
 // shadcn is source you own rather than a package you import: these are its
 // `components/ui/dropdown-menu.tsx` (manual install, over `@radix-ui/react-dropdown-menu`) with its
 // theme variables swapped for ours. What Radix brings is the part every hand-built menu here had to
-// grow one bug at a time — focus moving into the menu and back to its trigger (lib/menuFocus.ts),
-// arrow keys and typeahead, a portal so a scrolling list cannot clip it (lib/anchoredMenu.ts),
+// grow one bug at a time — focus moving into the menu and back to its trigger (the old
+// lib/menuFocus.ts), arrow keys and typeahead, a portal so a scrolling list cannot clip it (the old
+// lib/anchoredMenu.ts; both deleted once nothing used them),
 // flipping to open upward at the bottom of the window, and a press outside that closes the menu
 // without also landing on whatever was under it.
 //

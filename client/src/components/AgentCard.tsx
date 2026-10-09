@@ -151,7 +151,7 @@ function Overflow({
           Rename showed; Export current version and Archive could not be seen or clicked, and at
           compact density Rename was sliced through its own text. Archive is offered nowhere else,
           so the whole archive feature sat behind a filter nothing could populate. The sidebar's
-          menu already leaves its list this way (lib/anchoredMenu.ts); this is the same move. */}
+          menu already leaves its list this way, through the same Radix portal. */}
       <DropdownMenuContent
         align="end"
         aria-label={`Actions for ${agent.name}`}
