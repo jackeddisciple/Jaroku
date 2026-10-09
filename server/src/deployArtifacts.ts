@@ -16,7 +16,7 @@
 import {
   copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync,
 } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 import { loadConnectors, templatesDir } from "./connectors.ts";
 import { buildArtifacts, VENDORED_RUNTIME_DIR, VENDORED_RUNTIME_ENTRIES } from "./dockerfile.ts";
@@ -187,9 +187,11 @@ export function writeDeployArtifacts(opts: WriteArtifactsOptions): WrittenArtifa
     loadConnectors(runtimeDir),
   );
 
-  const staging = deployStagingDir(runtimeDir, agentId);
+  // BESIDE A WORKSPACE'S OWN PROJECT when it has one, rather than in the one `.staging` every
+  // workspace shares: two workspaces deploying agents of the same name would stage into one directory.
+  const staging = opts.projectDir ? `${projectDir}${STAGING_SUFFIX}` : deployStagingDir(runtimeDir, agentId);
   rmSync(staging, { recursive: true, force: true });
-  mkdirSync(join(agentsRoot(runtimeDir), ".staging"), { recursive: true });
+  mkdirSync(opts.projectDir ? dirname(projectDir) : join(agentsRoot(runtimeDir), ".staging"), { recursive: true });
   let vendored: { paths: string[]; bytes: number } = { paths: [], bytes: 0 };
 
   try {

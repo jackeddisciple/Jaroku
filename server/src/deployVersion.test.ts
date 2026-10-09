@@ -60,7 +60,9 @@ const manager = new DeployManager({
   onLog: () => {},
   onFinished: () => {},
 } as never);
-const record = (manager as unknown as { recordArtifacts(slug: string): Promise<number | null> }).recordArtifacts.bind(manager);
+// Keyed by the deployment it belongs to, for that deploy's context; with none in flight it falls back.
+const recordFor = (manager as unknown as { recordArtifacts(id: string, slug: string): Promise<number | null> }).recordArtifacts.bind(manager);
+const record = (slug: string) => recordFor("deployment-under-test", slug);
 
 console.log("\nthe version a deploy uploads");
 {
@@ -78,7 +80,7 @@ console.log("\nthe version a deploy uploads");
 
   // AND THE DEPLOY WRITES THAT VERSION ON ITS ROW, rather than the one it started from.
   const source = readFileSync(fileURLToPath(new URL("./deployManager.ts", import.meta.url)), "utf8");
-  check(/const built = await this\.recordArtifacts\(req\.agentId\);\s*if \(built !== null\) await this\.deps\.store\.patch\(this\.deps\.context\(\), id, \{ version: built \}\)/.test(source),
+  check(/const built = await this\.recordArtifacts\(id, req\.agentId\);\s*if \(built !== null\) await this\.deps\.store\.patch\(this\.ctxOf\(id\), id, \{ version: built \}\)/.test(source),
     "the deployment row is given the version its upload was built from");
 }
 

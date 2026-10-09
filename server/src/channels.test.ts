@@ -364,11 +364,10 @@ console.log("\nan in-flight operation's channel scope belongs to it alone");
     "every broadcast of an agent's files is followed by its graph",
     unpaired.map((i) => `index.ts:${i + 1}`).join(", "));
 
-  for (const scope of ["deployContext"]) {
-    check(
-      new RegExp(`let ${scope}: TenantContext \\| null`).test(indexSource),
-      `${scope} is its own scope`,
-    );
+  // NONE OF THEM IS MODULE STATE ANY MORE. Each was a single shared scope for its subsystem; each is
+  // now per workspace or per call, which is what lets two workspaces work at once.
+  for (const scope of ["planContext", "genContext", "editContext", "replyContext", "deployContext"]) {
+    check(!new RegExp(`^let ${scope}\\b`, "m").test(indexSource), `${scope} is not one shared module variable`);
   }
 
   // The second half of the bug, and the subtler one: the scope was assigned BEFORE the guard
@@ -435,12 +434,11 @@ console.log("\nan in-flight operation's channel scope belongs to it alone");
       "a generation's context, thread and output live in its own call, not in module state");
   }
 
-  // `deploy` is a switch case rather than a function, so its guard is located the same way.
-  const deployCase = indexSource.slice(indexSource.indexOf(`case "deploy": {`));
-  check(
-    deployCase.indexOf("deployManager.busy") < deployCase.indexOf("deployContext = ctx"),
-    'the deploy case claims deployContext only AFTER "deployManager.busy"',
-  );
+  // `deploy` is a switch case rather than a function. Its guard is per workspace, and the deploy is
+  // handed the asking context rather than a module scope being pointed at it.
+  const deployCase = indexSource.slice(indexSource.indexOf(`case "deploy": {`), indexSource.indexOf(`case "cancelDeploy": {`));
+  check(/deployManager\.busyIn\(ctx\.workspaceId\)/.test(deployCase) && /\}, ctx\);/.test(deployCase),
+    "a deploy is refused per workspace and started with its own context");
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -480,7 +478,7 @@ console.log("\nevery transition §3.3 derives from refreshes the list");
     { fact: "an MCP confirmation being answered", start: "function answerConfirm" },
     { fact: "a plan being discarded", start: 'planner.on("discarded"' },
     { fact: "an eval finishing", start: "onFinished: (e) => {", chars: 3000 },
-    { fact: "a deployment settling", start: "onFinished: (d) => {" },
+    { fact: "a deployment settling", start: "onFinished: (d, ctx) => {" },
   ];
 
   for (const { fact, start, chars } of transitions) {

@@ -1122,9 +1122,8 @@ void mcpDiscoveryLoop.run();
 // The same problem for the three orchestrators, which emit through callbacks registered once
 // at boot and therefore have no argument to carry a context on.
 //
-// An eval is keyed, because several can be recorded even though only one runs at a time. A
-// deploy is a single variable, because the app enforces one in flight — `deployManager.busy`
-// refuses a second outright. Plans, generations, edits and answers are per workspace; see below.
+// An eval is keyed, one per workspace at a time. Deploys, plans, generations, edits and answers are
+// per workspace too; see below.
 //
 // Getting this wrong is no longer harmless. Before the broadcasts were scoped, an eval
 // started by one workspace was announced to everybody, which was a leak; now it would be
@@ -1149,11 +1148,10 @@ const contextForEval = (evalId: string): TenantContext => evalWorkspaces.get(eva
 // after every guard that could refuse it. A refusal is broadcast to the context of whoever
 // asked, which is always in hand at the point of refusal and never needs a variable at all.
 //
-// AND THEN THEY STOPPED BEING SINGLE-FLIGHT, except the deploy. A plan and an edit keep a session
-// per workspace (`planSessions`, `editSessions` below), and a generation and an answer keep theirs
-// in their own call — so one workspace's build no longer refuses another's.
-let deployContext: TenantContext | null = null;
-const contextForDeploy = (): TenantContext => deployContext ?? serverContext();
+// AND THEN THEY STOPPED BEING SINGLE-FLIGHT. A plan and an edit keep a session per workspace
+// (`planSessions`, `editSessions` below), a generation and an answer keep theirs in their own call,
+// and a deploy carries its own context through the deploy manager — so one workspace's work no
+// longer refuses another's.
 
 // Every event a piece of work emits goes out with the SESSION it belongs to as well as the
 // workspace, which is what lets a client file the turns under the right thread (§3.1, §4.5). Each
@@ -2524,7 +2522,8 @@ const deployDeps: DeployManagerDeps = {
   store: deployStore,
   agents: agentRepo,
   projects,
-  context: contextForDeploy,
+  // Only a fallback now: every deploy carries its own context from the command that started it.
+  context: serverContext,
   // THE DEPLOYING WORKSPACE'S OWN, from the vault. It was `process.env`, which on a hosted server is
   // whichever tenant set one last — deploying everybody's agents into one person's account.
   token: (ctx) => secrets.getRailwayToken(ctx),
@@ -2541,16 +2540,17 @@ const deployDeps: DeployManagerDeps = {
   // deploying WRITES into the project, so doing it while a subprocess is importing those
   // files would change code out from under a run in flight.
   agentBusy: (ctx, agentId) => agentRunning(ctx.workspaceId, agentId),
-  onStage: (e) => relay.broadcastDeploy(contextForDeploy(), { type: "stage", ...e }),
-  onLog: (e) => relay.broadcastDeploy(contextForDeploy(), { type: "log", ...e }),
-  onServeToken: (e) => relay.broadcastDeploy(contextForDeploy(), { type: "serveToken", ...e }),
+  // EACH IN THE DEPLOY'S OWN WORKSPACE, handed over with the event — several can be in flight.
+  onStage: (e, ctx) => relay.broadcastDeploy(ctx, { type: "stage", ...e }),
+  onLog: (e, ctx) => relay.broadcastDeploy(ctx, { type: "log", ...e }),
+  onServeToken: (e, ctx) => relay.broadcastDeploy(ctx, { type: "serveToken", ...e }),
   // THE REVERSAL, WIRED. See DeployManagerDeps.storeServeToken for why "Jaroku does not keep a
   // copy" stopped being the property this deploy holds. The manager is handed a function rather
   // than the store, so it still has no idea what a SecretStore is — the same shape `token` and
   // `configuredNames` already take.
-  storeServeToken: async ({ serviceId, token }) => {
+  storeServeToken: async ({ serviceId, token }, ctx) => {
     try {
-      const result = await secrets.setServeToken(contextForDeploy(), serviceId, token);
+      const result = await secrets.setServeToken(ctx, serviceId, token);
       return result.ok ? result.warning : (result.warning ?? "the vault refused the value");
     } catch (err) {
       // Reported rather than thrown: a deploy that reached a live URL has succeeded, and failing
@@ -2559,8 +2559,8 @@ const deployDeps: DeployManagerDeps = {
       return (err as Error).message;
     }
   },
-  onFinished: (d) => {
-    relay.broadcastDeploy(contextForDeploy(), {
+  onFinished: (d, ctx) => {
+    relay.broadcastDeploy(ctx, {
       type: "finished",
       deploymentId: d.id,
       status: d.status,
@@ -2570,7 +2570,7 @@ const deployDeps: DeployManagerDeps = {
     // §4.3's `deployed` fragment is derived from the deploy store, so a deployment going live (or
     // stopping) changes what an idle thread on that agent says about itself — and nothing was
     // pushing a snapshot for it.
-    scheduleListRefresh(contextForDeploy());
+    scheduleListRefresh(ctx);
 
     // A BUILD OR A HEALTH GATE THAT FAILED IS WORK THAT IS STOPPED — §2.1, and Blocking. Raised
     // here rather than in the manager because this is where the outcome is already in hand, and
@@ -2580,7 +2580,6 @@ const deployDeps: DeployManagerDeps = {
     // else takes: a deploy is an attempt with its own build log, and `view logs` on a card that
     // collapsed two attempts could only ever show one of them.
     if (d.status === "failed") {
-      const ctx = contextForDeploy();
       noteInbox(
         "a failed deploy",
         agentRepo.bySlug(ctx, d.agent_id).then((agent) =>
@@ -11023,14 +11022,13 @@ async function handleDeployCommand(ctx: TenantContext, cmd: DeployChannelCommand
           relay.broadcastDeploy(ctx, { type: "error", message: "invalid agent id" });
           return;
         }
-        if (deployManager.busy) {
+        // ONE DEPLOY PER WORKSPACE, and no longer one per server. The deploy is handed its own
+        // context below and nothing module-wide points at whoever asked, so a refusal cannot
+        // redirect another workspace's build log, which is what a shared scope once did.
+        if (deployManager.busyIn(ctx.workspaceId)) {
           relay.broadcastDeploy(ctx, { type: "error", message: "a deploy is already running" });
           return;
         }
-        // Claimed only now that the deploy is certain to start. Assigned before these guards, a
-        // REFUSED deploy redirected the running one's build log — scrubbed of secrets, but
-        // still another workspace's build output — into the refuser's deploy panel.
-        deployContext = ctx;
         // AND AGAIN HERE, not only in `planDeploy`. The two are separate commands and a deploy is
         // reachable without a plan — from the Inbox's `retry_deploy`, from the top bar, from a
         // second tab — so a directory brought up to date by the plan is not a directory this call
@@ -11046,7 +11044,7 @@ async function handleDeployCommand(ctx: TenantContext, cmd: DeployChannelCommand
           envKeys,
           allowMissing: cmd.allowMissing === true,
           publicEndpoint: cmd.publicEndpoint === true,
-        });
+        }, ctx);
         if ("error" in result) relay.broadcastDeploy(ctx, { type: "error", message: result.error });
         return;
       }
@@ -11084,7 +11082,7 @@ async function handleDeployCommand(ctx: TenantContext, cmd: DeployChannelCommand
           relay.broadcastDeploy(ctx, { type: "error", message: "no such deployment" });
           return;
         }
-        if (deployManager.activeId === target) {
+        if (deployManager.isActive(target)) {
           relay.broadcastDeploy(ctx, { type: "error", message: "that deploy is still running — cancel it first" });
           return;
         }

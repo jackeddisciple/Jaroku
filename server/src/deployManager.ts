@@ -100,16 +100,18 @@ export interface DeployManagerDeps {
   secretValues?: (ctx: TenantContext, names: string[]) => Promise<Map<string, string>>;
   /** True while a run or an eval job is reading this agent's files. Blocks packaging. */
   agentBusy: (ctx: TenantContext, agentId: string) => boolean;
-  onStage: (e: { deploymentId: string; stage: DeployStage; status: DeployStatus }) => void;
-  onLog: (e: { deploymentId: string; seq: number; stage: string; stream: string; text: string }) => void;
-  onFinished: (deployment: Deployment) => void;
+  // EVERY CALLBACK IS HANDED THE DEPLOY'S OWN CONTEXT, last, because several deploys can be in
+  // flight — one per workspace — and the listener has to tell the right workspace about each.
+  onStage: (e: { deploymentId: string; stage: DeployStage; status: DeployStatus }, ctx: TenantContext) => void;
+  onLog: (e: { deploymentId: string; seq: number; stage: string; stream: string; text: string }, ctx: TenantContext) => void;
+  onFinished: (deployment: Deployment, ctx: TenantContext) => void;
   /**
    * The bearer token for a newly live endpoint. Fired ONCE, and deliberately not routed
    * through onLog: a log line is persisted, and this token gates an endpoint that spends the
    * user's provider key. It exists here, in the request that set it on Railway, and nowhere
    * else — the caller shows it and Jaroku keeps no copy.
    */
-  onServeToken: (e: { deploymentId: string; url: string; token: string }) => void;
+  onServeToken: (e: { deploymentId: string; url: string; token: string }, ctx: TenantContext) => void;
   /**
    * Put the serve token where every other credential already lives.
    *
@@ -128,7 +130,7 @@ export interface DeployManagerDeps {
    * Injected rather than imported so this file still has no idea what a SecretStore is, the same
    * way it has no idea a WebSocket exists. Returns a warning to log, or null.
    */
-  storeServeToken: (e: { serviceId: string; token: string }) => Promise<string | null>;
+  storeServeToken: (e: { serviceId: string; token: string }, ctx: TenantContext) => Promise<string | null>;
   /** A full snapshot went stale — the caller re-broadcasts. */
   onChanged: () => void;
 }
@@ -281,26 +283,42 @@ export async function planDeploy(
 }
 
 export class DeployManager {
-  private active: { deploymentId: string; upload: RailwayUpload | null; cancelled: boolean } | null = null;
-  /** Build-log lines already shown for the deploy in flight. See seenBuildLine. */
-  private seenBuild = new Set<string>();
   /**
-   * Build-log text the CLI already streamed.
+   * The deploys in flight, by deployment id — at most one per workspace.
    *
-   * Kept separately because the CLI's lines carry no timestamp, and `buildLogs` returns the
-   * SAME build output the CLI was streaming — so without this the whole log appears twice,
-   * once live and once again on the first poll after the upload.
+   * It was a single slot, so one workspace's deploy refused every other workspace's for the minutes
+   * a Railway build takes. Each entry carries its own context, so every read, write and callback is
+   * the deploy's own workspace's rather than "the current" one.
+   *
+   * `seenBuild` is the build-log lines already shown (see seenBuildLine), and `streamedByCli` the
+   * text the CLI already streamed: the CLI's lines carry no timestamp, and `buildLogs` returns the
+   * SAME build output the CLI was streaming, so without it the whole log appears twice.
    */
-  private streamedByCli = new Set<string>();
+  private active = new Map<string, {
+    deploymentId: string;
+    ctx: TenantContext;
+    upload: RailwayUpload | null;
+    cancelled: boolean;
+    seenBuild: Set<string>;
+    streamedByCli: Set<string>;
+  }>();
 
   constructor(private deps: DeployManagerDeps) {}
 
-  get busy(): boolean {
-    return this.active !== null;
+  /** Whether this workspace has a deploy in flight. One each, and no longer one for the server. */
+  busyIn(workspaceId: string): boolean {
+    for (const a of this.active.values()) if (a.ctx.workspaceId === workspaceId) return true;
+    return false;
   }
 
-  get activeId(): string | null {
-    return this.active?.deploymentId ?? null;
+  /** Whether this deployment is the one being driven right now. */
+  isActive(deploymentId: string): boolean {
+    return this.active.has(deploymentId);
+  }
+
+  /** The context a deploy's reads, writes and callbacks happen in: its own workspace's. */
+  private ctxOf(id: string): TenantContext {
+    return this.active.get(id)?.ctx ?? this.deps.context();
   }
 
   /**
@@ -310,13 +328,13 @@ export class DeployManager {
    * deployment id comes back, there is a row, and every outcome after that point is a status
    * on that row rather than a thrown error.
    */
-  async start(req: StartDeployRequest): Promise<{ deploymentId: string } | { error: string }> {
-    if (this.active) return { error: "a deploy is already running" };
+  async start(req: StartDeployRequest, ctx: TenantContext = this.deps.context()): Promise<{ deploymentId: string } | { error: string }> {
+    if (this.busyIn(ctx.workspaceId)) return { error: "a deploy is already running" };
 
-    const plan = await planDeploy(this.deps, req, this.deps.context());
+    const plan = await planDeploy(this.deps, req, ctx);
     if (plan.problems.length) return { error: plan.problems.join(" · ") };
 
-    const token = await this.deps.token(this.deps.context());
+    const token = await this.deps.token(ctx);
     if (!token) return { error: "no Railway token" };
 
     // Only the names the user actually agreed to, intersected with what is really declared —
@@ -352,11 +370,11 @@ export class DeployManager {
     // null as "nobody recorded this". Refusing to deploy because a lookup for a label failed would
     // be the tail wagging the dog.
     const deployedVersion = await this.deps.agents
-      .bySlug(this.deps.context(), req.agentId)
+      .bySlug(ctx, req.agentId)
       .then((a) => a?.current_version ?? null)
       .catch(() => null);
 
-    const deployment = await this.deps.store.create(this.deps.context(), {
+    const deployment = await this.deps.store.create(ctx, {
       agentId: req.agentId,
       provider: req.provider,
       model: req.model,
@@ -366,11 +384,11 @@ export class DeployManager {
       // from the command. That context is the socket's own — the same one the capability check was
       // made against — so it is the person the server already decided was allowed to do this, and
       // there is no field on the request in which a client could name somebody else.
-      createdBy: this.deps.context().actorUserId,
+      createdBy: ctx.actorUserId,
     });
-    this.active = { deploymentId: deployment.id, upload: null, cancelled: false };
-    this.seenBuild.clear();
-    this.streamedByCli.clear();
+    this.active.set(deployment.id, {
+      deploymentId: deployment.id, ctx, upload: null, cancelled: false, seenBuild: new Set(), streamedByCli: new Set(),
+    });
     this.deps.onChanged();
 
     try {
@@ -380,9 +398,9 @@ export class DeployManager {
       // to settle, or it claims to be in flight forever.
       await this.fail(deployment.id, err instanceof Error ? err.message : String(err));
     } finally {
-      this.active = null;
-      const final = await this.deps.store.get(this.deps.context(), deployment.id);
-      if (final) this.deps.onFinished(final);
+      this.active.delete(deployment.id);
+      const final = await this.deps.store.get(ctx, deployment.id);
+      if (final) this.deps.onFinished(final, ctx);
       this.deps.onChanged();
     }
     return { deploymentId: deployment.id };
@@ -390,14 +408,14 @@ export class DeployManager {
 
   /** Stop the deploy in flight. Idempotent, and safe to call when there is nothing running. */
   async cancel(deploymentId: string): Promise<void> {
-    const active = this.active;
-    if (!active || active.deploymentId !== deploymentId) return;
+    const active = this.active.get(deploymentId);
+    if (!active) return;
     active.cancelled = true;
     active.upload?.stop();
 
     // Past the upload, the build belongs to Railway and only Railway can stop it.
-    const row = await this.deps.store.get(this.deps.context(), deploymentId);
-    const token = await this.deps.token(this.deps.context());
+    const row = await this.deps.store.get(active.ctx, deploymentId);
+    const token = await this.deps.token(active.ctx);
     if (row?.railway_deployment_id && token) {
       try {
         await new RailwayApi({ token }).cancelDeployment(row.railway_deployment_id);
@@ -424,7 +442,7 @@ export class DeployManager {
     // 🔴 The one read of credential values in the deploy path. Held from here to the finally
     // below, for two purposes and no others: the variables mutation, and the scrubber.
     const secretValues = this.deps.secretValues
-      ? await this.deps.secretValues(this.deps.context(), envKeys)
+      ? await this.deps.secretValues(this.ctxOf(id), envKeys)
       : resolveSecretValues(envKeys);
     const serveToken = req.publicEndpoint ? null : randomBytes(24).toString("base64url");
     const host = hostEnv({ provider: req.provider, model: req.model, serveToken });
@@ -440,7 +458,7 @@ export class DeployManager {
         runtimeDir: this.deps.runtimeDir,
         agentId: req.agentId,
         provider: req.provider,
-        projectDir: agentProjectDir(this.deps.runtimeDir, this.deps.context().workspaceId, req.agentId),
+        projectDir: agentProjectDir(this.deps.runtimeDir, this.ctxOf(id).workspaceId, req.agentId),
       });
       await this.log(id, "packaging", "jaroku",
         `wrote ${artifacts.paths.join(", ")} · image installs ${artifacts.requires.join(", ")}`);
@@ -461,15 +479,15 @@ export class DeployManager {
       // AND THE ROW NAMES THE VERSION THE UPLOAD IS ACTUALLY BUILT FROM. It named the one before the
       // artifacts were published, so every deploy left its own deployment a version behind: "Margot
       // is serving v2, current is v3", and a Redeploy offered straight after a successful deploy.
-      const built = await this.recordArtifacts(req.agentId);
-      if (built !== null) await this.deps.store.patch(this.deps.context(), id, { version: built });
+      const built = await this.recordArtifacts(id, req.agentId);
+      if (built !== null) await this.deps.store.patch(this.ctxOf(id), id, { version: built });
       if (await this.stopped(id)) return;
 
       // --- provision ---
       await this.stage(id, "provisioning", "packaging");
       const api = new RailwayApi({ token, scrub });
       const target = await this.resolveTarget(id, api, req.agentId);
-      await this.deps.store.patch(this.deps.context(), id, {
+      await this.deps.store.patch(this.ctxOf(id), id, {
         railway_project_id: target.projectId,
         railway_environment_id: target.environmentId,
         railway_service_id: target.serviceId,
@@ -488,23 +506,23 @@ export class DeployManager {
       // --- upload ---
       await this.stage(id, "uploading", "uploading");
       const upload = new RailwayUpload();
-      if (this.active) this.active.upload = upload;
+      { const a = this.active.get(id); if (a) a.upload = upload; }
       const result = await upload.run({
         token,
         projectId: target.projectId,
         serviceId: target.serviceId,
         environmentId: target.environmentId,
-        projectDir: agentProjectDir(this.deps.runtimeDir, this.deps.context().workspaceId, req.agentId),
+        projectDir: agentProjectDir(this.deps.runtimeDir, this.ctxOf(id).workspaceId, req.agentId),
         onLine: (stream, line) => {
           // Remembered so the buildLogs poll below does not show the same output a second
           // time — it is the same build's log, read a different way.
-          if (this.streamedByCli.size < BUILD_LOG_MEMORY) this.streamedByCli.add(line);
+          { const cli = this.active.get(id)?.streamedByCli; if (cli && cli.size < BUILD_LOG_MEMORY) cli.add(line); }
           void this.log(id, "building", stream === "stderr" ? "build-err" : "build", scrub(line));
         },
       });
-      if (this.active) this.active.upload = null;
+      { const a = this.active.get(id); if (a) a.upload = null; }
 
-      if (result.cancelled || this.active?.cancelled) {
+      if (result.cancelled || this.active.get(id)?.cancelled) {
         await this.settle(id, "cancelled", null);
         return;
       }
@@ -522,10 +540,10 @@ export class DeployManager {
       await this.stage(id, "publishing", "deploying");
       const existing = await api.existingDomain(target.projectId, target.environmentId, target.serviceId);
       const url = existing ?? (await api.createDomain(target.serviceId, target.environmentId, SERVE_PORT));
-      await this.deps.store.patch(this.deps.context(), id, { url });
+      await this.deps.store.patch(this.ctxOf(id), id, { url });
       // Exactly one row may claim to be live on a service. Two would be two different URLs
       // both described as the current one.
-      const replaced = await this.deps.store.supersede(this.deps.context(), id, target.serviceId);
+      const replaced = await this.deps.store.supersede(this.ctxOf(id), id, target.serviceId);
       if (replaced) {
         await this.log(id, "publishing", "jaroku",
           `replaced ${replaced} earlier deployment(s) on this service`);
@@ -540,8 +558,8 @@ export class DeployManager {
         // WHAT HAS CHANGED IS WHERE IT ALSO GOES. Stored first, so that a deploy which cannot
         // keep the token says so while somebody is still reading the log rather than three days
         // later when a scheduled dispatch fails with a 401.
-        const warning = await this.deps.storeServeToken({ serviceId: target.serviceId, token: serveToken });
-        this.deps.onServeToken({ deploymentId: id, url, token: serveToken });
+        const warning = await this.deps.storeServeToken({ serviceId: target.serviceId, token: serveToken }, this.ctxOf(id));
+        this.deps.onServeToken({ deploymentId: id, url, token: serveToken }, this.ctxOf(id));
         // AND THE LINE THAT USED TO BE FALSE. It read "Jaroku does not keep a copy", which was
         // true when nothing could call this endpoint on your behalf and is a lie now that
         // something does. The replacement says the same thing the reversal is defended on: not
@@ -580,7 +598,7 @@ export class DeployManager {
     let lastStatus = "";
 
     while (Date.now() < deadline) {
-      if (this.active?.cancelled) {
+      if (this.active.get(id)?.cancelled) {
         await this.settle(id, "cancelled", null);
         return null;
       }
@@ -601,7 +619,7 @@ export class DeployManager {
         await sleep(FOLLOW_POLL_MS);
         continue;
       }
-      await this.deps.store.patch(this.deps.context(), id, { railway_deployment_id: deployment.id });
+      await this.deps.store.patch(this.ctxOf(id), id, { railway_deployment_id: deployment.id });
 
       if (deployment.status !== lastStatus) {
         lastStatus = deployment.status;
@@ -613,7 +631,7 @@ export class DeployManager {
       // arrived after the CLI exited. Deduplicated rather than counted: see emitBuildLogs.
       try {
         for (const line of await api.buildLogs(deployment.id, BUILD_LOG_PAGE)) {
-          if (this.seenBuildLine(line.timestamp, line.message)) continue;
+          if (this.seenBuildLine(id, line.timestamp, line.message)) continue;
           await this.log(id, "building", "build", scrub(line.message));
         }
       } catch {
@@ -663,9 +681,9 @@ export class DeployManager {
    * the user asked for, and an unrecorded version is a stale file list rather than a broken
    * release. It is logged rather than swallowed.
    */
-  private async recordArtifacts(agentId: string): Promise<number | null> {
+  private async recordArtifacts(id: string, agentId: string): Promise<number | null> {
     try {
-      const ctx = this.deps.context();
+      const ctx = this.ctxOf(id);
       const agent = await this.deps.agents.bySlug(ctx, agentId);
       if (!agent) return null;
       const dir = agentProjectDir(this.deps.runtimeDir, ctx.workspaceId, agentId);
@@ -692,7 +710,7 @@ export class DeployManager {
     api: RailwayApi,
     agentId: string,
   ): Promise<{ projectId: string; environmentId: string; serviceId: string }> {
-    const remembered = await this.deps.store.reusableTarget(this.deps.context(), agentId);
+    const remembered = await this.deps.store.reusableTarget(this.ctxOf(id), agentId);
     if (remembered) {
       try {
         await api.deployments(remembered.projectId, remembered.serviceId, remembered.environmentId, 1);
@@ -773,30 +791,33 @@ export class DeployManager {
    * Keyed on timestamp AND text, so two identical lines a build genuinely emitted at
    * different moments both survive. Bounded, because this is a log and not an archive.
    */
-  private seenBuildLine(timestamp: string, message: string): boolean {
-    if (this.streamedByCli.has(message)) return true;
+  private seenBuildLine(id: string, timestamp: string, message: string): boolean {
+    const active = this.active.get(id);
+    if (!active) return false;
+    const seenBuild = active.seenBuild;
+    if (active.streamedByCli.has(message)) return true;
     const key = `${timestamp}\u0000${message}`;
-    if (this.seenBuild.has(key)) return true;
-    if (this.seenBuild.size >= BUILD_LOG_MEMORY) {
+    if (seenBuild.has(key)) return true;
+    if (seenBuild.size >= BUILD_LOG_MEMORY) {
       // Oldest first — a Set iterates in insertion order, and the oldest line is the one
       // least likely to come round again in a window onto the end of the log.
-      const oldest = this.seenBuild.values().next();
-      if (!oldest.done) this.seenBuild.delete(oldest.value);
+      const oldest = seenBuild.values().next();
+      if (!oldest.done) seenBuild.delete(oldest.value);
     }
-    this.seenBuild.add(key);
+    seenBuild.add(key);
     return false;
   }
 
   /** Cancelled between steps? Settle the row and tell the caller to stop. */
   private async stopped(id: string): Promise<boolean> {
-    if (!this.active?.cancelled) return false;
+    if (!this.active.get(id)?.cancelled) return false;
     await this.settle(id, "cancelled", null);
     return true;
   }
 
   private async stage(id: string, stage: DeployStage, status: DeployStatus): Promise<void> {
-    await this.deps.store.patch(this.deps.context(), id, { status });
-    this.deps.onStage({ deploymentId: id, stage, status });
+    await this.deps.store.patch(this.ctxOf(id), id, { status });
+    this.deps.onStage({ deploymentId: id, stage, status }, this.ctxOf(id));
   }
 
   /**
@@ -809,16 +830,16 @@ export class DeployManager {
    */
   private async log(id: string, stage: string, stream: string, text: string): Promise<void> {
     try {
-      const seq = await this.deps.store.appendLog(this.deps.context(), id, stage, stream, text);
-      this.deps.onLog({ deploymentId: id, seq, stage, stream, text });
+      const seq = await this.deps.store.appendLog(this.ctxOf(id), id, stage, stream, text);
+      this.deps.onLog({ deploymentId: id, seq, stage, stream, text }, this.ctxOf(id));
     } catch (err) {
       console.error(`[deploy] could not record a log line for ${id}: ${(err as Error)?.message ?? err}`);
     }
   }
 
   private async settle(id: string, status: DeployStatus, error: string | null): Promise<void> {
-    await this.deps.store.patch(this.deps.context(), id, { status, error });
-    this.deps.onStage({ deploymentId: id, stage: "done", status });
+    await this.deps.store.patch(this.ctxOf(id), id, { status, error });
+    this.deps.onStage({ deploymentId: id, stage: "done", status }, this.ctxOf(id));
     if (error) await this.log(id, "done", "jaroku", error);
   }
 
