@@ -19,6 +19,7 @@
 import { useState } from "react";
 import { Truncate } from "./Truncate.tsx";
 import { quietBtn } from "./buttons.ts";
+import { Dialog, DialogContent } from "./ui/dialog.tsx";
 import { relTime } from "../lib/format.ts";
 import { TYPE } from "../lib/tokens.ts";
 import type { LiveSession } from "../store/accessStore.ts";
@@ -33,13 +34,16 @@ function ConfirmEnd({
   onConfirm: () => void;
 }) {
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={`End ${session.name}'s session`}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/35 px-4"
-    >
-      <div className="w-full max-w-md rounded-lg border border-edge bg-elevated p-4 shadow-overlay">
+    // A RADIX DIALOG (ui/dialog.tsx, 2026-10-09): it had the role and none of the behaviour. Escape
+    // and the scrim cancel — nothing here is typed — and focus stays inside until it is answered.
+    <Dialog open onOpenChange={(next) => { if (!next) onCancel(); }}>
+      <DialogContent
+        inline
+        aria-label={`End ${session.name}'s session`}
+        aria-describedby={undefined}
+        overlayClassName="items-center bg-ink/35 px-4"
+        className="w-full max-w-md rounded-lg border border-edge bg-elevated p-4 shadow-overlay"
+      >
         <div className={TYPE.sectionLabel}>End session</div>
         {/* §14.2's sentence, close to verbatim, and §17's rule that the consequence is in the BODY
             rather than only in the title. Both halves matter: what it does, and what it does not
@@ -63,8 +67,8 @@ function ConfirmEnd({
             Cancel
           </button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

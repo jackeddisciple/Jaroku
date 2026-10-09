@@ -32,6 +32,7 @@ import { EmptyState } from "./EmptyState.tsx";
 import { UpsellCard } from "./UpsellCard.tsx";
 import { AlertTriangleIcon, LockIcon } from "./panelIcons.tsx";
 import { quietBtn } from "./buttons.ts";
+import { Dialog, DialogContent } from "./ui/dialog.tsx";
 import {
   sendEndSession, sendLoadAccess, sendLoadAccessHistory, sendLoadExposure, sendLoadSessions,
   sendRevokeGrant,
@@ -338,13 +339,16 @@ function RevokeDialog({
     : "They are no longer in this workspace, so this removes a grant that already resolves to nothing.";
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Revoke ${who}'s grant on ${agentSlug}`}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/35 px-4"
-    >
-      <div className="w-full max-w-md rounded-lg border border-edge bg-elevated p-4 shadow-overlay">
+    // A RADIX DIALOG (ui/dialog.tsx, 2026-10-09): it had the role and none of the behaviour. Escape
+    // and the scrim cancel — nothing here is typed — and focus stays inside until it is answered.
+    <Dialog open onOpenChange={(next) => { if (!next) onCancel(); }}>
+      <DialogContent
+        inline
+        aria-label={`Revoke ${who}'s grant on ${agentSlug}`}
+        aria-describedby={undefined}
+        overlayClassName="items-center bg-ink/35 px-4"
+        className="w-full max-w-md rounded-lg border border-edge bg-elevated p-4 shadow-overlay"
+      >
         <div className={TYPE.sectionLabel}>Revoke access</div>
         <p className="mt-2 text-caption leading-[1.55] text-ink">
           Revoke <span className="text-ink">{who}</span>&apos;s grant on{" "}
@@ -371,7 +375,7 @@ function RevokeDialog({
             Cancel
           </button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
