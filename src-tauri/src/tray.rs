@@ -19,6 +19,8 @@
 // is a real configuration — the close button is left alone and quits, because hiding a window
 // with nothing to bring it back is the one outcome worse than cancelling a run.
 
+// The macOS silhouette is the one icon built from bytes; the others reuse the window's.
+#[cfg(target_os = "macos")]
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};

@@ -121,6 +121,36 @@ pub fn open(app: &AppHandle, ws_url: &str) -> Result<(), Box<dyn std::error::Err
         // off-white text, on a product whose palette has no dark mode at all. `color-scheme: light`
         // in index.css says the same thing to the webview; this says it to AppKit.
         .theme(Some(tauri::Theme::Light))
+        .initialization_script(&host_config(ws_url));
+
+    // MACOS ONLY, AND NOT BY PREFERENCE — `title_bar_style`, `hidden_title` and
+    // `traffic_light_position` are compiled only for macOS in Tauri, so chaining them
+    // unconditionally is a build that fails on the other three targets `release.yml` uploads
+    // (`traffic_light_position` once did, on Linux and Windows). The other platforms keep their
+    // ordinary title bar; the client's reservation for the traffic lights is keyed off the host
+    // bridge rather than off the platform, so a Windows window simply has a chrome row with
+    // nothing reserved on its left.
+    // THE MATERIAL IS THE WINDOW'S, NOT THE PAGE'S. `Effect::Sidebar` is
+    // `NSVisualEffectMaterial.sidebar` — the material Finder and Mail put behind their own columns
+    // — and it sits BEHIND the webview, blurred by the window server rather than by CSS. That is
+    // the whole reason it is done here: `backdrop-filter` in the page can only blur what the page
+    // has already painted, and what sits behind the sidebar there is one flat colour, so it blurs
+    // a solid rectangle into an identical one. This blurs the desktop.
+    //
+    // `transparent` is what lets any of it through, and it is why `macOSPrivateApi` is set in
+    // tauri.conf.json — Tauri turns the `macos-private-api` feature on from that flag. On its own
+    // it changes nothing visible: the page paints over the whole viewport, so the material stays
+    // behind an opaque sheet until something deliberately opts out of it.
+    //
+    // AND EXACTLY ONE SCREEN DOES, WHICH IS THE SAFETY PROPERTY. The script below sets a FLAG
+    // rather than a style; the client turns transparency on only where a sidebar is actually
+    // rendered, and only when it sees that flag. Sign-in, first-run, the splash and account
+    // onboarding never become transparent, so a region nobody remembered to paint cannot show the
+    // desktop through it. Windows and Linux never see the flag and keep the opaque column.
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true)
         // THE LIGHTS COME DOWN TO THE ROW, RATHER THAN THE ROW GOING UP TO THE LIGHTS. With
         // `TitleBarStyle::Overlay` macOS keeps the three buttons where a default title bar keeps
         // them — centred 15.75pt down on macOS 26 — while `SidebarChrome` is a 44px row of 28px
@@ -145,34 +175,6 @@ pub fn open(app: &AppHandle, ws_url: &str) -> Result<(), Box<dyn std::error::Err
         // reason, and applying it now would move them 11pt right — the zoom button past the edge of
         // the 76px the chrome rows reserve for all three.
         .traffic_light_position(tauri::LogicalPosition::new(TRAFFIC_LIGHTS.0, TRAFFIC_LIGHTS.1))
-        .initialization_script(&host_config(ws_url));
-
-    // MACOS ONLY, AND NOT BY PREFERENCE — `title_bar_style` and `hidden_title` are compiled only
-    // for macOS in Tauri, so chaining them unconditionally is a build that fails on the other three
-    // targets `release.yml` uploads. The other platforms keep their ordinary title bar; the
-    // client's reservation for the traffic lights is keyed off the host bridge rather than off the
-    // platform, so a Windows window simply has a chrome row with nothing reserved on its left.
-    // THE MATERIAL IS THE WINDOW'S, NOT THE PAGE'S. `Effect::Sidebar` is
-    // `NSVisualEffectMaterial.sidebar` — the material Finder and Mail put behind their own columns
-    // — and it sits BEHIND the webview, blurred by the window server rather than by CSS. That is
-    // the whole reason it is done here: `backdrop-filter` in the page can only blur what the page
-    // has already painted, and what sits behind the sidebar there is one flat colour, so it blurs
-    // a solid rectangle into an identical one. This blurs the desktop.
-    //
-    // `transparent` is what lets any of it through, and it is why `macOSPrivateApi` is set in
-    // tauri.conf.json — Tauri turns the `macos-private-api` feature on from that flag. On its own
-    // it changes nothing visible: the page paints over the whole viewport, so the material stays
-    // behind an opaque sheet until something deliberately opts out of it.
-    //
-    // AND EXACTLY ONE SCREEN DOES, WHICH IS THE SAFETY PROPERTY. The script below sets a FLAG
-    // rather than a style; the client turns transparency on only where a sidebar is actually
-    // rendered, and only when it sees that flag. Sign-in, first-run, the splash and account
-    // onboarding never become transparent, so a region nobody remembered to paint cannot show the
-    // desktop through it. Windows and Linux never see the flag and keep the opaque column.
-    #[cfg(target_os = "macos")]
-    let builder = builder
-        .title_bar_style(tauri::TitleBarStyle::Overlay)
-        .hidden_title(true)
         .transparent(true)
         .effects(tauri::utils::config::WindowEffectsConfig {
             // `UnderWindowBackground`, NOT `Sidebar`, AND THE NAME IS MISLEADING ABOUT WHICH IS
