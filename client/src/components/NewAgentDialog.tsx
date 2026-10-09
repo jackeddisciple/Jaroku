@@ -40,11 +40,11 @@ import { useEffect, useId, useState } from "react";
 
 import { CategoryPicker } from "./CategoryPicker.tsx";
 import { outlineBtn, primaryBtn } from "./buttons.ts";
+import { Dialog, DialogContent, DialogTitle } from "./ui/dialog.tsx";
 import { AGENT_CATEGORIES, UNCATEGORIZED } from "../lib/agentCategories.ts";
-import { useDialog } from "../lib/dialog.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { sendCreateDraftAgent } from "../lib/socket.ts";
-import { ICON, LAYER, TYPE } from "../lib/tokens.ts";
+import { ICON, TYPE } from "../lib/tokens.ts";
 
 export function NewAgentDialog({
   open,
@@ -53,36 +53,16 @@ export function NewAgentDialog({
   open: boolean;
   onClose: () => void;
 }) {
-  const labelId = useId();
   const session = useId();
-  const { ref, dialogProps } = useDialog(open, labelId);
 
   const [helpWith, setHelpWith] = useState("");
   const [category, setCategory] = useState<string>(UNCATEGORIZED);
 
-  /**
-   * ESCAPE CLOSES IT, which it did not — and the close button has said "Close (Esc)" since the
-   * redesign, so the promise was on screen before the behaviour was.
-   *
-   * IT IS THE DIALOG'S OWN LISTENER, not `useDialog`'s. That hook's header explains why: "adding a
-   * second Escape listener would mean two closers per dialog and a nested pair closing both at
-   * once", so each overlay owns its key and `ProviderKeysDialog` is the shape this copies. What
-   * makes the nested case safe here is the other half of it — `CategoryPicker` calls
-   * `stopPropagation` on the Escape that closes its popover, so the first press closes the popover
-   * and only the second reaches this.
-   *
-   * SAFE TO CLOSE ON, in `GrantDialog`'s terms: nothing is blocked waiting on this answer. It does
-   * discard a typed brief, which is what the button beside Create also does and what the backdrop
-   * has always done.
-   */
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  // ESCAPE CLOSES IT — the close button has said "Close (Esc)" since the redesign — and so does the
+  // backdrop: both are Radix's now (`ui/dialog.tsx`, 2026-10-09), as the top layer of a stack, so with
+  // the category list open the first Escape closes the list and only the second reaches this. SAFE
+  // TO CLOSE ON, in `GrantDialog`'s terms: nothing is blocked waiting on this answer. It does discard
+  // a typed brief, which is what the button beside Create also does.
 
   // A FRESH DIALOG EVERY TIME IT OPENS. Left as it was, somebody who cancelled halfway through
   // reopens onto half of a decision they abandoned — and the brief in particular would be the one
@@ -110,26 +90,20 @@ export function NewAgentDialog({
     onClose();
   };
 
-  if (!open) return null;
-
   return (
-    <div
-      className="fixed inset-0 flex items-center justify-center bg-ink/20 p-6"
-      style={{ zIndex: LAYER.modal }}
-      // The backdrop is the dismissal, as every other overlay here offers.
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
-    >
-      <div
-        ref={ref}
-        {...dialogProps}
-        aria-labelledby={labelId}
+    // IN PLACE RATHER THAN PORTALLED, as it always rendered — and a suite reads its markup without a
+    // browser, where a portal has nowhere to go.
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent
+        inline
+        aria-describedby={undefined}
         className="relative flex w-full max-w-[480px] flex-col rounded-lg border border-edge bg-elevated shadow-overlay"
       >
         {/* NO SCROLL CONTAINER AND NO VIEWPORT CAP. It had `max-h-[86vh]` and an
             `overflow-y-auto` body because forty chips do not fit on a laptop; two fields do, on
             anything. A dialog that can scroll is a dialog somebody has to check for more. */}
         <div className="px-4 pb-3 pt-3.5 pr-11">
-          <h2 id={labelId} className={TYPE.title}>New agent</h2>
+          <DialogTitle className={TYPE.title}>New agent</DialogTitle>
           <p className="mt-0.5 text-tiny text-faint">
             It appears in Agents straight away. You build it from the composer when you are ready.
           </p>
@@ -209,7 +183,7 @@ export function NewAgentDialog({
           </div>
         </div>
 
-        {/* LAST IN THE DOM, TOP-RIGHT ON SCREEN. `useDialog` puts focus on the first focusable
+        {/* LAST IN THE DOM, TOP-RIGHT ON SCREEN. The dialog puts focus on the first focusable
             thing inside the panel, and that should be the field this dialog is for — not its
             dismissal. Absolute rather than in the header row so reading order and tab order can
             disagree on purpose. */}
@@ -222,8 +196,8 @@ export function NewAgentDialog({
         >
           <Icon.workspace.close size={ICON.sm} />
         </button>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
