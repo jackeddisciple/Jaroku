@@ -1,17 +1,17 @@
-# Building the desktop app for all three platforms, and publishing it where people can get it.
+# Building the desktop app for macOS, and publishing it where people can get it.
 #
-# WHY THIS IS A WORKFLOW AND NOT A SCRIPT SOMEBODY RUNS. Tauri does not cross-compile: a `.dmg`
-# is built on macOS, a `.deb` on Linux, an `.exe` on Windows, and there is no flag that changes
-# that. Worse, the two staging scripts are host-specific by design — `prepare-payload.mjs` copies
-# the machine's own Node binary and `prepare-python.mjs` downloads a CPython for the machine's own
-# platform — so a bundle is not merely BUILT per platform, it is ASSEMBLED per platform. One
-# machine cannot produce the set. Four runners can.
+# WHY THIS IS A WORKFLOW AND NOT A SCRIPT SOMEBODY RUNS. Tauri does not cross-compile, and the two
+# staging scripts are host-specific by design — `prepare-payload.mjs` copies the machine's own Node
+# binary and `prepare-python.mjs` downloads a CPython for the machine's own platform — so a bundle
+# is not merely BUILT per chip, it is ASSEMBLED per chip. One machine cannot produce the pair. Two
+# runners can.
 #
-# UBUNTU IS PINNED TO 22.04 AND THAT IS NOT LAZINESS ABOUT UPGRADING. The Node binary this bundle
-# ships is dynamically linked against the build machine's glibc, so the build machine's glibc
-# becomes the application's floor. 22.04 is glibc 2.35; `ubuntu-latest` is 24.04 and 2.39, which
-# would produce an AppImage that refuses to start on Debian 12 and every LTS older than last year.
-# The oldest runner that can still build is the right one, and this is the line that says so.
+# MAC ONLY, BECAUSE JAROKU LAUNCHES ON THE MAC (2026-10-09). Linux and Windows left the matrix
+# rather than staying in it red. Both compile; Windows also bundled. Linux's AppImage did not:
+# linuxdeploy walks every ELF under the bundle's resources, copies psycopg's vendored libraries out
+# of the Python payload, then cannot resolve their dependencies from the new place. Bringing Linux
+# back means shipping that payload as an archive linuxdeploy cannot see into, and pinning the
+# runner to ubuntu-22.04 (glibc 2.35), the floor the bundled Node binary inherits.
 #
 # TWO macOS RUNNERS, NOT A UNIVERSAL BINARY. `--target universal-apple-darwin` is the tidier
 # answer and cannot work here: it would need a universal Node to sit beside a universal Rust
@@ -36,8 +36,8 @@ jobs:
       contents: write
 
     strategy:
-      # NEVER fail-fast. A macOS build that breaks must not cancel a Linux build that would have
-      # succeeded — the whole point of a release run is to learn about all three at once.
+      # NEVER fail-fast. An Intel build that breaks must not cancel an Apple silicon build that
+      # would have succeeded — the whole point of a release run is to learn about both at once.
       fail-fast: false
       matrix:
         include:
@@ -50,41 +50,12 @@ jobs:
           - platform: macos-15-intel
             target: x86_64-apple-darwin
             label: macOS (Intel)
-          - platform: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            label: Linux
-          - platform: windows-latest
-            target: x86_64-pc-windows-msvc
-            label: Windows
 
     runs-on: ${{ matrix.platform }}
     name: ${{ matrix.label }}
 
     steps:
       - uses: actions/checkout@v4
-
-      # webkit2gtk is the webview, and libayatana-appindicator is the TRAY — which on Linux is
-      # also the only way to quit the application, because the close button hides it so a run in
-      # flight is not cancelled. Without it the app still works and silently loses that feature,
-      # which is the kind of degradation a build machine should not be allowed to introduce.
-      - name: Linux system dependencies
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          # libdbus-1-dev and pkg-config for the session token's home — `keyring`'s secret-service
-          # backend links libdbus, and without them the crate fails to build at all. libssl-dev and
-          # libxdo-dev are on Tauri's own list of Linux prerequisites.
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libssl-dev \
-            libxdo-dev \
-            libdbus-1-dev \
-            pkg-config \
-            patchelf \
-            build-essential \
-            file
 
       - uses: actions/setup-node@v4
         with:
@@ -95,7 +66,7 @@ jobs:
           targets: ${{ matrix.target }}
 
       # The Rust dependency tree is ~400 crates and a cold build is fifteen minutes. Keyed by
-      # platform so the four runners never share an incompatible cache.
+      # target so the two runners never share an incompatible cache.
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
@@ -120,9 +91,9 @@ jobs:
       - name: Stage the Python runtime
         run: npm run tauri:python
 
-      # A draft, deliberately. It gives somebody the chance to read the notes and check the four
-      # artefacts arrived before anybody can download a release that is missing one — three of the
-      # four platforms succeeding is exactly the case where an automatic publish is worst.
+      # A draft, deliberately. It gives somebody the chance to read the notes and check both
+      # artefacts arrived before anybody can download a release that is missing one — one chip of
+      # the two succeeding is exactly the case where an automatic publish is worst.
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -155,19 +126,17 @@ jobs:
           # difference between a build friends can try and a build they cannot.
           #
           # A real Developer ID certificate replaces this and removes the warnings entirely; see
-          # "Code signing" in docs/tauri.md. Empty on the other two runners, which ignore it.
-          APPLE_SIGNING_IDENTITY: ${{ startsWith(matrix.platform, 'macos') && '-' || '' }}
+          # "Code signing" in docs/tauri.md.
+          APPLE_SIGNING_IDENTITY: "-"
         with:
-          # VERBOSE ON LINUX, because without it a failed AppImage says only "failed to run
-          # linuxdeploy" and linuxdeploy's own reason is never printed.
-          args: --target ${{ matrix.target }}${{ matrix.platform == 'ubuntu-22.04' && ' --verbose' || '' }}
+          args: --target ${{ matrix.target }}
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}-dev', github.run_number) }}
           releaseName: "Jaroku ${{ github.ref_type == 'tag' && github.ref_name || format('build {0}', github.run_number) }}"
           releaseDraft: true
           prerelease: true
           releaseBody: |
-            Desktop builds of Jaroku. Nothing here is code-signed yet, so each platform needs one
-            extra step the first time — see below.
+            Jaroku for macOS, Apple silicon and Intel. Nothing here is code-signed yet, so the
+            first install needs one extra step — see below.
 
             **macOS — use the one-line install.** A browser marks its downloads as quarantined and
             Gatekeeper then refuses an app signed by no certificate. `curl` sets no such mark, so
@@ -179,14 +148,6 @@ jobs:
             opens it. If you would rather take the `.dmg` below by hand, you can — but then macOS
             needs right-click → *Open* the first time, because a plain double-click on a
             quarantined unsigned app offers no way through.
-
-            **Windows** — SmartScreen will warn that the publisher is unknown. *More info* →
-            *Run anyway*. The installer does not need administrator: it installs for the current
-            user only.
-
-            **Linux** — the `.deb` for Debian and Ubuntu, the `.AppImage` for anything else
-            (`chmod +x` it first). The AppImage cannot register the `jaroku://` URL scheme unless a
-            desktop entry is installed, which is a property of AppImage rather than of this build.
 
             **First launch takes a minute.** The app unpacks a Node runtime and a complete Python
             environment into your home directory so that nothing has to be installed separately.
@@ -213,10 +174,8 @@ jobs:
         run: |
           set -eu
           case "${{ matrix.platform }}" in
-            macos-15)       find_glob='*.dmg'      ; stable='Jaroku-macos-arm64.dmg' ;;
-            macos-15-intel) find_glob='*.dmg'      ; stable='Jaroku-macos-intel.dmg' ;;
-            windows-latest) find_glob='*-setup.exe'; stable='Jaroku-windows-x64-setup.exe' ;;
-            ubuntu-22.04)   find_glob=''           ; stable='' ;;
+            macos-15)       stable='Jaroku-macos-arm64.dmg' ;;
+            macos-15-intel) stable='Jaroku-macos-intel.dmg' ;;
           esac
 
           upload() {
@@ -226,12 +185,6 @@ jobs:
           }
 
           BUNDLE="src-tauri/target/${{ matrix.target }}/release/bundle"
-          if [ "${{ matrix.platform }}" = "ubuntu-22.04" ]; then
-            # Two artefacts on this one, so it is spelled out rather than squeezed into the case.
-            found="$(find "$BUNDLE" -name '*.AppImage' | head -n1)"; [ -n "$found" ] && upload "$found" "Jaroku-linux-x86_64.AppImage"
-            found="$(find "$BUNDLE" -name '*.deb' | head -n1)";      [ -n "$found" ] && upload "$found" "Jaroku-linux-amd64.deb"
-          else
-            found="$(find "$BUNDLE" -name "$find_glob" | head -n1)"
-            [ -n "$found" ] || { echo "no artefact matching $find_glob under $BUNDLE"; exit 1; }
-            upload "$found" "$stable"
-          fi
+          found="$(find "$BUNDLE" -name '*.dmg' | head -n1)"
+          [ -n "$found" ] || { echo "no .dmg under $BUNDLE"; exit 1; }
+          upload "$found" "$stable"

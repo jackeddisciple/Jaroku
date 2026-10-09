@@ -397,31 +397,29 @@ retry loop, which recovers on its own and says "Reconnected" when it does.
 
 ## Distribution
 
-**There is no landing page and none is needed.** GitHub Releases is a download page: four
+**There is no landing page and none is needed.** GitHub Releases is a download page: two
 artefacts, a description, and a URL you can send to a tester. `.github/workflows/release.yml`
-builds all four and attaches them.
+builds both and attaches them. **Jaroku launches on the Mac only**, so the release builds only the
+two Mac apps; the workflow's header says what bringing Linux and Windows back would take.
 
 ```bash
 git tag v0.3.4 && git push origin v0.3.4     # cuts a release
 # or run the workflow by hand from the Actions tab to test the pipeline without a tag
 ```
 
-It publishes as a **draft**. Three of four platforms succeeding is exactly the case where an
-automatic publish is worst, so somebody presses the button after checking all four arrived.
+It publishes as a **draft**, marked pre-release. One chip of the two succeeding is exactly the
+case where an automatic publish is worst, so somebody presses the button after checking both
+arrived — and unticks *pre-release*, because `releases/latest`, which `scripts/install.sh` reads,
+skips pre-releases.
 
 | Runner | Produces | For |
 |---|---|---|
 | `macos-15` | `.dmg`, `.app` | Apple silicon |
 | `macos-15-intel` | `.dmg`, `.app` | Intel Macs |
-| `ubuntu-22.04` | `.deb`, `.AppImage` | Debian/Ubuntu, and everything else |
-| `windows-latest` | `-setup.exe` (NSIS) | Windows, per-user, no administrator |
 
-Two of those rows are decisions rather than defaults. **Ubuntu is pinned to 22.04** because the
-Node binary this bundle ships is dynamically linked against the build machine's glibc, which
-therefore becomes the application's floor — `ubuntu-latest` is 24.04 and would produce an
-AppImage that refuses to start on Debian 12. And there are **two macOS runners rather than one
-universal binary**, because a universal build needs a universal Node to sit beside the universal
-Rust binary and the Node release channel does not publish one.
+There are **two macOS runners rather than one universal binary**, because a universal build needs
+a universal Node to sit beside the universal Rust binary and the Node release channel does not
+publish one.
 
 ### When the landing page is the only front door
 
@@ -439,9 +437,6 @@ that never changes, so a download button can point at one URL for the life of th
 |---|---|
 | macOS (Apple silicon) | `…/releases/latest/download/Jaroku-macos-arm64.dmg` |
 | macOS (Intel) | `…/releases/latest/download/Jaroku-macos-intel.dmg` |
-| Windows | `…/releases/latest/download/Jaroku-windows-x64-setup.exe` |
-| Linux (AppImage) | `…/releases/latest/download/Jaroku-linux-x86_64.AppImage` |
-| Linux (Debian/Ubuntu) | `…/releases/latest/download/Jaroku-linux-amd64.deb` |
 
 all prefixed `https://github.com/jackeddisciple/Jaroku`. The versioned originals stay beside them,
 which is what somebody wants when they need a specific release rather than the current one.
