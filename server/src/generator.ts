@@ -166,6 +166,30 @@ export function agentsDir(runtimeDir: string): string {
   return join(runtimeDir, "agents");
 }
 
+/** The workspace this process itself acts in — see `setServerWorkspace`. Null until boot says. */
+let serverWorkspaceId: string | null = null;
+
+/** Told once at boot which workspace is the server's own, the one `runtime/agents/` belongs to. */
+export function setServerWorkspace(workspaceId: string | null): void {
+  serverWorkspaceId = workspaceId;
+}
+
+/**
+ * Where an agent's project is cached on this server's disk — PER WORKSPACE.
+ *
+ * A slug is unique within a workspace and not across them, and `runtime/agents/<slug>` was one
+ * directory for everybody, stamped with nothing but a version number. So on a shared backend two
+ * workspaces that both had a `support_bot` at v3 shared a directory, and the second one's run, deploy
+ * or graph read the FIRST one's code — another tenant's agent, shipped to their machine or to their
+ * Railway account. The server's own workspace keeps `runtime/agents/<slug>`, which is what
+ * `npm run dev`, a hand-dropped project and a copied-out one all use; every other workspace has its own.
+ */
+export function agentProjectDir(runtimeDir: string, workspaceId: string, slug: string): string {
+  return serverWorkspaceId === null || workspaceId === serverWorkspaceId
+    ? join(agentsDir(runtimeDir), slug)
+    : join(runtimeDir, ".workspaces", workspaceId, "agents", slug);
+}
+
 /**
  * A slug nothing in this workspace is already using.
  *
@@ -184,7 +208,7 @@ export async function uniqueAgentSlug(
 ): Promise<string> {
   let id = desired;
   let n = 2;
-  while ((await agents.bySlug(ctx, id)) || existsSync(join(agentsDir(runtimeDir), id))) {
+  while ((await agents.bySlug(ctx, id)) || existsSync(agentProjectDir(runtimeDir, ctx.workspaceId, id))) {
     id = `${desired}_${n++}`;
   }
   return id;
@@ -489,7 +513,7 @@ export class Generator extends EventEmitter<GeneratorEvents> {
       // AND A LOCAL COPY, because a run is still a subprocess importing `agents.<slug>.agent`
       // from `runtime/agents/`. That directory stops being the source of truth here and becomes
       // a materialisation of one — Session 4 replaces it with a sandbox fetching the version.
-      await projects.materialise(ctx, agentUuid, version, join(agentsDir(runtimeDir), slug));
+      await projects.materialise(ctx, agentUuid, version, agentProjectDir(runtimeDir, ctx.workspaceId, slug));
 
       this.emit("done", {
         agentId: slug, name, files: written, usage, planUsage: opts.planUsage ?? emptyUsage(),

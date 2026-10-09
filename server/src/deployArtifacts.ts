@@ -45,6 +45,8 @@ export interface WriteArtifactsOptions {
   agentId: string;
   /** What the deployed instance will run on — decides which provider SDK is installed. */
   provider: string;
+  /** The project to package, when it is not `runtime/agents/<agentId>` — a workspace's own copy. */
+  projectDir?: string;
 }
 
 export interface WrittenArtifacts {
@@ -133,8 +135,8 @@ export function deployStagingDir(runtimeDir: string, agentId: string): string {
 }
 
 /** An agent's own metadata, read as a partial — the same posture listAgents() takes. */
-export function readAgentMeta(runtimeDir: string, agentId: string): AgentMeta {
-  const path = join(agentsRoot(runtimeDir), agentId, "jaroku.json");
+export function readAgentMeta(runtimeDir: string, agentId: string, projectDir?: string): AgentMeta {
+  const path = join(projectDir ?? join(agentsRoot(runtimeDir), agentId), "jaroku.json");
   if (!existsSync(path)) return { connectors: [] };
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<AgentMeta>;
@@ -163,7 +165,7 @@ export function writeDeployArtifacts(opts: WriteArtifactsOptions): WrittenArtifa
   const { runtimeDir, agentId, provider } = opts;
   if (!isSafeAgentId(agentId)) throw new Error(`invalid agent id: ${agentId}`);
 
-  const projectDir = join(agentsRoot(runtimeDir), agentId);
+  const projectDir = opts.projectDir ?? join(agentsRoot(runtimeDir), agentId);
   if (!existsSync(join(projectDir, "agent.py"))) {
     throw new Error(`${agentId} has no agent.py — there is nothing to serve`);
   }
@@ -173,7 +175,7 @@ export function writeDeployArtifacts(opts: WriteArtifactsOptions): WrittenArtifa
     throw new Error(`the serve template is missing from ${templatesDir(runtimeDir)}`);
   }
 
-  const meta = readAgentMeta(runtimeDir, agentId);
+  const meta = readAgentMeta(runtimeDir, agentId, projectDir);
   const artifacts = buildArtifacts(
     {
       agentId,

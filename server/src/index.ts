@@ -108,7 +108,7 @@ import { magicLinkRoutes } from "./http/magicLink.ts";
 import { signInRoutes } from "./http/signIn.ts";
 import { MAGIC_LINK_LIMIT_DEFAULTS, MAGIC_LINK_LIMITS, rateKeyForIp } from "./auth/signIn.ts";
 import {
-  Generator, agentsDir, slugify, uniqueAgentSlug, MAX_TOKENS as GEN_MAX_TOKENS,
+  Generator, agentsDir, agentProjectDir, setServerWorkspace, slugify, uniqueAgentSlug, MAX_TOKENS as GEN_MAX_TOKENS,
   // ALIASED, BECAUSE TWO MODULES EXPORT THIS NAME AND ONLY ONE OF THEM RESOLVES IT. `claude.ts`
   // holds a bare constant — the accounting fallback, and the one place v0.1.10's open issue lived —
   // while this module resolves the model through `JAROKU_GEN_MODEL`. The meter needs the resolved
@@ -477,6 +477,9 @@ if (maintenanceDb !== db) {
 
 await migrate(maintenanceDb.migrationTarget(), join(SERVER_DIR, "migrations", maintenanceDb.dialect));
 devTenancy = await resolveDevTenancy(db);
+// `runtime/agents/` is THIS workspace's; every other workspace caches its projects in a directory
+// of its own — see `agentProjectDir`.
+setServerWorkspace(devTenancy.context().workspaceId);
 
 // AND THE MONTHS AHEAD OF THE TRACE.
 //
@@ -2102,7 +2105,7 @@ const editor = new Editor({
 async function importAgentFiles(ctx: TenantContext): Promise<void> {
   const connectors = loadConnectors(RUNTIME_DIR);
   for (const agent of await agentRepo.list(ctx)) {
-    const dir = join(RUNTIME_DIR, "agents", agent.slug);
+    const dir = agentProjectDir(RUNTIME_DIR, ctx.workspaceId, agent.slug);
     if (!isSafeAgentId(agent.slug) || !existsSync(dir)) continue;
     const connectorFiles = connectors.filter((c) => agent.connectors.includes(c.id)).map((c) => `tools/${c.file}`);
     const onDisk = listProjectFiles(dir, connectorFiles);
@@ -2300,7 +2303,7 @@ async function deleteAgent(ctx: TenantContext, agentId: string, confirm: unknown
   }
   // And the directory, without which the next `upsertFromDisk` brings the agent back.
   try {
-    rmSync(join(agentsDir(RUNTIME_DIR), slug), { recursive: true, force: true });
+    rmSync(agentProjectDir(RUNTIME_DIR, ctx.workspaceId, slug), { recursive: true, force: true });
   } catch (err) {
     console.warn(`[agents] could not remove ${slug}'s directory: ${(err as Error).message}`);
   }
@@ -2477,7 +2480,7 @@ async function setAgentTools(ctx: TenantContext, slug: string, refs: unknown): P
         source: live?.source ?? "import",
         summary: granted.length === 0 ? "MCP grants cleared" : `MCP grants set to ${granted.length} tool(s)`,
       });
-      await projects.materialise(ctx, agent.id, version, join(agentsDir(RUNTIME_DIR), slug));
+      await projects.materialise(ctx, agent.id, version, agentProjectDir(RUNTIME_DIR, ctx.workspaceId, slug));
     }
   } catch (err) {
     // THE COLUMN IS THE GRANT AND IT IS ALREADY WRITTEN. A manifest that could not be re-emitted is
@@ -4380,7 +4383,7 @@ async function permissionModeForRun(ctx: TenantContext, runId: string): Promise<
  * refused for a reason nobody can see. The failure is logged with the version in it.
  */
 async function ensureProjectDir(ctx: TenantContext, slug: string): Promise<string> {
-  const dir = join(agentsDir(RUNTIME_DIR), slug);
+  const dir = agentProjectDir(RUNTIME_DIR, ctx.workspaceId, slug);
   const stamp = join(dir, ".jaroku-version");
   try {
     const agent = await agentRepo.bySlug(ctx, slug);
@@ -5635,9 +5638,10 @@ evalRunner = new EvalRunner({
     if (cannot) return { refusal: cannot };
     const credentials = await continuationCredentials(ctx, runId, job.provider, job.agentId);
     if (credentials.refusal) return { refusal: credentials.refusal };
+    const projectDir = await ensureProjectDir(ctx, job.agentId);
     runWorkspaces.set(runId, ctx);
     liveRuns.set(runId, { workspaceId: ctx.workspaceId, agentId: job.agentId, kind: "eval", ended: false });
-    return { workspaceId: ctx.workspaceId, host: ctx, env: credentials.env };
+    return { workspaceId: ctx.workspaceId, host: ctx, env: { ...credentials.env, JAROKU_AGENT_DIR: projectDir } };
   },
   releaseRun: (runId) => {
     liveRuns.delete(runId);
@@ -7060,7 +7064,7 @@ async function forkAgent(ctx: TenantContext, slug: string): Promise<void> {
   // refuses to run while blaming a missing `agent.py` the user cannot supply. Deriving `runnable`
   // from the manifest makes that honest for every agent; until then a fork must at least land where
   // the runner looks.
-  await projects.materialise(ctx, id, published, join(agentsDir(RUNTIME_DIR), forkSlug));
+  await projects.materialise(ctx, id, published, agentProjectDir(RUNTIME_DIR, ctx.workspaceId, forkSlug));
 
   console.log(`[agents] forked ${source.slug} v${version.version} to ${forkSlug} as v${published} (${sourceFiles.length} files)`);
   await relay.broadcastAgents();
@@ -7143,7 +7147,7 @@ async function restoreAgentVersion(ctx: TenantContext, slug: string, version: un
   // Generate materialises, apply materialises, undo materialises. Restore not doing so was an
   // inconsistency rather than a decision — `ensureProjectDir` removes the need to remember by
   // making one helper the only way anything obtains a project directory.
-  await projects.materialise(ctx, agent.id, published, join(agentsDir(RUNTIME_DIR), slug));
+  await projects.materialise(ctx, agent.id, published, agentProjectDir(RUNTIME_DIR, ctx.workspaceId, slug));
 
   console.log(`[agents] ${slug} restored v${wanted} as v${published} (${restoredFiles.length} files)`);
   await relay.broadcastAgents();
@@ -12966,7 +12970,12 @@ async function runAgent(
   // version is a fact about the workspace — so an agent published anywhere but here had nothing to
   // import, and one whose version moved without a materialise ran the bytes the history says were
   // replaced. See `ensureProjectDir`; it is a stamp comparison on the common path.
-  if (agentId) await ensureProjectDir(ctx, agentId);
+  // AND THE RUN IS POINTED AT IT EXPLICITLY. Left to resolve `agents.<slug>` from the runtime
+  // directory, it would import whichever workspace's copy of that slug happened to be there.
+  if (agentId) {
+    const projectDir = await ensureProjectDir(ctx, agentId);
+    if (!shadow) env.JAROKU_AGENT_DIR = projectDir;
+  }
   runWorkspaces.set(runId, ctx); // before the start: its first events arrive on their own tick
   // Before the start, for the same reason: `run_start` is what the ingest chain caches provider
   // and model from, and by then the environment that decided the payer is gone.
@@ -13143,6 +13152,8 @@ async function resumeRun(ctx: TenantContext, runId: string): Promise<void> {
   console.log(`[debug] resuming run ${runId} from seq ${seqOffset} (agent ${run.agent_id})`);
   const env: NodeJS.ProcessEnv = {
     ...credentials.env,
+    // This workspace's copy of the agent — see `agentProjectDir` and runAgent.
+    ...(run.agent_id ? { JAROKU_AGENT_DIR: await ensureProjectDir(ctx, run.agent_id) } : {}),
     JAROKU_RESUME_RUN_ID: runId,
     // The same workspace the run was dispatched in — a resume continues the SAME thread, so it
     // has to compute the same thread id. See runAgent.
@@ -13255,6 +13266,8 @@ async function branchRun(
   }
   const env: NodeJS.ProcessEnv = {
     ...credentials.env,
+    // This workspace's copy of the agent — see `agentProjectDir` and runAgent.
+    ...(parent.agent_id ? { JAROKU_AGENT_DIR: await ensureProjectDir(ctx, parent.agent_id) } : {}),
     JAROKU_RUN_ID: branchId,
     JAROKU_CONTROL_DIR: CHECKPOINT_DIR,
     JAROKU_WORKSPACE_ID: ctx.workspaceId,

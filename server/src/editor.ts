@@ -38,7 +38,7 @@ import type { AskModel } from "./askModel.ts";
 import { anthropicClient, emptyUsage, summarizeUsage, type UsageSummary } from "./claude.ts";
 import { loadConnectors, type Connector } from "./connectors.ts";
 import { FileProtocolParser, type ProtocolEvent } from "./fileProtocol.ts";
-import { agentsDir, replayFixture } from "./generator.ts";
+import { agentProjectDir, replayFixture } from "./generator.ts";
 import { DEPLOY_ARTIFACTS, isSafeAgentId, readOnlyPaths } from "./projectFs.ts";
 import { buildEditSystemPrompt, buildEditUserPrompt } from "./prompt.ts";
 import type { McpToolView } from "./mcpRegistry.ts";
@@ -691,7 +691,7 @@ export class Editor extends EventEmitter<EditorEvents> {
    * Session 4 replaces it with a sandbox fetching the objects, and this call goes away with it.
    */
   private async materialise(ctx: TenantContext, agentUuid: string, version: number, slug: string): Promise<void> {
-    await this.opts.projects.materialise(ctx, agentUuid, version, join(agentsDir(this.opts.runtimeDir), slug));
+    await this.opts.projects.materialise(ctx, agentUuid, version, agentProjectDir(this.opts.runtimeDir, ctx.workspaceId, slug));
   }
 
   private diffEmitted(

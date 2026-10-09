@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { migrate } from "./db/migrate.ts";
+import { agentProjectDir, setServerWorkspace } from "./generator.ts";
 import { SqliteDb } from "./db/sqlite.ts";
 import { LOCAL_WORKSPACE_ID, newRequestId, systemContext, systemContextFor } from "./db/tenant.ts";
 import { IdentityRepository } from "./db/repositories/identity.ts";
@@ -218,9 +219,21 @@ console.log("\nrunnable is answered by the manifest, and by the disk only for wh
   // published anywhere else — a fork, a restore, another replica — left the disk behind.
   check("ensureProjectDir exists", /async function ensureProjectDir\(/.test(index));
   check(
-    `...and the run and both deploy commands call it (${(index.match(/ensureProjectDir\(ctx, /g) ?? []).length})`,
-    (index.match(/ensureProjectDir\(ctx, /g) ?? []).length === 3,
+    `...and a run, its resume and branch, an eval's run and both deploy commands call it (${(index.match(/ensureProjectDir\(ctx, /g) ?? []).length})`,
+    (index.match(/ensureProjectDir\(ctx, /g) ?? []).length === 6,
   );
+  check("...and every run is pointed at the directory it returned, not left to find `agents.<slug>`",
+    (index.match(/JAROKU_AGENT_DIR: await ensureProjectDir\(ctx, /g) ?? []).length === 2
+      && /env\.JAROKU_AGENT_DIR = projectDir/.test(index) && /JAROKU_AGENT_DIR: projectDir/.test(index));
+
+  // AND THAT DIRECTORY IS THE WORKSPACE'S OWN. A slug is unique per workspace, and one shared
+  // `runtime/agents/<slug>` stamped only with a version let workspace B run workspace A's v3.
+  setServerWorkspace("ws-server");
+  check("the server's own workspace keeps runtime/agents/<slug>", agentProjectDir("/rt", "ws-server", "bot") === join("/rt", "agents", "bot"));
+  check("two workspaces with the same slug never share a directory",
+    agentProjectDir("/rt", "ws-a", "bot") !== agentProjectDir("/rt", "ws-b", "bot")
+      && !agentProjectDir("/rt", "ws-a", "bot").startsWith(join("/rt", "agents")));
+  setServerWorkspace(null);
   check(
     "...comparing a stamp rather than rewriting the project on every run",
     /\.jaroku-version/.test(index),

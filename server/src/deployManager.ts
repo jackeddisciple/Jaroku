@@ -27,6 +27,7 @@ import { join } from "node:path";
 import type { Deployment, DeployStatus, DeployStore } from "./deployStore.ts";
 import { readAgentMeta, writeDeployArtifacts } from "./deployArtifacts.ts";
 import type { AgentRepository } from "./db/repositories/agents.ts";
+import { agentProjectDir } from "./generator.ts";
 import { filesFromDirectory, manifestFor, type ProjectStore } from "./storage/projectStore.ts";
 import type { VersionManifest } from "./db/repositories/agents.ts";
 import { listProjectFiles } from "./projectFs.ts";
@@ -195,7 +196,7 @@ export async function planDeploy(
       redeploy: false, cliVersion: null,
     };
   }
-  const projectDir = join(deps.runtimeDir, "agents", req.agentId);
+  const projectDir = agentProjectDir(deps.runtimeDir, ctx.workspaceId, req.agentId);
   if (!existsSync(join(projectDir, "agent.py"))) {
     problems.push(`${req.agentId} has no agent.py — there is nothing to serve`);
   }
@@ -210,7 +211,7 @@ export async function planDeploy(
     );
   }
 
-  const meta = readAgentMeta(deps.runtimeDir, req.agentId);
+  const meta = readAgentMeta(deps.runtimeDir, req.agentId, projectDir);
   const declared = {
     requiredEnv: meta.required_env ?? [],
     mcpServers: meta.mcp_servers ?? [],
@@ -439,6 +440,7 @@ export class DeployManager {
         runtimeDir: this.deps.runtimeDir,
         agentId: req.agentId,
         provider: req.provider,
+        projectDir: agentProjectDir(this.deps.runtimeDir, this.deps.context().workspaceId, req.agentId),
       });
       await this.log(id, "packaging", "jaroku",
         `wrote ${artifacts.paths.join(", ")} · image installs ${artifacts.requires.join(", ")}`);
@@ -492,7 +494,7 @@ export class DeployManager {
         projectId: target.projectId,
         serviceId: target.serviceId,
         environmentId: target.environmentId,
-        projectDir: join(this.deps.runtimeDir, "agents", req.agentId),
+        projectDir: agentProjectDir(this.deps.runtimeDir, this.deps.context().workspaceId, req.agentId),
         onLine: (stream, line) => {
           // Remembered so the buildLogs poll below does not show the same output a second
           // time — it is the same build's log, read a different way.
@@ -666,7 +668,7 @@ export class DeployManager {
       const ctx = this.deps.context();
       const agent = await this.deps.agents.bySlug(ctx, agentId);
       if (!agent) return null;
-      const dir = join(this.deps.runtimeDir, "agents", agentId);
+      const dir = agentProjectDir(this.deps.runtimeDir, ctx.workspaceId, agentId);
       const connectorFiles = agent.connectors.map((id) => `tools/${id}.py`);
       const files = filesFromDirectory(dir, listProjectFiles(dir, connectorFiles).map((f) => f.path));
       if (!files.length) return null;
