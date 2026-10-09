@@ -25,6 +25,8 @@ dist/
 runtime/agents/*
 !runtime/agents/__init__.py
 !runtime/agents/example_agent/
+# Every other workspace's agents, one directory per workspace (generator.ts agentProjectDir).
+runtime/.workspaces/
 
 # OS / editor
 .DS_Store
