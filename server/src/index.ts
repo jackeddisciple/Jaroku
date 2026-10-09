@@ -5575,13 +5575,13 @@ if (eventBridge) {
 const judge = new JudgeScorer({
   store,
   evalStore,
-  context: serverContext,
+  // THE EVAL'S WORKSPACE, not the server's. This was `serverContext`, so on a shared backend every
+  // read the judge made — the eval run, its example, the run's steps — was scoped to a workspace that
+  // does not hold them, found nothing, and no eval was ever scored.
+  context: (evalId) => contextForEval(evalId),
   // The eval's own workspace, resolved at the moment of use. A judge verdict is a platform call
   // like a generation, and it bills to the platform's key unless the workspace opted its own in.
-  apiKey: async () => {
-    const evalId = evalRunner?.activeEvalIds()[0];
-    return evalId ? providerKeys.platformKey(contextForEval(evalId)) : undefined;
-  },
+  apiKey: async (evalId) => providerKeys.platformKey(contextForEval(evalId)),
   onScored: (e) => relay.broadcastEval(contextForEval(e.evalId), { type: "scored", ...e }),
   // The judge's own spend, in the workspace's ledger. NOT a replacement for `addJudgeCost`,
   // which keeps accumulating on the eval so the comparison can show judge overhead apart from
@@ -5621,8 +5621,8 @@ evalRunner = new EvalRunner({
   store,
   dispatcher,
   evalStore,
-  // One eval runs at a time, so this is the eval in flight.
-  context: () => contextForEval(evalRunner?.activeEvalIds()[0] ?? ""),
+  // THE EVAL'S OWN WORKSPACE, named by the eval — several can drain at once, one per workspace.
+  context: (evalId) => contextForEval(evalId),
   // ...which only answers once the eval has a workspace recorded against it. The runner does
   // that itself, between the eval becoming live and its first job, because nothing outside
   // knows the id before then.
@@ -5655,9 +5655,7 @@ evalRunner = new EvalRunner({
   // let the first job's authorisation cover all of them. Returns the sentence the user reads,
   // so the eval's stop reason names which ceiling stopped it rather than leaving somebody to
   // raise the wrong number and watch it stop again.
-  workspaceOverBudget: async () => {
-    const evalId = evalRunner?.activeEvalIds()[0];
-    if (!evalId) return null;
+  workspaceOverBudget: async (evalId) => {
     const ctx = contextForEval(evalId);
     const status = await budgetGate.status(ctx);
     return status.overCeiling ? ceilingRefusal(status) : null;
@@ -11196,16 +11194,15 @@ async function handleEvalCommand(ctx: TenantContext, cmd: ForwardedCommand): Pro
         return;
       }
       case "startEval": {
-        // One eval at a time. Two concurrent fan-outs would contend for the same pool
-        // slots and each would report latency inflated by the other — a comparison the
-        // numbers can't support. Worse, `contextForEval` below resolves the runner's workspace
-        // as its FIRST active eval, so a second live one writes into the first one's tenancy.
+        // ONE EVAL AT A TIME PER WORKSPACE. Two in one workspace would contend for its provider
+        // slots and each report latency inflated by the other — a comparison the numbers can't
+        // support. Across workspaces they no longer collide: every read the runner makes names its
+        // own eval rather than "the first live one".
         //
-        // A FAST PATH, NOT THE GUARD. This check is followed by an await before `start` is even
-        // called, and wsRelay dispatches commands concurrently — so two of these overlap and both
-        // read `active === false`. `EvalRunner.start` claims synchronously and refuses with the
-        // same message; this only saves the round trip when the answer is already obvious.
-        if (evalRunner.active) {
+        // A FAST PATH, NOT THE GUARD. An await follows before `start` is called, and wsRelay
+        // dispatches commands concurrently — so `EvalRunner.start` claims synchronously and refuses
+        // with the same message; this only saves the round trip when the answer is already obvious.
+        if (evalRunner.activeIn(ctx.workspaceId)) {
           relay.broadcastEval(ctx, { type: "error", message: "an eval is already running" });
           return;
         }

@@ -371,10 +371,9 @@ console.log("\nthe store throws between reserving and starting");
 
 // --- two startEval commands arriving together ---------------------------------------------
 //
-// "One eval at a time" is not a preference here, it is what makes the runner's context correct:
-// index.ts resolves the workspace as contextForEval(activeEvalIds()[0]), so a SECOND live eval
-// has every read and write attributed to the FIRST one's workspace. Its jobs are looked up in
-// the wrong tenancy scope and its rows are written there.
+// One eval at a time PER WORKSPACE: two in one workspace would share its provider slots and report
+// each other's latency. (It used to be one per server, because index.ts resolved the workspace as
+// contextForEval(activeEvalIds()[0]) — every read now names its own eval; see the check below.)
 //
 // The guard was `if (evalRunner.active)` in the WebSocket handler, followed by five awaits before
 // anything became live — and wsRelay dispatches commands concurrently (`void authorized().then(
@@ -412,6 +411,18 @@ console.log("\ntwo evals started at the same instant");
   for (const r of accepted) if (!("error" in r)) await runner.cancel(r.evalId);
   for (const runId of pool.activeRunIds()) pool.finish(runId, { spawnError: "cancelled" });
   await sleep(100);
+}
+
+console.log("\nevery read names the eval it belongs to, so workspaces do not collide");
+{
+  const { readFileSync } = await import("node:fs");
+  const read = (rel: string) => readFileSync(new URL(rel, import.meta.url), "utf8");
+  check(!/this\.deps\.context\(\)/.test(read("./evalRunner.ts")), "the runner never asks for 'the' context — every read names its eval");
+  check(!/this\.deps\.context\(\)/.test(read("./judge/score.ts")), "...and nor does the judge");
+  const index = read("./index.ts");
+  check(!/activeEvalIds\(\)\[0\]/.test(index), "index.ts never resolves an eval's workspace as the first live one");
+  check(/const judge = new JudgeScorer\(\{[\s\S]{0,600}context: \(evalId\) => contextForEval\(evalId\)/.test(index),
+    "the judge reads in the eval's workspace, not the server's");
 }
 
 check(unhandled.length === 0, `nothing rejected unhandled across the whole suite (${unhandled.length})`);

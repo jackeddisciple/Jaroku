@@ -60,8 +60,8 @@ export interface ScoredEvent {
 
 export interface JudgeScorerDeps {
   store: TraceStore;
-  /** The workspace whose runs this judge may read. Read at the moment of use. */
-  context: () => TenantContext;
+  /** The workspace whose runs this judge may read: the eval's own. Read at the moment of use. */
+  context: (evalId: string) => TenantContext;
   evalStore: EvalStore;
   onScored: (e: ScoredEvent) => void;
   onScoringFinished: (e: { evalId: string; scored: number; unscored: number }) => void;
@@ -73,7 +73,7 @@ export interface JudgeScorerDeps {
    * key on the next verdict rather than on the next restart. Returning undefined — the default,
    * and what a workspace that never opted in always gets — means the platform's key.
    */
-  apiKey?: () => Promise<string | undefined>;
+  apiKey?: (evalId: string) => Promise<string | undefined>;
   /**
    * One judge call, for the workspace's ledger.
    *
@@ -173,39 +173,39 @@ export class JudgeScorer {
 
   /** Record an unscored result. Never throws, never blames the provider. */
   private async markUnscored(evalId: string, job: EvalJob, reason: string): Promise<void> {
-    await this.deps.evalStore.putScore(this.deps.context(), { job_id: job.id, score: null, error: reason, judge_model: JUDGE_MODEL });
+    await this.deps.evalStore.putScore(this.deps.context(evalId), { job_id: job.id, score: null, error: reason, judge_model: JUDGE_MODEL });
     const p = this.pending.get(evalId);
     if (p) p.unscored++;
     this.deps.onScored({ evalId, jobId: job.id, score: null, error: reason });
   }
 
   private async scoreOne(evalId: string, job: EvalJob): Promise<void> {
-    const evalRun = await this.deps.evalStore.getEvalRun(this.deps.context(), evalId);
+    const evalRun = await this.deps.evalStore.getEvalRun(this.deps.context(evalId), evalId);
     if (!evalRun) return;
 
     // The judge is real spend. If the eval has already hit its ceiling, don't add to it.
-    if (evalRun.budget_usd !== null && (await this.deps.evalStore.trueSpend(this.deps.context(), evalId)) >= evalRun.budget_usd) {
+    if (evalRun.budget_usd !== null && (await this.deps.evalStore.trueSpend(this.deps.context(evalId), evalId)) >= evalRun.budget_usd) {
       await this.markUnscored(evalId, job, "not scored — the eval hit its budget ceiling");
       return;
     }
     // A workspace's own key counts. Without this, a deployment with no platform key at all
     // would report every cell unscored for a workspace that is paying for its own judging.
-    if (!JudgeScorer.available() && !(await this.deps.apiKey?.())) {
+    if (!JudgeScorer.available() && !(await this.deps.apiKey?.(evalId))) {
       // The free dry-run path still produces a complete eval: every other column is real,
       // and the quality column says plainly why it's blank.
       await this.markUnscored(evalId, job, "not scored — no ANTHROPIC_API_KEY for the judge");
       return;
     }
 
-    const example = await this.deps.evalStore.getExample(this.deps.context(), job.example_id);
+    const example = await this.deps.evalStore.getExample(this.deps.context(evalId), job.example_id);
     if (!example) { await this.markUnscored(evalId, job, "the example no longer exists"); return; }
     if (!job.run_id) { await this.markUnscored(evalId, job, "the job has no run to score"); return; }
 
-    const rubric = await this.deps.evalStore.getRubric(this.deps.context(), evalRun.rubric_id);
+    const rubric = await this.deps.evalStore.getRubric(this.deps.context(evalId), evalRun.rubric_id);
     const criteria: RubricCriterion[] = rubric?.criteria ?? [];
     if (!criteria.length) { await this.markUnscored(evalId, job, "the rubric has no criteria"); return; }
 
-    const steps = await this.deps.store.stepsForRun(this.deps.context(), job.run_id);
+    const steps = await this.deps.store.stepsForRun(this.deps.context(evalId), job.run_id);
     const output = extractAgentOutput(steps);
     const prompt = buildJudgePrompt(
       { input: example.input, expected: example.expected, output: output.text },
@@ -215,7 +215,7 @@ export class JudgeScorer {
     // Resolved once per verdict rather than per attempt: a retry is the same call again, and
     // re-reading the credential between two of them would let a mid-eval change of mind split
     // one verdict's attempts across two accounts.
-    const apiKey = await this.deps.apiKey?.();
+    const apiKey = await this.deps.apiKey?.(evalId);
 
     let lastError = "the judge did not return a verdict";
     for (let attempt = 1; attempt <= JUDGE_ATTEMPTS; attempt++) {
@@ -263,7 +263,7 @@ export class JudgeScorer {
           continue; // a malformed verdict is worth one more try
         }
 
-        await this.deps.evalStore.putScore(this.deps.context(), {
+        await this.deps.evalStore.putScore(this.deps.context(evalId), {
           job_id: job.id,
           score: parsed.verdict.score,
           per_criterion: parsed.verdict.perCriterion,
@@ -297,6 +297,6 @@ export class JudgeScorer {
       cacheReadTokens: usage.cache_read_input_tokens ?? 0,
       cacheWriteTokens: usage.cache_creation_input_tokens ?? 0,
     });
-    if (cost !== null) await this.deps.evalStore.addJudgeCost(this.deps.context(), evalId, cost);
+    if (cost !== null) await this.deps.evalStore.addJudgeCost(this.deps.context(evalId), evalId, cost);
   }
 }

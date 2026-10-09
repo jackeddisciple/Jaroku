@@ -138,7 +138,7 @@ export interface EvalRunnerDeps {
    * moment of use so the runner never holds a context that has gone stale, and so the
    * per-command contexts of Session 2 can replace this without changing a call site here.
    */
-  context: () => TenantContext;
+  context: (evalId: string) => TenantContext;
   evalStore: EvalStore;
   runtimeDir: string;
   /** Register/unregister a run id as belonging to an eval, so its events stay off "trace". */
@@ -205,7 +205,7 @@ export interface EvalRunnerDeps {
    * Optional, so a runner constructed without billing — every existing suite — behaves exactly
    * as it did.
    */
-  workspaceOverBudget?: () => Promise<string | null>;
+  workspaceOverBudget?: (evalId: string) => Promise<string | null>;
 }
 
 export interface StartEvalRequest {
@@ -229,6 +229,8 @@ export interface StartEvalRequest {
 
 interface Live {
   evalId: string;
+  /** Whose eval this is — the workspace a second start is refused for while this one drains. */
+  workspaceId: string;
   /** runId -> jobId, so a pool exit can be attributed to the job that caused it. */
   runToJob: Map<string, string>;
   /** `${jobId}:${attempt}` already sent to the dispatcher, so pump()'s reconciliation scan
@@ -297,11 +299,24 @@ export class EvalRunner {
    * has been read and the rows written, which is five awaits after `start` was called — and
    * "one eval at a time" has to hold across that whole span, not just at its end. See start().
    */
-  private starting = false;
+  private starting = new Set<string>();
 
-  /** Whether any eval is draining, or is on its way to. Used to refuse a second start. */
-  get active(): boolean {
-    return this.starting || this.live.size > 0;
+  /**
+   * Whether this workspace has an eval draining, or on its way to. Used to refuse a second start.
+   *
+   * PER WORKSPACE. It was one for the whole server, and the reason was real: the runner answered
+   * every read as "the workspace of the first live eval", so a second one wrote into the wrong
+   * tenancy. Every read now names the eval it is for, which is what lets two workspaces each have one.
+   */
+  activeIn(workspaceId: string): boolean {
+    if (this.starting.has(workspaceId)) return true;
+    for (const l of this.live.values()) if (l.workspaceId === workspaceId) return true;
+    return false;
+  }
+
+  /** The context an eval's reads and writes happen in — its own workspace's, never another's. */
+  private ctx(evalId: string): TenantContext {
+    return this.deps.context(evalId);
   }
 
   activeEvalIds(): string[] {
@@ -314,22 +329,21 @@ export class EvalRunner {
    * Fails loudly rather than starting an empty or malformed eval — a comparison built on
    * nothing is worse than an error, because it renders as a dashboard full of blanks.
    *
-   * ONE AT A TIME, CLAIMED SYNCHRONOUSLY. The refusal used to live in the WebSocket handler as
-   * `if (evalRunner.active)`, followed by five awaits before anything became live — and wsRelay
-   * dispatches commands concurrently, so two startEval messages genuinely overlap and both saw
-   * `active === false`. That is not merely two evals contending for slots: index.ts resolves the
-   * runner's workspace as `contextForEval(activeEvalIds()[0])`, so a second live eval has every
-   * read and write attributed to the FIRST one's workspace — its jobs looked up in the wrong
-   * tenancy scope, its rows written there. The claim belongs here, where the invariant is, and it
-   * is taken before the first await so there is no window to lose.
+   * ONE AT A TIME PER WORKSPACE, CLAIMED SYNCHRONOUSLY. The refusal used to live in the WebSocket
+   * handler, followed by five awaits before anything became live — and wsRelay dispatches commands
+   * concurrently, so two startEval messages genuinely overlapped and both passed. The claim belongs
+   * here, where the invariant is, and is taken before the first await so there is no window to lose.
+   * It was one for the whole server while every read resolved "the first live eval's" workspace;
+   * each read names its eval now (`ctx(evalId)`), so another workspace's eval is no collision.
    */
   async start(req: StartEvalRequest): Promise<{ evalId: string } | { error: string }> {
-    if (this.active) return { error: "an eval is already running" };
-    this.starting = true;
+    const workspaceId = req.ctx.workspaceId;
+    if (this.activeIn(workspaceId)) return { error: "an eval is already running" };
+    this.starting.add(workspaceId);
     try {
       return await this.startClaimed(req);
     } finally {
-      this.starting = false;
+      this.starting.delete(workspaceId);
     }
   }
 
@@ -363,6 +377,7 @@ export class EvalRunner {
 
     this.live.set(evalRun.id, {
       evalId: evalRun.id,
+      workspaceId: req.ctx.workspaceId,
       runToJob: new Map(),
       enqueuedAttempts: new Set(),
       cancelled: false,
@@ -400,10 +415,10 @@ export class EvalRunner {
     if (!live) return;
     live.cancelled = true;
     if (live.retryTimer) { clearTimeout(live.retryTimer); live.retryTimer = null; }
-    await this.deps.evalStore.cancelQueuedJobs(this.deps.context(), evalId, "cancelled");
+    await this.deps.evalStore.cancelQueuedJobs(this.ctx(evalId), evalId, "cancelled");
     const keys = new Set([...live.enqueuedAttempts].map((attemptKey) => `run.eval:${attemptKey}`));
     if (keys.size) {
-      const purged = await this.deps.dispatcher.purgePending("run.eval", this.deps.context().workspaceId, keys);
+      const purged = await this.deps.dispatcher.purgePending("run.eval", this.ctx(evalId).workspaceId, keys);
       if (purged) console.log(`[eval] ${evalId} purged ${purged} still-queued job(s) from the dispatcher`);
     }
     for (const runId of live.runToJob.keys()) this.deps.pool.stop(runId);
@@ -433,17 +448,17 @@ export class EvalRunner {
     // comparison; the workspace's is the limit on everything it starts this period. Both bound
     // what is STARTED, both are checked on every pump for the same reason — a fan-out is many
     // starts, not one — and both stop the queue rather than the jobs already running.
-    const workspaceReason = live.cancelled ? null : ((await this.deps.workspaceOverBudget?.()) ?? null);
+    const workspaceReason = live.cancelled ? null : ((await this.deps.workspaceOverBudget?.(evalId)) ?? null);
     if (!live.cancelled && (workspaceReason !== null || (await this.overBudget(evalId)))) {
       const cancelled = await this.deps.evalStore.cancelQueuedJobs(
-        this.deps.context(),
+        this.ctx(evalId),
         evalId,
         workspaceReason ?? "budget ceiling reached",
       );
       live.cancelled = true;
-      const spent = await this.deps.evalStore.trueSpend(this.deps.context(), evalId);
-      const ceiling = (await this.deps.evalStore.getEvalRun(this.deps.context(), evalId))?.budget_usd;
-      await this.deps.evalStore.setEvalStatus(this.deps.context(),
+      const spent = await this.deps.evalStore.trueSpend(this.ctx(evalId), evalId);
+      const ceiling = (await this.deps.evalStore.getEvalRun(this.ctx(evalId), evalId))?.budget_usd;
+      await this.deps.evalStore.setEvalStatus(this.ctx(evalId),
         evalId,
         "aborted_over_budget",
         // Which ceiling stopped it, in the words the user will read. "Over budget" with no
@@ -461,7 +476,7 @@ export class EvalRunner {
     // concern now, checked by executeAdmitted() once the dispatcher's own fair rotation has
     // actually chosen a job to run; this loop's only job is "does the dispatcher know about
     // every eligible attempt yet."
-    const jobs = await this.deps.evalStore.jobsForEval(this.deps.context(), evalId);
+    const jobs = await this.deps.evalStore.jobsForEval(this.ctx(evalId), evalId);
     if (!live.cancelled) {
       const now = Date.now();
       for (const job of jobs) {
@@ -483,9 +498,9 @@ export class EvalRunner {
 
   /** True when this eval has spent at or past its ceiling. No ceiling => never true. */
   private async overBudget(evalId: string): Promise<boolean> {
-    const budget = (await this.deps.evalStore.getEvalRun(this.deps.context(), evalId))?.budget_usd;
+    const budget = (await this.deps.evalStore.getEvalRun(this.ctx(evalId), evalId))?.budget_usd;
     if (budget === null || budget === undefined) return false;
-    return (await this.deps.evalStore.trueSpend(this.deps.context(), evalId)) >= budget;
+    return (await this.deps.evalStore.trueSpend(this.ctx(evalId), evalId)) >= budget;
   }
 
   /**
@@ -503,7 +518,7 @@ export class EvalRunner {
     if (live.cancelled) return;
 
     const now = Date.now();
-    const waiting = (await this.deps.evalStore.jobsForEval(this.deps.context(), evalId))
+    const waiting = (await this.deps.evalStore.jobsForEval(this.ctx(evalId), evalId))
       .filter((j) => j.status === "queued" && j.retry_not_before)
       .map((j) => Date.parse(j.retry_not_before!))
       .filter((t) => t > now);
@@ -524,14 +539,14 @@ export class EvalRunner {
    * pool.freeSlots one eval at a time.
    */
   private async enqueueJob(live: Live, job: EvalJob): Promise<void> {
-    const example = await this.deps.evalStore.getExample(this.deps.context(), job.example_id);
+    const example = await this.deps.evalStore.getExample(this.ctx(live.evalId), job.example_id);
     if (!example) {
       // The example was deleted after the eval was queued. Record it rather than skipping
       // silently — a missing cell in the dashboard needs a reason.
-      await this.deps.evalStore.finishJob(this.deps.context(), job.id, "failed", { error: "example no longer exists" });
+      await this.deps.evalStore.finishJob(this.ctx(live.evalId), job.id, "failed", { error: "example no longer exists" });
       return;
     }
-    const evalRun = (await this.deps.evalStore.getEvalRun(this.deps.context(), live.evalId))!;
+    const evalRun = (await this.deps.evalStore.getEvalRun(this.ctx(live.evalId), live.evalId))!;
     const payload: RunEvalPayload = {
       evalId: live.evalId,
       jobId: job.id,
@@ -542,7 +557,7 @@ export class EvalRunner {
       attempt: job.attempt,
     };
     this.jobToEval.set(job.id, live.evalId);
-    await this.deps.dispatcher.enqueue("run.eval", this.deps.context().workspaceId, payload, {
+    await this.deps.dispatcher.enqueue("run.eval", this.ctx(live.evalId).workspaceId, payload, {
       id: job.id,
       idempotencyKey: `run.eval:${job.id}:${job.attempt}`,
       attempt: job.attempt,
@@ -643,7 +658,7 @@ export class EvalRunner {
     // silently retired one of the two provider slots a real provider gets, permanently.
     let started = false;
     try {
-      await this.deps.evalStore.markJobRunning(this.deps.context(), payload.jobId, runId, payload.attempt);
+      await this.deps.evalStore.markJobRunning(this.ctx(payload.evalId), payload.jobId, runId, payload.attempt);
       const setup = (await this.deps.runSetup?.(payload.evalId, runId, { provider: payload.provider, agentId: payload.agentId })) ?? {};
       if (setup.refusal) {
         // It cannot start, and saying so is a failed job with the reason on it — the same ending a
@@ -688,7 +703,7 @@ export class EvalRunner {
       this.deps.releaseRun?.(runId);
       await provSem.release(provLeaseId);
       await this.deps.dispatcher.ack("run.eval", leaseId);
-      await this.deps.evalStore.requeueJob(this.deps.context(), payload.jobId);
+      await this.deps.evalStore.requeueJob(this.ctx(payload.evalId), payload.jobId);
       await this.requeueVerbatim(job);
       return "requeued";
     }
@@ -733,12 +748,12 @@ export class EvalRunner {
     live.runToJob.delete(runId);
     this.deps.markEvalRun(runId, false);
 
-    const job = await this.deps.evalStore.getJob(this.deps.context(), jobId);
+    const job = await this.deps.evalStore.getJob(this.ctx(live.evalId), jobId);
 
     // The run row is the source of truth for what happened — the runner brackets every
     // execution with run_start/run_end, so a contract violation or a mid-graph crash is
     // already recorded there as status 'error'.
-    const run = await this.deps.store.getRun(this.deps.context(), runId);
+    const run = await this.deps.store.getRun(this.ctx(live.evalId), runId);
     const status = timedOut
       ? "timed_out"
       : spawnError
@@ -755,13 +770,13 @@ export class EvalRunner {
     // Recorded for failed and timed-out jobs too: partial spend is still spend, and the
     // budget ceiling has to see it.
     const metrics = await aggregateJob(
-      this.deps.context(),
+      this.ctx(live.evalId),
       this.deps.store,
       runId,
       job?.model ?? run?.model ?? "",
     );
 
-    await this.deps.evalStore.finishJob(this.deps.context(), jobId, status as "succeeded" | "failed" | "timed_out", {
+    await this.deps.evalStore.finishJob(this.ctx(live.evalId), jobId, status as "succeeded" | "failed" | "timed_out", {
       error,
       cost_usd: metrics.cost_usd,
       tokens: metrics.tokens,
@@ -782,17 +797,17 @@ export class EvalRunner {
       // limit binds it exactly as the eval's own does — without this, a workspace that ran out
       // mid-eval would keep paying for attempts on the jobs that happened to fail.
       !(await this.overBudget(live.evalId)) &&
-      ((await this.deps.workspaceOverBudget?.()) ?? null) === null;
+      ((await this.deps.workspaceOverBudget?.(live.evalId)) ?? null) === null;
 
     if (retryable) {
       // Exponential backoff: a rate limit retried immediately is a rate limit again.
       const delay = RETRY_BASE_MS * 2 ** (attempt - 1);
-      await this.deps.evalStore.retryJob(this.deps.context(), jobId, attempt, new Date(Date.now() + delay));
+      await this.deps.evalStore.retryJob(this.ctx(live.evalId), jobId, attempt, new Date(Date.now() + delay));
       console.log(
         `[eval] job ${jobId.slice(0, 8)} attempt ${attempt}/${MAX_ATTEMPTS} in ${delay}ms — ${error}`,
       );
     } else {
-      const finished = await this.deps.evalStore.getJob(this.deps.context(), jobId);
+      const finished = await this.deps.evalStore.getJob(this.ctx(live.evalId), jobId);
       if (finished) this.deps.onJobFinished?.(finished);
     }
 
@@ -801,7 +816,7 @@ export class EvalRunner {
   }
 
   private async counts(evalId: string) {
-    const jobs = await this.deps.evalStore.jobsForEval(this.deps.context(), evalId);
+    const jobs = await this.deps.evalStore.jobsForEval(this.ctx(evalId), evalId);
     const by = (s: string) => jobs.filter((j) => j.status === s).length;
     const terminal = jobs.filter(
       (j) => j.status !== "queued" && j.status !== "running",
@@ -826,7 +841,7 @@ export class EvalRunner {
   private reportedSpend = new Map<string, number>();
 
   private async reportProgress(evalId: string): Promise<void> {
-    const spent = await this.deps.evalStore.trueSpend(this.deps.context(), evalId).catch(() => 0);
+    const spent = await this.deps.evalStore.trueSpend(this.ctx(evalId), evalId).catch(() => 0);
     const before = this.reportedSpend.get(evalId) ?? 0;
     this.reportedSpend.set(evalId, spent);
     this.deps.onProgress({
@@ -849,10 +864,10 @@ export class EvalRunner {
     this.reportedSpend.delete(evalId);
     // A budget abort already recorded its own status and reason; don't overwrite it with
     // the generic "cancelled", which would lose why the eval stopped.
-    const current = (await this.deps.evalStore.getEvalRun(this.deps.context(), evalId))?.status;
+    const current = (await this.deps.evalStore.getEvalRun(this.ctx(evalId), evalId))?.status;
     const status =
       current === "aborted_over_budget" ? current : live.cancelled ? "cancelled" : "completed";
-    if (current !== "aborted_over_budget") await this.deps.evalStore.setEvalStatus(this.deps.context(), evalId, status);
+    if (current !== "aborted_over_budget") await this.deps.evalStore.setEvalStatus(this.ctx(evalId), evalId, status);
     console.log(
       `[eval] ${evalId} ${status} — ${c.total - c.failed}/${c.total} succeeded, ${c.failed} failed`,
     );
