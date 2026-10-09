@@ -6,21 +6,17 @@
 // "Provider keys" in the account menu, opens it here, centred over the application the way the
 // workspace panel is. See lib/dialog for what makes an overlay a dialog.
 
-import { useEffect } from "react";
 import { providerLabelOf, useProviderStore } from "../store/providerStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { sendSetOwnKeyForPlatform } from "../lib/socket.ts";
 import { useCanRun } from "../lib/useCapability.ts";
-import { useDialog } from "../lib/dialog.ts";
 import { ProviderMark } from "../lib/icons.tsx";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { KeyIcon } from "./panelIcons.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
 import { CheckboxField } from "./Checkbox.tsx";
-
-/** The id `aria-labelledby` points at, and the id on the heading it names — one constant, one pair. */
-const PROVIDER_KEYS_LABEL_ID = "provider-keys-title";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./ui/dialog.tsx";
 
 /**
  * Which providers this workspace has a key for — and the one door to changing that.
@@ -48,36 +44,19 @@ export function ProviderKeysDialog() {
   const anthropicReady = providers.some((p) => p.id === "anthropic" && p.configured);
   const canManageProviders = useCanRun("setOwnKeyForPlatform");
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open, setOpen]);
-
-  // CALLED ABOVE THE EARLY RETURN, for WorkspacePanel's reason: a hook that stops being called on
-  // close is a hook whose cleanup never runs, and the cleanup is what gives the focus back.
-  const { ref: card, dialogProps } = useDialog(open, PROVIDER_KEYS_LABEL_ID);
-
-  if (!open) return null;
-
   return (
-    <div
-      className="fixed inset-0 z-40 flex items-start justify-center bg-ink/40 p-8"
-      // Dismissed by the backdrop as well as by Escape. Nothing here is typed, so nothing is lost.
-      onMouseDown={(e) => {
-        if (!card.current?.contains(e.target as Node)) setOpen(false);
-      }}
-    >
-      <div
-        ref={card}
-        {...dialogProps}
+    // A RADIX DIALOG (ui/dialog.tsx, 2026-10-09): named by its title, focus in and back, Escape and the
+    // backdrop both closing it. Nothing here is typed, so nothing is lost by either.
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogContent
+        // NEAR THE TOP, ON A DARKER SCRIM — where it has always opened, rather than centred.
+        overlayClassName="items-start bg-ink/40 p-8"
         className="mt-16 w-[440px] max-w-full animate-slide-in rounded-lg border border-edge bg-elevated p-3 shadow-overlay focus-visible:outline-none motion-reduce:animate-none"
       >
         <div className="flex items-center">
-          <span id={PROVIDER_KEYS_LABEL_ID} className={TYPE.sectionLabel}>Provider keys</span>
+          <DialogTitle asChild>
+            <span className={TYPE.sectionLabel}>Provider keys</span>
+          </DialogTitle>
           <button
             type="button"
             onClick={() => setOpen(false)}
@@ -88,10 +67,10 @@ export function ProviderKeysDialog() {
             <Icon.workspace.close size={ICON.sm} />
           </button>
         </div>
-        <p className="mt-1 text-tiny leading-[1.55] text-faint">
+        <DialogDescription className="mt-1 text-tiny leading-[1.55] text-faint">
           Kept in Secrets with every other credential, behind the passcode. Never logged, never
           sent back to this page.
-        </p>
+        </DialogDescription>
         <div className="mt-2.5 space-y-2">
           {providers.map((p) => (
             <div key={p.id} className="flex items-center gap-2">
@@ -161,7 +140,7 @@ export function ProviderKeysDialog() {
         >
           Add or rotate a key in Secrets →
         </button>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

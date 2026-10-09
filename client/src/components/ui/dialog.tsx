@@ -31,20 +31,20 @@ export const DialogDescription = DialogPrimitive.Description;
 
 export function DialogContent({
   className = "",
-  overlayClassName = "bg-ink/20 p-6",
+  overlayClassName = "items-center bg-ink/20 p-6",
   inline = false,
   onEscapeKeyDown,
   onKeyDown,
   children,
   ...props
 }: ComponentProps<typeof DialogPrimitive.Content> & {
-  /** The scrim's own look — its tint and the air around the panel. */
+  /** The scrim's own look — where it holds the panel, its tint, and the air around the panel. */
   overlayClassName?: string;
   inline?: boolean;
 }) {
   const body = (
     <DialogPrimitive.Overlay
-      className={`fixed inset-0 flex items-center justify-center ${overlayClassName}`}
+      className={`fixed inset-0 flex justify-center ${overlayClassName}`}
       style={{ zIndex: LAYER.modal }}
     >
       <DialogPrimitive.Content
