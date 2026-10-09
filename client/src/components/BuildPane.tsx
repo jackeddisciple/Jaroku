@@ -2899,17 +2899,23 @@ export function BuildPane({
    * a regenerated turn, where the question is one turn further back than it looks.
    */
   const nearMiss = !operating && turns.length > 0
-    ? [...turns].reverse().find(
-      (t): t is ReplyTurn =>
-        t.role === "jaroku" && t.kind === "reply"
-        // THE LAST TURN ONLY, in effect: an offer under an answer three exchanges up is an offer
-        // about a message somebody has moved on from. `find` on the reversed list stops at the
-        // newest reply, and the `status` test keeps it off one still arriving — §15.1's card is a
-        // decision about a finished answer.
-        && (t.status === "done" || t.status === "stopped")
-        && (t.planEvidence === "near" || t.planEvidence === "confident")
-        && Boolean(t.askedWith),
-    ) ?? null
+    ? [...turns].reverse()
+      // THE NEWEST THING JAROKU SAID, NOT THE NEWEST REPLY. A plan, a generation, an edit or a job
+      // under the answer means the offer was taken or overtaken, and looking for the newest REPLY
+      // walked straight past them, back to the answer, offering to plan the agent just generated
+      // from it. A note doesn't count: a failed plan's error under the answer leaves the offer up.
+      .filter((t) => t.role === "jaroku" && t.kind !== "info")
+      .slice(0, 1)
+      .find(
+        (t): t is ReplyTurn =>
+          t.role === "jaroku" && t.kind === "reply"
+          // THE LAST TURN ONLY: an offer under an answer three exchanges up is an offer about a
+          // message somebody has moved on from. The `status` test keeps it off one still arriving —
+          // §15.1's card is a decision about a finished answer.
+          && (t.status === "done" || t.status === "stopped")
+          && (t.planEvidence === "near" || t.planEvidence === "confident")
+          && Boolean(t.askedWith),
+      ) ?? null
     : null;
 
   if (openPlan?.planId && openPlan.status === "pending") {

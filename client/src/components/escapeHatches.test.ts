@@ -63,6 +63,10 @@ console.log("\n§15.1 — the build offer");
   // something nobody has read.
   check("...and on a settled turn",
     /t\.status === "done" \|\| t\.status === "stopped"/.test(pane), "");
+  // AND ONLY WHILE THAT ANSWER IS STILL THE LAST THING SAID. It looked for the newest reply, which
+  // walked past the plan and the generation it led to and offered to plan the same agent again.
+  check("...that nothing but a note has come after",
+    /\.filter\(\(t\) => t\.role === "jaroku" && t\.kind !== "info"\)\s*\.slice\(0, 1\)\s*\.find\(/.test(pane), "");
   // IT IS A `ChoiceRow` OPTION, which §15.1 names — "no new component".
   check("it is a ChoiceRow option", /const nearMiss/.test(pane) && pane.includes("ChoiceRow"), "");
 
