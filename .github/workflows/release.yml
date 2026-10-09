@@ -158,7 +158,9 @@ jobs:
           # "Code signing" in docs/tauri.md. Empty on the other two runners, which ignore it.
           APPLE_SIGNING_IDENTITY: ${{ startsWith(matrix.platform, 'macos') && '-' || '' }}
         with:
-          args: --target ${{ matrix.target }}
+          # VERBOSE ON LINUX, because without it a failed AppImage says only "failed to run
+          # linuxdeploy" and linuxdeploy's own reason is never printed.
+          args: --target ${{ matrix.target }}${{ matrix.platform == 'ubuntu-22.04' && ' --verbose' || '' }}
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}-dev', github.run_number) }}
           releaseName: "Jaroku ${{ github.ref_type == 'tag' && github.ref_name || format('build {0}', github.run_number) }}"
           releaseDraft: true
