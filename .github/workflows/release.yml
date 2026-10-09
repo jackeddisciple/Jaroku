@@ -129,7 +129,8 @@ jobs:
           # "Code signing" in docs/tauri.md.
           APPLE_SIGNING_IDENTITY: "-"
         with:
-          args: --target ${{ matrix.target }}
+          # THE APP ONLY; THE DISK IMAGE IS MADE BELOW. See that step for why.
+          args: --target ${{ matrix.target }} --bundles app
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}-dev', github.run_number) }}
           releaseName: "Jaroku ${{ github.ref_type == 'tag' && github.ref_name || format('build {0}', github.run_number) }}"
           releaseDraft: true
@@ -153,20 +154,22 @@ jobs:
             environment into your home directory so that nothing has to be installed separately.
             Every launch after that is immediate.
 
-      # STABLE FILENAMES, BECAUSE A LANDING PAGE CANNOT LINK TO A MOVING TARGET.
+      # THE DISK IMAGE IS MADE HERE, NOT BY TAURI. Tauri's `bundle_dmg.sh` lays its window out with a
+      # Finder AppleScript, and on the Intel runner that took 13½ minutes in one run and died after
+      # 9¾ in the next — with the app already built and signed. `hdiutil` alone makes the image
+      # install.sh and a drag-install need (the app beside an Applications link) in well under a
+      # minute, and is retried because a CI runner's `hdiutil` can find the device busy.
       #
-      # Tauri names its output after the version — `Jaroku_0.3.3_aarch64.dmg` — which is correct
-      # for an archive and useless for a download button: every release would break every link on
-      # the site, and `releases/latest/download/<name>` only works if you already know the name.
-      # So each artefact is uploaded a second time under a name that never changes, and a button
-      # can point at one URL for the life of the product:
+      # AND UNDER TWO NAMES, BECAUSE A LANDING PAGE CANNOT LINK TO A MOVING TARGET. The versioned one
+      # (`Jaroku_0.4.0_aarch64.dmg`) is right for an archive and useless for a download button: every
+      # release would break every link on the site. The stable one never changes, so a button can
+      # point at one URL for the life of the product:
       #
       #   https://github.com/OWNER/REPO/releases/latest/download/Jaroku-macos-arm64.dmg
       #
       # `--clobber` because a re-run of a build must replace its own upload rather than fail on
-      # finding one already there. The versioned originals stay: they are what somebody wants when
-      # they need a specific release rather than the current one.
-      - name: Publish under stable filenames
+      # finding one already there.
+      - name: Disk image, under a versioned and a stable name
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -174,17 +177,26 @@ jobs:
         run: |
           set -eu
           case "${{ matrix.platform }}" in
-            macos-15)       stable='Jaroku-macos-arm64.dmg' ;;
-            macos-15-intel) stable='Jaroku-macos-intel.dmg' ;;
+            macos-15)       arch='aarch64'; stable='Jaroku-macos-arm64.dmg' ;;
+            macos-15-intel) arch='x64'    ; stable='Jaroku-macos-intel.dmg' ;;
           esac
+          version="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          app="src-tauri/target/${{ matrix.target }}/release/bundle/macos/Jaroku.app"
+          [ -d "$app" ] || { echo "no Jaroku.app at $app"; exit 1; }
 
-          upload() {
-            cp "$1" "${RUNNER_TEMP}/$2"
-            gh release upload "$TAG" "${RUNNER_TEMP}/$2" --clobber --repo "${{ github.repository }}"
-            echo "uploaded $2"
-          }
+          stage="${RUNNER_TEMP}/dmg-root"
+          rm -rf "$stage"; mkdir -p "$stage"
+          ditto "$app" "$stage/Jaroku.app"
+          ln -s /Applications "$stage/Applications"
 
-          BUNDLE="src-tauri/target/${{ matrix.target }}/release/bundle"
-          found="$(find "$BUNDLE" -name '*.dmg' | head -n1)"
-          [ -n "$found" ] || { echo "no .dmg under $BUNDLE"; exit 1; }
-          upload "$found" "$stable"
+          dmg="${RUNNER_TEMP}/Jaroku_${version}_${arch}.dmg"
+          for attempt in 1 2 3; do
+            hdiutil create -quiet -volname Jaroku -srcfolder "$stage" -fs HFS+ -format UDZO -ov "$dmg" && break
+            if [ "$attempt" = 3 ]; then exit 1; fi
+            echo "hdiutil failed (attempt $attempt); retrying"; sleep 15
+          done
+
+          gh release upload "$TAG" "$dmg" --clobber --repo "${{ github.repository }}"
+          cp "$dmg" "${RUNNER_TEMP}/$stable"
+          gh release upload "$TAG" "${RUNNER_TEMP}/$stable" --clobber --repo "${{ github.repository }}"
+          echo "uploaded $(basename "$dmg") and $stable"
