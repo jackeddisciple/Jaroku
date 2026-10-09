@@ -26,7 +26,16 @@ export const DropdownMenuRadioGroup = MenuPrimitive.RadioGroup;
 
 /** The row every menu item wears. Spelled once so the menus cannot drift apart. */
 const ROW =
-  "flex w-full cursor-default select-none items-center gap-2.5 px-2.5 py-1.5 text-left text-body text-muted outline-none transition-colors duration-fast data-[highlighted]:bg-active data-[highlighted]:text-ink data-[disabled]:pointer-events-none data-[disabled]:opacity-40";
+  "flex w-full cursor-default select-none items-center gap-2.5 px-2.5 py-1.5 text-left text-body outline-none transition-colors duration-fast data-[highlighted]:bg-active data-[disabled]:pointer-events-none data-[disabled]:opacity-40";
+/**
+ * THE INK IS A PROP, NOT A CLASS ON TOP. A `text-err` added beside the row's own `text-muted` is two
+ * colours on one element, and which one paints is decided by the order Tailwind happens to emit them
+ * in — Delete came out grey. A tone picks exactly one.
+ */
+const ROW_TONE = {
+  default: "text-muted data-[highlighted]:text-ink",
+  danger: "text-err",
+} as const;
 
 export function DropdownMenuContent({ className = "", sideOffset = 4, ...props }: ComponentProps<typeof MenuPrimitive.Content>) {
   return (
@@ -46,8 +55,12 @@ export function DropdownMenuContent({ className = "", sideOffset = 4, ...props }
   );
 }
 
-export function DropdownMenuItem({ className = "", ...props }: ComponentProps<typeof MenuPrimitive.Item>) {
-  return <MenuPrimitive.Item className={`${ROW} ${className}`} {...props} />;
+export function DropdownMenuItem({
+  className = "",
+  tone = "default",
+  ...props
+}: ComponentProps<typeof MenuPrimitive.Item> & { tone?: keyof typeof ROW_TONE }) {
+  return <MenuPrimitive.Item className={`${ROW} ${ROW_TONE[tone]} ${className}`} {...props} />;
 }
 
 /**
@@ -65,7 +78,7 @@ export function DropdownMenuPlainItem({ className = "", ...props }: ComponentPro
  * the chosen row sits on the selected fill the way a chosen row does everywhere else.
  */
 export function DropdownMenuRadioItem({ className = "", ...props }: ComponentProps<typeof MenuPrimitive.RadioItem>) {
-  return <MenuPrimitive.RadioItem className={`${ROW} data-[state=checked]:bg-chrome data-[state=checked]:text-ink ${className}`} {...props} />;
+  return <MenuPrimitive.RadioItem className={`${ROW} ${ROW_TONE.default} data-[state=checked]:bg-chrome data-[state=checked]:text-ink ${className}`} {...props} />;
 }
 
 export function DropdownMenuSeparator({ className = "", ...props }: ComponentProps<typeof MenuPrimitive.Separator>) {

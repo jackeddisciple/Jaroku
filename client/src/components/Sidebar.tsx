@@ -429,7 +429,7 @@ function AgentRowMenu({ agent }: { agent: AgentSummary }) {
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onSelect={(e) => { e.preventDefault(); setConfirming(true); }}
-                className="text-err data-[highlighted]:text-err"
+                tone="danger"
               >
                 <Icon.agents.delete size={ICON.sm} />
                 <span className="min-w-0 flex-1 truncate">Delete</span>
