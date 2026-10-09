@@ -22,10 +22,7 @@
 // is dropping focus on `<body>`, which in this app means the sidebar, three panels from the
 // composer they were driving.
 
-import { useEffect, useRef } from "react";
-
-const FOCUSABLE =
-  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+import { Dialog, DialogContent, DialogTitle } from "../ui/dialog.tsx";
 
 export function FullscreenComposer({
   open,
@@ -42,93 +39,43 @@ export function FullscreenComposer({
   title?: string;
   children: React.ReactNode;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-  // Captured on open rather than passed in: the thing to return focus to is whatever had it, which
-  // is the collapse trigger in the ordinary case and something else entirely when the dialog was
-  // opened by the Cmd+Shift+F chord from inside the textarea.
-  const restoreTo = useRef<HTMLElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    restoreTo.current = document.activeElement as HTMLElement | null;
-
-    const el = ref.current;
-    const raf = requestAnimationFrame(() => {
-      // The textarea, not the first button. This dialog exists to be typed in.
-      el?.querySelector<HTMLTextAreaElement>("textarea")?.focus();
-    });
-
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") {
-        // §3.3's Esc order is "close popover → exit fullscreen → clear focus", and the popover half
-        // is enforced at the other end: Popover.tsx consumes the event in the capture phase, so an
-        // Esc that closed a menu never reaches this listener at all.
-        e.preventDefault();
-        onClose();
-        return;
-      }
-      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        onSend();
-        onClose();
-        return;
-      }
-      if (e.key !== "Tab" || !el) return;
-      // The trap. Both edges, because Shift+Tab off the first element is the same escape as Tab off
-      // the last one and is the half people forget.
-      const items = Array.from(el.querySelectorAll<HTMLElement>(FOCUSABLE))
-        .filter((n) => n.offsetParent !== null || n === document.activeElement);
-      if (items.length === 0) return;
-      const first = items[0]!;
-      const last = items[items.length - 1]!;
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener("keydown", onKey);
-    return () => {
-      cancelAnimationFrame(raf);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open, onClose, onSend]);
-
-  useEffect(() => {
-    if (open) return;
-    restoreTo.current?.focus();
-    restoreTo.current = null;
-  }, [open]);
-
-  if (!open) return null;
-
   return (
-    // `fixed`, and deliberately NOT a portal. A portal would mount this outside the pane's tree,
-    // which is fine for the overlay and fatal for the promise above it: the thread has to stay
-    // mounted, and the cheapest guarantee of that is not moving anything.
-    <div className="fixed inset-0 z-40 flex items-center justify-center">
-      {/* The thread stays visible through this rather than being replaced by it — §3.2 again. The
-          backdrop is a scrim, not a cover. */}
-      <div
-        className="absolute inset-0 bg-ink/25 backdrop-blur-[1px] transition-opacity duration-base motion-reduce:transition-none"
-        onClick={onClose}
-        aria-hidden
-      />
-      <div
-        ref={ref}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
+    // A RADIX DIALOG (ui/dialog.tsx, 2026-10-09), which now does the trap and the return the header
+    // promises: Tab cannot leave it, and focus goes back to whatever had it when it opened — the
+    // collapse trigger usually, the textarea when the Cmd+Shift+F chord opened it.
+    //
+    // §3.3's Esc ORDER, "close popover → exit fullscreen", is Radix's layering: a composer popover
+    // open inside this is the top layer, so the first Esc closes it and only the next reaches here.
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent
+        // `fixed`, and deliberately NOT a portal. A portal would mount this outside the pane's tree,
+        // which is fine for the overlay and fatal for the promise above it: the thread has to stay
+        // mounted, and the cheapest guarantee of that is not moving anything.
+        inline
+        aria-describedby={undefined}
+        // The thread stays visible through this rather than being replaced by it — §3.2 again. The
+        // backdrop is a scrim, not a cover, and pressing it closes.
+        overlayClassName="items-center bg-ink/25 backdrop-blur-[1px]"
+        // The textarea, not the first button. This dialog exists to be typed in.
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          (e.currentTarget as HTMLElement | null)?.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            onSend();
+            onClose();
+          }
+        }}
         className="relative flex w-full max-w-[880px] flex-col overflow-hidden rounded-lg border
           border-edge bg-elevated shadow-floating animate-slide-in motion-reduce:animate-none"
         style={{ height: "70vh" }}
       >
+        <DialogTitle className="sr-only">{title}</DialogTitle>
         {children}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
