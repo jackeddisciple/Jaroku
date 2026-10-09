@@ -38,8 +38,9 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { CATEGORY_GROUPS, CATEGORY_MAX, UNCATEGORIZED, normalizeCategory } from "../lib/agentCategories.ts";
-import { ICON, LAYER, TYPE } from "../lib/tokens.ts";
+import { ICON, TYPE } from "../lib/tokens.ts";
 import { CheckIcon, ChevronDownIcon } from "./panelIcons.tsx";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
 
 /**
  * Distance from the trigger and the closest the popover may come to the window's edge. The 4px gap
@@ -181,16 +182,6 @@ export function CategoryPicker({
       ?.scrollIntoView({ block: "nearest", behavior: "auto" });
   }, [open, cursor, rows]);
 
-  useEffect(() => {
-    if (!open) return;
-    field.current?.focus();
-    const away = (e: MouseEvent): void => {
-      if (!host.current?.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", away);
-    return () => document.removeEventListener("mousedown", away);
-  }, [open]);
-
   const choose = (row: CategoryRow): void => {
     onChange(row.value);
     setOpen(false);
@@ -198,40 +189,46 @@ export function CategoryPicker({
   };
 
   return (
-    <div ref={host} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        // THE TRIGGER READS AS A FIELD, not as a button, because it is one of two answers on a form
-        // and the other is a textarea. Same rung, same border, same ground as that one.
-        className="flex w-full items-center gap-2 rounded-input border border-edge bg-elevated px-3 py-2 text-left text-caption transition-colors duration-fast hover:border-chrome focus-visible:outline-none focus-visible:shadow-focusring"
-      >
-        <span className={`min-w-0 flex-1 truncate ${chosen ? "text-ink" : "text-faint"}`}>
-          {chosen ?? "Choose a category…"}
-        </span>
-        {/* THE ONE MARK ON THIS CONTROL. A chevron is what says "this opens"; anything else here
-            would be decoration on a form that is deliberately two questions long. */}
-        <span className="shrink-0 text-faint" aria-hidden>
-          <ChevronDownIcon size={ICON.xs} />
-        </span>
-      </button>
+    // A RADIX POPOVER (ui/popover.tsx, 2026-10-09): the press outside, Escape as the top layer — so in
+    // the new-agent dialog the first Escape closes this and only the second reaches the dialog,
+    // which a listener here used to arrange by swallowing the key — and the field focused on open.
+    // WHICH WAY AND HOW TALL stay this component's own decision (`fit`, above), handed to Radix with
+    // its own flipping turned off: Radix would flip by whether the tallest list fits, which is the
+    // rule `POPOVER_MIN` exists to refuse.
+    <Popover open={open} onOpenChange={setOpen}>
+      <div ref={host} className="relative">
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            aria-haspopup="listbox"
+            aria-expanded={open}
+            // THE TRIGGER READS AS A FIELD, not as a button, because it is one of two answers on a form
+            // and the other is a textarea. Same rung, same border, same ground as that one.
+            className="flex w-full items-center gap-2 rounded-input border border-edge bg-elevated px-3 py-2 text-left text-caption transition-colors duration-fast hover:border-chrome focus-visible:outline-none focus-visible:shadow-focusring"
+          >
+            <span className={`min-w-0 flex-1 truncate ${chosen ? "text-ink" : "text-faint"}`}>
+              {chosen ?? "Choose a category…"}
+            </span>
+            {/* THE ONE MARK ON THIS CONTROL. A chevron is what says "this opens"; anything else here
+                would be decoration on a form that is deliberately two questions long. */}
+            <span className="shrink-0 text-faint" aria-hidden>
+              <ChevronDownIcon size={ICON.xs} />
+            </span>
+          </button>
+        </PopoverTrigger>
 
-      {open && (
-        <div
-          // AT THE MENU LAYER, capped to the room measured above, and a column so the list is the
-          // part that gives: the search field and Clear stay whole at any height, which is the
-          // whole argument for capping the popover rather than the list inside it.
-          //
-          // INSIDE THE DIALOG RATHER THAN PORTALLED. `useDialog` pulls focus back whenever it lands
-          // outside the panel, and it exempts only another `[role="dialog"]` — so a popover
-          // portalled into the body would have its search field emptied of focus the instant it
-          // got it. Nothing clips this one but the window, and `max` is the answer to that.
-          style={{ zIndex: LAYER.menu, maxHeight: box.max }}
-          className={`absolute left-0 right-0 flex flex-col overflow-hidden rounded-card border border-edge bg-elevated shadow-floating ${
-            box.above ? "bottom-full mb-1" : "top-full mt-1"
-          }`}
+        <PopoverContent
+          // IN PLACE, NOT PORTALLED: inside the new-agent dialog it stays inside the dialog, whose
+          // focus is the dialog's to keep. Capped to the room measured above, and a column so the
+          // list is the part that gives: the search field and Clear stay whole at any height.
+          inline
+          side={box.above ? "top" : "bottom"}
+          align="start"
+          sideOffset={GAP}
+          avoidCollisions={false}
+          onOpenAutoFocus={(e) => { e.preventDefault(); field.current?.focus(); }}
+          style={{ maxHeight: box.max }}
+          className="flex w-[var(--radix-popover-trigger-width)] flex-col overflow-hidden rounded-card border border-edge bg-elevated shadow-floating"
         >
           <div className="shrink-0 border-b border-hair p-1.5">
             <input
@@ -239,11 +236,8 @@ export function CategoryPicker({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
-                // ESCAPE IS SWALLOWED, NOT JUST HANDLED. `lib/dialog.ts` names this failure in its
-                // own header — "a nested pair closing both at once" — and the dialog around this
-                // one listens on `document`, so an Escape that bubbled would close the popover and
-                // the dialog in one keystroke, throwing away a brief somebody had typed.
-                if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setOpen(false); return; }
+                // NO ESCAPE HERE: Radix closes this as the top layer, and the dialog around it — if
+                // there is one — does not hear that press. A brief somebody typed survives it.
                 if (e.key === "ArrowDown") { e.preventDefault(); setCursor((c) => Math.min(c + 1, rows.length - 1)); return; }
                 if (e.key === "ArrowUp") { e.preventDefault(); setCursor((c) => Math.max(c - 1, 0)); return; }
                 if (e.key === "Enter") {
@@ -335,8 +329,8 @@ export function CategoryPicker({
               Clear category
             </button>
           )}
-        </div>
-      )}
-    </div>
+        </PopoverContent>
+      </div>
+    </Popover>
   );
 }

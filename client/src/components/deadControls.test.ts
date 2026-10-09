@@ -111,10 +111,11 @@ console.log("\nevery rendered button can be pressed for a reason");
       // state, and a control that is only sometimes disabled still needs a handler for the rest.
       if (/disabled(?:=\{true\}|(?=[\s>]))/.test(attrs)) continue;
       if (/onClick|onMouseDown|onPointerDown|onKeyDown/.test(attrs)) continue;
-      // A RADIX MENU TRIGGER'S CHILD IS PRESSED THROUGH THE TRIGGER. `<DropdownMenuTrigger asChild>`
-      // hands its own pointer and key handlers to the button directly inside it, and that is the
-      // press: it opens the menu. Directly inside, nothing between, so it exempts exactly that.
-      if (/<DropdownMenuTrigger asChild>\s*$/.test(text.slice(Math.max(0, at - 120), at))) continue;
+      // A RADIX TRIGGER'S CHILD IS PRESSED THROUGH THE TRIGGER. `<DropdownMenuTrigger asChild>` — and
+      // the Popover's and Dialog's — hands its own pointer and key handlers to the button directly
+      // inside it, and that is the press: it opens the menu, popover or dialog. Directly inside,
+      // nothing between, so it exempts exactly that.
+      if (/<(?:DropdownMenu|Popover|Dialog)Trigger asChild>\s*$/.test(text.slice(Math.max(0, at - 120), at))) continue;
       const line = text.slice(0, at).split("\n").length;
       dead.push(`${path}:${line}`);
     }
