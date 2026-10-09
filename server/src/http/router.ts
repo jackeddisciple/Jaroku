@@ -144,8 +144,13 @@ export interface HttpRequest {
   /** The client's address, for audit rows. Best-effort: behind a proxy this is the proxy. */
   readonly ip: string | null;
   header(name: string): string | undefined;
-  /** The JSON body, size-capped. `{}` when there is no body — absent is not an error here. */
-  json<T = Record<string, unknown>>(): Promise<T>;
+  /**
+   * The JSON body, `{}` when there is none — absent is not an error here. Capped at `MAX_BODY_BYTES`,
+   * or at `maxBytes` for the one route whose bodies are legitimately larger: a sandboxed run's
+   * trace batch, which carries LLM prompts and state snapshots and is bounded per run by
+   * backpressure.ts rather than per request by this.
+   */
+  json<T = Record<string, unknown>>(opts?: { maxBytes?: number }): Promise<T>;
   /** The body as bytes, capped separately. For the one route whose payload is not JSON. */
   buffer(): Promise<Buffer>;
 }
@@ -528,8 +533,8 @@ export class Router {
         const v = raw.headers[name.toLowerCase()];
         return Array.isArray(v) ? v[0] : v;
       },
-      json: <T,>(): Promise<T> => {
-        parsed ??= readJson(raw);
+      json: <T,>(opts?: { maxBytes?: number }): Promise<T> => {
+        parsed ??= readJson(raw, opts?.maxBytes ?? MAX_BODY_BYTES);
         return parsed as Promise<T>;
       },
       buffer: (): Promise<Buffer> => {
@@ -593,17 +598,17 @@ async function readBytes(raw: IncomingMessage): Promise<Buffer> {
  * is a claim, and a chunked request has none at all. Checking the header first is still worth
  * doing because it refuses an obvious abuse before a byte is read.
  */
-async function readJson<T>(raw: IncomingMessage): Promise<T> {
+async function readJson<T>(raw: IncomingMessage, maxBytes: number): Promise<T> {
   const declared = Number(raw.headers["content-length"] ?? 0);
-  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) {
-    throw tooLarge(`request body over ${MAX_BODY_BYTES} bytes`);
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    throw tooLarge(`request body over ${maxBytes} bytes`);
   }
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of raw) {
     const buf = chunk as Buffer;
     size += buf.length;
-    if (size > MAX_BODY_BYTES) throw tooLarge(`request body over ${MAX_BODY_BYTES} bytes`);
+    if (size > maxBytes) throw tooLarge(`request body over ${maxBytes} bytes`);
     chunks.push(buf);
   }
   if (size === 0) return {} as T;

@@ -115,9 +115,17 @@ export function registerControlPlaneRoutes(router: Router, deps: ControlPlaneDep
   }, { timeoutMs: MAX_LONG_POLL_MS + 5_000 });
 }
 
+/**
+ * How big one trace batch may be. The router's 64 KB default was sized for forms, and one LLM step
+ * with its prompt and state snapshots outgrows that alone — the runner treats a refused push as a
+ * lost batch, so steps simply vanished from the trace. The runner caps its own batches below this
+ * (`controlplane_http.py`), and backpressure.ts bounds every event and the run as a whole.
+ */
+export const MAX_TRACE_BATCH_BYTES = 4 * 1024 * 1024;
+
 async function handleTrace(req: HttpRequest, runId: string, deps: ControlPlaneDeps) {
   authenticate(req, runId, deps);
-  const body = await req.json<{ events?: unknown[] }>();
+  const body = await req.json<{ events?: unknown[] }>({ maxBytes: MAX_TRACE_BATCH_BYTES });
   if (!Array.isArray(body.events)) throw badRequest("expected {events: [...]}");
 
   // Bytes AND RATE are checked BEFORE parsing any event out of the batch — a batch that is itself

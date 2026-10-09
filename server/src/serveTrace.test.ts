@@ -24,6 +24,7 @@ import {
 import { startMockServe } from "../fixtures/deploy/mockServe.ts";
 import { DeployDispatcher } from "./deployDispatch.ts";
 import { BackpressureTracker, DEFAULT_BACKPRESSURE_LIMITS } from "./sandbox/backpressure.ts";
+import { MAX_TRACE_BATCH_BYTES } from "./sandbox/controlPlaneRoutes.ts";
 import type { TraceEvent } from "./types.ts";
 
 let fail = 0;
@@ -102,11 +103,13 @@ const check = (name: string, ok: boolean, detail = "") => {
 
   // AND THE BOUND IN FRONT OF IT, which is the router's own and is the first thing a flood meets.
   // Worth asserting because it is what makes the backpressure cap the SECOND line rather than the
-  // only one: a single enormous batch never reaches the trace route at all.
+  // only one: a single enormous batch never reaches the trace route at all. The trace route's cap is
+  // MAX_TRACE_BATCH_BYTES (4 MB) — a real batch of LLM steps outgrows the router's 64 KB form cap —
+  // so "enormous" here is past that.
   const huge = await fetch(`${control.url}/v1/runs/${runId}/trace`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${opened.runToken}` },
-    body: JSON.stringify({ events: [{ kind: "step", schema_version: 1, step: { pad: "x".repeat(200_000) } }] }),
+    body: JSON.stringify({ events: [{ kind: "step", schema_version: 1, step: { pad: "x".repeat(MAX_TRACE_BATCH_BYTES + 1024) } }] }),
   });
   await huge.text();
   check("a single batch larger than the request cap never reaches the trace route",

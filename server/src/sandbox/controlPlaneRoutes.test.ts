@@ -3,6 +3,7 @@
 //
 //   npm run test:control-plane-routes
 
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { randomBytes } from "node:crypto";
@@ -10,7 +11,7 @@ import { Router } from "../http/router.ts";
 import { BackpressureTracker, DEFAULT_BACKPRESSURE_LIMITS } from "./backpressure.ts";
 import { RunEventBus } from "./eventBus.ts";
 import { mintRunToken, RunTokenRevocationList } from "./runTokens.ts";
-import { registerControlPlaneRoutes } from "./controlPlaneRoutes.ts";
+import { MAX_TRACE_BATCH_BYTES, registerControlPlaneRoutes } from "./controlPlaneRoutes.ts";
 
 let fail = 0;
 const check = (name: string, ok: boolean, detail = "") => {
@@ -278,6 +279,37 @@ const token1 = mintRunToken(signingKey, "run-1", "ws-1", 3600);
     `pushed ${bytesPushed} bytes`,
   );
   rateHttp.close();
+}
+
+// --- a real trace batch is not a form ------------------------------------------------------
+//
+// The router caps a body at 64 KB, and one LLM step with its prompt and state snapshots outgrows
+// that alone. The runner treats a refused push as a lost batch, so steps vanished from the trace of
+// any run that did real work — the route takes trace-sized batches, and the runner caps its own.
+{
+  // Its own router, with the production backpressure limits: the shared one above is deliberately
+  // tiny so the flood cases trip it, and that is not what this is about.
+  const bigBus = new RunEventBus();
+  const bigRouter = new Router({ log: () => {}, quiet: () => true });
+  registerControlPlaneRoutes(bigRouter, { bus: bigBus, signingKey, revocations, backpressure: new BackpressureTracker(DEFAULT_BACKPRESSURE_LIMITS) });
+  const bigHttp = createServer((req, res) => {
+    void bigRouter.handle(req, res).then((handled) => { if (!handled) res.writeHead(404).end(); });
+  });
+  await new Promise<void>((resolve) => bigHttp.listen(0, "127.0.0.1", resolve));
+  bigBus.register("run-big");
+  const bigToken = mintRunToken(signingKey, "run-big", "ws-1", 3600);
+  const step = (i: number) => ({ kind: "run_start", schema_version: 1, run: { id: "run-big" }, note: "x".repeat(150_000), i });
+  const res = await fetch(`http://127.0.0.1:${(bigHttp.address() as AddressInfo).port}/v1/runs/run-big/trace`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${bigToken}` },
+    body: JSON.stringify({ events: [step(1), step(2), step(3)] }),
+  });
+  const body = (await res.json().catch(() => null)) as { accepted?: number } | null;
+  bigHttp.close();
+  check(`a 450 KB batch of large steps is accepted (${res.status})`, res.status === 200 && body?.accepted === 3);
+  const runner = readFileSync(new URL("../../../runtime/jaroku_runner/controlplane_http.py", import.meta.url), "utf8");
+  const cap = Number(/_TRACE_BATCH_MAX_BYTES = (\d+) \* 1024/.exec(runner)?.[1] ?? NaN) * 1024;
+  check("the runner's own batch cap sits under the route's", cap > 0 && cap < MAX_TRACE_BATCH_BYTES);
 }
 
 // --- revocation --------------------------------------------------------------------------

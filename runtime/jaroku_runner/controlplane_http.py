@@ -98,7 +98,13 @@ def _request(method: str, path: str, body: dict | None, timeout_s: float) -> dic
 # jaroku_interceptor.schema.emit already calls this once per event in order.
 _TRACE_BATCH_MAX = 50
 _TRACE_BATCH_WINDOW_S = 0.1
+# AND BY SIZE. One LLM step with its prompt and state snapshots can be hundreds of kilobytes, and the
+# server refuses a body over its cap (controlPlaneRoutes.ts's MAX_TRACE_BATCH_BYTES) — a refused push
+# is a batch lost, so fifty large events in one request was a trace with steps missing. Flushed
+# before a batch would grow past this, which is well under the server's limit.
+_TRACE_BATCH_MAX_BYTES = 512 * 1024
 _trace_buffer: list[dict] = []
+_trace_buffer_bytes = 0
 _trace_buffer_opened_at: float | None = None
 
 
@@ -110,13 +116,21 @@ def queue_trace_event(envelope: dict) -> None:
     writing, never instead of), so the worst case of a failed flush is a gap in what the server
     ingested, not a corrupted or lost local record.
     """
-    global _trace_buffer_opened_at
+    global _trace_buffer_opened_at, _trace_buffer_bytes
     if not configured():
         return
+    size = len(json.dumps(envelope, default=str))
+    if _trace_buffer and _trace_buffer_bytes + size > _TRACE_BATCH_MAX_BYTES:
+        flush_trace_events()
     _trace_buffer.append(envelope)
+    _trace_buffer_bytes += size
     if _trace_buffer_opened_at is None:
         _trace_buffer_opened_at = time.monotonic()
-    if len(_trace_buffer) >= _TRACE_BATCH_MAX or (time.monotonic() - _trace_buffer_opened_at) >= _TRACE_BATCH_WINDOW_S:
+    if (
+        len(_trace_buffer) >= _TRACE_BATCH_MAX
+        or _trace_buffer_bytes >= _TRACE_BATCH_MAX_BYTES
+        or (time.monotonic() - _trace_buffer_opened_at) >= _TRACE_BATCH_WINDOW_S
+    ):
         flush_trace_events()
 
 
@@ -124,11 +138,12 @@ def flush_trace_events() -> None:
     """Send whatever is buffered right now, even a partial batch. Called on every threshold
     crossing above, and MUST also be called once at run end (see __main__.py's finally block) —
     otherwise a run whose last few events never cross a threshold loses them silently."""
-    global _trace_buffer_opened_at
+    global _trace_buffer_opened_at, _trace_buffer_bytes
     if not _trace_buffer:
         return
     batch = _trace_buffer[:]
     _trace_buffer.clear()
+    _trace_buffer_bytes = 0
     _trace_buffer_opened_at = None
     if not configured():
         return
