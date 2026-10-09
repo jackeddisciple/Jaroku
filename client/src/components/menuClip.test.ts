@@ -110,9 +110,15 @@ console.log("\nevery menu that opens from inside the scrolling list is portalled
 
 console.log("\n...and the Runs tab's run menu, which opens from inside its own scrolling list");
 {
-  check("RunsPanel declares a run menu", /role="menu"/.test(runsPanel));
-  check("...rendered through a portal into the body", /createPortal\(/.test(runsPanel) && /document\.body,/.test(runsPanel));
+  // A RADIX MENU SINCE 2026-10-09, portalled by construction (see the shared check above).
+  const radixRuns = /<DropdownMenuContent/.test(runsPanel);
+  check("RunsPanel declares a run menu", /role="menu"/.test(runsPanel) || radixRuns);
+  check("...rendered through a portal into the body",
+    radixRuns || (/createPortal\(/.test(runsPanel) && /document\.body,/.test(runsPanel)));
   check("...not positioned inside the row", !/className="absolute/.test(runsPanel));
+  // AND A PORTAL STILL BUBBLES THROUGH REACT: a click in the panel reaches the row, which opens the run.
+  check("...and a click in it does not reach the row",
+    !radixRuns || /<DropdownMenuContent[\s\S]{0,600}?onClick=\{\(e\) => e\.stopPropagation\(\)\}/.test(runsPanel));
 }
 
 console.log("\n...and the agent card's menu, which opens from inside a card that clips");
@@ -136,17 +142,18 @@ console.log("\n...and a portalled panel keeps the wiring the portal breaks");
   // trigger's subtree, a `mousedown` on one of its own items counts as a click outside: the menu
   // closes on mousedown and the item never receives the click. Every item is dead, and the menu
   // still looks completely normal.
-  // ONE HAND-BUILT PORTALLED MENU IS LEFT IN THESE TWO FILES (the Runs tab's); the sidebar's moved to
-  // Radix, which owns click-away, focus and placement for its own portalled content.
-  check("click-away tests the panel as well as the trigger",
-    (both.match(/panelRef\.current\?\.contains\(t\)/g) ?? []).length >= 1,
-    "a portalled panel is `outside` its own trigger, so its items stop receiving clicks");
-  // And the keyboard: `useMenuFocus` looks for items in the element it is given, so a portalled
-  // menu has to hand it the panel — and the trigger separately, since they are no longer one tree.
-  check("the focus hook is given the panel and the trigger separately",
-    (both.match(/useMenuFocus\(open, panelRef, ref\)/g) ?? []).length >= 1);
-  check("both are anchored back to their trigger",
-    (both.match(/useAnchoredMenu\(open, ref, panelRef\)/g) ?? []).length >= 1);
+  // PER HAND-BUILT MENU, AND THE RADIX ONES ARE EXEMPT. The sidebar's and the Runs tab's moved to
+  // `ui/dropdown-menu.tsx` on 2026-10-09, and Radix owns click-away, focus and placement for its own
+  // portalled content; these three are the wiring a HAND-BUILT portal has to remember.
+  for (const [file, text] of [["Sidebar.tsx", sidebar], ["RunsPanel.tsx", runsPanel]] as const) {
+    if (!(/createPortal\(/.test(text) && /role="menu"/.test(text))) continue;
+    check(`${file}: click-away tests the panel as well as the trigger`, /panelRef\.current\?\.contains\(t\)/.test(text),
+      "a portalled panel is `outside` its own trigger, so its items stop receiving clicks");
+    // And the keyboard: `useMenuFocus` looks for items in the element it is given, so a portalled
+    // menu has to hand it the panel — and the trigger separately, since they are no longer one tree.
+    check(`${file}: the focus hook is given the panel and the trigger separately`, /useMenuFocus\(open, panelRef, ref\)/.test(text));
+    check(`${file}: anchored back to its trigger`, /useAnchoredMenu\(open, ref, panelRef\)/.test(text));
+  }
 }
 
 console.log("\n...and the trigger does not fade out from under its own open menu");

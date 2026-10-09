@@ -4,14 +4,11 @@
 // finding an agent and its conversations; what an agent has run belongs beside its trace, one tab away
 // from it — so opening a run here turns the panel to the Trace tab, next to the list it came from.
 
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useState } from "react";
 
-import { useAnchoredMenu } from "../lib/anchoredMenu.ts";
 import { RUN_PHASE } from "../lib/domainPhase.ts";
 import { absTime, relTime } from "../lib/format.ts";
 import { Icon } from "../lib/icons/registry.ts";
-import { useMenuFocus } from "../lib/menuFocus.ts";
 import { selectAgent, selectRun } from "../lib/selection.ts";
 import { sendLoadHistory, sendLoadRun, sendRun } from "../lib/socket.ts";
 import { PHASE_WORD, type Phase } from "../lib/statusPhase.ts";
@@ -23,6 +20,7 @@ import { useUiStore } from "../store/uiStore.ts";
 import type { RunStatus, RunSummary } from "../types.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { StatusGlyph } from "./StatusGlyph.tsx";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu.tsx";
 
 /**
  * How long a run took, from the two timestamps it already carries.
@@ -96,83 +94,48 @@ function openRun(runId: string): void {
   useUiStore.getState().setRightTab("trace");
 }
 
-const MENU_ROW =
-  "flex w-full items-center gap-2.5 px-2.5 py-1.5 text-left text-caption text-muted transition-colors hover:bg-active/40 hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring";
-
 /**
  * The run's overflow, revealed on hover and on focus.
  *
- * PORTALLED, because it opens from inside this tab's scrolling list and an `overflow` ancestor clips an
- * absolutely-positioned panel whatever its `z-index` — see lib/anchoredMenu.ts and `test:menu-clip`.
+ * A RADIX MENU (ui/dropdown-menu.tsx), which is portalled by construction: it opens from inside this
+ * tab's scrolling list, and an `overflow` ancestor clips an absolutely-positioned panel whatever its
+ * `z-index` — see `test:menu-clip`. Radix also places it against its trigger and moves focus in and back.
  */
 function RunOverflow({ run, agentId }: { run: RunSummary; agentId: string }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const away = (e: MouseEvent): void => {
-      const t = e.target as Node;
-      if (ref.current?.contains(t) || panelRef.current?.contains(t)) return;
-      setOpen(false);
-    };
-    const key = (e: KeyboardEvent): void => { if (e.key === "Escape") setOpen(false); };
-    document.addEventListener("mousedown", away);
-    document.addEventListener("keydown", key);
-    return () => {
-      document.removeEventListener("mousedown", away);
-      document.removeEventListener("keydown", key);
-    };
-  }, [open]);
-
-  useMenuFocus(open, panelRef, ref);
-  useAnchoredMenu(open, ref, panelRef);
 
   return (
-    <div ref={ref} className="relative shrink-0">
-      <button
-        type="button"
-        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title="More"
-        aria-label={`More actions for run ${shortRunId(run.id)}`}
-        className={`flex h-6 w-6 items-center justify-center rounded-control text-faint transition-opacity hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring ${
-          open ? "opacity-100" : "opacity-0 group-hover/run:opacity-100 group-focus-within/run:opacity-100"
-        }`}
-      >
-        <Icon.agents.more size={ICON.sm} />
-      </button>
-      {open && createPortal(
-        <div
-          ref={panelRef}
-          role="menu"
-          aria-label="Run actions"
-          className="fixed left-0 top-0 z-50 w-40 origin-top animate-menu-in overflow-hidden rounded-control border border-edge bg-elevated py-1 shadow-floating motion-reduce:animate-none"
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          onClick={(e) => e.stopPropagation()}
+          title="More"
+          aria-label={`More actions for run ${shortRunId(run.id)}`}
+          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-faint transition-opacity hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring ${
+            open ? "opacity-100" : "opacity-0 group-hover/run:opacity-100 group-focus-within/run:opacity-100"
+          }`}
         >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={(e) => { e.stopPropagation(); setOpen(false); openRun(run.id); }}
-            className={MENU_ROW}
-          >
-            <Icon.panel.trace size={ICON.sm} />
-            <span className="min-w-0 flex-1 truncate">View trace</span>
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={(e) => { e.stopPropagation(); setOpen(false); selectAgent(agentId); runAgain(agentId); }}
-            className={MENU_ROW}
-          >
-            <Icon.cockpit.refresh size={ICON.sm} />
-            <span className="min-w-0 flex-1 truncate">Run again</span>
-          </button>
-        </div>,
-        document.body,
-      )}
-    </div>
+          <Icon.agents.more size={ICON.sm} />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        aria-label="Run actions"
+        // A PORTAL STILL BUBBLES THROUGH REACT. The panel is in `document.body`, but a click on it
+        // travels up the component tree to the row, which opens the run — so it stops here.
+        onClick={(e) => e.stopPropagation()}
+      >
+        <DropdownMenuItem size="compact" onSelect={() => openRun(run.id)}>
+          <Icon.panel.trace size={ICON.sm} />
+          <span className="min-w-0 flex-1 truncate">View trace</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem size="compact" onSelect={() => { selectAgent(agentId); runAgain(agentId); }}>
+          <Icon.cockpit.refresh size={ICON.sm} />
+          <span className="min-w-0 flex-1 truncate">Run again</span>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
