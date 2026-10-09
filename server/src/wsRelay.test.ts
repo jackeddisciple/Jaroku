@@ -515,6 +515,40 @@ console.log("\nwhat connected, in two words");
   check(!/Pixel/.test(described), "...and no device model");
 }
 
+console.log("\nan agent's code goes to one app of the person who asked, never anybody else's");
+{
+  // A FRESH SOCKET OF ITS OWN. The two above have been closed by the session cases, and every
+  // connection after the first is handed workspace B's context in this harness.
+  a.ws.close();
+  b.ws.close();
+  await sleep(150);
+  const c = await connect();
+  await sleep(150);
+  const refusal = (r: unknown) => (r as { refusal?: string }).refusal ?? "";
+  check(refusal(relay.execTarget(ctxB, 1)).includes("desktop app"), "a socket that never reported is told agents run in the desktop app");
+
+  c.send({ cmd: "reportProviderHost", hosts: [] });
+  await sleep(150);
+  check(refusal(relay.execTarget(ctxB, 1)).includes("too old"), "a desktop app from before exec is told to update, not to open the app");
+
+  c.send({ cmd: "reportExecHost", protocol: 1, state: "preparing", detail: "unpacking Python", running: [] });
+  await sleep(150);
+  check(refusal(relay.execTarget(ctxB, 1)).includes("unpacking Python"), "an app still setting up Python says so, with what it is doing");
+  check(refusal(relay.execTarget(ctxB, 2)).includes("too old"), "an app on an older protocol than the server needs is told to update");
+
+  c.send({ cmd: "reportExecHost", protocol: 1, state: "ready", detail: null, running: [] });
+  await sleep(150);
+  const target = relay.execTarget(ctxB, 1) as { requestId?: string; workspaceId?: string };
+  check(target.requestId === ctxB.requestId && target.workspaceId === B, "a ready app is the target for its own requests");
+  check("refusal" in relay.execTarget(ctxA, 1), "another workspace's request never reaches it");
+
+  relay.sendExec({ workspaceId: B, requestId: ctxB.requestId }, { channel: "exec", type: "stop", execId: "exec-1" });
+  await c.want((m) => m.channel === "exec" && m.execId === "exec-1", "the exec message reaches the app it was sent to");
+  check(!relay.sendExec({ workspaceId: A, requestId: ctxB.requestId }, { channel: "exec", type: "stop", execId: "x" }),
+    "a send naming the wrong workspace for that socket delivers nothing");
+  c.ws.close();
+}
+
 a.ws.close();
 b.ws.close();
 await relay.close();

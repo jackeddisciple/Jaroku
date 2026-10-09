@@ -5925,6 +5925,12 @@ export class WsRelay {
     if (host?.state === "failed") {
       return { refusal: `Jaroku could not set up Python on this computer: ${host.detail ?? "unknown error"}. Quit and reopen Jaroku to retry.` };
     }
+    // A DESKTOP APP THAT REPORTS ITS PROVIDER CLIS BUT NOT AN EXEC HOST is one from before agents
+    // ran on the Mac. It can never take an execution, and "open the desktop app" would be read as
+    // a bug by somebody looking at it — the fix is an update.
+    if (asking?.hostProviders) {
+      return { refusal: "This version of Jaroku is too old to run agents. Update it (re-run the one-line install), then try again." };
+    }
     if (asking) {
       return { refusal: "Agents run in the Jaroku desktop app on your computer. Open this in the app (or update it), then try again." };
     }
