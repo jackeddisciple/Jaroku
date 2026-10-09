@@ -197,7 +197,7 @@ console.log("\n§6's picker offers all of them, and the dialog does not lay them
   check("the dialog offers no picture picker",
     !/>(?:Avatar|Face|Picture)</.test(html));
 
-  // AND IT IS A DIALOG, not a div drawn on top of the application — `useDialog`'s whole argument.
+  // AND IT IS A DIALOG, not a div drawn on top of the application — the dialog's whole argument.
   check("it announces itself as a dialog",
     html.includes('role="dialog"') && html.includes('aria-modal="true"'));
 

@@ -4,7 +4,7 @@
 // carries no header any more. What the popover said is kept as it was — which providers have a key,
 // who pays for Jaroku's own thinking, and the door to Secrets — and the way in that remains,
 // "Provider keys" in the account menu, opens it here, centred over the application the way the
-// workspace panel is. See lib/dialog for what makes an overlay a dialog.
+// workspace panel is. See ui/dialog.tsx for what makes an overlay a dialog.
 
 import { providerLabelOf, useProviderStore } from "../store/providerStore.ts";
 import { useUiStore } from "../store/uiStore.ts";

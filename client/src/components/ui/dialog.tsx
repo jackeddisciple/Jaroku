@@ -2,7 +2,7 @@
 //
 // shadcn is source you own rather than a package you import: these are its `components/ui/
 // dialog.tsx` (manual install, over `@radix-ui/react-dialog`) with its theme variables swapped for
-// ours. Radix brings what `lib/dialog.ts` did by hand — `role="dialog"` named by its title, focus
+// ours. Radix brings what the deleted `lib/dialog.ts` did by hand — `role="dialog"` named by its title, focus
 // moved in and trapped (both directions), the page behind it locked and hidden from assistive
 // technology, focus handed back to whatever opened it — and adds Escape and the press outside as one
 // layer in a stack, so a dialog over a panel closes the dialog and not both.
