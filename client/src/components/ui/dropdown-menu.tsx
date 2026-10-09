@@ -24,9 +24,17 @@ export const DropdownMenuTrigger = MenuPrimitive.Trigger;
 export const DropdownMenuGroup = MenuPrimitive.Group;
 export const DropdownMenuRadioGroup = MenuPrimitive.RadioGroup;
 
-/** The row every menu item wears. Spelled once so the menus cannot drift apart. */
+/**
+ * The row every menu item wears. Spelled once so the menus cannot drift apart.
+ *
+ * A DISABLED ROW STILL TAKES THE POINTER, unlike shadcn's, because here a disabled control carries
+ * its reason in its tooltip (§8) — "Reconnecting — this needs a connection" — and a row the pointer
+ * passes through never shows one. Radix already skips it for the keyboard and refuses its select.
+ */
 const ROW =
-  "flex w-full cursor-default select-none items-center gap-2.5 px-2.5 py-1.5 text-left text-body outline-none transition-colors duration-fast data-[highlighted]:bg-active data-[disabled]:pointer-events-none data-[disabled]:opacity-40";
+  "flex w-full cursor-default select-none items-center gap-2.5 px-2.5 py-1.5 text-left outline-none transition-colors duration-fast data-[highlighted]:bg-active data-[disabled]:text-disabled data-[disabled]:data-[highlighted]:bg-transparent";
+/** The two type sizes a menu row comes in: the sidebar's, and the chat header's compact one. */
+const ROW_SIZE = { normal: "text-body", compact: "rounded-control text-caption" } as const;
 /**
  * THE INK IS A PROP, NOT A CLASS ON TOP. A `text-err` added beside the row's own `text-muted` is two
  * colours on one element, and which one paints is decided by the order Tailwind happens to emit them
@@ -57,10 +65,11 @@ export function DropdownMenuContent({ className = "", sideOffset = 4, ...props }
 
 export function DropdownMenuItem({
   className = "",
+  size = "normal",
   tone = "default",
   ...props
-}: ComponentProps<typeof MenuPrimitive.Item> & { tone?: keyof typeof ROW_TONE }) {
-  return <MenuPrimitive.Item className={`${ROW} ${ROW_TONE[tone]} ${className}`} {...props} />;
+}: ComponentProps<typeof MenuPrimitive.Item> & { size?: keyof typeof ROW_SIZE; tone?: keyof typeof ROW_TONE }) {
+  return <MenuPrimitive.Item className={`${ROW} ${ROW_SIZE[size]} ${ROW_TONE[tone]} ${className}`} {...props} />;
 }
 
 /**
@@ -78,7 +87,7 @@ export function DropdownMenuPlainItem({ className = "", ...props }: ComponentPro
  * the chosen row sits on the selected fill the way a chosen row does everywhere else.
  */
 export function DropdownMenuRadioItem({ className = "", ...props }: ComponentProps<typeof MenuPrimitive.RadioItem>) {
-  return <MenuPrimitive.RadioItem className={`${ROW} ${ROW_TONE.default} data-[state=checked]:bg-chrome data-[state=checked]:text-ink ${className}`} {...props} />;
+  return <MenuPrimitive.RadioItem className={`${ROW} ${ROW_SIZE.normal} ${ROW_TONE.default} data-[state=checked]:bg-chrome data-[state=checked]:text-ink ${className}`} {...props} />;
 }
 
 export function DropdownMenuSeparator({ className = "", ...props }: ComponentProps<typeof MenuPrimitive.Separator>) {

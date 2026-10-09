@@ -11,7 +11,14 @@ import { useTypedText } from "../lib/typedText.ts";
 import { chatTitle } from "../lib/chatTitle.ts";
 import { readMachineName } from "../lib/hostMachine.ts";
 import { Icon } from "../lib/icons/registry.ts";
-import { useMenuFocus } from "../lib/menuFocus.ts";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuPlainItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu.tsx";
 import {
   sendArchiveThread, sendCreateThread, sendDeleteThread, sendRenameThread, sendRestoreThread,
 } from "../lib/socket.ts";
@@ -202,9 +209,6 @@ export function ThreadTitle({
   );
 }
 
-const MENU_ROW =
-  "flex w-full items-center gap-2.5 rounded-control px-2.5 py-1.5 text-left text-caption text-muted transition-colors hover:bg-active/40 hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring disabled:cursor-default disabled:text-disabled disabled:hover:bg-transparent";
-
 /** How long "Copied" stays beside the menu after Share Chat. */
 const NOTE_MS = 1200;
 
@@ -225,8 +229,13 @@ function ThreadMenu({ thread, connected, onRename }: { thread: ThreadView; conne
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [note, setNote] = useState<string | null>(null);
-  const ref = useRef<HTMLDivElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * Set by Rename, acted on once the menu has CLOSED. The title box takes the focus, and a menu that
+   * is still open holds the focus inside itself — so asked from the item, the box was focused and
+   * pulled straight back, and the rename opened with no cursor in it.
+   */
+  const renameOnClose = useRef(false);
   const pinned = useUiStore((s) => s.pinnedThreads.includes(thread.id));
   const archived = thread.archived_at !== null;
   const canRename = useCanRun("renameThread");
@@ -235,12 +244,9 @@ function ThreadMenu({ thread, connected, onRename }: { thread: ThreadView; conne
   const canCreate = useCanRun("createThread", thread.agent_id);
   const canDelete = useCanRun("deleteThread");
 
-  // `"mousedown"` and `"Escape"` are handled in `useDismiss`, which this menu shares with the computer's popover.
-  useDismiss(open, ref, () => setOpen(false));
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
   // A menu reopened on a delete question somebody walked away from would be asking it again unprompted.
   useEffect(() => { if (!open) setConfirming(false); }, [open]);
-  useMenuFocus(open, ref);
 
   const say = (text: string): void => {
     setNote(text);
@@ -268,29 +274,34 @@ function ThreadMenu({ thread, connected, onRename }: { thread: ThreadView; conne
     if (useThreadStore.getState().activeThreadId === thread.id) useThreadStore.getState().selectThread(null);
   };
 
-  const choose = (run: () => void) => () => {
-    setOpen(false);
-    run();
-  };
   const offline = connected ? undefined : "Reconnecting — this needs a connection";
 
   return (
-    <div ref={ref} className="relative flex shrink-0 items-center gap-2">
-      <button
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label="Chat actions"
-        title="Chat actions"
-        onClick={() => setOpen((v) => !v)}
-        className={`${HEADER_BUTTON} w-7 text-muted hover:text-ink`}
-      >
-        <Icon.chatHeader.menu size={ICON.sm} />
-      </button>
-      <span aria-live="polite" className="text-tiny text-muted">{note ?? ""}</span>
-
-      {open && (
-        <div role="menu" aria-label="Chat actions" className={`${POPOVER} min-w-[220px] overflow-hidden p-1`}>
+    <div className="relative flex shrink-0 items-center gap-2">
+      {/* A RADIX MENU (ui/dropdown-menu.tsx): focus into it and back to this button, Escape, and a
+          press outside that closes it — what `useDismiss` and the focus hook did here by hand. */}
+      <DropdownMenu open={open} onOpenChange={setOpen}>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label="Chat actions"
+            title="Chat actions"
+            className={`${HEADER_BUTTON} w-7 text-muted hover:text-ink`}
+          >
+            <Icon.chatHeader.menu size={ICON.sm} />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="start"
+          aria-label="Chat actions"
+          className="min-w-[220px]"
+          onCloseAutoFocus={(e) => {
+            if (!renameOnClose.current) return;
+            renameOnClose.current = false;
+            e.preventDefault();
+            onRename();
+          }}
+        >
           {confirming ? (
             <div className="flex max-w-[280px] flex-col gap-1.5 p-1.5">
               <p className="px-1 text-tiny leading-[1.5] text-muted">
@@ -298,101 +309,97 @@ function ThreadMenu({ thread, connected, onRename }: { thread: ThreadView; conne
                 agent, runs and costs stay.
               </p>
               <div className="flex gap-3 px-1 pb-0.5">
-                <button
-                  type="button"
-                  role="menuitem"
+                <DropdownMenuPlainItem
                   disabled={!connected}
                   title={offline}
-                  onClick={choose(remove)}
-                  className="text-tiny text-err underline underline-offset-2 focus-visible:outline-none focus-visible:shadow-focusring disabled:cursor-default disabled:text-disabled disabled:no-underline"
+                  onSelect={remove}
+                  className="text-tiny text-err underline underline-offset-2 data-[highlighted]:shadow-focusring data-[disabled]:cursor-default data-[disabled]:text-disabled data-[disabled]:no-underline"
                 >
                   Delete for good
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => setConfirming(false)}
-                  className="text-tiny text-muted underline underline-offset-2 focus-visible:outline-none focus-visible:shadow-focusring"
+                </DropdownMenuPlainItem>
+                <DropdownMenuPlainItem
+                  onSelect={(e) => { e.preventDefault(); setConfirming(false); }}
+                  className="text-tiny text-muted underline underline-offset-2 data-[highlighted]:shadow-focusring"
                 >
                   Cancel
-                </button>
+                </DropdownMenuPlainItem>
               </div>
             </div>
           ) : (
             <>
-              <button
-                type="button"
-                role="menuitem"
+              <DropdownMenuItem
+                size="compact"
                 // THROUGH `withRowMotion` FOR THE SAME REASON THE SIDEBAR'S OWN PIN IS: this moves a
                 // row between two lists in a column that is on screen while this menu is open, and
                 // the rows it displaces should travel rather than teleport. The helper finds that
                 // column in the DOM, so this works from here without either side knowing the other.
-                onClick={choose(() => withRowMotion(() => useUiStore.getState().togglePinnedThread(thread.id)))}
-                className={MENU_ROW}
+                onSelect={() => withRowMotion(() => useUiStore.getState().togglePinnedThread(thread.id))}
               >
                 <Icon.chatHeader.pin size={ICON.sm} />
                 <span className="min-w-0 flex-1 truncate">{pinned ? "Unpin" : "Pin"}</span>
-              </button>
+              </DropdownMenuItem>
               {canRename && (
-                <button type="button" role="menuitem" disabled={!connected} title={offline} onClick={choose(onRename)} className={MENU_ROW}>
-                  <Icon.chatHeader.rename size={ICON.sm} />
-                  <span className="min-w-0 flex-1 truncate">Rename</span>
-                </button>
-              )}
-              {canArchive && (
-                <button
-                  type="button"
-                  role="menuitem"
+                <DropdownMenuItem
+                  size="compact"
                   disabled={!connected}
                   title={offline}
-                  onClick={choose(() => withRowMotion(() => {
+                  onSelect={() => { renameOnClose.current = true; }}
+                >
+                  <Icon.chatHeader.rename size={ICON.sm} />
+                  <span className="min-w-0 flex-1 truncate">Rename</span>
+                </DropdownMenuItem>
+              )}
+              {canArchive && (
+                <DropdownMenuItem
+                  size="compact"
+                  disabled={!connected}
+                  title={offline}
+                  onSelect={() => withRowMotion(() => {
                     if (archived) sendRestoreThread(thread.id);
                     else if (sendArchiveThread(thread.id)) useThreadStore.getState().noteArchived(thread);
-                  }))}
-                  className={MENU_ROW}
+                  })}
                 >
                   <Icon.chatHeader.archive size={ICON.sm} />
                   <span className="min-w-0 flex-1 truncate">{archived ? "Restore" : "Archive"}</span>
-                </button>
+                </DropdownMenuItem>
               )}
-              <button type="button" role="menuitem" onClick={choose(() => void share())} className={MENU_ROW}>
+              <DropdownMenuItem size="compact" onSelect={() => void share()}>
                 <Icon.chatHeader.share size={ICON.sm} />
                 <span className="min-w-0 flex-1 truncate">Share Chat</span>
-              </button>
+              </DropdownMenuItem>
               {canCreate && (
-                <button
-                  type="button"
-                  role="menuitem"
+                <DropdownMenuItem
+                  size="compact"
                   disabled={!connected}
                   title={offline}
                   // In the same project: a new chat about this chat's agent, or a plain one when it has none.
-                  onClick={choose(() => sendCreateThread(thread.agent_id))}
-                  className={MENU_ROW}
+                  onSelect={() => sendCreateThread(thread.agent_id)}
                 >
                   <Icon.chatHeader.newChat size={ICON.sm} />
                   <span className="min-w-0 flex-1 truncate">New Chat</span>
-                </button>
+                </DropdownMenuItem>
               )}
               {canDelete && (
                 <>
-                  <div className="my-1 h-px bg-hair" role="separator" />
-                  <button
-                    type="button"
-                    role="menuitem"
+                  <DropdownMenuSeparator className="bg-hair" />
+                  {/* `preventDefault` keeps the menu open: Delete turns it into the question above. */}
+                  <DropdownMenuItem
+                    size="compact"
                     disabled={!connected}
                     title={offline}
-                    onClick={() => setConfirming(true)}
-                    className={`${MENU_ROW} text-err`}
+                    onSelect={(e) => { e.preventDefault(); setConfirming(true); }}
+                    tone="danger"
                   >
                     <Icon.chatHeader.delete size={ICON.sm} />
                     <span className="min-w-0 flex-1 truncate">Delete</span>
-                  </button>
+                  </DropdownMenuItem>
                 </>
               )}
             </>
           )}
-        </div>
-      )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <span aria-live="polite" className="text-tiny text-muted">{note ?? ""}</span>
     </div>
   );
 }
