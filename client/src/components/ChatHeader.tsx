@@ -19,6 +19,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu.tsx";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
 import {
   sendArchiveThread, sendCreateThread, sendDeleteThread, sendRenameThread, sendRestoreThread,
 } from "../lib/socket.ts";
@@ -47,25 +48,6 @@ function useMachineName(): string | null {
   return name;
 }
 
-/** Close a popover on a click outside it or on Escape, while it is open. */
-function useDismiss(open: boolean, ref: React.RefObject<HTMLElement | null>, close: () => void): void {
-  useEffect(() => {
-    if (!open) return;
-    const away = (e: MouseEvent): void => {
-      if (!ref.current?.contains(e.target as Node)) close();
-    };
-    const key = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") close();
-    };
-    document.addEventListener("mousedown", away);
-    document.addEventListener("keydown", key);
-    return () => {
-      document.removeEventListener("mousedown", away);
-      document.removeEventListener("keydown", key);
-    };
-  }, [open, ref, close]);
-}
-
 const CONNECTION_WORD: Record<ConnectionState, string> = {
   open: "Connected",
   connecting: "Connecting…",
@@ -81,9 +63,6 @@ const CONNECTION_DOT: Record<ConnectionState, string> = {
 const HEADER_BUTTON =
   "flex h-7 shrink-0 items-center justify-center rounded-control transition-colors duration-fast hover:bg-active/40 focus-visible:outline-none focus-visible:shadow-focusring";
 
-const POPOVER =
-  "absolute left-0 top-full z-50 mt-1 origin-top animate-menu-in rounded-card border border-edge bg-elevated shadow-floating motion-reduce:animate-none";
-
 /**
  * The computer, as a button. Pressing it shows the name its owner gave it, and under that a dot and
  * a word for whether Jaroku can reach it right now.
@@ -92,32 +71,35 @@ const POPOVER =
  * first thing in the row and says the machine is here; the title and the menu beside it are quieter.
  */
 export function MachineButton({ name, connection }: { name: string; connection: ConnectionState }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useDismiss(open, ref, () => setOpen(false));
+  // A RADIX POPOVER (ui/popover.tsx): the press outside and Escape close it, and the trigger says
+  // what it opens. Focus stays on the button — the panel holds nothing to press.
   return (
-    <div ref={ref} className="relative shrink-0">
-      <button
-        type="button"
-        aria-haspopup="dialog"
-        aria-expanded={open}
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label="This computer"
+          title={name}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-control text-ink transition-colors duration-fast hover:bg-active/40 focus-visible:outline-none focus-visible:shadow-focusring"
+        >
+          <Icon.chatHeader.machine size={ICON.lg} />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
         aria-label="This computer"
-        title={name}
-        onClick={() => setOpen((v) => !v)}
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-control text-ink transition-colors duration-fast hover:bg-active/40 focus-visible:outline-none focus-visible:shadow-focusring"
+        side="bottom"
+        align="start"
+        sideOffset={4}
+        onOpenAutoFocus={(e) => e.preventDefault()}
+        className="min-w-[220px] origin-top animate-menu-in rounded-card border border-edge bg-elevated px-3 py-2.5 shadow-floating focus:outline-none motion-reduce:animate-none"
       >
-        <Icon.chatHeader.machine size={ICON.lg} />
-      </button>
-      {open && (
-        <div role="dialog" aria-label="This computer" className={`${POPOVER} min-w-[220px] px-3 py-2.5`}>
-          <div className="max-w-[280px] truncate text-label text-ink">{name}</div>
-          <div className="mt-1 flex items-center gap-1.5 text-tiny text-muted" aria-live="polite">
-            <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${CONNECTION_DOT[connection]}`} />
-            {CONNECTION_WORD[connection]}
-          </div>
+        <div className="max-w-[280px] truncate text-label text-ink">{name}</div>
+        <div className="mt-1 flex items-center gap-1.5 text-tiny text-muted" aria-live="polite">
+          <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${CONNECTION_DOT[connection]}`} />
+          {CONNECTION_WORD[connection]}
         </div>
-      )}
-    </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -279,7 +261,7 @@ function ThreadMenu({ thread, connected, onRename }: { thread: ThreadView; conne
   return (
     <div className="relative flex shrink-0 items-center gap-2">
       {/* A RADIX MENU (ui/dropdown-menu.tsx): focus into it and back to this button, Escape, and a
-          press outside that closes it — what `useDismiss` and the focus hook did here by hand. */}
+          press outside that closes it — what a hand-built dismiss hook and focus hook did here. */}
       <DropdownMenu open={open} onOpenChange={setOpen}>
         <DropdownMenuTrigger asChild>
           <button
