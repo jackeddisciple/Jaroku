@@ -21,9 +21,6 @@
 // warned about is how a control plane loses trust in one click."
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { useAnchoredMenu } from "../lib/anchoredMenu.ts";
-import { useMenuFocus } from "../lib/menuFocus.ts";
 import { useNow } from "../lib/useNow.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 
@@ -46,8 +43,15 @@ import { GlobeIcon, KeyIcon, PlugIcon } from "./panelIcons.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { AgentFace, FACE_SIZE } from "./AgentFace.tsx";
 import { pictureBySlug } from "../lib/agentPicture.ts";
-import { Icon } from "../lib/icons/registry.ts";
-import { IconButton } from "./IconButton.tsx";
+import { Icon, type IconComponent } from "../lib/icons/registry.ts";
+import { HIT_TARGET } from "./icons.ts";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuPlainItem,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu.tsx";
 
 /**
  * The dot on a card, which carries the CONNECTION rather than the work.
@@ -99,6 +103,38 @@ function ConnectionDot({ card }: { card: FleetCardView }) {
 }
 
 /**
+ * One of the card menu's three icon-only actions — drawn exactly as `IconButton` draws a control (the
+ * same 32×32 hit target, the same mark at the same size, the label as both name and tooltip), but a
+ * menu ITEM, so the menu's arrow keys reach it and it is announced as one of the menu's choices.
+ * `IconButton` cannot be that: it renders its own `<button>` and takes no ref.
+ */
+function CardMenuAction({
+  icon: Mark,
+  label,
+  danger = false,
+  onSelect,
+}: {
+  icon: IconComponent;
+  label: string;
+  danger?: boolean;
+  onSelect: (event: Event) => void;
+}) {
+  return (
+    <DropdownMenuPlainItem
+      onSelect={onSelect}
+      title={label}
+      aria-label={label}
+      className={`inline-flex items-center justify-center rounded-control transition-colors data-[highlighted]:bg-active ${
+        danger ? "text-faint data-[highlighted]:text-err" : "text-muted data-[highlighted]:text-ink"
+      }`}
+      style={{ minWidth: HIT_TARGET, minHeight: HIT_TARGET }}
+    >
+      <Mark size={ICON.sm} />
+    </DropdownMenuPlainItem>
+  );
+}
+
+/**
  * §4's one overflow control, and the reason there is exactly one.
  *
  * "RECONNECT, LOGS AND KILL LIVE BEHIND ONE OVERFLOW CONTROL ON THE CARD, NOT AS THREE VISIBLE
@@ -124,140 +160,116 @@ function CardMenu({ card }: { card: FleetCardView }) {
   const [open, setOpen] = useState(false);
   const [logs, setLogs] = useState(false);
   const [confirming, setConfirming] = useState<"reconnect" | "kill" | null>(null);
-  const ref = useRef<HTMLDivElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
+  /**
+   * Which dialog to open once the menu has CLOSED. Opened from the item, the dialog took the focus
+   * and the closing menu handed it straight back to its own button, behind the dialog.
+   */
+  const askAfterClose = useRef<"reconnect" | "kill" | null>(null);
   const receivedAt = useWorkStore((s) => s.fleetReceivedAt);
   // Aged from when the fleet arrived, re-read on the strip's clock — see `healthLine`.
   const health = healthLine(card, receivedAt ? Date.now() - receivedAt : 0);
   const spend = cockpitCost(card.spend_today, card.spend_complete);
-  // THE PANEL LEAVES THE CARD. It opened inside it, and the card is `overflow-hidden` inside a strip
-  // that scrolls sideways — an `overflow` ancestor clips an absolutely-positioned descendant whatever
-  // its `z-index`. All that showed was "Today" and the top few pixels of Logs, Reconnect and Kill,
-  // clickable only through that sliver, and the log pane was entirely off screen. Portalled into the
-  // body and placed against its trigger, as the agent card's and the sidebar's menus already are.
-  useAnchoredMenu(open, ref, panelRef);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent): void => {
-      const target = e.target as Node;
-      if (ref.current?.contains(target) || panelRef.current?.contains(target)) return;
-      setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent): void => { if (e.key === "Escape") setOpen(false); };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
-  // See lib/menuFocus.ts — the fifth menu in the app to declare `role="menu"` and handle neither
-  // the arrow keys that role promises nor the focus Escape destroys. Found by `test:menu-keys`.
-  useMenuFocus(open, panelRef, ref);
 
   return (
-    <div ref={ref} className="relative z-20">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        // §12: EVERY ICON-ONLY CONTROL HAS AN ACCESSIBLE NAME, and this one names the agent —
-        // twenty identical "More" buttons in a strip is twenty controls a screen reader cannot
-        // tell apart.
-        aria-label={`More for ${card.agent_name}`}
-        title={`More for ${card.agent_name}`}
-        className="rounded-control p-0.5 text-faint transition-colors duration-fast hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
-      >
-        <Icon.cockpit.agentMore size={ICON.xs} />
-      </button>
-
-      {open && createPortal(
-        <div
-          ref={panelRef}
-          // ITS BUTTONS ARE `menuitem` NOW. This declared `role="menu"` and contained none — a menu
-          // with no items, which assistive technology announces as exactly that, and which left
-          // `useMenuFocus` with nothing to move between. The facts above them stay unmarked: they
-          // are content inside the menu, not things you can choose.
-          role="menu"
+    <div className="relative z-20">
+      {/* A RADIX MENU (ui/dropdown-menu.tsx). The panel leaves the card — which is `overflow-hidden`
+          inside a strip that scrolls sideways, and clipped this menu to a sliver when it opened inside
+          it — through Radix's portal, placed against its trigger, with focus moved in and back. */}
+      <DropdownMenu open={open} onOpenChange={setOpen}>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+          // §12: EVERY ICON-ONLY CONTROL HAS AN ACCESSIBLE NAME, and this one names the agent —
+          // twenty identical "More" buttons in a strip is twenty controls a screen reader cannot
+          // tell apart.
+            aria-label={`More for ${card.agent_name}`}
+            title={`More for ${card.agent_name}`}
+            className="rounded-control p-0.5 text-faint transition-colors duration-fast hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+          >
+            <Icon.cockpit.agentMore size={ICON.xs} />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="end"
           aria-label={`More for ${card.agent_name}`}
-          // `top-0 left-0` IS THE STARTING POINT, NOT THE POSITION — `useAnchoredMenu` places it
-          // before paint. Wider than the card, because the log pane lives in it.
-          className="fixed left-0 top-0 z-50 w-[320px] rounded-card border border-edge bg-elevated p-1 shadow-floating"
+          // Wider than the card, because the log pane lives in it.
+          className="w-[320px]"
+          onCloseAutoFocus={(e) => {
+            const ask = askAfterClose.current;
+            if (!ask) return;
+            askAfterClose.current = null;
+            e.preventDefault();
+            setConfirming(ask);
+          }}
         >
-          {/* THE FACTS FIRST, THE VERBS AFTER. Somebody opening this menu is usually answering
-              "what is wrong with this agent" rather than reaching for a control, and putting the
-              probe and the spend above the actions means the commonest use of the menu costs no
-              press at all. */}
-          <div className="flex flex-col gap-0.5 px-2 py-1.5">
-            <div className="flex items-baseline justify-between gap-2 text-tiny">
-              <span className="text-muted">Today</span>
-              <span className="tabular-nums text-ink" title={spend.title ?? undefined}>
-                {spend.text}{spend.floor && <span className="text-faint">+</span>}
-              </span>
-            </div>
-            {/* THE PROBE'S ANSWER WITH ITS AGE, or nothing at all when nobody has asked — which is
-                a third state and not "unhealthy". A card reporting red because it had never been
-                probed would be the product accusing a working agent. */}
-            {health && <span className="text-tiny leading-[1.4] text-faint">{health}</span>}
-          </div>
+              {/* THE FACTS FIRST, THE VERBS AFTER. Somebody opening this menu is usually answering
+                  "what is wrong with this agent" rather than reaching for a control, and putting the
+                  probe and the spend above the actions means the commonest use of the menu costs no
+                  press at all. */}
+              <div className="flex flex-col gap-0.5 px-2 py-1.5">
+                <div className="flex items-baseline justify-between gap-2 text-tiny">
+                  <span className="text-muted">Today</span>
+                  <span className="tabular-nums text-ink" title={spend.title ?? undefined}>
+                    {spend.text}{spend.floor && <span className="text-faint">+</span>}
+                  </span>
+                </div>
+                {/* THE PROBE'S ANSWER WITH ITS AGE, or nothing at all when nobody has asked — which is
+                    a third state and not "unhealthy". A card reporting red because it had never been
+                    probed would be the product accusing a working agent. */}
+                {health && <span className="text-tiny leading-[1.4] text-faint">{health}</span>}
+              </div>
 
-          <div className="my-1 border-t border-hair" />
+              <div className="my-1 border-t border-hair" />
 
-          {/* §6 MAKES THESE THREE ICON-ONLY, so they are a row rather than a stack. Three bare
-              glyphs listed vertically would be three lines of nothing; laid out as an action bar
-              they read as what they are — the operations available on this card — and each one
-              still carries its name in both places a name can be carried.
+              {/* §6 MAKES THESE THREE ICON-ONLY, so they are a row rather than a stack. Three bare
+                  glyphs listed vertically would be three lines of nothing; laid out as an action bar
+                  they read as what they are — the operations available on this card — and each one
+                  still carries its name in both places a name can be carried.
 
-              §21 SURVIVES THE CHANGE, WHICH IS THE PART THAT MATTERED. Kill is still last and
-              still separated by a rule, because the separation is about a mis-aimed press landing
-              on the control that deletes somebody's agent, and shortening the controls makes that
-              MORE likely rather than less, not less. */}
-          <div role="group" aria-label={`Actions for ${card.agent_name}`} className="flex items-center gap-0.5">
-            <IconButton
+                  §21 SURVIVES THE CHANGE, WHICH IS THE PART THAT MATTERED. Kill is still last and
+                  still separated by a rule, because the separation is about a mis-aimed press landing
+                  on the control that deletes somebody's agent, and shortening the controls makes that
+                  MORE likely rather than less, not less. */}
+          <DropdownMenuGroup aria-label={`Actions for ${card.agent_name}`} className="flex items-center gap-0.5">
+            <CardMenuAction
               icon={Icon.fleet.logs}
               label={logs ? "Hide logs" : "Show logs"}
-              role="menuitem"
-              onClick={() => setLogs((v) => !v)}
+              // The log pane opens IN the menu, so this one keeps it open.
+              onSelect={(e) => { e.preventDefault(); setLogs((v) => !v); }}
             />
 
-            {/* §9: RECONNECT IS THE CARD'S PRIMARY ACTION WHEN IT IS UNCONNECTED, and it is offered
-                at every state rather than only then — a token can be rotated on Railway under a card
-                that still reads `connected`, and the repair has to be reachable before the first job
-                fails to prove it. */}
+                {/* §9: RECONNECT IS THE CARD'S PRIMARY ACTION WHEN IT IS UNCONNECTED, and it is offered
+                    at every state rather than only then — a token can be rotated on Railway under a card
+                    that still reads `connected`, and the repair has to be reachable before the first job
+                    fails to prove it. */}
             <Capable cmd="reconnectAgent">
-              <IconButton
+              <CardMenuAction
                 icon={Icon.fleet.reconnect}
                 label={DESTRUCTIVE.reconnect.label}
-                role="menuitem"
-                onClick={() => { setOpen(false); setConfirming("reconnect"); }}
+                onSelect={() => { askAfterClose.current = "reconnect"; }}
               />
             </Capable>
 
             <Capable cmd="killAgent">
               <>
                 <span className="mx-1 h-5 w-px shrink-0 bg-hair" aria-hidden />
-                <IconButton
+                <CardMenuAction
                   icon={Icon.fleet.kill}
                   label={DESTRUCTIVE.kill.label}
                   danger
-                  role="menuitem"
-                  onClick={() => { setOpen(false); setConfirming("kill"); }}
+                  onSelect={() => { askAfterClose.current = "kill"; }}
                 />
               </>
             </Capable>
-          </div>
+          </DropdownMenuGroup>
 
-          {logs && (
-            <div className="px-1 pb-1">
-              <LogPane card={card} />
-            </div>
-          )}
-        </div>,
-        document.body,
-      )}
+              {logs && (
+                <div className="px-1 pb-1">
+                  <LogPane card={card} />
+                </div>
+              )}
+        </DropdownMenuContent>
+      </DropdownMenu>
 
       {/* §21's TWO DIALOGS, both through the app's own — see `CockpitDialog`. They live outside the
           menu's `open` branch so that dismissing the menu to show the dialog does not unmount the

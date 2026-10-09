@@ -194,8 +194,10 @@ console.log("\nthe fleet card's menu leaves the card");
   // `absolute` inside it: only "Today" and a sliver of Logs, Reconnect and Kill showed, and the log
   // pane not at all. Same rule as the list menus above — portalled out and anchored by hand.
   const strip = withoutComments(read("components/FleetStrip.tsx"));
-  check("the fleet card's menu is portalled out of the card", /createPortal\(/.test(strip));
-  check("...and placed against its trigger", /useAnchoredMenu\(open, ref, panelRef\)/.test(strip));
+  // A RADIX MENU SINCE 2026-10-09: portalled and placed against its trigger by construction.
+  const radixStrip = /<DropdownMenuContent/.test(strip);
+  check("the fleet card's menu is portalled out of the card", radixStrip || /createPortal\(/.test(strip));
+  check("...and placed against its trigger", radixStrip || /useAnchoredMenu\(open, ref, panelRef\)/.test(strip));
   check("...and is not positioned inside the card", !/role="menu"[\s\S]{0,400}absolute right-0 top-full/.test(strip));
 }
 
