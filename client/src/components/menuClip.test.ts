@@ -129,9 +129,12 @@ console.log("\n...and the agent card's menu, which opens from inside a card that
   const card = withoutComments(read("components/AgentCard.tsx"));
   const overflow = /function Overflow\([\s\S]*?\n\}\n/.exec(card)?.[0] ?? "";
   check("AgentCard declares its overflow menu", overflow.length > 0);
-  check("...rendered through a portal into the body", /createPortal\(/.test(overflow) && /document\.body,/.test(overflow));
+  // A RADIX MENU SINCE 2026-10-09: portalled and anchored by construction (the shared check above).
+  const radixCard = /<DropdownMenuContent/.test(overflow);
+  check("...rendered through a portal into the body",
+    radixCard || (/createPortal\(/.test(overflow) && /document\.body,/.test(overflow)));
   check("...not positioned inside the card", !/className="absolute/.test(overflow));
-  check("...anchored back to its trigger", /useAnchoredMenu\(open, ref, panelRef\)/.test(overflow));
+  check("...anchored back to its trigger", radixCard || /useAnchoredMenu\(open, ref, panelRef\)/.test(overflow));
   check("...and a click on it does not open the card through the portal",
     /onClick=\{\(e\) => e\.stopPropagation\(\)\}/.test(overflow));
 }

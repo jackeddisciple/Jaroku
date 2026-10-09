@@ -17,8 +17,7 @@
 // and could only get brighter at its edge. The palette is light now and `shadow-glow` deepens the
 // border instead of brightening it, which is the same treatment arriving from the other direction.
 
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useState } from "react";
 import { DateChip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { AgentTagRow } from "./AgentTagRow.tsx";
@@ -26,12 +25,11 @@ import { AgentSparkline } from "./AgentSparkline.tsx";
 import { FACE_SIZE, AgentFace, AgentBanner } from "./AgentFace.tsx";
 import { stateBorder } from "../lib/stateBorder.ts";
 import { AlertTriangleIcon, GitForkIcon } from "./panelIcons.tsx";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuPlainItem, DropdownMenuTrigger } from "./ui/dropdown-menu.tsx";
 import { agentContextMarkdown } from "../lib/agentContext.ts";
 import { faceFor } from "../lib/agentFaces.ts";
 import { showsCategory } from "../lib/agentCategories.ts";
 import { absTime, fmtCost } from "../lib/format.ts";
-import { useAnchoredMenu } from "../lib/anchoredMenu.ts";
-import { useMenuFocus } from "../lib/menuFocus.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { ProviderMark } from "../lib/icons.tsx";
 import { ICON, STATUS } from "../lib/tokens.ts";
@@ -98,21 +96,6 @@ function Overflow({
    */
   const [confirming, setConfirming] = useState(false);
   const archived = agent.archived_at !== null;
-  const ref = useRef<HTMLDivElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-  // lib/anchoredMenu.ts puts the portalled panel back under its trigger, flipping up when the card
-  // is low in the window, and follows it when the grid scrolls.
-  useAnchoredMenu(open, ref, panelRef);
-  // AND DRIVABLE FROM THE KEYBOARD, which it was not: no Escape, no arrows, focus left on the trigger
-  // — so a keyboard user who opened it had no way out. lib/menuFocus.ts moves focus onto the first
-  // item and back to the trigger on close; the listener below is Escape, as the sidebar's menu has it.
-  useMenuFocus(open, panelRef, ref);
-  useEffect(() => {
-    if (!open) return;
-    const key = (e: KeyboardEvent): void => { if (e.key === "Escape") setOpen(false); };
-    document.addEventListener("keydown", key);
-    return () => document.removeEventListener("keydown", key);
-  }, [open]);
   // A menu reopened on a half-answered confirmation remembers a decision somebody walked away from.
   useEffect(() => {
     if (open) return;
@@ -120,6 +103,9 @@ function Overflow({
     setRenaming(false);
     setName(agent.name);
   }, [open, agent.name]);
+
+  /** Typing in the rename field stays in it — see the sidebar's `keepKeys` for the menu's typeahead. */
+  const keepKeys = (e: React.KeyboardEvent): void => { e.stopPropagation(); };
 
   const item = (
     label: string,
@@ -129,43 +115,36 @@ function Overflow({
     /** Keep the panel open, for an item whose next step is asked inside it. */
     stay = false,
   ) => (
-    <button
+    <DropdownMenuItem
       key={label}
-      type="button"
-      role="menuitem"
-      onClick={(e) => {
-        e.stopPropagation();
-        if (!stay) setOpen(false);
+      size="compact"
+      tone={danger ? "danger" : "default"}
+      onSelect={(e) => {
+        if (stay) e.preventDefault();
         onPick();
       }}
-      className={`flex w-full items-center gap-2 rounded-control px-2.5 py-1.5 text-left text-caption transition-colors duration-fast hover:bg-active active:bg-chrome focus:bg-active focus:outline-none ${
-        danger ? "text-err hover:text-err" : "text-muted hover:text-ink focus:text-ink"
-      }`}
     >
       <Icon size={ICON.xs} />
       {label}
-    </button>
+    </DropdownMenuItem>
   );
 
   return (
-    <div ref={ref} className="relative shrink-0">
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((v) => !v);
-        }}
-        // §8: every icon-only control gets an accessible label and a tooltip. An icon nobody can name
-        // is a worse button than a text button.
-        title="More actions"
-        aria-label={`More actions for ${agent.name}`}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className="rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active active:bg-chrome hover:text-ink"
-      >
-        <Icon.agents.more size={ICON.sm} />
-      </button>
-      {/* INTO `document.body`, NOT INTO THE CARD — and the card is why. Its root is `overflow-hidden`
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          onClick={(e) => e.stopPropagation()}
+          // §8: every icon-only control gets an accessible label and a tooltip. An icon nobody can name
+          // is a worse button than a text button.
+          title="More actions"
+          aria-label={`More actions for ${agent.name}`}
+          className="shrink-0 rounded-control p-1 text-faint transition-colors duration-fast hover:bg-active active:bg-chrome hover:text-ink"
+        >
+          <Icon.agents.more size={ICON.sm} />
+        </button>
+      </DropdownMenuTrigger>
+      {/* INTO `document.body`, NOT INTO THE CARD — and the card is why, which is why it is a Radix menu now. Its root is `overflow-hidden`
           so the banner is clipped to its rounded corners, and this panel hung `top-full` off a
           trigger on the card's last row: an `overflow` ancestor clips an absolutely-positioned
           descendant whatever its `z-index`, so the menu was cut flush at the card's edge. Fork and
@@ -173,121 +152,111 @@ function Overflow({
           compact density Rename was sliced through its own text. Archive is offered nowhere else,
           so the whole archive feature sat behind a filter nothing could populate. The sidebar's
           menu already leaves its list this way (lib/anchoredMenu.ts); this is the same move. */}
-      {open && createPortal(
-        <>
-          {/* A full-screen catcher rather than a document listener: it closes on any click outside,
-              including one that would otherwise open a different card, and it disappears with the
-              menu rather than outliving it. */}
-          <div className="fixed inset-0 z-40" aria-hidden onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
-          {/* `top-0 left-0` IS THE STARTING POINT, NOT THE POSITION — `useAnchoredMenu` places it
-              before paint. A click on the panel's own padding stops here: React carries events up
-              through a portal to the card, whose click opens the agent. */}
-          <div
-            ref={panelRef}
-            role="menu"
-            aria-label={`Actions for ${agent.name}`}
-            onClick={(e) => e.stopPropagation()}
-            className="fixed left-0 top-0 z-50 w-52 animate-slide-in rounded-card border border-edge bg-elevated p-1 shadow-floating motion-reduce:animate-none"
+      <DropdownMenuContent
+        align="end"
+        aria-label={`Actions for ${agent.name}`}
+        className="w-52"
+        // A click on the panel stops here: React carries events up through a portal to the card,
+        // whose click opens the agent.
+        onClick={(e) => e.stopPropagation()}
+        // ESCAPE IN THE RENAME FIELD STEPS BACK TO THE LIST rather than closing the whole menu, as it
+        // always has; everywhere else it closes the menu.
+        onEscapeKeyDown={(e) => { if (renaming) { e.preventDefault(); setRenaming(false); } }}
+      >
+        {renaming ? (
+          <form
+            className="flex flex-col gap-1 p-1"
+            onKeyDown={keepKeys}
+            onSubmit={(e) => {
+              e.preventDefault();
+              const next = name.trim();
+              if (next && next !== agent.name) onRename(next);
+              setOpen(false);
+            }}
           >
-            {renaming ? (
-              <form
-                className="flex flex-col gap-1 p-1"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const next = name.trim();
-                  if (next && next !== agent.name) onRename(next);
-                  setOpen(false);
-                }}
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              autoFocus
+              aria-label={`Rename ${agent.name}`}
+              className="w-full rounded-input border border-edge bg-panel px-2 py-1 text-caption text-ink outline-none focus-visible:shadow-focusring"
+            />
+            <div className="flex gap-3 px-1 pb-0.5">
+              <button type="submit" className="text-caption font-medium text-ink underline underline-offset-2">Rename</button>
+              <button
+                type="button"
+                onClick={() => setRenaming(false)}
+                className="text-caption font-medium text-muted underline underline-offset-2"
               >
-                <input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setRenaming(false); } }}
-                  autoFocus
-                  aria-label={`Rename ${agent.name}`}
-                  className="w-full rounded-input border border-edge bg-panel px-2 py-1 text-caption text-ink outline-none focus-visible:shadow-focusring"
-                />
-                <div className="flex gap-3 px-1 pb-0.5">
-                  <button type="submit" className="text-caption font-medium text-ink underline underline-offset-2">Rename</button>
-                  <button
-                    type="button"
-                    onClick={() => setRenaming(false)}
-                    className="text-caption font-medium text-muted underline underline-offset-2"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </form>
-            ) : confirming ? (
-              // §7.5's CONFIRMATION, NAMING THE CREATOR, as the collaborative-workspace safety net —
-              // said here, where the button was pressed, and answered with a button rather than a
-              // dialog the desktop app cannot show.
-              <div className="flex flex-col gap-1 p-1">
-                <p className="px-1 py-0.5 text-caption leading-[1.5] text-muted">
-                  Archive <span className="text-ink">{agent.name}</span>?
-                  {creator ? ` It was created by ${creator}.` : ""} Its versions, runs and threads all
-                  stay, and you can restore it.
-                </p>
-                <div className="flex gap-3 px-1 pb-0.5">
-                  <button
-                    type="button"
-                    onClick={() => { setOpen(false); onArchive(); }}
-                    className="text-caption font-medium text-err underline underline-offset-2"
-                  >
-                    Archive
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setConfirming(false)}
-                    className="text-caption font-medium text-muted underline underline-offset-2"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            ) : archived
-              ? item("Restore", Icon.agents.restore, onRestore)
-              : [
-                  item("Fork", GitForkIcon, onFork),
-                  item("Rename", Icon.agentDetail.rename, () => setRenaming(true), false, true),
-                  // EXPORT IS ONLY OFFERED WHEN THERE IS A VERSION TO EXPORT.
-                  //
-                  // WHAT IT DID ON A DRAFT. The entry sets a one-shot intent and asks the server
-                  // for the agent's current version; `AgentsView` saves the file payload when it
-                  // arrives. An agent with nothing published — every agent the New agent dialog and
-                  // onboarding create — has no version row, so `agentVersionFiles` returns
-                  // `undefined` and the relay answers `no such agent version in this workspace`,
-                  // which lands in the grid's error strip. So it was never silent; it was a menu
-                  // entry whose only possible outcome on a draft was an error written in the
-                  // product's internal vocabulary, for a state that is completely ordinary.
-                  //
-                  // AND THE INTENT IS LEFT SET, which is the part that could surprise somebody
-                  // later. `exportRequest` clears only when a MATCHING version payload lands —
-                  // `setError` does not clear it — so a failed export arms a download indefinitely,
-                  // and the next time anybody loads a version OF THAT AGENT, after building it,
-                  // from the detail's version list, the stale intent fires and saves a file nobody
-                  // asked for. Verified by reading every writer of `exportRequest`: the effect in
-                  // `AgentsView` is the only one that clears it.
-                  //
-                  // REMOVED RATHER THAN DISABLED WITH A TOOLTIP. This codebase's own rule, from the
-                  // commit that took out a greyed control with an explanatory tooltip: "a greyed
-                  // control with 'only an owner can do this' beside it has decided somebody should
-                  // keep looking at it". There is nothing to export yet and nothing to explain.
-                  ...(agent.version_source === null
-                    ? []
-                    : [item("Export current version", Icon.agentDetail.export, onExport)]),
-                  // ARCHIVE, AND THERE IS NO DELETE HERE. §5.2 lists both and this product has no
-                  // delete path for an agent, deliberately: its versions, runs, traces and costs are
-                  // the record every past comparison points at. The confirmation §7.5 asks for —
-                  // naming the creator, as the collaborative-workspace safety net — is on this,
-                  // because this is the destructive-looking act that actually exists.
-                  item("Archive", Icon.threads.archive, () => setConfirming(true), true, true),
-                ]}
+                Cancel
+              </button>
+            </div>
+          </form>
+        ) : confirming ? (
+          // §7.5's CONFIRMATION, NAMING THE CREATOR, as the collaborative-workspace safety net —
+          // said here, where the button was pressed, and answered with a button rather than a
+          // dialog the desktop app cannot show.
+          <div className="flex flex-col gap-1 p-1">
+            <p className="px-1 py-0.5 text-caption leading-[1.5] text-muted">
+              Archive <span className="text-ink">{agent.name}</span>?
+              {creator ? ` It was created by ${creator}.` : ""} Its versions, runs and threads all
+              stay, and you can restore it.
+            </p>
+            <div className="flex gap-3 px-1 pb-0.5">
+              <DropdownMenuPlainItem
+                onSelect={onArchive}
+                className="text-caption font-medium text-err underline underline-offset-2 data-[highlighted]:shadow-focusring"
+              >
+                Archive
+              </DropdownMenuPlainItem>
+              <DropdownMenuPlainItem
+                onSelect={(e) => { e.preventDefault(); setConfirming(false); }}
+                className="text-caption font-medium text-muted underline underline-offset-2 data-[highlighted]:shadow-focusring"
+              >
+                Cancel
+              </DropdownMenuPlainItem>
+            </div>
           </div>
-        </>,
-        document.body,
-      )}
-    </div>
+        ) : archived
+          ? item("Restore", Icon.agents.restore, onRestore)
+          : [
+              item("Fork", GitForkIcon, onFork),
+              item("Rename", Icon.agentDetail.rename, () => setRenaming(true), false, true),
+              // EXPORT IS ONLY OFFERED WHEN THERE IS A VERSION TO EXPORT.
+              //
+              // WHAT IT DID ON A DRAFT. The entry sets a one-shot intent and asks the server
+              // for the agent's current version; `AgentsView` saves the file payload when it
+              // arrives. An agent with nothing published — every agent the New agent dialog and
+              // onboarding create — has no version row, so `agentVersionFiles` returns
+              // `undefined` and the relay answers `no such agent version in this workspace`,
+              // which lands in the grid's error strip. So it was never silent; it was a menu
+              // entry whose only possible outcome on a draft was an error written in the
+              // product's internal vocabulary, for a state that is completely ordinary.
+              //
+              // AND THE INTENT IS LEFT SET, which is the part that could surprise somebody
+              // later. `exportRequest` clears only when a MATCHING version payload lands —
+              // `setError` does not clear it — so a failed export arms a download indefinitely,
+              // and the next time anybody loads a version OF THAT AGENT, after building it,
+              // from the detail's version list, the stale intent fires and saves a file nobody
+              // asked for. Verified by reading every writer of `exportRequest`: the effect in
+              // `AgentsView` is the only one that clears it.
+              //
+              // REMOVED RATHER THAN DISABLED WITH A TOOLTIP. This codebase's own rule, from the
+              // commit that took out a greyed control with an explanatory tooltip: "a greyed
+              // control with 'only an owner can do this' beside it has decided somebody should
+              // keep looking at it". There is nothing to export yet and nothing to explain.
+              ...(agent.version_source === null
+                ? []
+                : [item("Export current version", Icon.agentDetail.export, onExport)]),
+              // ARCHIVE, AND THERE IS NO DELETE HERE. §5.2 lists both and this product has no
+              // delete path for an agent, deliberately: its versions, runs, traces and costs are
+              // the record every past comparison points at. The confirmation §7.5 asks for —
+              // naming the creator, as the collaborative-workspace safety net — is on this,
+              // because this is the destructive-looking act that actually exists.
+              item("Archive", Icon.threads.archive, () => setConfirming(true), true, true),
+            ]}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
