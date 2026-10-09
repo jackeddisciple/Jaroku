@@ -18,12 +18,12 @@
 // action; everything below it can destroy work, and putting the two in one undifferentiated list
 // would be the design saying they are the same weight of thing.
 
-import { useEffect, useRef, useState } from "react";
-import { useMenuFocus } from "../lib/menuFocus.ts";
+import { useState } from "react";
 
 import { ICON } from "../lib/tokens.ts";
 import { AlertTriangleIcon } from "./panelIcons.tsx";
 import { Icon } from "../lib/icons/registry.ts";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./ui/dropdown-menu.tsx";
 
 export interface SplitAction {
   id: string;
@@ -57,101 +57,70 @@ export function SplitButton({
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
-  // See lib/menuFocus.ts. This menu declared `role="menu"` and handled neither the arrow keys that
-  // role promises nor the focus that Escape destroys — the same omission the three sidebar menus
-  // had, found by `test:menu-keys` rather than by anybody noticing.
-  useMenuFocus(open, ref);
 
   const everyday = actions.filter((a) => !a.danger);
   const dangerous = actions.filter((a) => a.danger);
   const primaryBlocked = Boolean(primary?.reason) || disabled;
 
   return (
-    <div ref={ref} className={`relative ${className}`}>
-      {/* One rounded box with a hairline between the halves, the same pairing §A.8 uses for
-          Commit and ↑ — so they read as one control with two affordances rather than as two
-          buttons that happen to be adjacent. */}
-      <span className="inline-flex overflow-hidden rounded-control bg-panel">
-        <button
-          type="button"
-          className="px-3 py-1.5 text-caption text-ink transition-colors hover:bg-active active:bg-chrome disabled:cursor-not-allowed disabled:opacity-40"
-          disabled={!primary || primaryBlocked}
-          title={primary?.title}
-          onClick={() => primary?.onSelect()}
-        >
-          {/* "Sync" for a state with no suggested action — see the `primary` note above. */}
-          {primary?.label ?? "Sync"}
-        </button>
-        <span className="w-px shrink-0 bg-hair" aria-hidden />
-        <button
-          type="button"
-          aria-haspopup="menu"
-          aria-expanded={open}
-          aria-label="More sync actions"
-          className="px-1.5 py-1.5 text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
-          disabled={disabled}
-          onClick={() => setOpen((v) => !v)}
-        >
-          <span className={`inline-block transition-transform duration-fast ${open ? "rotate-180" : ""}`}>
-            <Icon.github.syncMore size={ICON.xs} />
-          </span>
-        </button>
-      </span>
+    // A RADIX MENU (ui/dropdown-menu.tsx) behind the caret: focus into it and back, arrow keys,
+    // Escape and a press outside — what a hand-wired listener and the focus hook did here.
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <div className={`relative ${className}`}>
+        {/* One rounded box with a hairline between the halves, the same pairing §A.8 uses for
+            Commit and ↑ — so they read as one control with two affordances rather than as two
+            buttons that happen to be adjacent. */}
+        <span className="inline-flex overflow-hidden rounded-control bg-panel">
+          <button
+            type="button"
+            className="px-3 py-1.5 text-caption text-ink transition-colors hover:bg-active active:bg-chrome disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={!primary || primaryBlocked}
+            title={primary?.title}
+            onClick={() => primary?.onSelect()}
+          >
+            {/* "Sync" for a state with no suggested action — see the `primary` note above. */}
+            {primary?.label ?? "Sync"}
+          </button>
+          <span className="w-px shrink-0 bg-hair" aria-hidden />
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label="More sync actions"
+            title="More sync actions"
+              className="px-1.5 py-1.5 text-muted transition-colors hover:bg-active active:bg-chrome hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={disabled}
+            >
+              <span className={`inline-block transition-transform duration-fast ${open ? "rotate-180" : ""}`}>
+                <Icon.github.syncMore size={ICON.xs} />
+              </span>
+            </button>
+          </DropdownMenuTrigger>
+        </span>
 
-      {open && (
-        <div
-          role="menu"
-          className="absolute right-0 top-full z-30 mt-1 min-w-[170px] animate-slide-in rounded-card border border-edge bg-elevated p-1 shadow-floating motion-reduce:animate-none"
-        >
-          {everyday.map((a) => <MenuRow key={a.id} action={a} onDone={() => setOpen(false)} />)}
+        <DropdownMenuContent align="end" aria-label="Sync actions">
+          {everyday.map((a) => <MenuRow key={a.id} action={a} />)}
           {dangerous.length > 0 && (
             <>
-              {everyday.length > 0 && <div className="my-1 h-px bg-hair" aria-hidden />}
-              {dangerous.map((a) => <MenuRow key={a.id} action={a} onDone={() => setOpen(false)} />)}
+              {everyday.length > 0 && <DropdownMenuSeparator className="bg-hair" />}
+              {dangerous.map((a) => <MenuRow key={a.id} action={a} />)}
             </>
           )}
-        </div>
-      )}
-    </div>
+        </DropdownMenuContent>
+      </div>
+    </DropdownMenu>
   );
 }
 
-function MenuRow({ action, onDone }: { action: SplitAction; onDone: () => void }) {
+function MenuRow({ action }: { action: SplitAction }) {
   const blocked = Boolean(action.reason);
   return (
     <div>
-      <button
-        type="button"
-        role="menuitem"
+      <DropdownMenuItem
+        size="compact"
+        tone={action.danger ? "danger" : "default"}
         disabled={blocked}
         title={action.title}
-        onClick={() => {
-          action.onSelect();
-          onDone();
-        }}
-        className={`flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-caption transition-colors duration-fast disabled:cursor-not-allowed ${
-          action.danger
-            ? "text-err hover:bg-active active:bg-chrome disabled:opacity-40"
-            : "text-muted hover:bg-active/40 hover:text-ink disabled:opacity-40"
-        }`}
+        onSelect={action.onSelect}
       >
         {action.label}
         {/* The warning mark rides with the label rather than replacing it, so the row is still a
@@ -161,7 +130,7 @@ function MenuRow({ action, onDone }: { action: SplitAction; onDone: () => void }
             <AlertTriangleIcon size={ICON.xs} />
           </span>
         )}
-      </button>
+      </DropdownMenuItem>
       {/* §A.2 inside the menu too: a dimmed row with no explanation is the same silent failure a
           dimmed button is, and a menu is where somebody has gone LOOKING for the action. */}
       {action.reason && (

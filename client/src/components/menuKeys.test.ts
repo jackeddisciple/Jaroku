@@ -60,7 +60,11 @@ console.log("\nevery component that declares a menu also drives one");
   // The components that own a `role="menu"` panel. Found rather than listed, so a fourth menu is
   // covered by this suite on the day it is written rather than the day somebody remembers.
   const owners = SOURCES.filter((f) => /role="menu"/.test(f.text));
-  check("found the menus", owners.length >= 3, `${owners.length} file(s)`);
+  // THE RADIX MENUS COUNT TOWARD FINDING THEM, and only toward that. Since 2026-10-09 the menus move
+  // to `ui/dropdown-menu.tsx`, whose roles, arrow keys, Escape and focus are Radix's; the checks below
+  // are for a menu somebody wires by hand, and this floor only says the scan read the client at all.
+  const radix = SOURCES.filter((f) => /<DropdownMenuContent/.test(f.text));
+  check("found the menus", owners.length + radix.length >= 3, `${owners.length} hand-built, ${radix.length} Radix`);
 
   for (const f of owners) {
     // THE RULE IS THE BEHAVIOUR, NOT THE IMPLEMENTATION — and this suite was wrong about that
