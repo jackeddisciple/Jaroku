@@ -30,7 +30,7 @@
 // workspace (`team`) that could only be obtained by setting an environment variable documented as
 // naming which workspace the server acts in on its own behalf.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { acceptInvite, createWorkspace, storedToken } from "../lib/auth.ts";
 import { switchWorkspace } from "../lib/socket.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
@@ -43,6 +43,7 @@ import { orderWorkspaces, roleLabel, shouldScroll } from "../lib/workspaceList.t
 import { Chip } from "./Chip.tsx";
 import { Truncate } from "./Truncate.tsx";
 import { AlertTriangleIcon, CheckIcon, TicketIcon, UserIcon, UsersIcon } from "./panelIcons.tsx";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuPlainItem, DropdownMenuTrigger } from "./ui/dropdown-menu.tsx";
 
 /**
  * §3.2's two options, in §3.2's own words.
@@ -289,21 +290,20 @@ function JoinWorkspaceForm({ onDone }: { onDone: () => void }) {
 function MenuRow({
   icon: Icon,
   label,
-  onClick,
+  onSelect,
 }: {
   icon: (p: { size?: number }) => React.ReactElement;
   label: string;
-  onClick: () => void;
+  onSelect: (event: Event) => void;
 }) {
   return (
-    <button
-      role="menuitem"
-      onClick={onClick}
-      className="flex w-full items-center gap-2 rounded-control px-2 py-2 text-left text-caption text-muted transition-colors hover:bg-active/40 active:bg-chrome hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+    <DropdownMenuPlainItem
+      onSelect={onSelect}
+      className="flex w-full items-center gap-2 rounded-control px-2 py-2 text-left text-caption text-muted transition-colors data-[highlighted]:bg-active/40 data-[highlighted]:text-ink active:bg-chrome"
     >
       <span className="shrink-0" aria-hidden><Icon size={ICON.xs} /></span>
       <span className="min-w-0 flex-1 truncate">{label}</span>
-    </button>
+    </DropdownMenuPlainItem>
   );
 }
 
@@ -319,75 +319,18 @@ export function WorkspaceSwitcher() {
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [joining, setJoining] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
   // §2.2's order, computed here rather than in the map, so the list the rows are drawn from and
   // the list the arrow keys walk are the same array by construction.
   const ordered = orderWorkspaces(workspaces);
 
   /**
-   * §2.3's three ways out and the arrow keys, on ONE listener.
-   *
-   * ROVING DOM FOCUS OVER THE ROWS, not an index in React state — which is the "extends the
-   * existing binding layer, not a second one" the spec asks for, spelled the way `composer/
-   * Popover.tsx` already spells it. The difference is not stylistic: an index has to be kept in
-   * step with a list that changes under it (a workspace created, a form replacing the rows), and
-   * every one of those is a place for the highlight to point at a row that has moved. Focus cannot
-   * drift, `Enter` is already the browser's activation for a focused button, and the focus ring is
-   * the highlight — so there is nothing to draw and nothing to reset.
-   *
-   * `Enter` IS THEREFORE ABSENT FROM THIS HANDLER, deliberately. A row is a `<button>`; the
-   * platform activates it. Adding a key handler for it would be a second activation path that can
-   * disagree with the first — and the one it would disagree with is the one screen readers use.
+   * §2.3's three ways out and the arrow keys are RADIX'S NOW (ui/dropdown-menu.tsx, 2026-10-09):
+   * Escape, a press outside, choosing a row, arrows that wrap, and focus back on this row's button
+   * when the menu shuts — all four close paths, without each remembering. What stays here is the
+   * one thing a menu cannot know: the create and join forms are fields, and typing in them must not
+   * move the menu's highlight, so they keep their own keys (`keepKeys`).
    */
-  useEffect(() => {
-    if (!open) return;
-    const rows = (): HTMLElement[] =>
-      Array.from(ref.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
-
-    const close = (e: MouseEvent): void => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") {
-        setOpen(false);
-        return;
-      }
-      if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
-      // A FIELD INSIDE THE MENU KEEPS ITS OWN ARROWS. The create form replaces the rows with a
-      // text input, and stealing ArrowUp from it would stop somebody moving the caret in the name
-      // they are typing. Same guard, same reason, as the popover's.
-      const active = document.activeElement as HTMLElement | null;
-      if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return;
-      const items = rows();
-      if (items.length === 0) return;
-      e.preventDefault();
-      const at = active ? items.indexOf(active) : -1;
-      const next =
-        e.key === "Home" ? 0
-        : e.key === "End" ? items.length - 1
-        // Wrapping, because a menu of four rows should not require knowing which end you are at.
-        : e.key === "ArrowDown" ? (at + 1) % items.length
-        : (at - 1 + items.length) % items.length;
-      items[next]?.focus();
-    };
-    document.addEventListener("mousedown", close);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", close);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
-  // Focus back to the trigger when the menu closes, so a keyboard user is not dropped at the top
-  // of the document by a row that has just been removed from it. In its own effect rather than in
-  // every path that closes, because there are four of them — a selection, Escape, an outside
-  // click, and the create form finishing — and each would have to remember.
-  const wasOpen = useRef(false);
-  useEffect(() => {
-    if (wasOpen.current && !open) triggerRef.current?.focus();
-    wasOpen.current = open;
-  }, [open]);
+  const keepKeys = (e: React.KeyboardEvent): void => { e.stopPropagation(); };
 
   // The form is per-opening, not per-tab. A half-typed name left behind a dismissed menu would
   // reappear the next time somebody came to switch workspace, which is not what they asked for.
@@ -414,211 +357,208 @@ export function WorkspaceSwitcher() {
     // translucent one — lighter than the material it crosses. The class carries no styling of its
     // own; `index.css` clears the border only where the column is a material, so every other
     // platform keeps the seam it needs.
-    <div ref={ref} className="sidebar-seam relative shrink-0 border-b border-hair">
-      {/* A ROW OF TWO CONTROLS, WHICH IS WHY THE SWITCHER IS NO LONGER `w-full`. Search cannot be
-          nested inside the switcher — a button inside a button is invalid, and the browser's own
-          repair for it is to close the outer one early, which would have quietly detached the name
-          from the thing that opens the list. They are siblings, and the switcher takes the slack. */}
-      <div className="flex items-center">
-        <button
-          ref={triggerRef}
-          onClick={() => setOpen((v) => !v)}
-          aria-haspopup="menu"
-          aria-expanded={open}
-          // THE ROW EVERY OTHER ROW IN THE COLUMN IS SCOPED BY, at the rows' OWN size. §9.1 put it a
-          // rung above the tab labels; the product owner took it back down from 16px on 2026-09-11,
-          // and again on 2026-09-20 after a second look at 16 — with no rung between 16 and 14 and
-          // no semibold on top of a rung (`test:surface-system`), the step up is the whole 16px
-          // `text-title`, and against a column of 14px rows that reads as a heading shouting rather
-          // than leading. It is 14px medium; what sets it apart is the row it heads and the gap
-          // under it, not its size. See `NavList` in Sidebar.tsx for the other half of that.
-          // `pl-4` RATHER THAN `pl-3`, SO THE NAME SITS ON THE DESTINATIONS' OWN LEFT EDGE. The rows
-          // beneath are indented twice — `px-2` on `NavList` and `px-2` again on each row, so their
-          // icons start at 16px — and at 12px this name hung four pixels left of all of them. Four
-          // pixels is too small to read as a deliberate outdent and too large to look level, which
-          // is the worst of both. It is the same 16px; the two columns line up.
-          className={`flex min-w-0 flex-1 items-center gap-2 py-2 pl-4 pr-2 text-left transition-colors hover:bg-active/40 active:bg-chrome focus-visible:outline-none focus-visible:shadow-focusring ${
-            open ? "bg-active/40" : ""
-          }`}
-          title={`${current?.name ?? "workspace"} — ${current?.kind ?? ""}, you are ${current?.role ?? "a member"}`}
-        >
-          {/* NO KIND MARK. A person/people glyph sat here to say whether the workspace was personal
-              or a team — but it qualified a name that is already the most prominent text in the
-              sidebar, and it is the one fact in this row that never changes: `kind` is fixed at
-              creation. A permanent glyph for a permanent value is decoration on the row every other
-              row in the column is scoped by. It stays in the row's tooltip, which reads
-              "<name> — team, you are owner", so the fact is still reachable where somebody asking
-              for it would look. */}
-          <Truncate className="min-w-0 text-body font-medium text-ink" title={current?.name}>
-            {current?.name ?? "workspace"}
-          </Truncate>
-          {/* THE AFFORDANCE SITS AGAINST THE NAME, NOT AT THE ROW'S EDGE — and the difference is
-              whether it reads as belonging to the name or to the row. It used to be last, after the
-              plan chip, with the whole of the row's slack between it and the word it opens: the
-              arrow was there, but "Adarsh's workspace" did not look like a control, because the one
-              mark saying so had another element sitting in the gap. Beside the name, the two read as
-              one dropdown and the plan chip goes back to being what it is — metadata at the end of
-              the row.
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <div className="sidebar-seam relative shrink-0 border-b border-hair">
+        {/* A ROW OF TWO CONTROLS, WHICH IS WHY THE SWITCHER IS NO LONGER `w-full`. Search cannot be
+            nested inside the switcher — a button inside a button is invalid, and the browser's own
+            repair for it is to close the outer one early, which would have quietly detached the name
+            from the thing that opens the list. They are siblings, and the switcher takes the slack. */}
+        <div className="flex items-center">
+          <DropdownMenuTrigger asChild>
+            <button
+              // THE ROW EVERY OTHER ROW IN THE COLUMN IS SCOPED BY, at the rows' OWN size. §9.1 put it a
+              // rung above the tab labels; the product owner took it back down from 16px on 2026-09-11,
+              // and again on 2026-09-20 after a second look at 16 — with no rung between 16 and 14 and
+              // no semibold on top of a rung (`test:surface-system`), the step up is the whole 16px
+              // `text-title`, and against a column of 14px rows that reads as a heading shouting rather
+              // than leading. It is 14px medium; what sets it apart is the row it heads and the gap
+              // under it, not its size. See `NavList` in Sidebar.tsx for the other half of that.
+              // `pl-4` RATHER THAN `pl-3`, SO THE NAME SITS ON THE DESTINATIONS' OWN LEFT EDGE. The rows
+              // beneath are indented twice — `px-2` on `NavList` and `px-2` again on each row, so their
+              // icons start at 16px — and at 12px this name hung four pixels left of all of them. Four
+              // pixels is too small to read as a deliberate outdent and too large to look level, which
+              // is the worst of both. It is the same 16px; the two columns line up.
+              className={`flex min-w-0 flex-1 items-center gap-2 py-2 pl-4 pr-2 text-left transition-colors hover:bg-active/40 active:bg-chrome focus-visible:outline-none focus-visible:shadow-focusring ${
+                open ? "bg-active/40" : ""
+              }`}
+              title={`${current?.name ?? "workspace"} — ${current?.kind ?? ""}, you are ${current?.role ?? "a member"}`}
+            >
+              {/* NO KIND MARK. A person/people glyph sat here to say whether the workspace was personal
+                  or a team — but it qualified a name that is already the most prominent text in the
+                  sidebar, and it is the one fact in this row that never changes: `kind` is fixed at
+                  creation. A permanent glyph for a permanent value is decoration on the row every other
+                  row in the column is scoped by. It stays in the row's tooltip, which reads
+                  "<name> — team, you are owner", so the fact is still reachable where somebody asking
+                  for it would look. */}
+              <Truncate className="min-w-0 text-body font-medium text-ink" title={current?.name}>
+                {current?.name ?? "workspace"}
+              </Truncate>
+              {/* THE AFFORDANCE SITS AGAINST THE NAME, NOT AT THE ROW'S EDGE — and the difference is
+                  whether it reads as belonging to the name or to the row. It used to be last, after the
+                  plan chip, with the whole of the row's slack between it and the word it opens: the
+                  arrow was there, but "Adarsh's workspace" did not look like a control, because the one
+                  mark saying so had another element sitting in the gap. Beside the name, the two read as
+                  one dropdown and the plan chip goes back to being what it is — metadata at the end of
+                  the row.
 
-              §5's pair, and the reason there are two: `arrow-down-01` closed, `arrow-up-01` open.
-              The direction is the state, so the mark says which way pressing it will go. */}
-          <span className="shrink-0 text-faint" aria-hidden>
-            {open ? <Icon.workspace.switcherOpen size={ICON.xs} /> : <Icon.workspace.switcherClosed size={ICON.xs} />}
-          </span>
-          {expiring && (
-            // The token behind this socket is nearly out. Said quietly rather than as a modal:
-            // nothing has failed yet, and the reconnect will renew it.
-            <span className="ml-auto shrink-0 text-tiny text-run" title="your session is about to end">
-              ●
-            </span>
-          )}
-          {/* THE PLAN, FROM THE SESSION, NEVER MAPPED HERE. `planFor` on the server is the same
-              function the budget gate resolves limits through, so the chip in this row and the figure
-              in the Usage panel are one computation — see the footer's own note for the paid
-              workspace that read "Free" in one place and "Pro" in the other.
+                  §5's pair, and the reason there are two: `arrow-down-01` closed, `arrow-up-01` open.
+                  The direction is the state, so the mark says which way pressing it will go. */}
+              <span className="shrink-0 text-faint" aria-hidden>
+                {open ? <Icon.workspace.switcherOpen size={ICON.xs} /> : <Icon.workspace.switcherClosed size={ICON.xs} />}
+              </span>
+              {expiring && (
+                // The token behind this socket is nearly out. Said quietly rather than as a modal:
+                // nothing has failed yet, and the reconnect will renew it.
+                <span className="ml-auto shrink-0 text-tiny text-run" title="your session is about to end">
+                  ●
+                </span>
+              )}
+              {/* THE PLAN, FROM THE SESSION, NEVER MAPPED HERE. `planFor` on the server is the same
+                  function the budget gate resolves limits through, so the chip in this row and the figure
+                  in the Usage panel are one computation — see the footer's own note for the paid
+                  workspace that read "Free" in one place and "Pro" in the other.
 
-              `ml-auto` HERE RATHER THAN ON THE NAME, which is what holds the row's shape now that the
-              name no longer takes the slack: the plan is pinned to the right edge and the dropdown
-              travels with the name, however long or short the name is. The expiring dot carries it
-              too, for the case where there is no plan chip to pin. */}
-          {/* THE PLAN IS NOT HERE ANY MORE. It was on this row AND on the account row at the foot of
-              the sidebar — one fact, twice, forty pixels apart in the same column. What a workspace
-              is paying is a property of the ACCOUNT, so it stays where the account is named and the
-              widest control in the sidebar goes back to being about one thing: which workspace. The
-              switcher's own list still chips each row, because there the plan distinguishes the
-              workspaces from one another rather than restating the one you are in. */}
-        </button>
-        {/* SEARCH, AT THE END OF THE ROW THAT NAMES WHAT IS SEARCHED. It was in the title bar, in a
-            cluster of window controls it had nothing to do with; a workspace is the scope of every
-            search this opens, so the control belongs on the row that says which workspace you are in.
+                  `ml-auto` HERE RATHER THAN ON THE NAME, which is what holds the row's shape now that the
+                  name no longer takes the slack: the plan is pinned to the right edge and the dropdown
+                  travels with the name, however long or short the name is. The expiring dot carries it
+                  too, for the case where there is no plan chip to pin. */}
+              {/* THE PLAN IS NOT HERE ANY MORE. It was on this row AND on the account row at the foot of
+                  the sidebar — one fact, twice, forty pixels apart in the same column. What a workspace
+                  is paying is a property of the ACCOUNT, so it stays where the account is named and the
+                  widest control in the sidebar goes back to being about one thing: which workspace. The
+                  switcher's own list still chips each row, because there the plan distinguishes the
+                  workspaces from one another rather than restating the one you are in. */}
+            </button>
+          </DropdownMenuTrigger>
+          {/* SEARCH, AT THE END OF THE ROW THAT NAMES WHAT IS SEARCHED. It was in the title bar, in a
+              cluster of window controls it had nothing to do with; a workspace is the scope of every
+              search this opens, so the control belongs on the row that says which workspace you are in.
 
-            ONE CONTROL FOR BOTH SEARCHES. The palette already carries "Go to agent…" beside every
-            other destination, so a second, narrower agent-only box would be two answers to one
-            question — and the one people reach for is whichever is nearer.
+              ONE CONTROL FOR BOTH SEARCHES. The palette already carries "Go to agent…" beside every
+              other destination, so a second, narrower agent-only box would be two answers to one
+              question — and the one people reach for is whichever is nearer.
 
-            `sm` RATHER THAN `md`. It shares a row with the workspace name and a 12px chevron rather
-            than with the 16px window controls it used to sit beside, and a mark as loud as the name
-            reads as the loudest thing on the row it is a footnote to. */}
-        <button
-          onClick={() => setPaletteOpen(true)}
-          title={`Search agents and commands — ${keyHint("⌘K")} opens the palette`}
-          aria-label="Search agents and commands"
-          className="mr-2 flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-muted transition-colors hover:bg-active/40 active:bg-chrome hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
-        >
-          <Icon.agents.search size={ICON.sm} />
-        </button>
-      </div>
-
-      {/* §5.2 — "show an error inline in the switcher and revert to the previous workspace".
-          BENEATH THE ROW RATHER THAN INSIDE THE DROPDOWN, because by the time it exists the
-          dropdown has closed: the click that started the switch closed it, and a message that only
-          appears when somebody reopens the menu is a message about something they have already
-          concluded did not work. The name above it is the workspace they are back in, which is the
-          other half of what they need to know. */}
-      {switchError && (
-        <div role="alert" className="flex items-start gap-2 border-t border-hair bg-err/5 px-3 py-1.5">
-          <span className="mt-0.5 shrink-0 text-err" aria-hidden><AlertTriangleIcon size={ICON.xs} /></span>
-          <span className="min-w-0 flex-1 text-tiny leading-[1.5] text-err">{switchError}</span>
+              `sm` RATHER THAN `md`. It shares a row with the workspace name and a 12px chevron rather
+              than with the 16px window controls it used to sit beside, and a mark as loud as the name
+              reads as the loudest thing on the row it is a footnote to. */}
           <button
-            onClick={clearSwitchError}
-            title="Dismiss"
-            aria-label="Dismiss"
-            className="shrink-0 text-faint transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+            onClick={() => setPaletteOpen(true)}
+            title={`Search agents and commands — ${keyHint("⌘K")} opens the palette`}
+            aria-label="Search agents and commands"
+            className="mr-2 flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-muted transition-colors hover:bg-active/40 active:bg-chrome hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
           >
-            <Icon.global.dismissNotice size={ICON.xs} />
+            <Icon.agents.search size={ICON.sm} />
           </button>
         </div>
-      )}
 
-      {open && (
-        <div
-          role="menu"
-          className="absolute left-2 right-2 z-30 mt-1 w-auto origin-top animate-menu-in overflow-hidden rounded-card border border-edge bg-elevated p-1 shadow-floating motion-reduce:animate-none"
-        >
-          {/* THE LIST SCROLLS ONLY WHEN IT HAS TO — §2.3. A `max-h` applied unconditionally would
-              put a scrollbar on a menu of three and, worse, would push the two actions below the
-              fold on exactly the account that has no workspaces to switch between and therefore
-              needs "Create" and "Join" most. */}
-          <div className={`py-1 ${shouldScroll(ordered.length) ? "max-h-64 overflow-y-auto" : ""}`}>
-            {ordered.map((w) => {
-              const active = w.id === workspaceId;
-              const RowKind = w.kind === "team" ? UsersIcon : UserIcon;
-              return (
-                <button
-                  key={w.id}
-                  role="menuitem"
-                  onClick={() => {
-                    setOpen(false);
-                    switchWorkspace(w.id);
-                  }}
-                  // A CHECKMARK, NOT A CHECKMARK AND A HIGHLIGHT — §2.2 asks for one or the other
-                  // and the reason is worth keeping: a filled row plus a tick states the same fact
-                  // twice, and the second statement is the one that makes a quiet menu loud. The
-                  // row is `text-ink` against the others' `text-muted`, which is "visually distinct
-                  // but not loud" without a background.
-                  className="flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-left text-caption transition-colors hover:bg-active/40 active:bg-chrome focus-visible:outline-none focus-visible:shadow-focusring"
-                >
-                  <span className={`shrink-0 ${active ? "text-ink" : "text-faint"}`} aria-hidden>
-                    <RowKind size={ICON.xs} />
-                  </span>
-                  <Truncate className={`min-w-0 flex-1 ${active ? "text-ink" : "text-muted"}`} title={w.name}>
-                    {w.name}
-                  </Truncate>
-                  {/* THE ROLE, AND ONLY WHERE IT MEANS SOMETHING. A personal workspace has one
-                      member and no roles to distinguish — §5.5 and §9.4 both say those surfaces do
-                      not exist there — so an "Owner" badge on it would be a badge for a
-                      distinction the workspace does not make. */}
-                  {w.kind === "team" && (
-                    <Chip size="sm" tone="faint" variant="bare" className="shrink-0">{roleLabel(w.role)}</Chip>
-                  )}
-                  {w.plan?.label && (
-                    <Chip caps size="sm" tone="faint" className="shrink-0">{w.plan.label}</Chip>
-                  )}
-                  <span className={`shrink-0 ${active ? "text-ink" : "text-transparent"}`} aria-hidden>
-                    <CheckIcon size={ICON.xs} />
-                  </span>
-                </button>
-              );
-            })}
+        {/* §5.2 — "show an error inline in the switcher and revert to the previous workspace".
+            BENEATH THE ROW RATHER THAN INSIDE THE DROPDOWN, because by the time it exists the
+            dropdown has closed: the click that started the switch closed it, and a message that only
+            appears when somebody reopens the menu is a message about something they have already
+            concluded did not work. The name above it is the workspace they are back in, which is the
+            other half of what they need to know. */}
+        {switchError && (
+          <div role="alert" className="flex items-start gap-2 border-t border-hair bg-err/5 px-3 py-1.5">
+            <span className="mt-0.5 shrink-0 text-err" aria-hidden><AlertTriangleIcon size={ICON.xs} /></span>
+            <span className="min-w-0 flex-1 text-tiny leading-[1.5] text-err">{switchError}</span>
+            <button
+              onClick={clearSwitchError}
+              title="Dismiss"
+              aria-label="Dismiss"
+              className="shrink-0 text-faint transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+            >
+              <Icon.global.dismissNotice size={ICON.xs} />
+            </button>
           </div>
+        )}
 
-          {/* WHAT IS DELIBERATELY NOT ON THESE ROWS: an unread count from the Inbox. §2.2 offers it
-              "only if you've implemented an unread-count-per-workspace endpoint", and there is no
-              such endpoint — `counts.badge` is computed for the ONE workspace this socket is in,
-              and a socket is scoped to a workspace by its ticket, so the number for the others is
-              not a value this tab is holding. The spec's own instruction for that case is the one
-              followed here: skip it and say so, rather than render a zero that looks like an
-              answer. */}
-
-          {creating ? (
-            <NewWorkspaceForm onDone={() => setOpen(false)} />
-          ) : joining ? (
-            <JoinWorkspaceForm onDone={() => setOpen(false)} />
-          ) : (
-            // §2.2 — TEXT ROWS, NOT BUTTONS. They sit at the bottom of a menu whose other rows are
-            // all destinations, and filled buttons there would read as the menu's primary actions
-            // rather than as the things you do when none of the rows above is what you wanted.
-            <div className="border-t border-hair">
-              <MenuRow icon={Icon.workspace.newWorkspace} label="Create workspace" onClick={() => setCreating(true)} />
-              <MenuRow icon={TicketIcon} label="Join workspace" onClick={() => setJoining(true)} />
-              {/* SETTINGS FOR THE ACTIVE WORKSPACE — §6.1 and §10.1's entry point, on the row
-                  group rather than on the active workspace's own row. A gear inside a row whose
-                  whole job is "switch to this" would be a second target inside a click target,
-                  and the only workspace whose settings can be opened is the one this socket is
-                  in: the panel reads members, invitations, billing and the audit log over THIS
-                  socket, and there is no socket in the others. */}
-              <MenuRow
-                icon={Icon.workspace.settings}
-                label={`${current?.name ?? "Workspace"} settings`}
-                onClick={() => {
-                  setOpen(false);
-                  openWorkspacePanel("general");
-                }}
-              />
+        {/* AS WIDE AS THE ROW, INSET 8px EACH SIDE, as it always opened: the trigger is the name and the
+            search button sits beside it, so the panel takes the trigger's width plus the search
+            button's 36px, less the two insets. */}
+        <DropdownMenuContent
+          align="start"
+          alignOffset={8}
+          aria-label="Workspaces"
+          className="w-[calc(var(--radix-dropdown-menu-trigger-width)+20px)]"
+        >
+            {/* THE LIST SCROLLS ONLY WHEN IT HAS TO — §2.3. A `max-h` applied unconditionally would
+                put a scrollbar on a menu of three and, worse, would push the two actions below the
+                fold on exactly the account that has no workspaces to switch between and therefore
+                needs "Create" and "Join" most. */}
+            <div className={`py-1 ${shouldScroll(ordered.length) ? "max-h-64 overflow-y-auto" : ""}`}>
+              {ordered.map((w) => {
+                const active = w.id === workspaceId;
+                const RowKind = w.kind === "team" ? UsersIcon : UserIcon;
+                return (
+                  <DropdownMenuPlainItem
+                    key={w.id}
+                    onSelect={() => switchWorkspace(w.id)}
+                    // A CHECKMARK, NOT A CHECKMARK AND A HIGHLIGHT — §2.2 asks for one or the other
+                    // and the reason is worth keeping: a filled row plus a tick states the same fact
+                    // twice, and the second statement is the one that makes a quiet menu loud. The
+                    // row is `text-ink` against the others' `text-muted`, which is "visually distinct
+                    // but not loud" without a background.
+                    className="flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-left text-caption transition-colors data-[highlighted]:bg-active/40 active:bg-chrome"
+                  >
+                    <span className={`shrink-0 ${active ? "text-ink" : "text-faint"}`} aria-hidden>
+                      <RowKind size={ICON.xs} />
+                    </span>
+                    <Truncate className={`min-w-0 flex-1 ${active ? "text-ink" : "text-muted"}`} title={w.name}>
+                      {w.name}
+                    </Truncate>
+                    {/* THE ROLE, AND ONLY WHERE IT MEANS SOMETHING. A personal workspace has one
+                        member and no roles to distinguish — §5.5 and §9.4 both say those surfaces do
+                        not exist there — so an "Owner" badge on it would be a badge for a
+                        distinction the workspace does not make. */}
+                    {w.kind === "team" && (
+                      <Chip size="sm" tone="faint" variant="bare" className="shrink-0">{roleLabel(w.role)}</Chip>
+                    )}
+                    {w.plan?.label && (
+                      <Chip caps size="sm" tone="faint" className="shrink-0">{w.plan.label}</Chip>
+                    )}
+                    <span className={`shrink-0 ${active ? "text-ink" : "text-transparent"}`} aria-hidden>
+                      <CheckIcon size={ICON.xs} />
+                    </span>
+                  </DropdownMenuPlainItem>
+                );
+              })}
             </div>
-          )}
-        </div>
-      )}
-    </div>
+
+            {/* WHAT IS DELIBERATELY NOT ON THESE ROWS: an unread count from the Inbox. §2.2 offers it
+                "only if you've implemented an unread-count-per-workspace endpoint", and there is no
+                such endpoint — `counts.badge` is computed for the ONE workspace this socket is in,
+                and a socket is scoped to a workspace by its ticket, so the number for the others is
+                not a value this tab is holding. The spec's own instruction for that case is the one
+                followed here: skip it and say so, rather than render a zero that looks like an
+                answer. */}
+
+            {creating ? (
+              <div onKeyDown={keepKeys}><NewWorkspaceForm onDone={() => setOpen(false)} /></div>
+            ) : joining ? (
+              <div onKeyDown={keepKeys}><JoinWorkspaceForm onDone={() => setOpen(false)} /></div>
+            ) : (
+              // §2.2 — TEXT ROWS, NOT BUTTONS. They sit at the bottom of a menu whose other rows are
+              // all destinations, and filled buttons there would read as the menu's primary actions
+              // rather than as the things you do when none of the rows above is what you wanted.
+              <div className="border-t border-hair">
+                {/* `preventDefault` keeps the menu open: these two turn it into their form. */}
+                <MenuRow icon={Icon.workspace.newWorkspace} label="Create workspace" onSelect={(e) => { e.preventDefault(); setCreating(true); }} />
+                <MenuRow icon={TicketIcon} label="Join workspace" onSelect={(e) => { e.preventDefault(); setJoining(true); }} />
+                {/* SETTINGS FOR THE ACTIVE WORKSPACE — §6.1 and §10.1's entry point, on the row
+                    group rather than on the active workspace's own row. A gear inside a row whose
+                    whole job is "switch to this" would be a second target inside a click target,
+                    and the only workspace whose settings can be opened is the one this socket is
+                    in: the panel reads members, invitations, billing and the audit log over THIS
+                    socket, and there is no socket in the others. */}
+                <MenuRow
+                  icon={Icon.workspace.settings}
+                  label={`${current?.name ?? "Workspace"} settings`}
+                  onSelect={() => openWorkspacePanel("general")}
+                />
+              </div>
+            )}
+        </DropdownMenuContent>
+      </div>
+    </DropdownMenu>
   );
 }
