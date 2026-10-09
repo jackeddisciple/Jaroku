@@ -52,7 +52,9 @@ export function DialogContent({
         // technology, and the attribute tells a screen reader up front what it is inside.
         aria-modal
         // ESCAPE IS CONSUMED. Radix closes the top layer of its own stack, but the hand-built overlays
-        // still listening on the window would hear the same press and close underneath it.
+        // still listening on the window would hear the same press and close underneath it. (A
+        // hand-built `Select` open inside a dialog is not one of Radix's layers, so Escape closes the
+        // dialog with it, as it did before; shadcn's Select would be a layer and close first.)
         onEscapeKeyDown={(e) => { e.stopPropagation(); onEscapeKeyDown?.(e); }}
         // OPTION-TAB WRAPS TOO. Radix's trap answers Tab and leaves Option-Tab alone — and Option-Tab
         // is how WebKit (Safari, this app's webview) reaches buttons when full keyboard access is off,
@@ -71,6 +73,10 @@ export function DialogContent({
         }}
         className={`focus:outline-none ${className}`}
         {...props}
+        // A NAME GIVEN IS THE NAME USED. Radix links a dialog to its title, and `aria-labelledby`
+        // outranks `aria-label` — so a dialog that names itself ("Grant access to billing_bot") would
+        // be announced by a shorter visible heading instead. Given an explicit label, that wins.
+        {...(props["aria-label"] ? { "aria-labelledby": undefined } : {})}
       >
         {children}
       </DialogPrimitive.Content>

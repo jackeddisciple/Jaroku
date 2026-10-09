@@ -24,11 +24,12 @@
 // have deploy" needs an answer that is not archaeology, and the only moment anybody can write it is
 // the moment they know.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { CheckboxField } from "./Checkbox.tsx";
 import { Chip } from "./Chip.tsx";
 import { Select } from "./Select.tsx";
 import { primaryBtn, quietBtn } from "./buttons.ts";
+import { Dialog, DialogContent } from "./ui/dialog.tsx";
 import { AGENT_CAPABILITIES, agentCeiling, closeAgentCapabilities } from "../lib/capabilities.ts";
 import type { AgentCapability } from "../lib/capabilities.ts";
 import { STATUS, TYPE } from "../lib/tokens.ts";
@@ -95,45 +96,9 @@ export function GrantDialog({
   // re-resolve it when the selection changes.
   const ceiling = useMemo(() => agentCeiling(target?.role ?? null), [target]);
 
-  /**
-   * §17's FOCUS TRAP, and Escape.
-   *
-   * A REAL TRAP RATHER THAN `autoFocus` ALONE. Tabbing out of a modal into the page behind it is
-   * the failure that makes a dialog unusable with a keyboard: focus lands on controls the overlay
-   * is covering, and nothing on screen moves when they are activated. Escape closes, which is safe
-   * here in a way it is not for `McpConfirmModal` — nothing is blocked waiting on this answer.
-   */
-  const surface = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const node = surface.current;
-    if (!node) return;
-    const focusable = (): HTMLElement[] =>
-      [...node.querySelectorAll<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-      )].filter((el) => !el.hasAttribute("disabled"));
-    focusable()[0]?.focus();
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") {
-        onClose();
-        return;
-      }
-      if (e.key !== "Tab") return;
-      const items = focusable();
-      if (items.length === 0) return;
-      const first = items[0]!;
-      const last = items[items.length - 1]!;
-      const active = document.activeElement as HTMLElement | null;
-      if (e.shiftKey && (active === first || !node.contains(active))) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && active === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    node.addEventListener("keydown", onKey);
-    return () => node.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  // §17's FOCUS TRAP, and Escape — Radix's now (`ui/dialog.tsx`, 2026-10-09): focus starts on the
+  // first control and cannot Tab out into the page the overlay covers, and Escape closes, which is
+  // safe here in a way it is not for `McpConfirmModal` — nothing is blocked waiting on this answer.
 
   /**
    * Ticking and unticking, with the matrix deciding the consequences.
@@ -190,13 +155,18 @@ export function GrantDialog({
   const who = target ? target.display_name || target.email : "them";
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={editing ? `Edit access to ${agentSlug}` : `Grant access to ${agentSlug}`}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/35 px-4"
-    >
-      <div ref={surface} className="w-full max-w-lg rounded-lg border border-edge bg-elevated p-4 shadow-overlay">
+    <Dialog open onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent
+        // IN PLACE, so `test:access-tab` reads its markup without a browser.
+        inline
+        aria-label={editing ? `Edit access to ${agentSlug}` : `Grant access to ${agentSlug}`}
+        aria-describedby={undefined}
+        // THE BACKDROP DOES NOT CLOSE IT, as it never did: a note and an expiry date may be half
+        // typed, and a stray click is not an answer. Escape and Cancel are the ways out.
+        onInteractOutside={(e) => e.preventDefault()}
+        overlayClassName="items-center bg-ink/35 px-4"
+        className="w-full max-w-lg rounded-lg border border-edge bg-elevated p-4 shadow-overlay"
+      >
         <div className={TYPE.sectionLabel}>
           {editing ? "Edit access" : "Grant access"} · {agentSlug}
         </div>
@@ -317,7 +287,7 @@ export function GrantDialog({
             Cancel
           </button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
