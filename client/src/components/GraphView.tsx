@@ -87,7 +87,9 @@ import { useUiStore } from "../store/uiStore.ts";
 import { FindControl, GraphToolbar, RunControls, ToolButton, ToolDivider } from "./GraphToolbar.tsx";
 import { marksFor, type NodeMark } from "./graphNodeIcons.ts";
 import { Icon } from "../lib/icons/registry.ts";
-import { fmtLatency } from "../lib/format.ts";
+import { fmtCost, fmtLatency } from "../lib/format.ts";
+import { nodeTimings, replayFrames, stepsUpTo, type NodeTiming } from "../lib/graphReplay.ts";
+import { GraphRunStrip } from "./GraphRunStrip.tsx";
 
 // How much of this canvas the Step Details overlay covers when it is open. It is drawn over
 // the graph rather than beside it, so this is the one number that tells the framing the right
@@ -160,6 +162,8 @@ type FlowData = {
   out?: boolean;
   /** Hovered (and nothing is being dragged): its toolbar shows. */
   hover?: boolean;
+  /** How long it took and what it cost in the run on screen. */
+  timing?: NodeTiming;
   active: boolean;
   selected: boolean;
   status?: NodeStatus;
@@ -296,6 +300,25 @@ function Label({ d, sub }: { d: FlowData; sub?: string | null }) {
   );
 }
 
+/** A node's time and cost in the run on screen, beside its tile: a clock and a coin, and the numbers. */
+function Timing({ t, style }: { t?: NodeTiming; style: React.CSSProperties }) {
+  if (!t || t.runs === 0) return null;
+  return (
+    <span className="pointer-events-none absolute flex flex-col gap-0.5 whitespace-nowrap text-tiny tabular-nums text-muted" style={style}>
+      <span className="flex items-center gap-1" title={t.runs > 1 ? `${t.runs} runs` : undefined}>
+        <Icon.graphControl.time size={ICON.xs} />
+        {fmtLatency(t.ms)}
+      </span>
+      {t.cost !== null && (
+        <span className="flex items-center gap-1">
+          <Icon.graphControl.cost size={ICON.xs} />
+          {fmtCost(t.cost)}
+        </span>
+      )}
+    </span>
+  );
+}
+
 /** n8n's output dot, under the label, where the edge leaves. */
 function OutDot() {
   return (
@@ -391,7 +414,8 @@ function TileNode({ data }: NodeProps) {
           // The model this step calls, as a badge — the tile's own mark says what the step does.
           <span
             className="absolute flex items-center justify-center rounded-full"
-            style={{ right: -7, top: -7, width: 20, height: 20, background: CARD_BG, border: `1px solid ${BORDER}` }}
+            // Bottom right: the top right is where a run's status dot goes, and it would cover this.
+            style={{ right: -7, bottom: -7, width: 20, height: 20, background: CARD_BG, border: `1px solid ${BORDER}` }}
             title={`Calls ${d.badge.label}`}
           >
             <d.badge.Icon size={NODE_ICON.badge} />
@@ -408,6 +432,7 @@ function TileNode({ data }: NodeProps) {
           </span>
         )}
         <StatusDot status={d.status} />
+        <Timing t={d.timing} style={{ left: TILE + 8, top: 8 }} />
       </div>
       <Label d={d} sub={start ? (spec.doc ?? "When the agent is asked") : undefined} />
       {d.out && <OutDot />}
@@ -462,6 +487,7 @@ function AgentNode({ data }: NodeProps) {
       </div>
       <StatusDot status={d.status} />
       <HoverBar d={d} />
+      <Timing t={d.timing} style={{ left: 0, top: spec.h + 6 }} />
       {/* THE PORTS, down the card's right edge, each with the diamond n8n gives one. Their names
           ride on the dashed lines, by the circles — three names stacked at the card's edge would sit
           on top of each other's lines. */}
@@ -990,10 +1016,25 @@ export function GraphView() {
     return Math.round(detailOpen ? Math.min(STEP_PANEL_W, width * 0.85) + 24 : 0);
   }, [detailOpen]);
 
+  // ── replaying a finished run ────────────────────────────────────────────────
+  // While a frame is on screen it decides which node is lit, which edge is hot and which statuses
+  // show — the run as it was at that step, not as it ended.
+  const frames = useMemo(() => replayFrames(bucket), [bucket]);
+  const timings = useMemo(() => nodeTimings(bucket), [bucket]);
+  const [replayAt, setReplayAt] = useState<number | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [stripClosed, setStripClosed] = useState<string | null>(null);
+  useEffect(() => {
+    setReplayAt(null);
+    setPlaying(false);
+  }, [activeRunId]);
+  const replayFrame = replayAt !== null ? frames[replayAt] : undefined;
+  const stripShown = frames.length > 0 && !!run && run.status !== "running" && stripClosed !== activeRunId;
+
   // Read by the ResizeObserver below, which is registered once and must frame against what is
   // true when it fires rather than when it was created.
-  const live = useRef<{ covered: number; flow: FlowLayout | null; positions: Positions }>({ covered, flow, positions });
-  live.current = { covered, flow, positions };
+  const live = useRef<{ covered: number; flow: FlowLayout | null; positions: Positions; strip: boolean }>({ covered, flow, positions, strip: false });
+  live.current = { covered, flow, positions, strip: stripShown };
 
   // NOT SHOWN UNTIL IT IS FRAMED. React Flow paints its first frame at 100% from the origin, and
   // the framing lands a frame later — so the graph appeared in the corner and jumped to the middle.
@@ -1003,7 +1044,7 @@ export function GraphView() {
   const frameGraph = () => {
     const el = canvasRef.current;
     const inst = rf.current;
-    const { covered: hidden, flow: laid, positions: at } = live.current;
+    const { covered: hidden, flow: laid, positions: at, strip } = live.current;
     if (!el || !inst || !laid || el.clientWidth === 0) return;
     // A moved arrangement is framed by where its nodes now are, not by the layout's own box.
     const placed = laid.nodes.map((n) => ({ ...n, ...(at[n.id] ?? {}) }));
@@ -1016,7 +1057,12 @@ export function GraphView() {
         }
       : { minX: 0, minY: 0, maxX: laid.width, maxY: laid.height };
     // The toolbar floats over the canvas's top edge; the graph is framed in what is left below it.
-    const f = frameFor({ width: box.maxX - box.minX, height: box.maxY - box.minY }, { width: el.clientWidth, height: el.clientHeight - TOOLBAR_H }, hidden);
+    // ...and above the run strip, when there is one along the bottom.
+    const f = frameFor(
+      { width: box.maxX - box.minX, height: box.maxY - box.minY },
+      { width: el.clientWidth, height: el.clientHeight - TOOLBAR_H - (strip ? TOOLBAR_H : 0) },
+      hidden,
+    );
     inst.setViewport({ x: f.x - box.minX * f.zoom, y: TOOLBAR_H + f.y - box.minY * f.zoom, zoom: f.zoom });
     setFramed(true);
   };
@@ -1067,12 +1113,18 @@ export function GraphView() {
   // Not under the inspector, which covers the corner it sits in.
   const showMinimap = !!flow && frame.width > 0 && !inspectorOpen && frameFor(flow, frame, covered).kind === "top";
 
-  const activeNode = useMemo(() => (running ? activeNodeId(bucket) : undefined), [running, bucket]);
+  const activeNode = useMemo(
+    () => (replayFrame ? replayFrame.node : running ? activeNodeId(bucket) : undefined),
+    [replayFrame, running, bucket],
+  );
   const selectedNode = useMemo(() => {
     const step = selectedStepId && bucket ? bucket[selectedStepId] : undefined;
     return step ? stepNodeId(step, bucket!) : undefined;
   }, [selectedStepId, bucket]);
-  const nodeStatus = useMemo(() => computeNodeStatus(bucket, activeNode), [bucket, activeNode]);
+  const nodeStatus = useMemo(
+    () => computeNodeStatus(replayFrame && bucket ? stepsUpTo(bucket, replayFrame) : bucket, activeNode),
+    [replayFrame, bucket, activeNode],
+  );
 
   // Edges the current run actually traversed (source→target = real data direction), reused from
   // traceGraphMap. Drives the directional particle in the click micro-interaction.
@@ -1083,12 +1135,13 @@ export function GraphView() {
   }, [bucket]);
 
   const hotEdge = useMemo(() => {
+    if (replayFrame) return replayFrame.edge;
     if (selectedStepId && bucket) {
       const step = bucket[selectedStepId];
       return step ? stepEdge(step, bucket) : undefined;
     }
     return running ? activeEdge(bucket) : undefined;
-  }, [running, selectedStepId, bucket]);
+  }, [replayFrame, running, selectedStepId, bucket]);
 
   const nodes = useMemo<Node[]>(() => {
     if (!flow) return [];
@@ -1110,6 +1163,7 @@ export function GraphView() {
         mcp,
         out: flow.edges.some((e) => e.source === spec.id && !e.back && !e.port),
         hover: hovered === spec.id && !dragging,
+        timing: timings.get(spec.id),
         active: spec.id === activeNode,
         selected: spec.id === selectedNode || spec.id === selected?.id,
         status: nodeStatus[spec.id],
@@ -1129,7 +1183,7 @@ export function GraphView() {
         data,
       };
     });
-  }, [flow, order, marks, provider_, subs, activeNode, selectedNode, selected?.id, nodeStatus, mcpNames, positions, near, hovered, dragging]);
+  }, [flow, order, marks, provider_, subs, activeNode, selectedNode, selected?.id, nodeStatus, mcpNames, positions, near, hovered, dragging, timings]);
 
   const edges = useMemo<Edge[]>(() => {
     if (!flow) return [];
@@ -1382,6 +1436,20 @@ export function GraphView() {
         )}
       </ReactFlow>
       </NodeActionsContext.Provider>
+      {stripShown && (
+        <GraphRunStrip
+          count={frames.length}
+          at={replayAt}
+          playing={playing}
+          onAt={setReplayAt}
+          onPlaying={setPlaying}
+          onClose={() => {
+            setReplayAt(null);
+            setPlaying(false);
+            setStripClosed(activeRunId);
+          }}
+        />
+      )}
       {/* THE TOOLBAR, over the canvas rather than in it, so it neither pans nor zooms. */}
       <GraphToolbar>
         <RunControls agentId={activeAgentId} runnable={agentMeta?.runnable ?? false} />

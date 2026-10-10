@@ -25,6 +25,7 @@
     "test:graph-icons": "tsx src/components/graphIcons.test.ts",
     "test:graph-layout": "tsx src/lib/graphLayout.test.ts",
     "test:graph-node-icons": "tsx src/components/graphNodeIcons.test.ts",
+    "test:graph-replay": "tsx src/lib/graphReplay.test.ts",
     "test:chat-stream": "tsx src/store/chatStream.test.ts",
     "test:escape-hatches": "tsx src/components/escapeHatches.test.ts",
     "test:chat-keys": "tsx src/lib/chatKeys.test.ts",

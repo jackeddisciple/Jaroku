@@ -436,6 +436,14 @@ export const MANIFEST = {
     inspect: "InformationCircleIcon",
     openCode: "SourceCodeIcon",
     branch: "GitForkIcon",
+    // Stepping through a finished run, node by node; play and pause reuse `run` and `pause`.
+    first: "PreviousIcon",
+    prev: "ArrowLeft01Icon",
+    next: "ArrowRight01Icon",
+    last: "NextIcon",
+    // A node's time and cost in the run on screen.
+    time: "Clock01Icon",
+    cost: "Coins01Icon",
   },
 
   // ── Graph nodes ───────────────────────────────────────────────────────────
