@@ -19,6 +19,7 @@ import { useTraceStore } from "../store/traceStore.ts";
 import { inputKey, useUiStore } from "../store/uiStore.ts";
 import { iconBtn } from "./buttons.ts";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "./ui/dropdown-menu.tsx";
 import { Tip } from "./ui/tooltip.tsx";
 
 /** One control: a mark, its name as both tooltip and accessible name. */
@@ -249,6 +250,59 @@ export function FindControl({
         <Icon.graphControl.close size={ICON.sm} />
       </ToolButton>
     </span>
+  );
+}
+
+/**
+ * Which version of the agent the graph shows, and — once an earlier one is chosen — whether to draw
+ * it against the current one. Versions run 1..latest; nothing is offered for an agent with one.
+ */
+export function VersionControl({
+  latest, viewing, comparing, onPick, onCompare,
+}: {
+  latest: number;
+  viewing: number | null;
+  comparing: boolean;
+  onPick: (version: number | null) => void;
+  onCompare: (on: boolean) => void;
+}) {
+  if (latest < 2) return null;
+  const shown = viewing ?? latest;
+  return (
+    <>
+      <DropdownMenu>
+        <Tip label="Version" side="bottom">
+          <DropdownMenuTrigger asChild>
+            <button type="button" aria-label={`Version ${shown} of ${latest}`} className={`${iconBtn} h-7 gap-1 px-1.5`}>
+              <Icon.graphControl.versions size={ICON.sm} />
+              <span className="text-tiny tabular-nums">v{shown}</span>
+            </button>
+          </DropdownMenuTrigger>
+        </Tip>
+        <DropdownMenuContent align="center" aria-label="Versions">
+          <DropdownMenuRadioGroup
+            value={String(shown)}
+            onValueChange={(v) => onPick(Number(v) === latest ? null : Number(v))}
+          >
+            {Array.from({ length: latest }, (_, i) => latest - i).map((v) => (
+              <DropdownMenuRadioItem key={v} value={String(v)}>
+                v{v}
+                {v === latest && <span className="ml-2 text-tiny text-faint">current</span>}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {viewing !== null && (
+        <ToolButton
+          label={comparing ? "Stop comparing" : `Compare v${viewing} with v${latest}`}
+          pressed={comparing}
+          onClick={() => onCompare(!comparing)}
+        >
+          <Icon.graphControl.compare size={ICON.sm} />
+        </ToolButton>
+      )}
+    </>
   );
 }
 

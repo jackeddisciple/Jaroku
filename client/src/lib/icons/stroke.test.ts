@@ -21,8 +21,8 @@ const DIR = "src/lib/icons/generated";
 const files = readdirSync(DIR).filter((f) => f.endsWith(".tsx")).sort();
 const sources = new Map<string, string>(files.map((f) => [f, read(`${DIR}/${f}`)]));
 
-console.log("\nall 192 marks are present");
-check("192 generated components", files.length === 192, `${files.length}`);
+console.log("\nall 194 marks are present");
+check("194 generated components", files.length === 194, `${files.length}`);
 
 console.log("\nno mark carries its own weight");
 {

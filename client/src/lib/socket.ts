@@ -10,7 +10,7 @@ import { chatSubscriptionFor } from "./chatSubscription.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { useChatStore } from "../store/chatStore.ts";
-import { useGraphStore } from "../store/graphStore.ts";
+import { graphKey, useGraphStore } from "../store/graphStore.ts";
 import { useEvalStore } from "../store/evalStore.ts";
 import { useMcpStore } from "../store/mcpStore.ts";
 import { useProviderStore } from "../store/providerStore.ts";
@@ -236,7 +236,7 @@ function dispatch(msg: ServerMessage): void {
       else useBuildStore.getState().setAgentFiles(msg.agentId, msg.files);
       break;
     case "graph":
-      useGraphStore.getState().setGraph(msg.agentId, msg.graph);
+      useGraphStore.getState().setGraph(graphKey(msg.agentId, msg.version), msg.graph);
       break;
     case "gen": {
       // Generation is routed to its own store — it never touches trace state.
@@ -1583,9 +1583,10 @@ export function sendLoadAgentFiles(agentId: string): void {
   send({ cmd: "loadAgentFiles", agentId });
 }
 
-export function sendLoadAgentGraph(agentId: string): void {
-  useGraphStore.getState().markLoading(agentId);
-  send({ cmd: "loadAgentGraph", agentId });
+/** The agent's graph — or, with `version`, an earlier version's, kept under its own key (graphKey). */
+export function sendLoadAgentGraph(agentId: string, version?: number): void {
+  useGraphStore.getState().markLoading(graphKey(agentId, version));
+  send({ cmd: "loadAgentGraph", agentId, version });
 }
 
 // Debug depth: pause the live run at its next node boundary, or resume a paused run from its

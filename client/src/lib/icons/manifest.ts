@@ -444,6 +444,9 @@ export const MANIFEST = {
     // A node's time and cost in the run on screen.
     time: "Clock01Icon",
     cost: "Coins01Icon",
+    // Looking back: an earlier version's graph, and that version against the current one.
+    versions: "WorkHistoryIcon",
+    compare: "GitCompareIcon",
   },
 
   // ── Graph nodes ───────────────────────────────────────────────────────────

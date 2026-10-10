@@ -98,9 +98,9 @@ const relay = new WsRelay({
     if (agentId === "agent_unreadable") throw new Error("no such object: ws/x/agents/y/v2/agent.py");
     return OWNED[ctx.workspaceId]?.includes(agentId) ? [{ path: `${agentId}.py` }] : [];
   },
-  getAgentGraph: async (ctx, agentId) =>
+  getAgentGraph: async (ctx, agentId, version) =>
     OWNED[ctx.workspaceId]?.includes(agentId)
-      ? { agent_id: agentId }
+      ? { agent_id: agentId, ...(version ? { version } : {}) }
       : { agent_id: agentId, error: "no such agent in this workspace" },
   listMcpServers: async (ctx) => [{ id: ctx.workspaceId === A ? "server_a" : "server_b" }],
   listProviders: () => ({ providers: [], ownKeyForPlatform: false, models: [] }),
@@ -229,6 +229,15 @@ console.log("\nlocally-answered reads are per socket");
   const graph: any = await b.want((m) => m.channel === "graph" && m.agentId === "agent_b", "B graph");
   check(graph.graph?.agent_id === "agent_b" && !graph.graph?.error,
     "loadAgentGraph answers for the socket's own agent");
+
+  // AN EARLIER VERSION, for the Graph tab's picker and compare: asked for by number, answered under it,
+  // so the client holds it beside the current graph rather than replacing it.
+  b.send({ cmd: "loadAgentGraph", agentId: "agent_b", version: 2 });
+  const older: any = await b.want((m) => m.channel === "graph" && m.agentId === "agent_b" && m.version === 2, "B graph v2");
+  check(older.graph?.version === 2, "loadAgentGraph passes a named version through, and answers under it");
+  b.send({ cmd: "loadAgentGraph", agentId: "agent_b", version: -1 });
+  const bad: any = await b.want((m) => m.channel === "graph" && m.agentId === "agent_b" && m.version === undefined && m.graph?.version === undefined, "B graph, nonsense version");
+  check(!bad.graph?.version, "...and a version that is not a positive whole number is treated as none");
 
   b.send({ cmd: "loadAgentGraph", agentId: "agent_a" });
   const stolenGraph: any = await b.want((m) => m.channel === "graph" && m.agentId === "agent_a", "B graph for A's agent");

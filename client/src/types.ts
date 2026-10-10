@@ -402,6 +402,9 @@ export interface AgentGraph {
   nodes?: GraphNode[];
   edges?: GraphEdge[];
   routers?: GraphRouter[];
+  /** Which version this graph is of, and the agent's latest — what the version picker lists. */
+  version?: number;
+  latest?: number;
   error?: string;
   /**
    * The identifier the failure was about, kept out of the sentence.
@@ -2159,7 +2162,7 @@ export type ServerMessage =
   // cannot use one where the other was sent.
   | { channel: "agentFiles"; agentId: string; files: AgentFile[]; error?: undefined }
   | { channel: "agentFiles"; agentId: string; error: string; files?: undefined }
-  | { channel: "graph"; agentId: string; graph: AgentGraph | null }
+  | { channel: "graph"; agentId: string; version?: number; graph: AgentGraph | null }
   | { channel: "debug"; type: "paused"; runId: string; seq: number }
   | { channel: "debug"; type: "resumed"; runId: string; seqOffset: number }
   | { channel: "debug"; type: "boundary"; runId: string; seq: number; next: string[] }
@@ -2424,7 +2427,7 @@ export type ClientCommand =
   | { cmd: "undoEdit"; agentId: string }
   | { cmd: "discardEdit"; proposalId: string }
   | { cmd: "loadAgentFiles"; agentId: string }
-  | { cmd: "loadAgentGraph"; agentId: string }
+  | { cmd: "loadAgentGraph"; agentId: string; version?: number }
   | { cmd: "pauseRun"; runId: string }
   | { cmd: "resumeRun"; runId: string }
   // Stop, and there is nothing to resume from afterwards — which is why it is a third command

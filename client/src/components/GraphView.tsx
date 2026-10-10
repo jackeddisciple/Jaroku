@@ -44,14 +44,14 @@ import {
 import "@xyflow/react/dist/style.css";
 import { useBuildStore, type GenFile } from "../store/buildStore.ts";
 import { agentMcpToolNames } from "../store/mcpStore.ts";
-import { useGraphStore } from "../store/graphStore.ts";
+import { graphKey, useGraphStore } from "../store/graphStore.ts";
 import { DRAFT, graphErrorCopy, isDraftGraphError, isMappedGraphError, type GraphErrorCopy } from "../lib/graphError.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { graphPositionsKey, readPositions, topologySig, writePositions, type Positions } from "../lib/graphPositions.ts";
 import { sendBranchRun, sendLoadAgentGraph } from "../lib/socket.ts";
 import { alpha } from "../lib/palette.ts";
-import { ACCENT, ICON, INTERACTION, RADIUS, STATUS, SURFACE, TEXT } from "../lib/tokens.ts";
+import { ACCENT, ICON, INTERACTION, NODE_HUE, RADIUS, STATUS, SURFACE, TEXT } from "../lib/tokens.ts";
 import {
   AGENT_H,
   END_D,
@@ -84,7 +84,8 @@ import type { Step } from "../types.ts";
 import { TriggerIcon, modelResource, toolResource } from "./graphIcons.tsx";
 import { ProviderMark } from "../lib/icons.tsx";
 import { useUiStore } from "../store/uiStore.ts";
-import { FindControl, GraphToolbar, RunControls, ToolButton, ToolDivider } from "./GraphToolbar.tsx";
+import { FindControl, GraphToolbar, RunControls, ToolButton, ToolDivider, VersionControl } from "./GraphToolbar.tsx";
+import { compareGraphs, segmentMark, type DiffMark } from "../lib/graphCompare.ts";
 import { marksFor, type NodeMark } from "./graphNodeIcons.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { fmtCost, fmtLatency } from "../lib/format.ts";
@@ -164,6 +165,8 @@ type FlowData = {
   hover?: boolean;
   /** How long it took and what it cost in the run on screen. */
   timing?: NodeTiming;
+  /** In a comparison: new since the older version, or gone since it. */
+  diff?: DiffMark;
   active: boolean;
   selected: boolean;
   status?: NodeStatus;
@@ -177,6 +180,8 @@ type EdgeData = {
   dim?: boolean;
   /** Somebody has moved a node, so dagre's routing no longer describes where things are. */
   free?: boolean;
+  /** In a comparison: new since the older version, or gone since it. */
+  diff?: DiffMark;
   branch?: string;
   back?: boolean;
   via?: Point[];
@@ -243,15 +248,27 @@ function StatusDot({ status }: { status?: NodeStatus }) {
   );
 }
 
-/** A tile's border: the accent when selected, amber while it runs, otherwise the resting edge. */
+/**
+ * A tile's border: the accent when selected, amber while it runs, otherwise the resting edge — and
+ * in a comparison, green for a step that is new and a faint dash for one that is gone.
+ */
 function tileBorder(d: FlowData): string {
-  return d.active ? AMBER : d.selected ? SEL : BORDER;
+  if (d.active) return AMBER;
+  if (d.selected) return SEL;
+  if (d.diff === "added") return NODE_HUE.green;
+  if (d.diff === "removed") return TEXT.faint;
+  return BORDER;
 }
 /** ...and the soft ring n8n puts round a selected node. */
 function tileRing(d: FlowData): string | undefined {
   if (d.active) return `0 0 0 4px ${alpha(AMBER, 0.18)}`;
   if (d.selected) return `0 0 0 4px ${alpha(SEL, 0.12)}`;
+  if (d.diff === "added") return `0 0 0 4px ${alpha(NODE_HUE.green, 0.16)}`;
   return undefined;
+}
+/** A step that is gone since the older version: drawn where it was, faded and dashed. */
+function goneStyle(d: FlowData): React.CSSProperties | undefined {
+  return d.diff === "removed" ? { opacity: 0.45, borderStyle: "dashed" } : undefined;
 }
 
 /** The same plug outline as panelIcons.PlugIcon, at the size this corner marker needs. */
@@ -349,7 +366,7 @@ const NodeActionsContext = createContext<NodeActions | null>(null);
  */
 function HoverBar({ d }: { d: FlowData }) {
   const actions = useContext(NodeActionsContext);
-  if (!actions) return null;
+  if (!actions || d.diff === "removed") return null;
   const { id } = d.spec;
   return (
     <NodeToolbar isVisible={!!d.hover} position={Position.Top} offset={6}>
@@ -400,6 +417,7 @@ function TileNode({ data }: NodeProps) {
             borderRadius: radius,
             boxShadow: tileRing(d),
             transition: "border-color 120ms ease, box-shadow 120ms ease",
+            ...goneStyle(d),
           }}
         >
           <Mark mark={d.mark} size={NODE_ICON.tile} />
@@ -549,7 +567,7 @@ function FlowEdge({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPo
     ({ d: path, label } = d.lane !== undefined ? loopPath(s, t, d.lane) : routePath(s, t, d.via));
   }
   // Transient click highlight takes visual precedence over the persistent selection edge.
-  const stroke = d.pulse ? PULSE : d.hot ? AMBER : d.lit ? SEL : EDGE;
+  const stroke = d.pulse ? PULSE : d.hot ? AMBER : d.lit ? SEL : d.diff === "added" ? NODE_HUE.green : EDGE;
   const width = d.pulse || d.hot ? 2.4 : d.lit ? 2 : 1.75;
   return (
     <>
@@ -559,7 +577,8 @@ function FlowEdge({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPo
         style={{
           stroke,
           strokeWidth: width,
-          opacity: d.dim ? 0.25 : 1,
+          opacity: d.dim ? 0.25 : d.diff === "removed" ? 0.5 : 1,
+          strokeDasharray: d.diff === "removed" ? "5 4" : undefined,
           filter: d.pulse ? `drop-shadow(0 0 3px ${PULSE_GLOW})` : undefined,
           transition: REDUCED_MOTION ? undefined : "stroke 120ms ease, opacity 120ms ease",
         }}
@@ -897,9 +916,33 @@ export function GraphView() {
   }, [files, provider, model]);
 
   // The layout, memoised on the static graph and the agent's circles.
+  // ── an earlier version, alone or against this one ──────────────────────────
+  // `viewing` is the version picked (null: the current one). Its graph is fetched once and kept
+  // under its own key; comparing lays out both versions as one, every node either had, each marked.
+  const [viewing, setViewing] = useState<number | null>(null);
+  const [comparing, setComparing] = useState(false);
+  useEffect(() => {
+    setViewing(null);
+    setComparing(false);
+  }, [activeAgentId]);
+  const latest = graph?.latest ?? graph?.version ?? 0;
+  const older = useGraphStore((s) => (activeAgentId && viewing ? s.graphs[graphKey(activeAgentId, viewing)] : undefined));
+  const olderLoading = useGraphStore((s) => (activeAgentId && viewing ? s.loading[graphKey(activeAgentId, viewing)] : undefined));
+  useEffect(() => {
+    if (activeAgentId && viewing && !older && !olderLoading) sendLoadAgentGraph(activeAgentId, viewing);
+  }, [activeAgentId, viewing, older, olderLoading]);
+  const olderReady = !!older?.nodes?.length;
+  const diff = useMemo(
+    () => (comparing && graph?.nodes && olderReady ? compareGraphs(graph, older!) : undefined),
+    [comparing, graph, older, olderReady],
+  );
+  // What is drawn: the union when comparing, the picked version alone, or the current graph.
+  const shownGraph = diff ? diff.union : viewing && olderReady ? older! : graph;
+  const pastVersion = viewing !== null && olderReady;
+
   const flow = useMemo(
-    () => (graph?.nodes?.length ? buildFlow(graph, { resources: subs.map((x) => x.title) }) : null),
-    [graph, subs],
+    () => (shownGraph?.nodes?.length ? buildFlow(shownGraph, { resources: subs.map((x) => x.title) }) : null),
+    [shownGraph, subs],
   );
   const order = useMemo(() => (flow ? readingOrder(flow.nodes) : []), [flow]);
 
@@ -1164,6 +1207,7 @@ export function GraphView() {
         out: flow.edges.some((e) => e.source === spec.id && !e.back && !e.port),
         hover: hovered === spec.id && !dragging,
         timing: timings.get(spec.id),
+        diff: diff ? diff.nodes.get(spec.decides?.source ?? spec.id) : undefined,
         active: spec.id === activeNode,
         selected: spec.id === selectedNode || spec.id === selected?.id,
         status: nodeStatus[spec.id],
@@ -1183,7 +1227,7 @@ export function GraphView() {
         data,
       };
     });
-  }, [flow, order, marks, provider_, subs, activeNode, selectedNode, selected?.id, nodeStatus, mcpNames, positions, near, hovered, dragging, timings]);
+  }, [flow, order, marks, provider_, subs, activeNode, selectedNode, selected?.id, nodeStatus, mcpNames, positions, near, hovered, dragging, timings, diff]);
 
   const edges = useMemo<Edge[]>(() => {
     if (!flow) return [];
@@ -1215,10 +1259,11 @@ export function GraphView() {
         data: {
           hot, lit, dim, pulse: connected, particle, pulseKey: pulse?.key, branch: e.branch, back: e.back, via: e.via, lane: e.lane,
           flowing: hot && running && !REDUCED_MOTION, free: moved,
+          diff: diff ? segmentMark(diff, e.from, e.to) : undefined,
         } satisfies EdgeData,
       };
     });
-  }, [flow, hotEdge, pulse, traversed, near, hovered, running, moved]);
+  }, [flow, hotEdge, pulse, traversed, near, hovered, running, moved, diff]);
 
   // Clicking a node and pressing Enter on it do the same thing: open its inspector, and only that.
   //
@@ -1349,7 +1394,8 @@ export function GraphView() {
         }
       }}
     >
-      <NodeActionsContext.Provider value={nodeActions}>
+      {/* An earlier version's steps are not the code that is loaded: no toolbar over them. */}
+      <NodeActionsContext.Provider value={pastVersion ? null : nodeActions}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -1458,6 +1504,17 @@ export function GraphView() {
           find={(q) => findNodes(flow.nodes, q).map((n) => n.id)}
           onFocus={focusNode}
           openSignal={findSignal}
+        />
+        {latest > 1 && <ToolDivider />}
+        <VersionControl
+          latest={latest}
+          viewing={viewing}
+          comparing={comparing}
+          onPick={(v) => {
+            setViewing(v);
+            if (v === null) setComparing(false);
+          }}
+          onCompare={setComparing}
         />
       </GraphToolbar>
       {selected && flow && (() => {

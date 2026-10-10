@@ -66,6 +66,9 @@ export interface GraphResult {
   nodes?: GraphNode[];
   edges?: GraphEdge[];
   routers?: GraphRouter[];
+  /** Which version of the agent this graph is of, and the agent's latest — added when served, never cached. */
+  version?: number;
+  latest?: number;
   error?: string;
   /**
    * The identifier the failure was about, kept OUT of the sentence.

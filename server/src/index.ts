@@ -2674,20 +2674,30 @@ function readDiskConnectors(agentId: string): string[] {
 // even SEEN this agent before can still answer instantly once any replica has introspected it
 // once.
 const graphCache = new Map<string, Promise<GraphResult>>();
-async function agentGraph(ctx: TenantContext, agentId: string): Promise<GraphResult> {
+/**
+ * An agent's graph — the version it is on, or, for the Graph tab's version picker and compare, an
+ * earlier one. Every version's graph is cached under its own key, so looking back costs one
+ * introspection per version, once.
+ */
+async function agentGraph(ctx: TenantContext, agentId: string, version?: number): Promise<GraphResult> {
   if (!isSafeAgentId(agentId)) return { agent_id: agentId, error: "invalid agent id" };
   const agent = await agentRepo.bySlug(ctx, agentId);
   if (!agent) return { agent_id: agentId, error: "no such agent in this workspace" };
+  // Versions run 1..current; anything else names nothing this agent has.
+  if (version !== undefined && (!Number.isInteger(version) || version < 1 || version > agent.current_version)) {
+    return { agent_id: agentId, error: `this agent has no version ${version}` };
+  }
+  const v = version ?? agent.current_version;
 
   // Keyed by the AGENT UUID and the version, not by the slug: two workspaces may each have a
   // `support_bot`, and one of them must not be shown the other's topology out of a cache.
-  const key = `${agent.id}@${agent.current_version}`;
+  const key = `${agent.id}@${v}`;
   let pending = graphCache.get(key);
   if (!pending) {
     pending = (async () => {
-      const dir = join(tmpdir(), `jaroku-graph-${agent.id}-${agent.current_version}`);
+      const dir = join(tmpdir(), `jaroku-graph-${agent.id}-${v}`);
       try {
-        const written = await projects.materialise(ctx, agent.id, agent.current_version, dir);
+        const written = await projects.materialise(ctx, agent.id, v, dir);
         if (written.includes("agent.py")) {
           // BY THE AGENT'S UUID, NOT THE SLUG `introspectGraphCached` is keyed by. `agent_versions.agent_id`
           // is a uuid: on SQLite a slug simply matched nothing, so the cache never worked and nobody
@@ -2697,7 +2707,7 @@ async function agentGraph(ctx: TenantContext, agentId: string): Promise<GraphRes
             getGraphCache: (_slug: string, v: number) => agentRepo.getGraphCache(ctx, agent.id, v),
             setGraphCache: (_slug: string, v: number, g: unknown) => agentRepo.setGraphCache(ctx, agent.id, v, g),
           };
-          return await introspectGraphCached(RUNTIME_DIR, agentId, agent.current_version, store, dir, codeCheckFor(ctx));
+          return await introspectGraphCached(RUNTIME_DIR, agentId, v, store, dir, codeCheckFor(ctx));
         }
       } catch (err) {
         // THE KEY TRAVELS AS ITS OWN FIELD, and the sentence stays a sentence. `ObjectNotFound`
@@ -2729,7 +2739,9 @@ async function agentGraph(ctx: TenantContext, agentId: string): Promise<GraphRes
     });
     graphCache.set(key, pending);
   }
-  return pending;
+  // WHICH VERSION THIS IS, AND HOW MANY THERE ARE, beside the cached topology rather than in it: the
+  // Graph tab's version picker lists 1..latest, and the latest moves while a version's graph does not.
+  return pending.then((r) => (r.error ? r : { ...r, version: v, latest: agent.current_version }));
 }
 
 // THE HTTP SURFACE.
@@ -4905,9 +4917,9 @@ const relay = new WsRelay({
   // generated source code by name and getting it.
   listAgentFiles: async (ctx, agentId) =>
     (await agentRepo.bySlug(ctx, agentId)) ? agentProjectFiles(ctx, agentId) : [],
-  getAgentGraph: async (ctx, agentId) =>
+  getAgentGraph: async (ctx, agentId, version) =>
     (await agentRepo.bySlug(ctx, agentId))
-      ? agentGraph(ctx, agentId)
+      ? agentGraph(ctx, agentId, version)
       : { agent_id: agentId, error: "no such agent in this workspace" },
   listMcpServers: (ctx) => mcpRegistry.list(ctx),
   // WHATEVER IS BLOCKED RIGHT NOW, for a tab that connected after the ask went out. See the

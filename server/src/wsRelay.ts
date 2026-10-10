@@ -416,7 +416,8 @@ export type DiscardEditCommand = { cmd: "discardEdit"; proposalId: string };
 export type LoadAgentFilesCommand = { cmd: "loadAgentFiles"; agentId: string };
 // Graph View (Week 5): request the agent's static LangGraph topology. Answered locally by
 // spawning the isolated `jaroku_runner.graph` entrypoint — never touches the trace stream.
-export type LoadAgentGraphCommand = { cmd: "loadAgentGraph"; agentId: string };
+/** `version` asks for an earlier version's graph — the Graph tab's picker and compare. Absent, the current one. */
+export type LoadAgentGraphCommand = { cmd: "loadAgentGraph"; agentId: string; version?: number };
 // Debug depth (Week 6): pause a running run at its next node boundary, or resume a paused run
 // from its durable checkpoint. Both are forwarded to the app (control-plane, never touch the
 // frozen trace stream).
@@ -4217,7 +4218,7 @@ export interface RelayOptions {
   // and the check becomes structural rather than a lookup.
   listAgents?: (ctx: TenantContext) => unknown[] | Promise<unknown[]>;
   listAgentFiles?: (ctx: TenantContext, agentId: string) => unknown[] | Promise<unknown[]>;
-  getAgentGraph?: (ctx: TenantContext, agentId: string) => Promise<unknown>;
+  getAgentGraph?: (ctx: TenantContext, agentId: string, version?: number) => Promise<unknown>;
   listMcpServers?: (ctx: TenantContext) => unknown[] | Promise<unknown[]>;
   /**
    * Every confirmation this workspace is currently blocked on, for a socket that has just
@@ -4989,13 +4990,17 @@ export class WsRelay {
           } else if (msg.cmd === "loadAgentGraph" && typeof msg.agentId === "string") {
             // Async: spawn introspection, then answer only the requesting client.
             const agentId = msg.agentId;
+            // An earlier version, when one is named; answered under that version so the client can
+            // hold it beside the current one rather than replacing it.
+            const version = typeof msg.version === "number" && Number.isInteger(msg.version) && msg.version > 0 ? msg.version : undefined;
             void live
-              .then((ctx) => this.opts.getAgentGraph?.(ctx, agentId))
-              .then((graph) => this.sendTo(ws, { channel: "graph", agentId, graph: graph ?? null }))
+              .then((ctx) => this.opts.getAgentGraph?.(ctx, agentId, version))
+              .then((graph) => this.sendTo(ws, { channel: "graph", agentId, version, graph: graph ?? null }))
               .catch((err) =>
                 this.sendTo(ws, {
                   channel: "graph",
                   agentId,
+                  version,
                   graph: { agent_id: agentId, error: String((err as Error)?.message ?? err) },
                 }),
               );

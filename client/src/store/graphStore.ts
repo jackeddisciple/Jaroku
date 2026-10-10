@@ -6,6 +6,14 @@
 import { create } from "zustand";
 import type { AgentGraph } from "../types.ts";
 
+/**
+ * Where a graph is kept: the agent's own id for the version it is on, `<agent>@v<n>` for an earlier
+ * one the version picker asked for — held beside the current graph, never in its place.
+ */
+export function graphKey(agentId: string, version?: number): string {
+  return version ? `${agentId}@v${version}` : agentId;
+}
+
 interface GraphState {
   // agentId -> topology (or an error placeholder). Undefined = never requested / in flight.
   graphs: Record<string, AgentGraph>;
