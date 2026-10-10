@@ -1566,6 +1566,12 @@ jobs:
           # Gmail envelope on the calendar tool of the one workspace that has both connectors and
           # for which telling them apart is the entire point of the icon.
           npm run test:graph-icons
+          # THE GRAPH TAB'S LAYOUT, which was drawn left to right into a column: a seven-step agent
+          # came out 2,400px wide, cropped at both ends with four-pixel labels. It runs top to
+          # bottom now, and this holds what that was for — it fits, a long agent opens readable from
+          # the top, no edge runs through a card, a fork is a named decision, and every step keeps
+          # the one name the code and the trace give it.
+          npm run test:graph-layout
           # WHERE EACH COMPOSER CONTROL SITS, which §12 states as two acceptance criteria written
           # as things somebody checks by resizing a window — 1c, that hiding a control moves no
           # other control, and 1d, that the bar never wraps and the right three collapse into the
