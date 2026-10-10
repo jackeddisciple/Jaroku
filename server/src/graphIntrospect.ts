@@ -125,8 +125,14 @@ export interface GraphCacheStore {
 }
 
 /**
- * introspectGraph, but at most once per (agentId, version) ever — a version's topology cannot
- * change without the version changing, so a cached result is never stale.
+ * introspectGraph, but at most once per (agentId, version) and graph schema — a version's topology
+ * cannot change without the version changing, so a cached result is stale only when the runner has
+ * learned to say more about it since. A cached graph older than GRAPH_SCHEMA (one written before
+ * `schema` existed has none) is introspected again and the new answer replaces it; that is how a
+ * version built before the Graph view could tell model calls from steps comes to show them.
+ *
+ * An app too old to know the new schema answers with the old one, which is cached and served as
+ * before — and asked again on the next view, until an app that knows more is the one answering.
  *
  * A cached ERROR is not cached. Only a genuine result (nodes/edges present, no error) is worth
  * remembering — a transient sandbox failure ("spawn failed", a timeout under load) caching
@@ -141,7 +147,9 @@ export async function introspectGraphCached(
   sandbox: CodeCheckSandbox = defaultCodeCheckSandbox,
 ): Promise<GraphResult> {
   const cached = await store.getGraphCache(agentId, version);
-  if (cached && typeof cached === "object") return cached as GraphResult;
+  if (cached && typeof cached === "object" && ((cached as GraphResult).schema ?? 1) >= GRAPH_SCHEMA) {
+    return cached as GraphResult;
+  }
 
   const result = await introspectGraph(runtimeDir, agentId, projectDir, sandbox);
   if (!result.error) {

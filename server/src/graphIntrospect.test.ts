@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-import { introspectGraphCached, type GraphCacheStore, type GraphResult } from "./graphIntrospect.ts";
+import { GRAPH_SCHEMA, introspectGraphCached, type GraphCacheStore, type GraphResult } from "./graphIntrospect.ts";
 import type { CodeCheckSandbox, CodeCheckSpec, CodeCheckResult } from "./sandbox/codeCheck.ts";
 
 let fail = 0;
@@ -37,7 +37,7 @@ class FakeStore implements GraphCacheStore {
   }
 }
 
-const ok: GraphResult = { agent_id: "a1", nodes: [{ id: "start", type: "start" }], edges: [] };
+const ok: GraphResult = { agent_id: "a1", schema: GRAPH_SCHEMA, nodes: [{ id: "start", type: "start" }], edges: [] };
 const okResult: CodeCheckResult = { stdout: JSON.stringify(ok), stderr: "", timedOut: false, exitCode: 0, spawnError: null, truncated: false };
 
 await (async () => {
@@ -75,6 +75,38 @@ await (async () => {
   const second = await introspectGraphCached("/rt", "a1", 1, store, undefined, sandbox);
   check("a FAILED result is never cached — the next call tries again", sandbox.calls === 2);
   check("...and can succeed once the transient problem is gone", !second.error);
+})();
+
+// A GRAPH CACHED BEFORE THE RUNNER COULD SAY MORE. Schema 2 added which steps call the model, each
+// step's docstring and the function deciding at each fork; a version introspected before then is
+// cached forever without them, so the Graph view could never show them for any agent built earlier.
+console.log("\na graph cached under an older schema is introspected again");
+await (async () => {
+  const sandbox = new FakeSandbox([okResult]);
+  const store = new FakeStore();
+  await store.setGraphCache("a1", 1, { agent_id: "a1", nodes: [{ id: "start", type: "start" }], edges: [] });
+  const fresh = await introspectGraphCached("/rt", "a1", 1, store, undefined, sandbox);
+  check("a cached graph with no schema is not served", sandbox.calls === 1);
+  check("...the new answer is what comes back", fresh.schema === GRAPH_SCHEMA);
+  check("...and it replaces the old one in the cache",
+    (await store.getGraphCache("a1", 1) as GraphResult | undefined)?.schema === GRAPH_SCHEMA);
+  await introspectGraphCached("/rt", "a1", 1, store, undefined, sandbox);
+  check("...after which the cache is used again", sandbox.calls === 1);
+})();
+
+await (async () => {
+  // An app older than the schema answers with what it knows. That answer is still a graph, so it is
+  // served — and asked for again next time, until an app that knows the new schema is answering.
+  const old: GraphResult = { agent_id: "a1", schema: GRAPH_SCHEMA - 1, nodes: [{ id: "start", type: "start" }], edges: [] };
+  const oldResult: CodeCheckResult = { ...okResult, stdout: JSON.stringify(old) };
+  const sandbox = new FakeSandbox([oldResult, oldResult, okResult]);
+  const store = new FakeStore();
+  const first = await introspectGraphCached("/rt", "a1", 1, store, undefined, sandbox);
+  check("an older schema's answer is still shown", !first.error && first.nodes?.length === 1);
+  await introspectGraphCached("/rt", "a1", 1, store, undefined, sandbox);
+  check("...but is asked for again on the next view", sandbox.calls === 2);
+  const third = await introspectGraphCached("/rt", "a1", 1, store, undefined, sandbox);
+  check("...until the current schema answers", third.schema === GRAPH_SCHEMA && sandbox.calls === 3);
 })();
 
 // ---------------------------------------------------------------------------------------------
@@ -118,6 +150,8 @@ console.log("\nan unreadable object explains itself without putting a key in the
   const clientTypes = readFileSync(CLIENT, "utf8");
   const agentGraph = /export interface AgentGraph \{[\s\S]*?\n\}/.exec(clientTypes)?.[0] ?? "";
   check("the client's AgentGraph declares errorKey too", /errorKey\?: string/.test(agentGraph));
+  check("the client's AgentGraph declares the schema and the routers the server sends",
+    /schema\?: number/.test(agentGraph) && /routers\?: GraphRouter\[\]/.test(agentGraph));
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

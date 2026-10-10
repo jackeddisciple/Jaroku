@@ -356,6 +356,13 @@ export type GraphNodeType = "start" | "end" | "tool" | "agent";
 export interface GraphNode {
   id: string;
   type: GraphNodeType | string;
+  /**
+   * Whether the step can reach the model it was built with (schema 2); null when the runtime could
+   * not tell, absent on a graph introspected before it could. What marks a card "Model call".
+   */
+  calls_model?: boolean | null;
+  /** The first line of the node function's docstring — the card's description. */
+  doc?: string | null;
 }
 
 export interface GraphEdge {
@@ -365,10 +372,23 @@ export interface GraphEdge {
   label: string | null;
 }
 
+/**
+ * The function deciding at a conditional fork. The compiled topology has the fork's edges and no
+ * node for it, so this is where the Graph view's decision pill gets its name and its rule.
+ */
+export interface GraphRouter {
+  source: string;
+  name: string | null;
+  doc: string | null;
+}
+
 export interface AgentGraph {
   agent_id: string;
+  /** The runner's GRAPH_SCHEMA. Absent on a graph introspected before schema 2. */
+  schema?: number;
   nodes?: GraphNode[];
   edges?: GraphEdge[];
+  routers?: GraphRouter[];
   error?: string;
   /**
    * The identifier the failure was about, kept out of the sentence.
