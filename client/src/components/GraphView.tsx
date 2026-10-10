@@ -44,7 +44,6 @@ import { agentMcpToolNames } from "../store/mcpStore.ts";
 import { useGraphStore } from "../store/graphStore.ts";
 import { DRAFT, graphErrorCopy, isDraftGraphError, isMappedGraphError, type GraphErrorCopy } from "../lib/graphError.ts";
 import { useTraceStore } from "../store/traceStore.ts";
-import { useUiStore } from "../store/uiStore.ts";
 import { sendLoadAgentGraph } from "../lib/socket.ts";
 import { alpha } from "../lib/palette.ts";
 import { ACCENT, ICON, INTERACTION, RADIUS, STATUS, SURFACE, TEXT } from "../lib/tokens.ts";
@@ -667,7 +666,6 @@ export function GraphView() {
   const runs = useTraceStore((s) => s.runs);
   const running = activeRunId ? runs[activeRunId]?.status === "running" : false;
   const selectedStepId = useTraceStore((s) => s.selectedStepId);
-  const selectStep = useTraceStore((s) => s.selectStep);
 
   // A draft is not asked about: it has no code, so the answer is already known.
   const draft = agent?.draft === true;
@@ -871,17 +869,17 @@ export function GraphView() {
     });
   }, [flow, hotEdge, pulse, traversed]);
 
-  // Clicking a node and pressing Enter on it do the same thing: open what it is, and point the
-  // composer and the trace at it. A decision is not a step; it stands for the step it decides for.
+  // Clicking a node and pressing Enter on it do the same thing: open its inspector, and only that.
+  //
+  // IT USED TO REACH INTO THE COMPOSER AS WELL. A click set the composer's selected node and the
+  // trace's selected step, and each of those draws a context chip over the composer — "node:
+  // extract_jd", "step #3" — a small dialog appearing somewhere other than where somebody clicked.
+  // The inspector already says what the step is and how it ran in the run on screen.
   const openNode = (id: string, viaClick: boolean) => {
     const spec = flow?.nodes.find((n) => n.id === id);
     if (!spec) return;
-    const nodeId = spec.decides?.source ?? spec.id;
     setSelected({ id: spec.id });
-    useUiStore.getState().setSelectedNodeId(nodeId); // composer context: this graph node
     if (viaClick) triggerPulse(spec.id); // transient connected-edge highlight + directional particle
-    const step = latestStepForNode(nodeId, bucket);
-    selectStep(step ? step.id : null);
   };
 
   if (!activeAgentId) return <Empty title="No agent selected" hint="Pick one in the sidebar and its compiled topology is introspected and drawn here." />;
@@ -976,10 +974,7 @@ export function GraphView() {
         ariaLabelConfig={READ_ONLY_ARIA}
         elementsSelectable
         onNodeClick={(_, n) => openNode(n.id, true)}
-        onPaneClick={() => {
-          setSelected(null);
-          useUiStore.getState().setSelectedNodeId(null);
-        }}
+        onPaneClick={() => setSelected(null)}
       >
         <Background variant={BackgroundVariant.Dots} gap={28} size={1} color={SURFACE.chrome} />
         <Controls
