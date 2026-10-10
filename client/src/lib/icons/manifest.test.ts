@@ -65,7 +65,8 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // 239 WITH `graph.resetLayout`, which puts a dragged graph back.
   // 242 WITH THE GRAPH TOOLBAR'S RUN, PAUSE AND STOP — marks the set already had.
   // 246 WITH ITS FIND: the search, the two arrows that step through matches, and a close.
-  check("246 registry keys", entries.length === 246, `${entries.length}`);
+  // 249 WITH THE HOVER TOOLBAR'S INSPECT, OPEN CODE AND BRANCH.
+  check("249 registry keys", entries.length === 249, `${entries.length}`);
   const names = new Set(entries.map((e) => e.export));
   // 104 from icons_integration's appendix, plus D8's 13 — the composer glyphs that had to move
   // here when `@hugeicons/react` came out. See the note at the top of `registry.ts`.
@@ -91,7 +92,8 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // 186 WITH THE GRAPH'S NODES: 61 of the 70 `graphNode` marks; the other nine (`DatabaseIcon`,
   // `CreditCardIcon`, `Share08Icon`, `PlayIcon` and so on) were already drawn by other keys.
   // 186 STILL WITH `graph.resetLayout`: it draws `Undo02Icon`, which `evals.revertRubric` already does.
-  check("186 distinct marks", names.size === 186, `${names.size}`);
+  // 187 WITH `InformationCircleIcon`, for the hover toolbar's Inspect.
+  check("187 distinct marks", names.size === 187, `${names.size}`);
   check("no key is declared twice", new Set(entries.map((e) => e.key)).size === entries.length);
 }
 

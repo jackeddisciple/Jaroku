@@ -432,6 +432,10 @@ export const MANIFEST = {
     findPrev: "ArrowUp01Icon",
     findNext: "ArrowDown01Icon",
     close: "Cancel01Icon",
+    // The toolbar over a hovered node: what it is, its code, and a run branched from it.
+    inspect: "InformationCircleIcon",
+    openCode: "SourceCodeIcon",
+    branch: "GitForkIcon",
   },
 
   // ── Graph nodes ───────────────────────────────────────────────────────────

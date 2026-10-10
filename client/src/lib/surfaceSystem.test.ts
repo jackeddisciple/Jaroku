@@ -221,7 +221,9 @@ console.log("\n§07: where each level is allowed to appear");
   // THE RADIX CONTENT ELEMENTS FLOAT BY CONSTRUCTION (2026-10-09). `<DialogContent` is `role="dialog"`
   // over an overlay, and `<PopoverContent` / `<DropdownMenuContent` sit in Radix's fixed-position
   // wrapper — each as surely out of the flow as the classes above say.
-  const FLOATS = /\b!?(?:absolute|fixed|inset-0|backdrop-blur)\b|role="dialog"|<(?:Dialog|Popover|DropdownMenu)Content\b/;
+  // ...and `<NodeToolbar`, which React Flow draws in its own absolutely positioned layer over the
+  // canvas, the way Radix's wrapper carries a popover — the graph's hover toolbar sits in one.
+  const FLOATS = /\b!?(?:absolute|fixed|inset-0|backdrop-blur)\b|role="dialog"|<(?:Dialog|Popover|DropdownMenu)Content\b|<NodeToolbar\b/;
   /**
    * THE SURFACES THAT FLOAT BY SOMETHING OTHER THAN A CLASS, named rather than pattern-matched
    * because a pattern wide enough to cover them would cover every card in the app as well.

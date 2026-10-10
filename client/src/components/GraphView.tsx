@@ -19,7 +19,7 @@
 // Trace sync stays intact: cards carry status dots and the active/selected accent bar, and clicking
 // a node still selects its trace step.
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -29,6 +29,7 @@ import {
   MiniMap,
   Handle,
   MarkerType,
+  NodeToolbar,
   Position,
   BaseEdge,
   EdgeLabelRenderer,
@@ -48,7 +49,7 @@ import { DRAFT, graphErrorCopy, isDraftGraphError, isMappedGraphError, type Grap
 import { useTraceStore } from "../store/traceStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { graphPositionsKey, readPositions, topologySig, writePositions, type Positions } from "../lib/graphPositions.ts";
-import { sendLoadAgentGraph } from "../lib/socket.ts";
+import { sendBranchRun, sendLoadAgentGraph } from "../lib/socket.ts";
 import { alpha } from "../lib/palette.ts";
 import { ACCENT, ICON, INTERACTION, RADIUS, STATUS, SURFACE, TEXT } from "../lib/tokens.ts";
 import {
@@ -83,7 +84,7 @@ import type { Step } from "../types.ts";
 import { TriggerIcon, modelResource, toolResource } from "./graphIcons.tsx";
 import { ProviderMark } from "../lib/icons.tsx";
 import { useUiStore } from "../store/uiStore.ts";
-import { FindControl, GraphToolbar, RunControls, ToolDivider } from "./GraphToolbar.tsx";
+import { FindControl, GraphToolbar, RunControls, ToolButton, ToolDivider } from "./GraphToolbar.tsx";
 import { marksFor, type NodeMark } from "./graphNodeIcons.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { fmtLatency } from "../lib/format.ts";
@@ -157,6 +158,8 @@ type FlowData = {
   mcp?: boolean;
   /** Whether an edge leaves this node downwards — n8n's output dot is drawn only then. */
   out?: boolean;
+  /** Hovered (and nothing is being dragged): its toolbar shows. */
+  hover?: boolean;
   active: boolean;
   selected: boolean;
   status?: NodeStatus;
@@ -303,6 +306,51 @@ function OutDot() {
   );
 }
 
+// ── the toolbar over a hovered node ───────────────────────────────────────────
+// What a node's own controls do, given by GraphView — the nodes are drawn by React Flow, which only
+// hands them their data.
+type NodeActions = {
+  inspect: (id: string) => void;
+  code: (id: string) => void;
+  /** Branch a run from this node's checkpoint, when the run on screen passed through it. */
+  branch: (id: string) => void;
+  canBranch: (id: string) => boolean;
+  /** Keep the toolbar up while the pointer is on it, and let it go when it leaves. */
+  hold: (id: string | null) => void;
+};
+const NodeActionsContext = createContext<NodeActions | null>(null);
+
+/**
+ * n8n's node toolbar, over the tile while it is hovered: Inspect, Open code, and — when the run on
+ * screen went through this step — Branch from here. Marks only, as the canvas toolbar is.
+ */
+function HoverBar({ d }: { d: FlowData }) {
+  const actions = useContext(NodeActionsContext);
+  if (!actions) return null;
+  const { id } = d.spec;
+  return (
+    <NodeToolbar isVisible={!!d.hover} position={Position.Top} offset={6}>
+      <div
+        className="flex items-center gap-0.5 rounded-card border border-edge bg-elevated px-0.5 py-0.5 shadow-floating"
+        onMouseEnter={() => actions.hold(id)}
+        onMouseLeave={() => actions.hold(null)}
+      >
+        <ToolButton label="Inspect" onClick={() => actions.inspect(id)}>
+          <Icon.graphControl.inspect size={ICON.sm} />
+        </ToolButton>
+        <ToolButton label="Open code" onClick={() => actions.code(id)}>
+          <Icon.graphControl.openCode size={ICON.sm} />
+        </ToolButton>
+        {actions.canBranch(id) && (
+          <ToolButton label="Branch a run from here" onClick={() => actions.branch(id)}>
+            <Icon.graphControl.branch size={ICON.sm} />
+          </ToolButton>
+        )}
+      </div>
+    </NodeToolbar>
+  );
+}
+
 // ── a tile: Start, a step, a fork ─────────────────────────────────────────────
 function TileNode({ data }: NodeProps) {
   const d = data as FlowData;
@@ -363,6 +411,7 @@ function TileNode({ data }: NodeProps) {
       </div>
       <Label d={d} sub={start ? (spec.doc ?? "When the agent is asked") : undefined} />
       {d.out && <OutDot />}
+      {!start && <HoverBar d={d} />}
       <Handles tileMid={TILE / 2} tileHalf={TILE / 2} />
     </div>
   );
@@ -412,6 +461,7 @@ function AgentNode({ data }: NodeProps) {
         </span>
       </div>
       <StatusDot status={d.status} />
+      <HoverBar d={d} />
       {/* THE PORTS, down the card's right edge, each with the diamond n8n gives one. Their names
           ride on the dashed lines, by the circles — three names stacked at the card's edge would sit
           on top of each other's lines. */}
@@ -863,7 +913,17 @@ export function GraphView() {
   };
 
   // ── hovering a node lights its path ─────────────────────────────────────────
+  // Let go a moment late, so the pointer can travel from a tile up onto its toolbar without the
+  // toolbar vanishing on the way.
   const [hovered, setHovered] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const hideTimer = useRef<number | undefined>(undefined);
+  const hover = (id: string | null) => {
+    window.clearTimeout(hideTimer.current);
+    if (id) setHovered(id);
+    else hideTimer.current = window.setTimeout(() => setHovered(null), 160);
+  };
+  useEffect(() => () => window.clearTimeout(hideTimer.current), []);
   const near = useMemo(() => {
     if (!hovered || !flow) return null;
     const set = new Set([hovered]);
@@ -1049,6 +1109,7 @@ export function GraphView() {
         ports: agentCard ? flow.edges.filter((e) => e.port).map((e) => e.port!) : undefined,
         mcp,
         out: flow.edges.some((e) => e.source === spec.id && !e.back && !e.port),
+        hover: hovered === spec.id && !dragging,
         active: spec.id === activeNode,
         selected: spec.id === selectedNode || spec.id === selected?.id,
         status: nodeStatus[spec.id],
@@ -1068,7 +1129,7 @@ export function GraphView() {
         data,
       };
     });
-  }, [flow, order, marks, provider_, subs, activeNode, selectedNode, selected?.id, nodeStatus, mcpNames, positions, near]);
+  }, [flow, order, marks, provider_, subs, activeNode, selectedNode, selected?.id, nodeStatus, mcpNames, positions, near, hovered, dragging]);
 
   const edges = useMemo<Edge[]>(() => {
     if (!flow) return [];
@@ -1154,6 +1215,21 @@ export function GraphView() {
     triggerPulse(spec.id);
   };
 
+  // What each node's hover toolbar does. Branching needs the run on screen to have passed through
+  // the node — its checkpoint there is what the branch starts from (the same call the state editor
+  // makes) — and a run that has finished or paused, not one still moving.
+  const branchable = run && run.status !== "running" ? bucket : undefined;
+  const nodeActions: NodeActions = {
+    inspect: (id) => openNode(id, false),
+    code: (id) => openCode(id),
+    canBranch: (id) => !!activeRunId && !!latestStepForNode(id, branchable),
+    branch: (id) => {
+      const step = latestStepForNode(id, branchable);
+      if (activeRunId && step) sendBranchRun(activeRunId, step.seq);
+    },
+    hold: hover,
+  };
+
   if (!activeAgentId) return <Empty title="No agent selected" hint="Pick one in the sidebar and its compiled topology is introspected and drawn here." />;
   // A DRAFT IS A STATE, NOT A FAILURE. It used to be asked about, answered "no published version",
   // and drawn as "This graph could not be drawn" over a Try again that could never succeed.
@@ -1219,6 +1295,7 @@ export function GraphView() {
         }
       }}
     >
+      <NodeActionsContext.Provider value={nodeActions}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -1247,8 +1324,10 @@ export function GraphView() {
         // and the agent itself only changes by being asked to.
         nodesDraggable
         onNodesChange={onNodesChange}
-        onNodeMouseEnter={(_, n) => setHovered(n.id)}
-        onNodeMouseLeave={() => setHovered(null)}
+        onNodeMouseEnter={(_, n) => hover(n.id)}
+        onNodeMouseLeave={() => hover(null)}
+        onNodeDragStart={() => setDragging(true)}
+        onNodeDragStop={() => setDragging(false)}
         nodesConnectable={false}
         edgesFocusable={false}
         deleteKeyCode={null}
@@ -1302,6 +1381,7 @@ export function GraphView() {
           />
         )}
       </ReactFlow>
+      </NodeActionsContext.Provider>
       {/* THE TOOLBAR, over the canvas rather than in it, so it neither pans nor zooms. */}
       <GraphToolbar>
         <RunControls agentId={activeAgentId} runnable={agentMeta?.runnable ?? false} />
