@@ -1,0 +1,170 @@
+// The Graph tab's toolbar: a pill along the top of the canvas, marks only.
+//
+// RUN IS HERE BECAUSE THE GRAPH IS WHERE A RUN IS WATCHED. Starting one from the composer and then
+// switching to this tab to see it move was two places for one act; the button runs exactly what the
+// composer's Test mode runs — the same command, the same model, the same last input, and the same
+// way to a key when there is none — and while the run is on screen it becomes Pause and Stop.
+//
+// NO WORDS ON THE CONTROLS. Each is a mark with a tooltip and an accessible name from one string,
+// so the canvas stays a picture.
+
+import { useState, type ReactElement } from "react";
+
+import { Icon } from "../lib/icons/registry.ts";
+import { ICON } from "../lib/tokens.ts";
+import { sendCancelRun, sendPauseRun, sendResumeRun, sendRun } from "../lib/socket.ts";
+import { isRunnable, useProviderStore } from "../store/providerStore.ts";
+import { useTraceStore } from "../store/traceStore.ts";
+import { inputKey, useUiStore } from "../store/uiStore.ts";
+import { iconBtn } from "./buttons.ts";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
+import { Tip } from "./ui/tooltip.tsx";
+
+/** One control: a mark, its name as both tooltip and accessible name. */
+export function ToolButton({
+  label, onClick, disabled, children, pressed,
+}: {
+  label: string;
+  onClick?: () => void;
+  disabled?: boolean;
+  pressed?: boolean;
+  children: ReactElement;
+}) {
+  return (
+    <Tip label={label} side="bottom">
+      <button
+        type="button"
+        aria-label={label}
+        aria-pressed={pressed}
+        disabled={disabled}
+        onClick={onClick}
+        className={`${iconBtn} h-7 w-7 ${pressed ? "bg-active text-ink" : ""}`}
+      >
+        {children}
+      </button>
+    </Tip>
+  );
+}
+
+/** A hairline between groups of controls. */
+export function ToolDivider() {
+  return <span className="mx-0.5 h-4 w-px bg-hair" aria-hidden />;
+}
+
+function readLastInput(agentId: string): string {
+  try {
+    return localStorage.getItem(inputKey(agentId)) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** Run ▶, and while this agent's run is on screen, Pause/Resume and Stop. */
+export function RunControls({ agentId, runnable }: { agentId: string; runnable: boolean }) {
+  const connected = useTraceStore((s) => s.connection === "open");
+  const run = useTraceStore((s) => (s.activeRunId ? s.runs[s.activeRunId] : undefined));
+  const provider = useUiStore((s) => s.provider);
+  const model = useUiStore((s) => s.model);
+  const providers = useProviderStore((s) => s.providers);
+  const providersLoaded = useProviderStore((s) => s.loaded);
+  const [open, setOpen] = useState(false);
+  const [input, setInput] = useState("");
+
+  const mine = run && run.agent_id === agentId ? run : undefined;
+  const live = mine && (mine.status === "running" || mine.status === "paused");
+
+  const start = () => {
+    // NO KEY, NO RUN — and no dead end: the way to the key opens instead, as the composer's does.
+    if (providersLoaded && !isRunnable(providers, provider)) {
+      setOpen(false);
+      useUiStore.getState().openSecretsForProvider(provider || "anthropic");
+      return;
+    }
+    try {
+      localStorage.setItem(inputKey(agentId), input);
+    } catch {
+      /* the last input is a convenience; the run does not need it kept */
+    }
+    sendRun(input.trim(), provider || undefined, model || undefined, agentId);
+    setOpen(false);
+  };
+
+  if (live) {
+    return (
+      <>
+        {mine.status === "paused" ? (
+          <ToolButton label="Resume" onClick={() => sendResumeRun(mine.id)}>
+            <Icon.graphControl.run size={ICON.sm} />
+          </ToolButton>
+        ) : (
+          <ToolButton label="Pause" onClick={() => sendPauseRun(mine.id)}>
+            <Icon.graphControl.pause size={ICON.sm} />
+          </ToolButton>
+        )}
+        <ToolButton label="Stop" onClick={() => sendCancelRun(mine.id)}>
+          <Icon.graphControl.stop size={ICON.sm} />
+        </ToolButton>
+      </>
+    );
+  }
+
+  const why = !connected ? "Run — not connected" : !runnable ? "Run — this agent cannot run yet" : "Run";
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(v) => {
+        if (v) setInput(readLastInput(agentId));
+        setOpen(v);
+      }}
+    >
+      <PopoverTrigger asChild>
+        <span className="inline-flex">
+          <ToolButton label={why} disabled={!connected || !runnable}>
+            <Icon.graphControl.run size={ICON.sm} />
+          </ToolButton>
+        </span>
+      </PopoverTrigger>
+      <PopoverContent side="bottom" align="center" className="w-72 rounded-card border border-edge bg-elevated p-2 shadow-floating">
+        <form
+          className="flex items-end gap-1.5"
+          onSubmit={(e) => {
+            e.preventDefault();
+            start();
+          }}
+        >
+          <textarea
+            autoFocus
+            rows={2}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                start();
+              }
+            }}
+            placeholder="What to give the agent"
+            aria-label="Input for this run"
+            className="min-h-[44px] flex-1 resize-none rounded-input border border-edge bg-panel px-2 py-1.5 text-caption text-ink placeholder:text-faint focus:outline-none focus-visible:shadow-focusring"
+          />
+          <ToolButton label="Run" onClick={start}>
+            <Icon.graphControl.run size={ICON.sm} />
+          </ToolButton>
+        </form>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** The pill itself, at the top of the canvas. Its groups are passed in, in order. */
+export function GraphToolbar({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      role="toolbar"
+      aria-label="Graph"
+      className="absolute left-1/2 top-3 z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-card border border-edge bg-elevated/90 px-1 py-1 shadow-floating backdrop-blur"
+    >
+      {children}
+    </div>
+  );
+}

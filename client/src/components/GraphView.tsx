@@ -82,6 +82,7 @@ import type { Step } from "../types.ts";
 import { TriggerIcon, modelResource, toolResource } from "./graphIcons.tsx";
 import { ProviderMark } from "../lib/icons.tsx";
 import { useUiStore } from "../store/uiStore.ts";
+import { GraphToolbar, RunControls } from "./GraphToolbar.tsx";
 import { marksFor, type NodeMark } from "./graphNodeIcons.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { fmtLatency } from "../lib/format.ts";
@@ -92,6 +93,8 @@ import { fmtLatency } from "../lib/format.ts";
 const STEP_PANEL_W = 340;
 // The node inspector, which is an overlay for the same reason. Kept in step with its `w-64`.
 const INSPECTOR_W = 256;
+// How much of the canvas's top the toolbar takes: its height and the gap above it.
+const TOOLBAR_H = 44;
 
 // Mark sizes on the canvas, named here rather than written out at each call site. A step's mark IS
 // its tile's face, the way n8n draws a node, so it is large; the rest are proportions of the box
@@ -950,8 +953,9 @@ export function GraphView() {
           maxY: Math.max(...placed.map((n) => n.y + n.h)) + 24,
         }
       : { minX: 0, minY: 0, maxX: laid.width, maxY: laid.height };
-    const f = frameFor({ width: box.maxX - box.minX, height: box.maxY - box.minY }, { width: el.clientWidth, height: el.clientHeight }, hidden);
-    inst.setViewport({ x: f.x - box.minX * f.zoom, y: f.y - box.minY * f.zoom, zoom: f.zoom });
+    // The toolbar floats over the canvas's top edge; the graph is framed in what is left below it.
+    const f = frameFor({ width: box.maxX - box.minX, height: box.maxY - box.minY }, { width: el.clientWidth, height: el.clientHeight - TOOLBAR_H }, hidden);
+    inst.setViewport({ x: f.x - box.minX * f.zoom, y: TOOLBAR_H + f.y - box.minY * f.zoom, zoom: f.zoom });
     setFramed(true);
   };
 
@@ -1277,6 +1281,10 @@ export function GraphView() {
           />
         )}
       </ReactFlow>
+      {/* THE TOOLBAR, over the canvas rather than in it, so it neither pans nor zooms. */}
+      <GraphToolbar>
+        <RunControls agentId={activeAgentId} runnable={agentMeta?.runnable ?? false} />
+      </GraphToolbar>
       {selected && flow && (() => {
         const spec = flow.nodes.find((n) => n.id === selected.id);
         return spec ? (

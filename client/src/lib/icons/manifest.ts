@@ -420,6 +420,16 @@ export const MANIFEST = {
     resetLayout: "Undo02Icon",
   },
 
+  // ── Graph controls ────────────────────────────────────────────────────────
+  //
+  // THE GRAPH PANEL'S OWN TOOLBAR, AND IT HAS NO WORDS. Every control is a mark with a tooltip and an
+  // accessible name, so the canvas stays a picture rather than a form.
+  graphControl: {
+    run: "PlayIcon",
+    pause: "PauseIcon",
+    stop: "StopIcon",
+  },
+
   // ── Graph nodes ───────────────────────────────────────────────────────────
   //
   // WHAT EACH STEP OF AN AGENT IS, AS A PICTURE. Every model-calling step used to wear the same
