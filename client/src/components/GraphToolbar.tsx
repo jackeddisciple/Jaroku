@@ -22,18 +22,22 @@ import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "./ui/dropdown-menu.tsx";
 import { Tip } from "./ui/tooltip.tsx";
 
-/** One control: a mark, its name as both tooltip and accessible name. */
+/**
+ * One control: a mark, its name as both tooltip and accessible name. `hide` quiets the tooltip while
+ * the control's own popover is open, where it would sit over what the popover holds.
+ */
 export function ToolButton({
-  label, onClick, disabled, children, pressed,
+  label, onClick, disabled, children, pressed, hide,
 }: {
   label: string;
+  hide?: boolean;
   onClick?: () => void;
   disabled?: boolean;
   pressed?: boolean;
   children: ReactElement;
 }) {
   return (
-    <Tip label={label} side="bottom">
+    <Tip label={label} side="bottom" hide={hide}>
       <button
         type="button"
         aria-label={label}
@@ -121,7 +125,7 @@ export function RunControls({ agentId, runnable }: { agentId: string; runnable: 
     >
       <PopoverTrigger asChild>
         <span className="inline-flex">
-          <ToolButton label={why} disabled={!connected || !runnable}>
+          <ToolButton label={why} disabled={!connected || !runnable} hide={open}>
             <Icon.graphControl.run size={ICON.sm} />
           </ToolButton>
         </span>
@@ -319,7 +323,7 @@ export function ExportControl({ onExport }: { onExport: (kind: GraphExport) => v
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <span className="inline-flex">
-          <ToolButton label="Export as an image" pressed={open}>
+          <ToolButton label="Export as an image" pressed={open} hide={open}>
             <Icon.graphControl.export size={ICON.sm} />
           </ToolButton>
         </span>
