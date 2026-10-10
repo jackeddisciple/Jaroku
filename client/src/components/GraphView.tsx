@@ -79,7 +79,7 @@ import { Truncate } from "./Truncate.tsx";
 import { GitBranchIcon } from "./panelIcons.tsx";
 import { activeEdge, activeNodeId, latestStepForNode, stepEdge, stepNodeId, traversedEdges } from "../lib/traceGraphMap.ts";
 import type { Step } from "../types.ts";
-import { TriggerIcon, modelResource, toolResource } from "./graphIcons.tsx";
+import { ModelChipIcon, TriggerIcon, modelResource, toolResource } from "./graphIcons.tsx";
 import { marksFor, type NodeMark } from "./graphNodeIcons.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { fmtLatency } from "../lib/format.ts";
@@ -855,21 +855,30 @@ export function GraphView() {
     [flow, agentMeta?.connectors],
   );
   // The provider a model-calling step runs on, for the badge on its tile's corner.
-  const provider_ = useMemo(() => modelResource(provider, model), [provider, model]);
+  // Only a provider somebody would recognise: an agent whose saved default is the dry-run model
+  // would otherwise wear a badge reading "Calls Dry-run" on every step.
+  const provider_ = useMemo(() => {
+    const b = modelResource(provider, model);
+    return b.Icon === ModelChipIcon ? undefined : b;
+  }, [provider, model]);
 
   // ── keeping the graph in frame ──────────────────────────────────────────────
   //
   // React Flow frames a graph once, against the canvas as it was at that instant, and then
-  // holds that viewport for good. Four ordinary things move the frame out from under it, and
+  // holds that viewport for good. Three ordinary things move the frame out from under it, and
   // each one silently cut nodes off with nothing to say anything was missing:
   //
   //   1. Step Details opens. It is an OVERLAY — absolutely positioned over this canvas, not
   //      a column that shrinks it — so the canvas never resizes and a frame told to use the
   //      full width puts part of the graph underneath an opaque panel. Reserving the strip
   //      is the whole fix; there is nothing to observe.
-  //   2. The node inspector opens, which is the same overlay on the same edge.
-  //   3. The pane itself is resized (the column splitter, the window).
-  //   4. A different agent is selected, and its topology is bigger than the last one's.
+  //   2. The pane itself is resized (the column splitter, the window).
+  //   3. A different agent is selected, and its topology is bigger than the last one's.
+  //
+  // THE NODE INSPECTOR IS NOT ONE OF THEM, though it is the same overlay on the same edge. It
+  // opens on a click, and re-framing on a click moved the node out from under the pointer — so
+  // the second click of a double-click landed on empty canvas. It slides the view sideways
+  // instead, only as far as keeps the clicked node clear of it, at the same zoom (see openNode).
   //
   // Refit for all of them — but only until the user takes the wheel. Once they have panned or
   // zoomed deliberately, refitting is the view fighting them, so `userMoved` latches and
@@ -878,7 +887,10 @@ export function GraphView() {
   //
   // AND NEVER PAST REAL SIZE. A three-step agent fitted to a 790px column came out at 175%, cards
   // the size of buttons; `frameFor` holds a fit at 100% and leaves the space around it empty.
-  const rf = useRef<{ setViewport: (v: { x: number; y: number; zoom: number }) => void } | null>(null);
+  const rf = useRef<{
+    setViewport: (v: { x: number; y: number; zoom: number }, o?: { duration?: number }) => void;
+    getViewport: () => { x: number; y: number; zoom: number };
+  } | null>(null);
   const userMoved = useRef(false);
   const canvasRef = useRef<HTMLDivElement>(null);
   const [frame, setFrame] = useState({ width: 0, height: 0 });
@@ -891,8 +903,8 @@ export function GraphView() {
   // so the nearest node does not sit flush against the panel's edge.
   const covered = useMemo(() => {
     const width = canvasRef.current?.clientWidth ?? 0;
-    return Math.round(detailOpen ? Math.min(STEP_PANEL_W, width * 0.85) + 24 : inspectorOpen ? INSPECTOR_W + 24 : 0);
-  }, [detailOpen, inspectorOpen]);
+    return Math.round(detailOpen ? Math.min(STEP_PANEL_W, width * 0.85) + 24 : 0);
+  }, [detailOpen]);
 
   // Read by the ResizeObserver below, which is registered once and must frame against what is
   // true when it fires rather than when it was created.
@@ -1073,6 +1085,16 @@ export function GraphView() {
     const spec = hit?.role === "resource" ? flow?.nodes.find((n) => n.role === "model" && isReactAgent(n.id)) : hit;
     if (!spec) return;
     setSelected({ id: spec.id });
+    // Keep the node clear of the inspector that is about to cover the canvas's right edge.
+    const inst = rf.current;
+    const el = canvasRef.current;
+    if (inst && el) {
+      const vp = inst.getViewport();
+      const at = positions[spec.id] ?? { x: spec.x, y: spec.y };
+      const right = (at.x + spec.w) * vp.zoom + vp.x;
+      const limit = el.clientWidth - INSPECTOR_W - 24;
+      if (right > limit) inst.setViewport({ ...vp, x: vp.x - (right - limit) }, { duration: REDUCED_MOTION ? 0 : 200 });
+    }
     if (viaClick) triggerPulse(spec.id); // transient connected-edge highlight + directional particle
   };
 
