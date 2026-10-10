@@ -3826,8 +3826,8 @@ A version's compiled topology cannot change without the version itself changing,
 schema** (migration 019, `agent_versions.graph_cache`) — a replica that has never even seen this
 agent before answers the graph view instantly once any replica has introspected it once. The schema
 is the runner's `GRAPH_SCHEMA`: when it learns to say more about a graph (schema 2 added which steps
-call the model, each step's docstring and the function deciding at each fork), a graph cached under
-an older one is introspected again and replaced. A failed introspection is deliberately never
+call the model, each step's docstring and the function deciding at each fork; schema 3, where each
+of those functions is written), a graph cached under an older one is introspected again and replaced. A failed introspection is deliberately never
 cached, so a transient sandbox hiccup gets to try again next time rather than permanently breaking
 that version's graph view.
 

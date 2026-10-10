@@ -25,10 +25,16 @@ import { LocalCodeCheckSandbox, PROJECT_TOKEN, type CodeCheckSandbox } from "./s
 /**
  * The payload version `jaroku_runner.graph` writes, kept in step with GRAPH_SCHEMA there.
  *
- * 2 added `calls_model` and `doc` on each node and `routers`. A graph introspected before then
- * carries no `schema` at all.
+ * 2 added `calls_model` and `doc` on each node and `routers`; 3 added where each node's and
+ * router's function is written. A graph introspected before 2 carries no `schema` at all.
  */
-export const GRAPH_SCHEMA = 2;
+export const GRAPH_SCHEMA = 3;
+
+/** Where a function is written: a file relative to the agent's own directory, and a 1-based line. */
+export interface SourceLocation {
+  file: string;
+  line: number;
+}
 
 export interface GraphNode {
   id: string;
@@ -37,6 +43,8 @@ export interface GraphNode {
   calls_model?: boolean | null;
   /** The first line of the node function's docstring. */
   doc?: string | null;
+  /** Where the node's function is written (schema 3); null for Start, End and a library ToolNode. */
+  source?: SourceLocation | null;
 }
 export interface GraphEdge {
   source: string;
@@ -49,6 +57,8 @@ export interface GraphRouter {
   source: string;
   name: string | null;
   doc: string | null;
+  /** Where the deciding function is written (schema 3). */
+  location?: SourceLocation | null;
 }
 export interface GraphResult {
   agent_id: string;

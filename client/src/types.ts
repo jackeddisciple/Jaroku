@@ -363,6 +363,17 @@ export interface GraphNode {
   calls_model?: boolean | null;
   /** The first line of the node function's docstring — the card's description. */
   doc?: string | null;
+  /**
+   * Where the node's function is written, relative to the agent's directory (schema 3) — what
+   * double-clicking the node opens. Null for Start, End and a library ToolNode.
+   */
+  source?: SourceLocation | null;
+}
+
+/** A 1-based line in a file of the agent's project. */
+export interface SourceLocation {
+  file: string;
+  line: number;
 }
 
 export interface GraphEdge {
@@ -380,6 +391,8 @@ export interface GraphRouter {
   source: string;
   name: string | null;
   doc: string | null;
+  /** Where the deciding function is written (schema 3). */
+  location?: SourceLocation | null;
 }
 
 export interface AgentGraph {

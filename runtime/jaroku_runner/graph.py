@@ -10,8 +10,10 @@ own ``app.get_graph()`` — as a SINGLE JSON object on stdout.
 
 Contract with the caller (the TS server):
   * Exactly one JSON line on stdout, then exit.
-  * Success: ``{"agent_id", "schema", "nodes": [{"id","type","calls_model","doc"}],
-    "edges": [{"source","target","conditional","label"}], "routers": [{"source","name","doc"}]}``.
+  * Success: ``{"agent_id", "schema", "nodes": [{"id","type","calls_model","doc","source"}],
+    "edges": [{"source","target","conditional","label"}],
+    "routers": [{"source","name","doc","location"}]}``. A ``source``/``location`` is
+    ``{"file","line"}``, the file relative to the agent's own directory, or null.
   * Failure: ``{"agent_id", "error": "<message>"}`` with a non-zero exit code.
 
 ``schema`` is GRAPH_SCHEMA. The server caches a version's graph forever, so a result written
@@ -38,8 +40,9 @@ START_ID = "__start__"
 END_ID = "__end__"
 
 # Bumped whenever the payload gains a field the Graph view reads. Kept in step with
-# GRAPH_SCHEMA in server/src/graphIntrospect.ts.
-GRAPH_SCHEMA = 2
+# GRAPH_SCHEMA in server/src/graphIntrospect.ts. 2 added calls_model, doc and routers; 3 added
+# where each node's and router's function is written, which double-clicking a node opens.
+GRAPH_SCHEMA = 3
 
 # How long a node's description may be. The Graph view shows one line of it on the card and
 # the rest on hover, so a docstring's later paragraphs are left in the code where they belong.
@@ -92,6 +95,28 @@ def _first_line(fn) -> str | None:
         return None
     line = doc.strip().splitlines()[0].strip()
     return line[:DOC_MAX] if line else None
+
+
+def _where(fn, root: str | None) -> dict | None:
+    """Where a callable is written — ``{"file", "line"}``, the file relative to the agent's own
+    directory — or None when it is not written there (a library's ToolNode, a builtin). Never raises."""
+    while isinstance(fn, functools.partial):
+        fn = fn.func
+    if fn is None or not root:
+        return None
+    try:
+        import os
+
+        path = inspect.getsourcefile(fn)
+        _, line = inspect.getsourcelines(fn)
+        if not path:
+            return None
+        rel = os.path.relpath(os.path.realpath(path), os.path.realpath(root))
+        if rel.startswith(".."):
+            return None
+        return {"file": rel.replace(os.sep, "/"), "line": int(line)}
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _reaches(value, llm, depth: int, seen: set[int]) -> bool:
@@ -151,15 +176,19 @@ def _calls_model(name: str, builder, llm) -> bool | None:
         return None
 
 
-def _node_doc(name: str, builder) -> str | None:
+def _node_fn(name: str, builder):
     try:
         spec = (getattr(builder, "nodes", {}) or {}).get(name)
-        return _first_line(_function_of(getattr(spec, "runnable", None)))
+        return _function_of(getattr(spec, "runnable", None))
     except Exception:  # noqa: BLE001
         return None
 
 
-def _routers(builder) -> list[dict]:
+def _node_doc(name: str, builder) -> str | None:
+    return _first_line(_node_fn(name, builder))
+
+
+def _routers(builder, root: str | None = None) -> list[dict]:
     """Each conditional fork's deciding function: where it sits, its name and what it says it
     does. The compiled topology has edges for a fork but no node, so without this the decision
     an agent makes is the one thing in it the Graph view cannot name. Never raises."""
@@ -174,6 +203,7 @@ def _routers(builder) -> list[dict]:
                     "source": str(source),
                     "name": None if name == "<lambda>" else name,
                     "doc": _first_line(fn),
+                    "location": _where(fn, root),
                 })
     except Exception:  # noqa: BLE001
         pass
@@ -212,12 +242,19 @@ def introspect(agent_id: str) -> dict:
         drawable = app.get_graph()  # LangGraph's own topology view (public API)
         builder = getattr(app, "builder", None)
 
+    # The agent's own directory, which every source location is written relative to: where its
+    # agent.py was imported from, whether that is runtime/agents/<id> or a materialised project.
+    import os
+
+    root = os.path.dirname(getattr(module, "__file__", "") or "") or None
+
     nodes = [
         {
             "id": nid,
             "type": _node_type(nid, builder),
             "calls_model": _calls_model(nid, builder, llm),
             "doc": _node_doc(nid, builder),
+            "source": _where(_node_fn(nid, builder), root) if nid not in (START_ID, END_ID) else None,
         }
         for nid in drawable.nodes
     ]
@@ -242,7 +279,7 @@ def introspect(agent_id: str) -> dict:
         "schema": GRAPH_SCHEMA,
         "nodes": nodes,
         "edges": edges,
-        "routers": _routers(builder),
+        "routers": _routers(builder, root),
     }
 
 

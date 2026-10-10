@@ -12,7 +12,7 @@
 //
 //   npm run test:graph-shape
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,6 +28,8 @@ const check = (name: string, ok: boolean, detail = "") => {
 const RUNTIME_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "runtime");
 
 const node = (g: GraphResult, id: string) => g.nodes?.find((n) => n.id === id);
+/** The 1-based line of the first line in `text` containing `needle` — what a source location must name. */
+const lineOf = (text: string, needle: string) => text.split("\n").findIndex((l) => l.includes(needle)) + 1;
 
 console.log("the reference agent");
 {
@@ -46,6 +48,20 @@ console.log("the reference agent");
   check("the fork names its deciding function",
     g.routers?.some((r) => r.source === "agent" && r.name === "should_continue") === true,
     JSON.stringify(g.routers));
+
+  // WHERE EACH ONE IS WRITTEN, which double-clicking a node opens. Read off the reference file
+  // itself rather than written down here, so an edit to the example cannot make this lie.
+  const src = readFileSync(join(RUNTIME_DIR, "agents", "example_agent", "agent.py"), "utf8");
+  check("the agent node points at its function's def line",
+    node(g, "agent")?.source?.file === "agent.py" && node(g, "agent")?.source?.line === lineOf(src, "def call_model("),
+    JSON.stringify(node(g, "agent")?.source));
+  check("record_note points at its own",
+    node(g, "record_note")?.source?.line === lineOf(src, "def record_note("), JSON.stringify(node(g, "record_note")?.source));
+  check("the router points at its function too",
+    g.routers?.find((r) => r.source === "agent")?.location?.line === lineOf(src, "def should_continue("),
+    JSON.stringify(g.routers));
+  check("Start, End and the library ToolNode point nowhere",
+    node(g, "__start__")?.source === null && node(g, "__end__")?.source === null && node(g, "tools")?.source === null);
 }
 
 const SCREENER = `from functools import partial
@@ -135,6 +151,13 @@ console.log("\nthe shapes generated code uses");
     check("...and says what it decides", route?.doc === "Shortlist at 70 or more, otherwise decline.");
     check("the two branches are still conditional edges",
       (g.edges ?? []).filter((e) => e.source === "score" && e.conditional).length === 2);
+    check("a nested function points at its def line", node(g, "score")?.source?.line === lineOf(SCREENER, "def score("),
+      JSON.stringify(node(g, "score")?.source));
+    check("a partial points at the function it wraps", node(g, "shortlist")?.source?.line === lineOf(SCREENER, "def _summarise("),
+      JSON.stringify(node(g, "shortlist")?.source));
+    check("a lambda points at the line it is written on",
+      node(g, "decline")?.source?.line === lineOf(SCREENER, 'graph.add_node("decline", lambda'), JSON.stringify(node(g, "decline")?.source));
+    check("...all relative to the project, not the machine", (g.nodes ?? []).every((n) => !n.source || n.source.file === "agent.py"));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
