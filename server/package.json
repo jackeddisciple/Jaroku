@@ -150,6 +150,7 @@
     "test:code-check": "tsx src/sandbox/codeCheck.test.ts",
     "test:desktop-exec": "tsx src/sandbox/desktopExec.test.ts",
     "test:graph-introspect": "tsx src/graphIntrospect.test.ts",
+    "test:graph-shape": "tsx src/graphShape.test.ts",
     "test:escape-suite": "tsx src/sandbox/escapeSuite.test.ts",
     "test:tenancy-isolation": "tsx src/sandbox/tenancyIsolation.test.ts",
     "test:aggregate": "tsx src/evalAggregate.test.ts",

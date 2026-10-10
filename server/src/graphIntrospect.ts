@@ -22,9 +22,21 @@
 import { join } from "node:path";
 import { LocalCodeCheckSandbox, PROJECT_TOKEN, type CodeCheckSandbox } from "./sandbox/codeCheck.ts";
 
+/**
+ * The payload version `jaroku_runner.graph` writes, kept in step with GRAPH_SCHEMA there.
+ *
+ * 2 added `calls_model` and `doc` on each node and `routers`. A graph introspected before then
+ * carries no `schema` at all.
+ */
+export const GRAPH_SCHEMA = 2;
+
 export interface GraphNode {
   id: string;
   type: string; // "start" | "end" | "tool" | "agent"
+  /** Whether the node can reach the model it was built with; null when that cannot be told. */
+  calls_model?: boolean | null;
+  /** The first line of the node function's docstring. */
+  doc?: string | null;
 }
 export interface GraphEdge {
   source: string;
@@ -32,10 +44,18 @@ export interface GraphEdge {
   conditional: boolean;
   label: string | null;
 }
+/** The function deciding at a conditional fork. The compiled topology has its edges but no node. */
+export interface GraphRouter {
+  source: string;
+  name: string | null;
+  doc: string | null;
+}
 export interface GraphResult {
   agent_id: string;
+  schema?: number;
   nodes?: GraphNode[];
   edges?: GraphEdge[];
+  routers?: GraphRouter[];
   error?: string;
   /**
    * The identifier the failure was about, kept OUT of the sentence.

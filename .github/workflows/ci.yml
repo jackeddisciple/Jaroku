@@ -2038,6 +2038,12 @@ jobs:
       - name: a generation is validated, and repaired once when it fails
         run: npm run test:generation
 
+      # WHAT THE GRAPH VIEW IS TOLD ABOUT EACH STEP, built for real for the same reason: which nodes
+      # call the model, what their docstrings say, and the function deciding at each fork are read
+      # off the graph builder, and only a real build shows the runner reads the right thing.
+      - name: the graph view's description of each step
+        run: npm run test:graph-shape
+
       # THE HOSTED CONFIRMATION GATE, driven through the real bridge: the verdicts, the timeout that
       # denies, and the reason the dialog shows — which the hosted ask used to leave behind.
       - name: a deployed agent's tool confirmations
