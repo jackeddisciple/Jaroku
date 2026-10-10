@@ -20,7 +20,6 @@
 // a node still selects its trace step.
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { ReactElement } from "react";
 import {
   ReactFlow,
   Background,
@@ -48,23 +47,26 @@ import { sendLoadAgentGraph } from "../lib/socket.ts";
 import { alpha } from "../lib/palette.ts";
 import { ACCENT, ICON, INTERACTION, RADIUS, STATUS, SURFACE, TEXT } from "../lib/tokens.ts";
 import {
-  AGENT_FOOTER_H,
-  CARD_H,
-  CARD_W,
+  AGENT_H,
+  END_D,
+  LABEL_GAP,
+  MAX_SUBS,
   MIN_ZOOM,
   ROLE_LABEL,
+  SUB_D,
+  TILE,
   buildFlow,
   frameFor,
   isReactAgent,
   loopPath,
   matchesEdge,
   nodeAriaLabel,
+  portPath,
   readingOrder,
   routePath,
   titleOf,
   type FlowLayout,
   type FlowNodeSpec,
-  type FlowRole,
   type Point,
 } from "../lib/graphLayout.ts";
 import { EmptyState } from "./EmptyState.tsx";
@@ -72,15 +74,8 @@ import { Truncate } from "./Truncate.tsx";
 import { GitBranchIcon } from "./panelIcons.tsx";
 import { activeEdge, activeNodeId, latestStepForNode, stepEdge, stepNodeId, traversedEdges } from "../lib/traceGraphMap.ts";
 import type { Step } from "../types.ts";
-import {
-  AgentIcon,
-  ActionIcon,
-  ToolIcon,
-  TriggerIcon,
-  TerminalIcon,
-  modelResource,
-  toolResource,
-} from "./graphIcons.tsx";
+import { TriggerIcon, modelResource, toolResource } from "./graphIcons.tsx";
+import { marksFor, type NodeMark } from "./graphNodeIcons.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { fmtLatency } from "../lib/format.ts";
 
@@ -91,39 +86,38 @@ const STEP_PANEL_W = 340;
 // The node inspector, which is an overlay for the same reason. Kept in step with its `w-64`.
 const INSPECTOR_W = 256;
 
-// Glyph sizes on the canvas, named here rather than written out at each call site. They were
-// 28px, centred in a card with nothing else in it, because the glyph WAS the card's face. The card
-// now carries the node's name beside it, so the same marks are drawn at the size of an icon in a
-// row: the well is a 28px square, the pill is a line of 11px text, the strip is a row of logos.
+// Mark sizes on the canvas, named here rather than written out at each call site. A step's mark IS
+// its tile's face, the way n8n draws a node, so it is large; the rest are proportions of the box
+// each sits in.
 const NODE_ICON = {
-  /** Inside a step card's 28px icon well. */
-  card: 16,
-  /** Inside the Start and End pills. */
-  pill: 12,
-  /** A model or tool logo in the ReAct agent's strip. */
-  resource: 16,
+  /** On a step's 64px tile. */
+  tile: 30,
+  /** On End's 44px circle. */
+  end: 20,
+  /** In the ReAct agent card's icon well. */
+  agent: 24,
+  /** A model or tool logo on one of the agent's circles. */
+  resource: 24,
+  /** The provider badge on a model-calling tile's corner. */
+  badge: 12,
+  /** Start's bolt, beside its tile as n8n's sits beside a trigger. */
+  bolt: 16,
 } as const;
-/** The step card's icon well. */
-const WELL = 28;
 
 
 // ── palette (flat) ────────────────────────────────────────────────────────────
-// Solid, opaque cards on the design-system panel colour; a one-step fill marks the selected/active
-// state (paired with a thin accent bar on the left edge — never a glow). Every value is the token
-// it was once a hex copy of, which is what keeps the canvas on the same palette as the panels
-// behind it.
-//
-// The fill used to be a slightly LIGHTER step for the selected state, because on near-black that is
-// the only direction a surface can move. On §01's light ladder it is a step down, and `SURFACE`
-// already knows which.
-const CARD_BG = SURFACE.panel; // cards — solid and confident on the canvas behind them
-const CARD_BG_ACTIVE = SURFACE.active; // selected/active fill
-const ICON_BG = SURFACE.chrome; // the icon square inside a card
-const BORDER = SURFACE.edge; // thin, subtle card outline (no colour, no glow)
-const DIAMOND = TEXT.faint; // the decision pill's mark
+// White tiles on the dotted canvas, each carrying one coloured mark; a selected tile takes the app's
+// accent as its border. Every value is a token, which is what keeps the canvas on the same palette
+// as the panels behind it.
+const CARD_BG = SURFACE.panel; // tiles — solid on the canvas behind them
+const CARD_BG_ACTIVE = SURFACE.active; // the agent card's selected fill
+const ICON_BG = SURFACE.chrome; // the agent card's icon well, a branch label's chip
+const BORDER = SURFACE.edge; // a tile's resting outline
+const DIAMOND = TEXT.faint; // a port's mark, as n8n draws one
 const EDGE = SURFACE.grip;
-const SEL = INTERACTION.accent; // selection accent (left bar only) — the app's, not the canvas's own
-const AMBER = STATUS.pending; // running/active accent (left bar only)
+const EDGE_DASH = TEXT.disabled; // the dashed line to one of the agent's circles
+const SEL = INTERACTION.accent; // selection — the app's accent, not the canvas's own
+const AMBER = STATUS.pending; // running
 // Transient click micro-interaction highlight: the accent itself, with two alphas of it carrying the
 // falloff. On a light canvas an ink particle is more legible than a coloured one.
 const PULSE = INTERACTION.accent;
@@ -140,13 +134,19 @@ const STATUS_COLOR: Record<NodeStatus, string> = { ok: STATUS.ok, error: STATUS.
 type Brand = ReturnType<typeof modelResource>;
 type FlowData = {
   spec: FlowNodeSpec;
+  /** What this node is drawn as — see graphNodeIcons. Absent on the agent's circles. */
+  mark?: NodeMark;
+  /** On a model-calling tile: the provider the agent runs on, as a corner badge. */
+  badge?: Brand;
+  /** On one of the agent's circles: the model's or tool's own logo and name. */
+  brand?: Brand;
+  /** On the agent card: its ports, in order, for their labels down its right edge. */
+  ports?: Array<"Model" | "Tools">;
   /** True when this tool node calls a third-party MCP server. Drives the rose marker. */
   mcp?: boolean;
   active: boolean;
   selected: boolean;
   status?: NodeStatus;
-  /** The ReAct agent's model and tools, for the strip along its card's bottom edge. */
-  resources?: { model: Brand; tools: Brand[] };
 };
 type EdgeData = {
   hot?: boolean;
@@ -159,30 +159,13 @@ type EdgeData = {
   pulseKey?: number;
 };
 
-// THE MARKS, ON THE ROLES THEY MEAN. The same five glyphs as before, each on its own token: a model
-// call wears the agent's mark in ink, because calling the model is what an agent is; a tool node
-// is ACCENT.reviewed and a plain step ACCENT.state by name, as tokens.ts always said they were.
-const ROLE_ICON: Record<Exclude<FlowRole, "decision">, (p: { size?: number }) => ReactElement> = {
-  start: TriggerIcon,
-  end: TerminalIcon,
-  model: AgentIcon,
-  step: ActionIcon,
-  tool: ToolIcon,
-};
-const ROLE_ACCENT: Record<Exclude<FlowRole, "decision">, string> = {
-  start: STATUS.pending,
-  end: TEXT.faint,
-  model: TEXT.ink,
-  step: ACCENT.state,
-  tool: ACCENT.reviewed,
-};
 // ACCENT.mcp itself — one badge colour across the plan card, the trace and here, from one place.
 const ACCENT_MCP = ACCENT.mcp;
 const SURFACE_BG = SURFACE.bg;
 
 // WHAT A SCREEN READER IS TOLD ABOUT THE CANVAS. React Flow's defaults describe an editor: "Press
-// delete to remove it", "use the arrow keys to move the node around". Nothing here can be moved or
-// removed, and saying it can is the same lie the diamonds and the "+" told sighted users.
+// delete to remove it", "use the arrow keys to move the node around". Nothing here can be removed,
+// and saying it can is the same lie a "+" on the last node would tell sighted users.
 const READ_ONLY_ARIA: Partial<AriaLabelConfig> = {
   "node.a11yDescription.default": "Press enter to inspect this step.",
   "node.a11yDescription.keyboardDisabled": "Press enter to inspect this step.",
@@ -202,17 +185,18 @@ function Diamond({ style }: { style: React.CSSProperties }) {
 const HANDLE_HIDDEN = "!w-1.5 !h-1.5 !bg-transparent !border-0 !min-w-0 !min-h-0";
 
 /**
- * Where edges meet a node: in at the top and out at the bottom, down the column — and one more
- * pair on the right, for a loop. An edge back UP the column drawn top-to-bottom would run straight
- * through every card between its ends; leaving and arriving on the side sends it round them.
+ * Where edges meet a tiled node: in at the top of the tile, out under its label — the dot n8n draws
+ * — and a pair on each side of the tile, half way down it, for a loop.
  */
-function Handles() {
+function Handles({ tileMid, tileHalf }: { tileMid: number; tileHalf: number }) {
   return (
     <>
       <Handle id="in" type="target" position={Position.Top} className={HANDLE_HIDDEN} />
       <Handle id="out" type="source" position={Position.Bottom} className={HANDLE_HIDDEN} />
-      <Handle id="loop-in" type="target" position={Position.Right} className={HANDLE_HIDDEN} />
-      <Handle id="loop-out" type="source" position={Position.Right} className={HANDLE_HIDDEN} />
+      <Handle id="loop-in" type="target" position={Position.Right} className={HANDLE_HIDDEN} style={{ top: tileMid, right: `calc(50% - ${tileHalf}px)` }} />
+      <Handle id="loop-out" type="source" position={Position.Right} className={HANDLE_HIDDEN} style={{ top: tileMid, right: `calc(50% - ${tileHalf}px)` }} />
+      <Handle id="loop-in-l" type="target" position={Position.Left} className={HANDLE_HIDDEN} style={{ top: tileMid, left: `calc(50% - ${tileHalf}px)` }} />
+      <Handle id="loop-out-l" type="source" position={Position.Left} className={HANDLE_HIDDEN} style={{ top: tileMid, left: `calc(50% - ${tileHalf}px)` }} />
     </>
   );
 }
@@ -229,20 +213,15 @@ function StatusDot({ status }: { status?: NodeStatus }) {
   );
 }
 
-// The selected/active state: a slightly lighter fill + a thin accent bar on the left edge.
-// No coloured full border, no glow, no shadow (design-system discipline).
-function stateBg(d: FlowData): string {
-  return d.active || d.selected ? CARD_BG_ACTIVE : CARD_BG;
+/** A tile's border: the accent when selected, amber while it runs, otherwise the resting edge. */
+function tileBorder(d: FlowData): string {
+  return d.active ? AMBER : d.selected ? SEL : BORDER;
 }
-function AccentBar({ d, radius }: { d: FlowData; radius: number }) {
-  const color = d.active ? AMBER : d.selected ? SEL : null;
-  if (!color) return null;
-  return (
-    <span
-      className="absolute left-0 top-0 bottom-0 pointer-events-none"
-      style={{ width: 3, background: color, borderTopLeftRadius: radius, borderBottomLeftRadius: radius }}
-    />
-  );
+/** ...and the soft ring n8n puts round a selected node. */
+function tileRing(d: FlowData): string | undefined {
+  if (d.active) return `0 0 0 4px ${alpha(AMBER, 0.18)}`;
+  if (d.selected) return `0 0 0 4px ${alpha(SEL, 0.12)}`;
+  return undefined;
 }
 
 /** The same plug outline as panelIcons.PlugIcon, at the size this corner marker needs. */
@@ -258,153 +237,199 @@ function McpPlugGlyph() {
   );
 }
 
-/**
- * A card's second line: what the step does, in its docstring's words — or, without one, what kind
- * of step it is. Not both: "Model call · Split the job descri…" spent half the line repeating the
- * glyph beside it and cut the one sentence only this card can say. The kind is still in the glyph,
- * the hover and the inspector.
- */
-function metaOf(d: FlowData): string {
-  if (d.mcp) return "Tool node · reaches MCP";
-  return d.spec.doc ?? ROLE_LABEL[d.spec.role];
+/** A node's mark, in its hue — or, for a brand, in the brand's own colours. */
+function Mark({ mark, size }: { mark?: NodeMark; size: number }) {
+  if (!mark) return null;
+  const M = mark.Icon;
+  return mark.kind === "brand" ? (
+    <M size={size} />
+  ) : (
+    <span className="flex" style={{ color: mark.hue }}>
+      <M size={size} />
+    </span>
+  );
 }
 
-// ── step card ─────────────────────────────────────────────────────────────────
-function StepNode({ data }: NodeProps) {
+/**
+ * The name under a tile and one line under that: what the step does, in its docstring's words, or
+ * — without one — what kind of step it is. n8n's "Slack / Send message", with the code's own name.
+ */
+function Label({ d, sub }: { d: FlowData; sub?: string | null }) {
+  const { spec } = d;
+  const line = d.mcp ? "Tool node · reaches MCP" : sub ?? spec.doc ?? ROLE_LABEL[spec.role];
+  return (
+    <div className="flex w-full flex-col items-center leading-tight" style={{ marginTop: LABEL_GAP }}>
+      <Truncate className="max-w-full text-caption font-medium text-ink" title={spec.title}>{spec.title}</Truncate>
+      <Truncate
+        className={`max-w-full text-tiny ${d.mcp ? "" : "text-muted"}`}
+        title={spec.doc ? `${ROLE_LABEL[spec.role]} — ${spec.doc}` : line}
+      >
+        <span style={d.mcp ? { color: ACCENT_MCP } : undefined}>{line}</span>
+      </Truncate>
+    </div>
+  );
+}
+
+/** n8n's output dot, under the label, where the edge leaves. */
+function OutDot() {
+  return (
+    <span
+      className="pointer-events-none absolute left-1/2 rounded-full"
+      style={{ bottom: -4, width: 8, height: 8, transform: "translateX(-50%)", background: EDGE }}
+    />
+  );
+}
+
+// ── a tile: Start, a step, a fork ─────────────────────────────────────────────
+function TileNode({ data }: NodeProps) {
   const d = data as FlowData;
   const { spec } = d;
-  const role = spec.role as Exclude<FlowRole, "decision">;
-  const Glyph = ROLE_ICON[role];
-  const meta = metaOf(d);
+  const start = spec.role === "start";
+  // n8n's trigger is a D: its leading side rounded right round. Turned for a flow that runs down,
+  // the rounded side is the top.
+  const radius = start ? `${TILE / 2}px ${TILE / 2}px ${RADIUS.lg}px ${RADIUS.lg}px` : `${RADIUS.lg}px`;
   return (
-    <div className="relative select-none" style={{ width: spec.w, height: spec.h }}>
-      <div
-        className="relative flex h-full flex-col overflow-hidden rounded-card"
-        style={{ background: stateBg(d), border: `1px solid ${BORDER}` }}
-      >
-        <AccentBar d={d} radius={RADIUS.card} />
-        <div className="flex shrink-0 items-center gap-2.5 px-3" style={{ height: CARD_H - 2 }}>
-          <span
-            className="flex shrink-0 items-center justify-center rounded-control"
-            style={{ width: WELL, height: WELL, background: ICON_BG, color: ROLE_ACCENT[role] }}
-          >
-            <Glyph size={NODE_ICON.card} />
-          </span>
-          {/* NAME OVER WHAT IT IS. A 13px/500 name over an 11px/400 line at §02's secondary ink is
-              two levels apart on three axes at once, which is the whole hierarchy a card needs. */}
-          <span className="flex min-w-0 flex-col gap-0.5 leading-tight">
-            <Truncate className="text-label text-ink" title={spec.title}>{spec.title}</Truncate>
-            <Truncate className={`text-tiny ${d.mcp ? "" : "text-muted"}`} title={d.spec.doc ? `${ROLE_LABEL[spec.role]} — ${d.spec.doc}` : meta}>
-              <span style={d.mcp ? { color: ACCENT_MCP } : undefined}>{meta}</span>
-            </Truncate>
-          </span>
-        </div>
-        {d.resources && <ResourceStrip resources={d.resources} />}
-      </div>
-      <StatusDot status={d.status} />
-      {/* The MCP marker, corner-mounted like StatusDot. On the card rather than only in the meta
-          line, because zoomed out the line is the first thing to become unreadable and this is
-          the one label that must survive it. */}
-      {d.mcp && (
-        <span
-          className="absolute -top-1.5 -left-1.5 flex h-4 w-4 items-center justify-center rounded-full"
-          style={{ background: SURFACE_BG, color: ACCENT_MCP }}
-          title="This tool calls a third-party MCP server Jaroku has not reviewed"
+    <div className="relative flex select-none flex-col items-center" style={{ width: spec.w, height: spec.h }}>
+      <div className="relative" style={{ width: TILE, height: TILE }}>
+        <div
+          className="flex h-full w-full items-center justify-center"
+          style={{
+            background: CARD_BG,
+            border: `1.5px solid ${tileBorder(d)}`,
+            borderRadius: radius,
+            boxShadow: tileRing(d),
+            transition: "border-color 120ms ease, box-shadow 120ms ease",
+          }}
         >
-          <McpPlugGlyph />
-        </span>
-      )}
-      <Handles />
-    </div>
-  );
-}
-
-/**
- * The ReAct agent's model and tools, along its card's bottom edge. They were circles hanging under
- * the card on dashed curves, which in a column collide with the next step down; and what they say —
- * this is the model, these are the tools it may call — belongs to the agent, so it sits on it.
- */
-function ResourceStrip({ resources }: { resources: { model: Brand; tools: Brand[] } }) {
-  const all = [resources.model, ...resources.tools];
-  return (
-    <div
-      className="flex shrink-0 items-center gap-3 overflow-hidden px-3"
-      style={{ height: AGENT_FOOTER_H, borderTop: `1px solid ${BORDER}` }}
-    >
-      {all.map((b, i) => (
-        <span key={i} className="flex min-w-0 shrink-0 items-center gap-1.5 text-tiny text-muted">
-          <b.Icon size={NODE_ICON.resource} />
-          <span className="max-w-[88px]">
-            <Truncate title={b.label}>{b.label}</Truncate>
+          <Mark mark={d.mark} size={NODE_ICON.tile} />
+        </div>
+        {start && (
+          // The bolt n8n puts beside a trigger: the existing trigger mark, in its own colour.
+          <span className="pointer-events-none absolute flex" style={{ left: -22, top: TILE / 2 - NODE_ICON.bolt / 2, color: STATUS.pending }}>
+            <TriggerIcon size={NODE_ICON.bolt} />
           </span>
-        </span>
-      ))}
+        )}
+        {d.badge && (
+          // The model this step calls, as a badge — the tile's own mark says what the step does.
+          <span
+            className="absolute flex items-center justify-center rounded-full"
+            style={{ right: -7, top: -7, width: 20, height: 20, background: CARD_BG, border: `1px solid ${BORDER}` }}
+            title={`Calls ${d.badge.label}`}
+          >
+            <d.badge.Icon size={NODE_ICON.badge} />
+          </span>
+        )}
+        {d.mcp && (
+          // The MCP marker, corner-mounted like StatusDot, so it survives the label going unreadable.
+          <span
+            className="absolute -top-1.5 -left-1.5 flex h-4 w-4 items-center justify-center rounded-full"
+            style={{ background: SURFACE_BG, color: ACCENT_MCP }}
+            title="This tool calls a third-party MCP server Jaroku has not reviewed"
+          >
+            <McpPlugGlyph />
+          </span>
+        )}
+        <StatusDot status={d.status} />
+      </div>
+      <Label d={d} sub={start ? (spec.doc ?? "When the agent is asked") : undefined} />
+      <OutDot />
+      <Handles tileMid={TILE / 2} tileHalf={TILE / 2} />
     </div>
   );
 }
 
-// ── Start and End ─────────────────────────────────────────────────────────────
-function PillNode({ data }: NodeProps) {
+// ── End ───────────────────────────────────────────────────────────────────────
+function EndNode({ data }: NodeProps) {
   const d = data as FlowData;
   const { spec } = d;
-  const role = spec.role as "start" | "end";
-  const Glyph = ROLE_ICON[role];
+  return (
+    <div className="relative flex select-none flex-col items-center" style={{ width: spec.w, height: spec.h }}>
+      <div
+        className="relative flex items-center justify-center rounded-full"
+        style={{ width: END_D, height: END_D, background: CARD_BG, border: `1.5px solid ${tileBorder(d)}`, boxShadow: tileRing(d) }}
+      >
+        <Mark mark={d.mark} size={NODE_ICON.end} />
+        <StatusDot status={d.status} />
+      </div>
+      <div className="text-caption font-medium leading-tight text-ink" style={{ marginTop: LABEL_GAP }}>{spec.title}</div>
+      <Handles tileMid={END_D / 2} tileHalf={END_D / 2} />
+    </div>
+  );
+}
+
+// ── the ReAct agent: n8n's wide card ──────────────────────────────────────────
+function AgentNode({ data }: NodeProps) {
+  const d = data as FlowData;
+  const { spec } = d;
+  const ports = d.ports ?? [];
   return (
     <div className="relative select-none" style={{ width: spec.w, height: spec.h }}>
       <div
-        className="flex h-full items-center justify-center gap-1.5 rounded-pill text-tiny text-muted"
-        style={{ background: stateBg(d), border: `1px solid ${BORDER}` }}
+        className="flex h-full items-center gap-3 px-4"
+        style={{
+          background: d.selected || d.active ? CARD_BG_ACTIVE : CARD_BG,
+          border: `1.5px solid ${tileBorder(d)}`,
+          borderRadius: RADIUS.lg,
+          boxShadow: tileRing(d),
+        }}
       >
-        <span className="flex" style={{ color: ROLE_ACCENT[role] }}>
-          <Glyph size={NODE_ICON.pill} />
+        <span className="flex shrink-0 items-center justify-center rounded-control" style={{ width: 40, height: 40, background: ICON_BG }}>
+          <Mark mark={d.mark} size={NODE_ICON.agent} />
         </span>
-        {spec.title}
+        <span className="flex min-w-0 flex-col gap-0.5 leading-tight">
+          <Truncate className="text-label text-ink" title={spec.title}>{spec.title}</Truncate>
+          <Truncate className="text-tiny text-muted" title={spec.doc ?? ROLE_LABEL[spec.role]}>{spec.doc ?? ROLE_LABEL[spec.role]}</Truncate>
+        </span>
       </div>
       <StatusDot status={d.status} />
-      <Handles />
+      {/* THE PORTS, down the card's right edge, each with the diamond n8n gives one. Their names
+          ride on the dashed lines, by the circles — three names stacked at the card's edge would sit
+          on top of each other's lines. */}
+      {ports.map((_, i) => {
+        const y = (spec.h * (i + 1)) / (ports.length + 1);
+        return (
+          <span key={i}>
+            <Diamond style={{ left: spec.w, top: y }} />
+            <Handle id={`port-${i}`} type="source" position={Position.Right} className={HANDLE_HIDDEN} style={{ top: y }} />
+          </span>
+        );
+      })}
+      <Handles tileMid={AGENT_H / 2} tileHalf={spec.w / 2} />
     </div>
   );
 }
 
-// ── decision ──────────────────────────────────────────────────────────────────
-/**
- * A fork, named after the function that decides it, with that function's docstring on hover. The
- * compiled graph has no node here at all — only the edges leaving it — which made the one place an
- * agent chooses the one thing about it the canvas could not show.
- */
-function DecisionNode({ data }: NodeProps) {
+// ── one of the agent's circles ────────────────────────────────────────────────
+function ResourceNode({ data }: NodeProps) {
   const d = data as FlowData;
   const { spec } = d;
+  const B = d.brand?.Icon;
   return (
-    <div className="relative select-none" style={{ width: spec.w, height: spec.h }} title={spec.doc ?? undefined}>
+    <div className="relative flex select-none flex-col items-center" style={{ width: spec.w, height: spec.h }}>
       <div
-        className="flex h-full items-center justify-center gap-2 rounded-pill px-3 text-tiny text-muted"
-        style={{ background: d.selected ? CARD_BG_ACTIVE : ICON_BG, border: `1px solid ${BORDER}` }}
+        className="flex items-center justify-center rounded-full"
+        style={{ width: SUB_D, height: SUB_D, background: CARD_BG, border: `1.5px solid ${BORDER}` }}
       >
-        <span className="relative shrink-0" style={{ width: 9, height: 9 }}>
-          <Diamond style={{ left: "50%", top: "50%" }} />
-        </span>
-        <Truncate>{spec.title}</Truncate>
+        {B ? <B size={NODE_ICON.resource} /> : <span className="text-tiny font-medium text-muted">{spec.title}</span>}
       </div>
-      <Handles />
+      <Truncate className="mt-1.5 max-w-full text-tiny leading-tight text-ink" title={spec.title}>{spec.title}</Truncate>
+      <Handle id="in" type="target" position={Position.Left} className={HANDLE_HIDDEN} style={{ top: SUB_D / 2, left: (spec.w - SUB_D) / 2 }} />
     </div>
   );
 }
 
-const nodeTypes = { step: StepNode, pill: PillNode, decision: DecisionNode };
+const nodeTypes = { tile: TileNode, end: EndNode, agent: AgentNode, resource: ResourceNode };
 
-// ── edge ──────────────────────────────────────────────────────────────────────
+// ── edges ─────────────────────────────────────────────────────────────────────
 function FlowEdge({ sourceX, sourceY, targetX, targetY, data, markerEnd }: EdgeProps) {
   const d = (data ?? {}) as EdgeData;
   // Down the column through the points dagre routed it by, or — a loop — up its own lane.
   const s = { x: sourceX, y: sourceY };
   const t = { x: targetX, y: targetY };
   const { d: path, label } = d.lane !== undefined ? loopPath(s, t, d.lane) : routePath(s, t, d.via);
-  const labelX = label.x;
-  const labelY = label.y;
   // Transient click highlight takes visual precedence over the persistent selection edge.
   const stroke = d.pulse ? PULSE : d.hot ? AMBER : EDGE;
-  const width = d.pulse || d.hot ? 2.2 : 1.4;
+  const width = d.pulse || d.hot ? 2.4 : 1.75;
   return (
     <>
       <BaseEdge
@@ -425,11 +450,12 @@ function FlowEdge({ sourceX, sourceY, targetX, targetY, data, markerEnd }: EdgeP
         </circle>
       )}
       {d.branch && (
+        // A branch's own name, as n8n writes "true" and "false" beside an If node's outputs.
         <EdgeLabelRenderer>
           <div
             className="nodrag nopan absolute rounded-pill px-1.5 text-tiny"
             style={{
-              transform: `translate(-50%,-50%) translate(${labelX}px, ${labelY}px)`,
+              transform: `translate(-50%,-50%) translate(${label.x}px, ${label.y}px)`,
               background: ICON_BG,
               color: d.hot ? STATUS.pending : TEXT.muted,
               pointerEvents: "none",
@@ -443,7 +469,28 @@ function FlowEdge({ sourceX, sourceY, targetX, targetY, data, markerEnd }: EdgeP
   );
 }
 
-const edgeTypes = { flow: FlowEdge };
+/** The dashed line from one of the agent's ports to its circle — n8n's sub-node connection — named by the circle. */
+function PortEdge({ sourceX, sourceY, targetX, targetY, data }: EdgeProps) {
+  const { d: path } = portPath({ x: sourceX, y: sourceY }, { x: targetX, y: targetY });
+  const port = (data as { port?: string } | undefined)?.port;
+  return (
+    <>
+      <BaseEdge path={path} style={{ stroke: EDGE_DASH, strokeWidth: 1.4, strokeDasharray: "5 4" }} />
+      {port && (
+        <EdgeLabelRenderer>
+          <div
+            className="nodrag nopan absolute text-tiny text-faint"
+            style={{ transform: `translate(-100%, -100%) translate(${targetX - 6}px, ${targetY - 3}px)`, pointerEvents: "none" }}
+          >
+            {port}
+          </div>
+        </EdgeLabelRenderer>
+      )}
+    </>
+  );
+}
+
+const edgeTypes = { flow: FlowEdge, port: PortEdge };
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 function findPrompt(files: Record<string, GenFile>): string | undefined {
@@ -621,14 +668,15 @@ function computeNodeStatus(bucket: Record<string, Step> | undefined, activeNode:
   return out;
 }
 
-// THE SHAPE OF WHAT IS COMING: three cards down the column, as the graph will be drawn.
+// THE SHAPE OF WHAT IS COMING: three tiles down the column, as the graph will be drawn.
 function GraphSkeleton() {
   return (
     <div className="graph-canvas flex h-full items-center justify-center">
-      <div className="flex flex-col items-center gap-6">
+      <div className="flex flex-col items-center gap-3">
         {[0, 1, 2].map((i) => (
-          <div key={i} className="flex flex-col items-center gap-6">
-            <div className="animate-stream-pulse rounded-card bg-active motion-reduce:animate-none" style={{ width: CARD_W, height: CARD_H }} />
+          <div key={i} className="flex flex-col items-center gap-3">
+            <div className="animate-stream-pulse rounded-lg bg-active motion-reduce:animate-none" style={{ width: TILE, height: TILE }} />
+            <div className="h-2 w-16 animate-stream-pulse rounded-pill bg-active motion-reduce:animate-none" />
             {i < 2 && <div className="h-6 w-px bg-hair" />}
           </div>
         ))}
@@ -679,20 +727,31 @@ export function GraphView() {
   const provider = run?.provider ?? agentMeta?.default_provider;
   const model = run?.model;
 
-  // The layout, memoised on the static graph. The ReAct agent's card is always laid out with room
-  // for its strip, because it always has a model to name.
-  const flow = useMemo(() => (graph?.nodes?.length ? buildFlow(graph, { agentFooter: true }) : null), [graph]);
+  // The ReAct agent's model and tools, as the circles beside its card — derived from the agent's
+  // files and provider, not the compiled graph, so they never participate in trace sync. Past
+  // MAX_SUBS the last circle says how many more there are; the inspector lists them all.
+  const subs = useMemo<Array<{ title: string; brand?: Brand }>>(() => {
+    const all = [modelResource(provider, model), ...findToolFiles(files).map((f) => toolResource(f.path))];
+    if (all.length <= MAX_SUBS) return all.map((b) => ({ title: b.label, brand: b }));
+    const shown = all.slice(0, MAX_SUBS - 1).map((b) => ({ title: b.label, brand: b }));
+    return [...shown, { title: `+${all.length - shown.length}` }];
+  }, [files, provider, model]);
+
+  // The layout, memoised on the static graph and the agent's circles.
+  const flow = useMemo(
+    () => (graph?.nodes?.length ? buildFlow(graph, { resources: subs.map((x) => x.title) }) : null),
+    [graph, subs],
+  );
   const order = useMemo(() => (flow ? readingOrder(flow.nodes) : []), [flow]);
 
-  // The ReAct agent's model and tools — derived from the agent's files and provider, not the
-  // compiled graph, so they never participate in trace sync.
-  const resources = useMemo(
-    () => ({
-      model: modelResource(provider, model),
-      tools: findToolFiles(files).slice(0, 4).map((f) => toolResource(f.path)),
-    }),
-    [files, provider, model],
+  // What each node is drawn as: its own mark, never another node's, a connector's logo where the
+  // agent has that connector. Taken in the runtime's order, so the same graph draws the same way.
+  const marks = useMemo(
+    () => (flow ? marksFor(flow.nodes.filter((n) => n.role !== "resource"), { connectors: agentMeta?.connectors }) : new Map<string, NodeMark>()),
+    [flow, agentMeta?.connectors],
   );
+  // The provider a model-calling step runs on, for the badge on its tile's corner.
+  const provider_ = useMemo(() => modelResource(provider, model), [provider, model]);
 
   // ── keeping the graph in frame ──────────────────────────────────────────────
   //
@@ -823,17 +882,22 @@ export function GraphView() {
       // node also runs the agent's reviewed and bespoke tools, and claiming otherwise would
       // overstate exactly where the badge must not.
       const mcp = spec.role === "tool" && (mcpNames.has(spec.id) || mcpNames.size > 0);
+      const agentCard = spec.role === "model" && isReactAgent(spec.id);
+      const sub = spec.role === "resource" ? subs[Number(spec.id.slice(4))] : undefined;
       const data: FlowData = {
         spec,
+        mark: marks.get(spec.id),
+        badge: spec.role === "model" && !agentCard ? provider_ : undefined,
+        brand: sub?.brand,
+        ports: agentCard ? flow.edges.filter((e) => e.port).map((e) => e.port!) : undefined,
         mcp,
         active: spec.id === activeNode,
         selected: spec.id === selectedNode || spec.id === selected?.id,
         status: nodeStatus[spec.id],
-        resources: isReactAgent(spec.id) ? resources : undefined,
       };
       return {
         id: spec.id,
-        type: spec.role === "decision" ? "decision" : spec.role === "start" || spec.role === "end" ? "pill" : "step",
+        type: agentCard ? "agent" : spec.role === "end" ? "end" : spec.role === "resource" ? "resource" : "tile",
         position: { x: spec.x, y: spec.y },
         // Declared, not left to be measured. These nodes are rebuilt from the introspected
         // topology on every render, so React Flow's measured size never survives onto the
@@ -845,7 +909,7 @@ export function GraphView() {
         data,
       };
     });
-  }, [flow, order, resources, activeNode, selectedNode, selected?.id, nodeStatus, mcpNames]);
+  }, [flow, order, marks, provider_, subs, activeNode, selectedNode, selected?.id, nodeStatus, mcpNames]);
 
   const edges = useMemo<Edge[]>(() => {
     if (!flow) return [];
@@ -856,12 +920,20 @@ export function GraphView() {
         : false;
       const particle = connected && e.to.some((t) => traversed.has(`${e.from}->${t}`));
       const color = connected ? PULSE : hot ? AMBER : EDGE;
+      if (e.port) {
+        const i = Number(e.target.slice(4));
+        return {
+          id: e.id, source: e.source, target: e.target, sourceHandle: `port-${i}`, targetHandle: "in", type: "port", focusable: false,
+          data: { port: e.port === "Model" ? "Model" : "Tool" },
+        };
+      }
+      const side = e.side === "left" ? "-l" : "";
       return {
         id: e.id,
         source: e.source,
         target: e.target,
-        sourceHandle: e.back ? "loop-out" : "out",
-        targetHandle: e.back ? "loop-in" : "in",
+        sourceHandle: e.back ? `loop-out${side}` : "out",
+        targetHandle: e.back ? `loop-in${side}` : "in",
         type: "flow",
         markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color },
         data: { hot, pulse: connected, particle, pulseKey: pulse?.key, branch: e.branch, back: e.back, via: e.via, lane: e.lane } satisfies EdgeData,
@@ -876,7 +948,9 @@ export function GraphView() {
   // extract_jd", "step #3" — a small dialog appearing somewhere other than where somebody clicked.
   // The inspector already says what the step is and how it ran in the run on screen.
   const openNode = (id: string, viaClick: boolean) => {
-    const spec = flow?.nodes.find((n) => n.id === id);
+    // One of the agent's circles describes the agent: it opens the agent.
+    const hit = flow?.nodes.find((n) => n.id === id);
+    const spec = hit?.role === "resource" ? flow?.nodes.find((n) => n.role === "model" && isReactAgent(n.id)) : hit;
     if (!spec) return;
     setSelected({ id: spec.id });
     if (viaClick) triggerPulse(spec.id); // transient connected-edge highlight + directional particle
@@ -996,8 +1070,8 @@ export function GraphView() {
             style={{ width: 120, height: 80 }}
             maskColor={MINIMAP_MASK}
             nodeColor={(n) => {
-              const role = (n.data as FlowData | undefined)?.spec.role;
-              return role && role !== "decision" ? ROLE_ACCENT[role] : TEXT.faint;
+              const mark = (n.data as FlowData | undefined)?.mark;
+              return mark?.kind === "glyph" ? mark.hue : TEXT.faint;
             }}
             nodeStrokeWidth={0}
           />

@@ -8,8 +8,9 @@
 //   npm run test:graph-layout
 
 import {
-  AGENT_FOOTER_H,
-  CARD_H,
+  AGENT_H,
+  MAX_SUBS,
+  SUB_D,
   MIN_ZOOM,
   READABLE_ZOOM,
   branchChip,
@@ -19,6 +20,7 @@ import {
   fitZoom,
   frameFor,
   loopPath,
+  portPath,
   matchesEdge,
   nodeAriaLabel,
   readingOrder,
@@ -89,7 +91,7 @@ console.log("§1 it fits the panel it is drawn in");
 {
   const flow = buildFlow(LIVEN);
   const zoom = fitZoom(flow, PANEL);
-  check("Liven's seven steps fit the panel at 75% or more", zoom >= 0.75, `zoom ${zoom.toFixed(2)} for ${flow.width}×${flow.height}`);
+  check("Liven's seven steps fit the panel whole, readably", zoom >= READABLE_ZOOM, `zoom ${zoom.toFixed(2)} for ${flow.width}×${flow.height}`);
   check("...and readably, so no minimap is needed", zoom >= READABLE_ZOOM);
   const chain = ["__start__", "extract_jd", "extract_resume", "score_candidate"].map((id) => flow.nodes.find((n) => n.id === id)!);
   check("each step sits below the one before it", chain.every((n, i) => i === 0 || n.y > chain[i - 1]!.y));
@@ -124,7 +126,7 @@ console.log("§1 it fits the panel it is drawn in");
     frameFor(flow, PANEL, 340).kind === (fitZoom(flow, { width: PANEL.width - 340, height: PANEL.height }) >= READABLE_ZOOM ? "fit" : "top"));
   // THE INSPECTOR, OVER A REACT AGENT. Its loop's lane is right of every card, and a fit measured off
   // the cards alone put the lane under the inspector.
-  const react = buildFlow(REACT_OLD, { agentFooter: true });
+  const react = buildFlow(REACT_OLD, { resources: ["claude-sonnet-5", "Gmail"] });
   const inspector = 280;
   const under = frameFor(react, PANEL, inspector);
   const lane = react.edges.find((e) => e.back)!.lane!;
@@ -229,12 +231,32 @@ console.log("\n§7 loops go round the side");
   check("its lane runs right of every card beside it — End included",
     loop.lane !== undefined && beside.every((n) => loop.lane! > n.x + n.w), `lane ${loop.lane}`);
   check("...and the layout is wide enough to hold it", loop.lane !== undefined && flow.width >= loop.lane);
+  const start = flow.nodes.find((n) => n.id === "__start__")!;
   check("the loop is kept out of the layout, so the column stays centred under Start",
-    Math.abs(agent.x + agent.w / 2 - (flow.nodes.find((n) => n.id === "__start__")!.x + 44)) < 1);
-  check("the agent card grows to hold its model and tools when it has them",
-    buildFlow(REACT_OLD, { agentFooter: true }).nodes.find((n) => n.id === "agent")?.h === CARD_H + AGENT_FOOTER_H);
-  check("...and no other card does",
-    buildFlow(REACT_OLD, { agentFooter: true }).nodes.find((n) => n.id === "record_note")?.h === CARD_H);
+    Math.abs(agent.x + agent.w / 2 - (start.x + start.w / 2)) < 1);
+}
+
+console.log("\n§7b the agent's model and tools stand beside it, as n8n's sub-nodes do, turned");
+{
+  const flow = buildFlow(REACT_OLD, { resources: ["claude-sonnet-5", "Gmail", "Slack", "Stripe", "Postgres"] });
+  const agent = flow.nodes.find((n) => n.id === "agent")!;
+  const subs = flow.nodes.filter((n) => n.role === "resource");
+  check(`at most ${MAX_SUBS} circles are drawn`, subs.length === MAX_SUBS, String(subs.length));
+  check("all of them right of the agent's card", subs.every((n) => n.x > agent.x + agent.w));
+  check("...in a column, top to bottom, none overlapping the next",
+    subs.every((n, i) => i === 0 || (n.x === subs[0]!.x && n.y >= subs[i - 1]!.y + subs[i - 1]!.h)));
+  check("...centred on the card", Math.abs((subs[0]!.y + subs[subs.length - 1]!.y + SUB_D) / 2 - (agent.y + AGENT_H / 2)) < 12);
+  const row = { top: Math.min(agent.y, ...subs.map((n) => n.y)), bottom: Math.max(agent.y + agent.h, ...subs.map((n) => n.y + n.h)) };
+  const others = flow.nodes.filter((n) => n !== agent && n.role !== "resource");
+  check("...and in the agent's own row, which nothing else shares",
+    others.every((n) => n.y + n.h <= row.top + 1 || n.y >= row.bottom - 1), others.map((n) => `${n.id}@${n.y}`).join(" "));
+  const ports = flow.edges.filter((e) => e.port);
+  check("the first is the Model port, the rest Tools",
+    ports.length === MAX_SUBS && ports[0]!.port === "Model" && ports.slice(1).every((e) => e.port === "Tools"));
+  check("each leaves the card lower down than the one before, so no two lines cross",
+    ports.every((e, i) => i === 0 || e.portAt! > ports[i - 1]!.portAt!));
+  check("port lines are not steps: no trace edge matches them", ports.every((e) => e.from === "" && e.to.length === 0));
+  check("a graph without a ReAct agent gets no circles", !buildFlow(LIVEN, { resources: ["x"] }).nodes.some((n) => n.role === "resource"));
 }
 
 console.log("\n§8 no edge is drawn through a card");
@@ -258,7 +280,9 @@ console.log("\n§8 no edge is drawn through a card");
     for (const e of flow.edges) {
       const ends = edgeEnds(e, byId);
       if (!ends) continue;
-      const pts: Point[] = e.lane !== undefined ? loopPath(ends.s, ends.t, e.lane).points : routePath(ends.s, ends.t, e.via).points;
+      const pts: Point[] = e.port
+        ? portPath(ends.s, ends.t).points
+        : e.lane !== undefined ? loopPath(ends.s, ends.t, e.lane).points : routePath(ends.s, ends.t, e.via).points;
       for (let i = 1; i < pts.length; i++) {
         const a = pts[i - 1]!;
         const b = pts[i]!;
@@ -273,7 +297,7 @@ console.log("\n§8 no edge is drawn through a card");
     return out;
   };
   for (const [name, graph] of [["Liven", LIVEN], ["the ReAct agent", REACT_OLD], ["a yes/no fork that skips a row", YESNO]] as const) {
-    const hits = crossings(buildFlow(graph, { agentFooter: true }));
+    const hits = crossings(buildFlow(graph, { resources: ["claude-sonnet-5", "Gmail", "Slack"] }));
     check(`no edge in ${name} crosses a card`, hits.length === 0, hits.join("; "));
   }
   const flow = buildFlow(YESNO);

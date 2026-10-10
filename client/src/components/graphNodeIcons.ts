@@ -110,7 +110,7 @@ const KINDS: Kind[] = [
   },
   {
     id: "money",
-    words: /^(pay|payment|payments|charge|invoice|invoices|price|pricing|cost|budget|refund|billing|order|orders|quote)$/,
+    words: /^(pay|payment|payments|charge|invoice|invoices|price|pricing|cost|budget|refund|billing|order|orders|quote|calculate|compute|total|sum|amount|tax)$/,
     hue: NODE_HUE.emerald,
     pool: [["creditCard", Icon.graphNode.creditCard], ["invoice", Icon.graphNode.invoice], ["calculator", Icon.graphNode.calculator], ["money", Icon.graphNode.money]],
   },
