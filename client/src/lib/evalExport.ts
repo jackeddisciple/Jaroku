@@ -175,7 +175,9 @@ export function download(filename: string, contents: string | Blob, mime: string
   a.href = url;
   a.download = filename;
   a.click();
-  URL.revokeObjectURL(url);
+  // Not at once: the desktop webview reads the blob after the click returns, from its download
+  // delegate, and a URL already revoked is a download that fails.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 /** Short, sortable filename stem for an eval's exports. */

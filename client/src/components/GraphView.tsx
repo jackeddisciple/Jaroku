@@ -1331,7 +1331,7 @@ export function GraphView() {
         const name = `${stem}.${kind}`;
         if (kind === "png") download(name, await graphPng(canvas), "image/png");
         else download(name, await graphSvg(canvas), "image/svg+xml");
-        toast(`Saved ${name}`, "ok");
+        toast(`Saved ${name} to Downloads`, "ok");
       }
     } catch {
       toast(kind === "copy" ? "Couldn’t copy the graph" : "Couldn’t save the graph", "err");

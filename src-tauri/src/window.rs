@@ -121,6 +121,11 @@ pub fn open(app: &AppHandle, ws_url: &str) -> Result<(), Box<dyn std::error::Err
         // off-white text, on a product whose palette has no dark mode at all. `color-scheme: light`
         // in index.css says the same thing to the webview; this says it to AppKit.
         .theme(Some(tauri::Theme::Light))
+        // A DOWNLOAD IS SAVED, NOT DROPPED. With no handler, wry's navigation delegate cancels
+        // every `<a download>` the page clicks, so the graph's Save PNG and the evals' CSV export
+        // did nothing at all. Allowed, it lands in ~/Downloads under the page's filename,
+        // numbered rather than overwriting an older one, as a browser's does.
+        .on_download(|_, _| true)
         .initialization_script(&host_config(ws_url));
 
     // MACOS ONLY, AND NOT BY PREFERENCE — `title_bar_style`, `hidden_title` and
