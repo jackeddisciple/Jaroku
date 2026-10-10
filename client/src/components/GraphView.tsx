@@ -79,7 +79,9 @@ import { Truncate } from "./Truncate.tsx";
 import { GitBranchIcon } from "./panelIcons.tsx";
 import { activeEdge, activeNodeId, latestStepForNode, stepEdge, stepNodeId, traversedEdges } from "../lib/traceGraphMap.ts";
 import type { Step } from "../types.ts";
-import { ModelChipIcon, TriggerIcon, modelResource, toolResource } from "./graphIcons.tsx";
+import { TriggerIcon, modelResource, toolResource } from "./graphIcons.tsx";
+import { ProviderMark } from "../lib/icons.tsx";
+import { useUiStore } from "../store/uiStore.ts";
 import { marksFor, type NodeMark } from "./graphNodeIcons.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { fmtLatency } from "../lib/format.ts";
@@ -149,6 +151,8 @@ type FlowData = {
   ports?: Array<"Model" | "Tools">;
   /** True when this tool node calls a third-party MCP server. Drives the rose marker. */
   mcp?: boolean;
+  /** Whether an edge leaves this node downwards — n8n's output dot is drawn only then. */
+  out?: boolean;
   active: boolean;
   selected: boolean;
   status?: NodeStatus;
@@ -354,7 +358,7 @@ function TileNode({ data }: NodeProps) {
         <StatusDot status={d.status} />
       </div>
       <Label d={d} sub={start ? (spec.doc ?? "When the agent is asked") : undefined} />
-      <OutDot />
+      {d.out && <OutDot />}
       <Handles tileMid={TILE / 2} tileHalf={TILE / 2} />
     </div>
   );
@@ -537,6 +541,20 @@ function PortEdge({ sourceX, sourceY, targetX, targetY, data }: EdgeProps) {
 const edgeTypes = { flow: FlowEdge, port: PortEdge };
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+// What each provider is called where its logo stands — the product, not the company.
+const PROVIDER_NAME: Record<string, string> = { anthropic: "Claude", openai: "ChatGPT", meta: "Meta AI" };
+
+/**
+ * A provider's own logo — Claude's, ChatGPT's — as `ProviderMark` draws it beside the composer's
+ * model chip, so the graph and the composer show the same mark for the same model. Undefined for a
+ * provider without one (the dry-run model), which then wears no badge at all.
+ */
+function providerBrand(provider?: string, model?: string): Brand | undefined {
+  const id = (provider ?? "").toLowerCase();
+  if (!PROVIDER_NAME[id]) return undefined;
+  const Mark = ({ size }: { size?: number }) => <ProviderMark provider={id} size={size} />;
+  return { label: model || PROVIDER_NAME[id]!, Icon: Mark };
+}
 function findPrompt(files: Record<string, GenFile>): string | undefined {
   const all = Object.values(files);
   const md = all.find((f) => /prompt/i.test(f.path) && f.path.endsWith(".md"));
@@ -781,14 +799,18 @@ export function GraphView() {
   // provider/model for the agent's strip
   const run = activeRunId ? runs[activeRunId] : undefined;
   const agentMeta = useMemo(() => agents.find((a) => a.agent_id === activeAgentId), [agents, activeAgentId]);
-  const provider = run?.provider ?? agentMeta?.default_provider;
-  const model = run?.model;
+  // THE MODEL A RUN FROM HERE WOULD USE: the run on screen, else what the composer has chosen,
+  // else the agent's own default — what its logo on the graph should say.
+  const chosenProvider = useUiStore((s) => s.provider);
+  const chosenModel = useUiStore((s) => s.model);
+  const provider = run?.provider ?? (chosenProvider || agentMeta?.default_provider);
+  const model = run?.model ?? (chosenProvider ? chosenModel : undefined);
 
   // The ReAct agent's model and tools, as the circles beside its card — derived from the agent's
   // files and provider, not the compiled graph, so they never participate in trace sync. Past
   // MAX_SUBS the last circle says how many more there are; the inspector lists them all.
   const subs = useMemo<Array<{ title: string; brand?: Brand }>>(() => {
-    const all = [modelResource(provider, model), ...findToolFiles(files).map((f) => toolResource(f.path))];
+    const all = [providerBrand(provider, model) ?? modelResource(provider, model), ...findToolFiles(files).map((f) => toolResource(f.path))];
     if (all.length <= MAX_SUBS) return all.map((b) => ({ title: b.label, brand: b }));
     const shown = all.slice(0, MAX_SUBS - 1).map((b) => ({ title: b.label, brand: b }));
     return [...shown, { title: `+${all.length - shown.length}` }];
@@ -855,12 +877,9 @@ export function GraphView() {
     [flow, agentMeta?.connectors],
   );
   // The provider a model-calling step runs on, for the badge on its tile's corner.
-  // Only a provider somebody would recognise: an agent whose saved default is the dry-run model
-  // would otherwise wear a badge reading "Calls Dry-run" on every step.
-  const provider_ = useMemo(() => {
-    const b = modelResource(provider, model);
-    return b.Icon === ModelChipIcon ? undefined : b;
-  }, [provider, model]);
+  // Only a provider somebody would recognise, in its own logo: an agent whose saved default is the
+  // dry-run model would otherwise wear a badge reading "Calls Dry-run" on every step.
+  const provider_ = useMemo(() => providerBrand(provider, model), [provider, model]);
 
   // ── keeping the graph in frame ──────────────────────────────────────────────
   //
@@ -955,11 +974,17 @@ export function GraphView() {
     const el = canvasRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
     let raf = 0;
+    let wasHidden = el.clientWidth === 0;
     const ro = new ResizeObserver(() => {
       // Coalesce to one refit per frame: a drag on the splitter fires this continuously.
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
         setFrame({ width: el.clientWidth, height: el.clientHeight });
+        // A CANVAS THAT WAS HIDDEN CANNOT HAVE BEEN MOVED BY ANYBODY. Mounted in a closed panel, or
+        // behind a dialog that held the app on launch, it has no size; when it first gets one it is
+        // framed afresh rather than shown at whatever viewport it was left with.
+        if (wasHidden && el.clientWidth > 0) userMoved.current = false;
+        wasHidden = el.clientWidth === 0;
         if (!userMoved.current) frameGraph();
       });
     });
@@ -1017,6 +1042,7 @@ export function GraphView() {
         brand: sub?.brand,
         ports: agentCard ? flow.edges.filter((e) => e.port).map((e) => e.port!) : undefined,
         mcp,
+        out: flow.edges.some((e) => e.source === spec.id && !e.back && !e.port),
         active: spec.id === activeNode,
         selected: spec.id === selectedNode || spec.id === selected?.id,
         status: nodeStatus[spec.id],
@@ -1209,7 +1235,9 @@ export function GraphView() {
         zoomOnDoubleClick={false}
         onPaneClick={() => setSelected(null)}
       >
-        <Background variant={BackgroundVariant.Dots} gap={28} size={1} color={SURFACE.chrome} />
+        {/* n8n's DOTTED CANVAS, and visibly so: the dots were the page's own chrome tone, which on
+            this background was a grid nobody could see. */}
+        <Background variant={BackgroundVariant.Dots} gap={20} size={1.6} color={TEXT.disabled} />
         <Controls
           showInteractive={false}
           className="!bg-elevated/80 !backdrop-blur !border-0 !rounded-card !shadow-floating"
