@@ -18,6 +18,7 @@ import {
   decisionId,
   edgeEnds,
   fitZoom,
+  findNodes,
   frameFor,
   loopPath,
   portPath,
@@ -325,7 +326,17 @@ console.log("\n§9 a screen reader is told what a node is, not how to delete it"
   check("the decision pill is not counted as a step", !order.some((n) => n.role === "decision"));
 }
 
-console.log("\n§10 an edge to a node the graph does not have is dropped, not drawn to nowhere");
+console.log("\n§10 Find steps through names in reading order");
+{
+  const flow = buildFlow(LIVEN);
+  const hits = findNodes(flow.nodes, "NOTE");
+  check("case does not matter, and every match is found", hits.length === 2, hits.map((n) => n.id).join(" "));
+  check("...top to bottom, then left to right", hits[0]!.y <= hits[1]!.y && (hits[0]!.y < hits[1]!.y || hits[0]!.x < hits[1]!.x));
+  check("Start is found by its name, not its id's underscores", findNodes(flow.nodes, "start")[0]?.id === "__start__");
+  check("nothing typed finds nothing", findNodes(flow.nodes, "  ").length === 0);
+}
+
+console.log("\n§11 an edge to a node the graph does not have is dropped, not drawn to nowhere");
 {
   const broken: AgentGraph = {
     agent_id: "broken",

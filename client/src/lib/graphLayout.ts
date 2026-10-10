@@ -578,6 +578,19 @@ export function readingOrder(nodes: FlowNodeSpec[]): FlowNodeSpec[] {
     .sort((a, b) => a.y - b.y || a.x - b.x);
 }
 
+/**
+ * The nodes whose name contains `query`, ignoring case, in reading order — what Find steps through.
+ * The agent's circles are found too: "gmail" should lead somewhere.
+ */
+export function findNodes(nodes: FlowNodeSpec[], query: string): FlowNodeSpec[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  return nodes
+    .filter((n) => n.title.toLowerCase().includes(q) || n.id.toLowerCase().includes(q))
+    .slice()
+    .sort((a, b) => a.y - b.y || a.x - b.x);
+}
+
 /** What a screen reader says for a node. React Flow's own default offers to drag or delete it. */
 export function nodeAriaLabel(n: FlowNodeSpec, order: FlowNodeSpec[]): string {
   if (n.role === "start") return "Start of the graph";

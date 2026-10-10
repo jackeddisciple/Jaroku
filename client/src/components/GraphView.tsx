@@ -61,6 +61,7 @@ import {
   SUB_D,
   TILE,
   buildFlow,
+  findNodes,
   frameFor,
   isReactAgent,
   loopPath,
@@ -82,7 +83,7 @@ import type { Step } from "../types.ts";
 import { TriggerIcon, modelResource, toolResource } from "./graphIcons.tsx";
 import { ProviderMark } from "../lib/icons.tsx";
 import { useUiStore } from "../store/uiStore.ts";
-import { GraphToolbar, RunControls } from "./GraphToolbar.tsx";
+import { FindControl, GraphToolbar, RunControls, ToolDivider } from "./GraphToolbar.tsx";
 import { marksFor, type NodeMark } from "./graphNodeIcons.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { fmtLatency } from "../lib/format.ts";
@@ -912,6 +913,7 @@ export function GraphView() {
   const rf = useRef<{
     setViewport: (v: { x: number; y: number; zoom: number }, o?: { duration?: number }) => void;
     getViewport: () => { x: number; y: number; zoom: number };
+    setCenter: (x: number, y: number, o?: { zoom?: number; duration?: number }) => void;
   } | null>(null);
   const userMoved = useRef(false);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -1139,6 +1141,19 @@ export function GraphView() {
     useBuildStore.getState().openInCode(at?.file ?? "agent.py", at?.line);
   };
 
+  // FIND: centre a match and pulse it, at no less than a readable zoom. Not a click — the inspector
+  // stays as it was — and not a move of the user's: refitting is not switched off by looking.
+  const [findSignal, setFindSignal] = useState(0);
+  const focusNode = (id: string) => {
+    const spec = flow?.nodes.find((n) => n.id === id);
+    const inst = rf.current;
+    if (!spec || !inst) return;
+    const at = positions[spec.id] ?? { x: spec.x, y: spec.y };
+    const zoom = Math.max(inst.getViewport().zoom, 0.9);
+    inst.setCenter(at.x + spec.w / 2, at.y + spec.h / 2, { zoom, duration: REDUCED_MOTION ? 0 : 250 });
+    triggerPulse(spec.id);
+  };
+
   if (!activeAgentId) return <Empty title="No agent selected" hint="Pick one in the sidebar and its compiled topology is introspected and drawn here." />;
   // A DRAFT IS A STATE, NOT A FAILURE. It used to be asked about, answered "no published version",
   // and drawn as "This graph could not be drawn" over a Try again that could never succeed.
@@ -1185,11 +1200,17 @@ export function GraphView() {
   return (
     <div
       ref={canvasRef}
-      className={`graph-canvas relative h-full w-full ${framed ? "" : "opacity-0"}`}
+      className={`graph-canvas relative h-full w-full focus:outline-none ${framed ? "" : "opacity-0"}`}
       // Enter on a focused node opens it, as a click does. Read off the node's own element, because
       // React Flow reports a keyboard selection only for nodes whose state it holds, and these are
       // rebuilt from the introspected topology on every render.
+      tabIndex={-1}
       onKeyDown={(e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+          e.preventDefault();
+          setFindSignal((n) => n + 1);
+          return;
+        }
         if (e.key !== "Enter" && e.key !== " ") return;
         const id = (e.target as HTMLElement).closest?.(".react-flow__node")?.getAttribute("data-id");
         if (id) {
@@ -1284,6 +1305,12 @@ export function GraphView() {
       {/* THE TOOLBAR, over the canvas rather than in it, so it neither pans nor zooms. */}
       <GraphToolbar>
         <RunControls agentId={activeAgentId} runnable={agentMeta?.runnable ?? false} />
+        <ToolDivider />
+        <FindControl
+          find={(q) => findNodes(flow.nodes, q).map((n) => n.id)}
+          onFocus={focusNode}
+          openSignal={findSignal}
+        />
       </GraphToolbar>
       {selected && flow && (() => {
         const spec = flow.nodes.find((n) => n.id === selected.id);

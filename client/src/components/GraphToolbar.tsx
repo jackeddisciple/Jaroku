@@ -8,7 +8,7 @@
 // NO WORDS ON THE CONTROLS. Each is a mark with a tooltip and an accessible name from one string,
 // so the canvas stays a picture.
 
-import { useState, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 
 import { Icon } from "../lib/icons/registry.ts";
 import { ICON } from "../lib/tokens.ts";
@@ -153,6 +153,101 @@ export function RunControls({ agentId, runnable }: { agentId: string; runnable: 
         </form>
       </PopoverContent>
     </Popover>
+  );
+}
+
+/**
+ * Find a step: a mark that opens into a field. Enter (or ↓) steps to the next match and Shift+Enter
+ * (or ↑) to the one before; each is centred and pulsed by `onFocus`. Esc closes it.
+ *
+ * `openSignal` is bumped by ⌘F on the canvas, so the shortcut and the mark open the same thing.
+ */
+export function FindControl({
+  find, onFocus, openSignal,
+}: {
+  find: (query: string) => string[];
+  onFocus: (id: string) => void;
+  openSignal: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [at, setAt] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const hits = open ? find(query) : [];
+
+  useEffect(() => {
+    if (openSignal > 0) setOpen(true);
+  }, [openSignal]);
+  useEffect(() => {
+    if (open) inputRef.current?.focus();
+  }, [open, openSignal]);
+
+  const go = (i: number) => {
+    if (hits.length === 0) return;
+    const next = (i + hits.length) % hits.length;
+    setAt(next);
+    onFocus(hits[next]!);
+  };
+
+  if (!open) {
+    return (
+      <ToolButton label="Find a step (⌘F)" onClick={() => setOpen(true)}>
+        <Icon.graphControl.find size={ICON.sm} />
+      </ToolButton>
+    );
+  }
+  return (
+    <span className="flex items-center gap-0.5">
+      <span className="flex items-center gap-1 rounded-control bg-panel px-1.5 py-0.5">
+        <Icon.graphControl.find size={ICON.xs} />
+        <input
+          ref={inputRef}
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setAt(0);
+            const first = find(e.target.value)[0];
+            if (first) onFocus(first);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              setOpen(false);
+              setQuery("");
+            } else if (e.key === "Enter" || e.key === "ArrowDown") {
+              e.preventDefault();
+              go(e.shiftKey ? at - 1 : at + 1);
+            } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+              go(at - 1);
+            }
+          }}
+          placeholder="Find a step"
+          aria-label="Find a step"
+          className="w-28 bg-transparent text-caption text-ink placeholder:text-faint focus:outline-none"
+        />
+        {query.trim() && (
+          <span className="text-tiny tabular-nums text-faint" aria-live="polite">
+            {hits.length ? `${at + 1}/${hits.length}` : "0/0"}
+          </span>
+        )}
+      </span>
+      <ToolButton label="Previous match" onClick={() => go(at - 1)} disabled={hits.length === 0}>
+        <Icon.graphControl.findPrev size={ICON.sm} />
+      </ToolButton>
+      <ToolButton label="Next match" onClick={() => go(at + 1)} disabled={hits.length === 0}>
+        <Icon.graphControl.findNext size={ICON.sm} />
+      </ToolButton>
+      <ToolButton
+        label="Close find"
+        onClick={() => {
+          setOpen(false);
+          setQuery("");
+        }}
+      >
+        <Icon.graphControl.close size={ICON.sm} />
+      </ToolButton>
+    </span>
   );
 }
 

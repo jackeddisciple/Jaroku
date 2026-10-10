@@ -428,6 +428,10 @@ export const MANIFEST = {
     run: "PlayIcon",
     pause: "PauseIcon",
     stop: "StopIcon",
+    find: "Search01Icon",
+    findPrev: "ArrowUp01Icon",
+    findNext: "ArrowDown01Icon",
+    close: "Cancel01Icon",
   },
 
   // ── Graph nodes ───────────────────────────────────────────────────────────

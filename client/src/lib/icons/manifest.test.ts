@@ -64,7 +64,8 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // does — so a five-step agent stops being five identical robots.
   // 239 WITH `graph.resetLayout`, which puts a dragged graph back.
   // 242 WITH THE GRAPH TOOLBAR'S RUN, PAUSE AND STOP — marks the set already had.
-  check("242 registry keys", entries.length === 242, `${entries.length}`);
+  // 246 WITH ITS FIND: the search, the two arrows that step through matches, and a close.
+  check("246 registry keys", entries.length === 246, `${entries.length}`);
   const names = new Set(entries.map((e) => e.export));
   // 104 from icons_integration's appendix, plus D8's 13 — the composer glyphs that had to move
   // here when `@hugeicons/react` came out. See the note at the top of `registry.ts`.
