@@ -183,7 +183,11 @@ const HARD_RULES = `HARD RULES:
    invent a tool name that is not in the list you were given. Those tools call a third-party
    server nobody has reviewed, so the wiring around them is host-owned and audited; a
    model-written version of it would be the one unreviewed thing in the path that nobody
-   agreed to.`;
+   agreed to.
+13. Give every node function and every routing function a one-line docstring in plain
+   English saying what it does ("Split the job description into must-haves and
+   nice-to-haves."). The Graph view shows that line on the node's card, and a routing
+   function's line is the rule it shows at the fork.`;
 
 function renderConnectorReference(connectors: Connector[]): string {
   return connectors
