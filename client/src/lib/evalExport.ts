@@ -167,8 +167,10 @@ export function resultsToJson(results: EvalResults): string {
 }
 
 /** Trigger a client-side download. No server round trip; the data is already here. */
-export function download(filename: string, contents: string, mime: string): void {
-  const url = URL.createObjectURL(new Blob([contents], { type: `${mime};charset=utf-8` }));
+export function download(filename: string, contents: string | Blob, mime: string): void {
+  // A Blob is binary already (an image) and carries its own type; text is labelled as UTF-8.
+  const blob = contents instanceof Blob ? contents : new Blob([contents], { type: `${mime};charset=utf-8` });
+  const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;

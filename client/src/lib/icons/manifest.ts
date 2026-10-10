@@ -447,6 +447,11 @@ export const MANIFEST = {
     // Looking back: an earlier version's graph, and that version against the current one.
     versions: "WorkHistoryIcon",
     compare: "GitCompareIcon",
+    // The graph as a picture: copied, or saved as a PNG or an SVG. Copy is the app's one copy mark.
+    export: "ImageDownloadIcon",
+    copyImage: "CopyIcon",
+    savePng: "PngIcon",
+    saveSvg: "SvgIcon",
   },
 
   // ── Graph nodes ───────────────────────────────────────────────────────────

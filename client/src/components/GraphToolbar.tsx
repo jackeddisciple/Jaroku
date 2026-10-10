@@ -306,6 +306,44 @@ export function VersionControl({
   );
 }
 
+export type GraphExport = "copy" | "png" | "svg";
+
+/** The graph as a picture: a mark that opens into three — copy it, or save it as a PNG or an SVG. */
+export function ExportControl({ onExport }: { onExport: (kind: GraphExport) => void }) {
+  const [open, setOpen] = useState(false);
+  const pick = (kind: GraphExport) => {
+    setOpen(false);
+    onExport(kind);
+  };
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <span className="inline-flex">
+          <ToolButton label="Export as an image" pressed={open}>
+            <Icon.graphControl.export size={ICON.sm} />
+          </ToolButton>
+        </span>
+      </PopoverTrigger>
+      <PopoverContent
+        side="bottom"
+        align="center"
+        aria-label="Export as an image"
+        className="flex w-auto items-center gap-0.5 rounded-card border border-edge bg-elevated p-1 shadow-floating"
+      >
+        <ToolButton label="Copy image" onClick={() => pick("copy")}>
+          <Icon.graphControl.copyImage size={ICON.sm} />
+        </ToolButton>
+        <ToolButton label="Save as PNG" onClick={() => pick("png")}>
+          <Icon.graphControl.savePng size={ICON.sm} />
+        </ToolButton>
+        <ToolButton label="Save as SVG" onClick={() => pick("svg")}>
+          <Icon.graphControl.saveSvg size={ICON.sm} />
+        </ToolButton>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 /** The pill itself, at the top of the canvas. Its groups are passed in, in order. */
 export function GraphToolbar({ children }: { children: React.ReactNode }) {
   return (

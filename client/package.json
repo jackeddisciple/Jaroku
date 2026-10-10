@@ -161,6 +161,7 @@
     "@radix-ui/react-tooltip": "1.2.16",
     "@xyflow/react": "^12.11.2",
     "cmdk": "^1.1.1",
+    "html-to-image": "1.11.13",
     "katex": "^0.18.7",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

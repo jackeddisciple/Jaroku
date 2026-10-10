@@ -68,7 +68,8 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // 249 WITH THE HOVER TOOLBAR'S INSPECT, OPEN CODE AND BRANCH.
   // 255 WITH THE RUN STRIP'S FIRST, PREVIOUS, NEXT AND LAST, AND A NODE'S TIME AND COST.
   // 257 WITH THE VERSION PICKER AND ITS COMPARE.
-  check("257 registry keys", entries.length === 257, `${entries.length}`);
+  // 261 WITH EXPORT: its menu, and copy, PNG and SVG.
+  check("261 registry keys", entries.length === 261, `${entries.length}`);
   const names = new Set(entries.map((e) => e.export));
   // 104 from icons_integration's appendix, plus D8's 13 — the composer glyphs that had to move
   // here when `@hugeicons/react` came out. See the note at the top of `registry.ts`.
@@ -97,7 +98,8 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // 187 WITH `InformationCircleIcon`, for the hover toolbar's Inspect.
   // 192 WITH `PreviousIcon`, `ArrowLeft01Icon`, `ArrowRight01Icon`, `NextIcon` and `Coins01Icon`.
   // 194 WITH `WorkHistoryIcon` AND `GitCompareIcon`, for them.
-  check("194 distinct marks", names.size === 194, `${names.size}`);
+  // 197 WITH `ImageDownloadIcon`, `PngIcon` AND `SvgIcon`, for export; its copy is `CopyIcon`.
+  check("197 distinct marks", names.size === 197, `${names.size}`);
   check("no key is declared twice", new Set(entries.map((e) => e.key)).size === entries.length);
 }
 

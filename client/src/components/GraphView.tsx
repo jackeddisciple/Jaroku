@@ -84,7 +84,9 @@ import type { Step } from "../types.ts";
 import { TriggerIcon, modelResource, toolResource } from "./graphIcons.tsx";
 import { ProviderMark } from "../lib/icons.tsx";
 import { useUiStore } from "../store/uiStore.ts";
-import { FindControl, GraphToolbar, RunControls, ToolButton, ToolDivider, VersionControl } from "./GraphToolbar.tsx";
+import { ExportControl, FindControl, GraphToolbar, RunControls, ToolButton, ToolDivider, VersionControl, type GraphExport } from "./GraphToolbar.tsx";
+import { download } from "../lib/evalExport.ts";
+import { graphFileStem, graphPng, graphSvg } from "../lib/graphExport.ts";
 import { compareGraphs, segmentMark, type DiffMark } from "../lib/graphCompare.ts";
 import { marksFor, type NodeMark } from "./graphNodeIcons.ts";
 import { Icon } from "../lib/icons/registry.ts";
@@ -1314,6 +1316,28 @@ export function GraphView() {
     triggerPulse(spec.id);
   };
 
+  // EXPORT: the graph as drawn — the version on screen, a comparison included — as a picture. The
+  // clipboard is handed the PNG still being drawn, so the copy stays inside the click that asked.
+  const exportGraph = async (kind: GraphExport) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const toast = useUiStore.getState().showToast;
+    const stem = graphFileStem(agentMeta?.name ?? activeAgentId ?? "agent", viewing ?? (latest || null), diff ? latest : null);
+    try {
+      if (kind === "copy") {
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": graphPng(canvas) })]);
+        toast("Copied the graph as an image", "ok");
+      } else {
+        const name = `${stem}.${kind}`;
+        if (kind === "png") download(name, await graphPng(canvas), "image/png");
+        else download(name, await graphSvg(canvas), "image/svg+xml");
+        toast(`Saved ${name}`, "ok");
+      }
+    } catch {
+      toast(kind === "copy" ? "Couldn’t copy the graph" : "Couldn’t save the graph", "err");
+    }
+  };
+
   // What each node's hover toolbar does. Branching needs the run on screen to have passed through
   // the node — its checkpoint there is what the branch starts from (the same call the state editor
   // makes) — and a run that has finished or paused, not one still moving.
@@ -1516,6 +1540,8 @@ export function GraphView() {
           }}
           onCompare={setComparing}
         />
+        <ToolDivider />
+        <ExportControl onExport={(kind) => void exportGraph(kind)} />
       </GraphToolbar>
       {selected && flow && (() => {
         const spec = flow.nodes.find((n) => n.id === selected.id);
