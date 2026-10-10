@@ -62,6 +62,7 @@ import {
   nodeAriaLabel,
   readingOrder,
   routePath,
+  titleOf,
   type FlowLayout,
   type FlowNodeSpec,
   type FlowRole,
@@ -82,6 +83,7 @@ import {
   toolResource,
 } from "./graphIcons.tsx";
 import { Icon } from "../lib/icons/registry.ts";
+import { fmtLatency } from "../lib/format.ts";
 
 // How much of this canvas the Step Details overlay covers when it is open. It is drawn over
 // the graph rather than beside it, so this is the one number that tells the framing the right
@@ -461,37 +463,112 @@ function findToolFiles(files: Record<string, GenFile>): GenFile[] {
   return flat ? [flat] : [];
 }
 
-/** What the inspector calls a node. A model-calling step is not the ReAct agent and has no prompt file. */
-function inspectorType(spec: FlowNodeSpec): string {
-  if (spec.role === "model") return isReactAgent(spec.id) ? "agent" : "model";
-  return spec.role;
+// ── node inspector ────────────────────────────────────────────────────────────
+type Link = { id: string; branch?: string };
+
+/**
+ * A node's edges as the code has them — a decision stands for the fork of the step it decides for,
+ * so its two segments are read back into the one edge each branch really is, with its label.
+ */
+function connections(spec: FlowNodeSpec, flow: FlowLayout): { incoming: string[]; outgoing: Link[] } {
+  const real = new Map<string, { source: string; target: string; branch?: string }>();
+  for (const e of flow.edges) {
+    for (const t of e.to) {
+      const key = `${e.from}->${t}`;
+      const branch = e.target === t ? e.branch : undefined;
+      real.set(key, { source: e.from, target: t, branch: real.get(key)?.branch ?? branch });
+    }
+  }
+  const id = spec.decides?.source ?? spec.id;
+  const all = [...real.values()];
+  if (spec.role === "decision") {
+    return { incoming: [id], outgoing: all.filter((r) => r.source === id).map((r) => ({ id: r.target, branch: r.branch })) };
+  }
+  return {
+    incoming: [...new Set(all.filter((r) => r.target === id).map((r) => r.source))],
+    outgoing: all.filter((r) => r.source === id).map((r) => ({ id: r.target, branch: r.branch })),
+  };
 }
 
-// ── node inspector ────────────────────────────────────────────────────────────
-function NodeInspector({ nodeId, ntype, onClose }: { nodeId: string; ntype: string; onClose: () => void }) {
+/** What Start and End are, since they have no docstring to say it. */
+const PILL_DOC: Record<"start" | "end", string> = {
+  start: "Where every run begins.",
+  end: "Where a run finishes.",
+};
+
+/**
+ * What the selected node is, what it does, where it sits, and how it went in the run on screen.
+ *
+ * IT USED TO TITLE START `__start__` AND CALL EVERY STEP AN AGENT. Every node that was not a tool,
+ * a start or an end was filed as "agent", so `extract_jd` read "Type: agent" over the whole agent's
+ * prompt file. The prompt belongs to the ReAct agent node alone; a step says what its docstring says.
+ */
+function NodeInspector({
+  spec, flow, bucket, onOpen, onClose,
+}: {
+  spec: FlowNodeSpec;
+  flow: FlowLayout;
+  bucket: Record<string, Step> | undefined;
+  onOpen: (id: string) => void;
+  onClose: () => void;
+}) {
   const files = useBuildStore((s) => s.files);
   const runs = useTraceStore((s) => s.runs);
   const activeRunId = useTraceStore((s) => s.activeRunId);
   const run = activeRunId ? runs[activeRunId] : undefined;
-  const prompt = findPrompt(files);
-  const toolFiles = findToolFiles(files);
+  const reactAgent = spec.role === "model" && isReactAgent(spec.id);
+  const prompt = reactAgent ? findPrompt(files) : undefined;
+  const toolFiles = spec.role === "tool" ? findToolFiles(files) : [];
+  const { incoming, outgoing } = connections(spec, flow);
+  const doc = spec.role === "start" || spec.role === "end" ? PILL_DOC[spec.role] : spec.doc;
+  const step = spec.role === "decision" ? undefined : latestStepForNode(spec.id, bucket);
+  const forkHere = flow.nodes.find((n) => n.decides?.source === spec.id);
 
   return (
     <div className="absolute top-2 right-2 bottom-2 w-64 bg-elevated rounded-card border border-edge p-3 overflow-auto text-caption shadow-floating">
-      <div className="flex items-center justify-between mb-3">
-        <Truncate className="text-ink" title={nodeId}>{nodeId}</Truncate>
+      <div className="flex items-start justify-between gap-2">
+        <span className="flex min-w-0 flex-col gap-0.5">
+          <Truncate className="text-label text-ink" title={spec.title}>{spec.title}</Truncate>
+          <span className="text-tiny text-muted">{ROLE_LABEL[spec.role]}</span>
+        </span>
         <button className="text-muted transition-colors duration-fast hover:text-ink" title="Close (Esc)" aria-label="Close" onClick={onClose}>
           <Icon.workspace.close size={ICON.sm} />
         </button>
       </div>
-      <Row label="Type" value={ntype} />
-      {ntype === "agent" && run && <Row label="Model" value={run.model} />}
-      {ntype === "agent" && prompt && (
+
+      {doc ? (
+        <p className="mt-3 text-ink">{doc}</p>
+      ) : spec.role !== "decision" ? (
+        <p className="mt-3 text-faint">No docstring says what this step does.</p>
+      ) : null}
+
+      {incoming.length > 0 && (
+        <Section title={spec.role === "decision" ? "Decides for" : "Comes from"}>
+          <Links links={incoming.map((id) => ({ id }))} onOpen={onOpen} />
+        </Section>
+      )}
+      {outgoing.length > 0 && (
+        <Section title={spec.role === "decision" ? "Chooses between" : forkHere ? `Goes to, as ${forkHere.title} decides` : "Goes to"}>
+          <Links links={outgoing} onOpen={onOpen} />
+        </Section>
+      )}
+
+      {step && (
+        <Section title="In this run">
+          <span className={step.error ? "text-ink" : "text-muted"}>
+            {step.error ? "Failed" : "Ran"} · {fmtLatency(step.latency_ms)}
+          </span>
+          {step.error && <p className="mt-1 whitespace-pre-wrap break-words text-tiny text-muted">{step.error}</p>}
+        </Section>
+      )}
+
+      {reactAgent && run && <Section title="Model"><span className="text-ink">{run.model}</span></Section>}
+      {prompt && (
         <Section title="Prompt">
           <pre className="whitespace-pre-wrap text-muted text-tiny leading-relaxed">{prompt.slice(0, 1200)}</pre>
         </Section>
       )}
-      {ntype === "tool" && toolFiles.length > 0 && (
+      {toolFiles.length > 0 && (
         <Section title={`Tools (${toolFiles.length})`}>
           {toolFiles.map((f) => (
             <div key={f.path} className="mb-3">
@@ -501,17 +578,26 @@ function NodeInspector({ nodeId, ntype, onClose }: { nodeId: string; ntype: stri
           ))}
         </Section>
       )}
-      {ntype === "start" && <p className="text-faint mt-2">Graph entry point.</p>}
-      {ntype === "end" && <p className="text-faint mt-2">Graph terminal.</p>}
     </div>
   );
 }
-function Row({ label, value }: { label: string; value: string }) {
+
+/** The nodes a node connects to, each one a way to open it. */
+function Links({ links, onOpen }: { links: Link[]; onOpen: (id: string) => void }) {
   return (
-    <div className="flex justify-between py-1">
-      <span className="text-muted">{label}</span>
-      <Truncate className="ml-2 text-ink" title={value}>{value}</Truncate>
-    </div>
+    <span className="flex flex-col items-start gap-1">
+      {links.map((l) => (
+        <button
+          key={l.id}
+          type="button"
+          onClick={() => onOpen(l.id)}
+          className="flex max-w-full items-center gap-1.5 text-left text-ink transition-colors hover:text-muted"
+        >
+          <Truncate title={titleOf(l.id)}>{titleOf(l.id)}</Truncate>
+          {l.branch && <span className="shrink-0 rounded-pill bg-chrome px-1.5 text-tiny text-muted">{l.branch}</span>}
+        </button>
+      ))}
+    </span>
   );
 }
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -562,7 +648,7 @@ export function GraphView() {
   const loading = useGraphStore((s) => (activeAgentId ? s.loading[activeAgentId] : undefined));
   const files = useBuildStore((s) => s.files);
   const agents = useBuildStore((s) => s.agents);
-  const [selected, setSelected] = useState<{ id: string; type: string } | null>(null);
+  const [selected, setSelected] = useState<{ id: string } | null>(null);
 
   // Transient click micro-interaction: highlight a clicked node's connected edges (and pulse a
   // particle along the ones that actually carried data), settling back after ~480ms.
@@ -791,7 +877,7 @@ export function GraphView() {
     const spec = flow?.nodes.find((n) => n.id === id);
     if (!spec) return;
     const nodeId = spec.decides?.source ?? spec.id;
-    setSelected({ id: spec.id, type: inspectorType(spec) });
+    setSelected({ id: spec.id });
     useUiStore.getState().setSelectedNodeId(nodeId); // composer context: this graph node
     if (viaClick) triggerPulse(spec.id); // transient connected-edge highlight + directional particle
     const step = latestStepForNode(nodeId, bucket);
@@ -922,7 +1008,12 @@ export function GraphView() {
           />
         )}
       </ReactFlow>
-      {selected && <NodeInspector nodeId={selected.id} ntype={selected.type} onClose={() => setSelected(null)} />}
+      {selected && flow && (() => {
+        const spec = flow.nodes.find((n) => n.id === selected.id);
+        return spec ? (
+          <NodeInspector spec={spec} flow={flow} bucket={bucket} onOpen={(id) => openNode(id, true)} onClose={() => setSelected(null)} />
+        ) : null;
+      })()}
     </div>
   );
 }
