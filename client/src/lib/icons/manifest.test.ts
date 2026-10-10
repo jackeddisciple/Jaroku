@@ -60,7 +60,9 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // shuffle button was the only thing that drew this.
   // 168 WITH `threads.pin`, for the pin at the end of every chat row in the sidebar — `PinIcon`, which
   // two keys already draw, so the count of distinct marks below does not move.
-  check("168 registry keys", entries.length === 168, `${entries.length}`);
+  // 238 WITH THE GRAPH'S NODES: the 70 `graphNode` keys a step of an agent is drawn as, by what it
+  // does — so a five-step agent stops being five identical robots.
+  check("238 registry keys", entries.length === 238, `${entries.length}`);
   const names = new Set(entries.map((e) => e.export));
   // 104 from icons_integration's appendix, plus D8's 13 — the composer glyphs that had to move
   // here when `@hugeicons/react` came out. See the note at the top of `registry.ts`.
@@ -83,7 +85,9 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // count alone cannot see and the file list in `test:icon-generated` can.
   // 125 WITH `Add01Icon`, for the agent card's New Thread pill. `PlusIcon` stays: two other keys
   // still draw it, so this is an addition rather than a swap.
-  check("125 distinct marks", names.size === 125, `${names.size}`);
+  // 186 WITH THE GRAPH'S NODES: 61 of the 70 `graphNode` marks; the other nine (`DatabaseIcon`,
+  // `CreditCardIcon`, `Share08Icon`, `PlayIcon` and so on) were already drawn by other keys.
+  check("186 distinct marks", names.size === 186, `${names.size}`);
   check("no key is declared twice", new Set(entries.map((e) => e.key)).size === entries.length);
 }
 

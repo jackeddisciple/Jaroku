@@ -416,6 +416,102 @@ export const MANIFEST = {
   // ── §6 Graph ──────────────────────────────────────────────────────────────
   graph: { retry: "ReloadIcon" },
 
+  // ── Graph nodes ───────────────────────────────────────────────────────────
+  //
+  // WHAT EACH STEP OF AN AGENT IS, AS A PICTURE. Every model-calling step used to wear the same
+  // robot, so a five-step agent was five identical tiles. `components/graphNodeIcons.ts` reads a
+  // node's name ("extract_jd", "score_candidate") into one of these by what it does, gives no two
+  // nodes in a graph the same one, and colours each in the hue of what it does. Grouped here as it
+  // groups them; the generic run at the end is what a name that says nothing recognisable gets.
+  graphNode: {
+    // The two ends and the fork.
+    start: "BubbleChatIcon",
+    end: "Flag02Icon",
+    decision: "SignpostIcon",
+    // Reading something in.
+    fileSearch: "FileSearchIcon",
+    scan: "ScanIcon",
+    documentCheck: "DocumentValidationIcon",
+    download: "Download01Icon",
+    // People.
+    userSearch: "UserSearch01Icon",
+    userAccount: "UserAccountIcon",
+    jobSearch: "JobSearchIcon",
+    briefcase: "Briefcase01Icon",
+    // Judging.
+    analytics: "Analytics01Icon",
+    target: "Target02Icon",
+    award: "Award01Icon",
+    chartBar: "ChartBarLineIcon",
+    star: "StarIcon",
+    // Sorting.
+    tag: "Tag01Icon",
+    filter: "FilterIcon",
+    filterHorizontal: "FilterHorizontalIcon",
+    // Writing.
+    pencilEdit: "PencilEdit02Icon",
+    messageEdit: "MessageEdit01Icon",
+    note: "Note01Icon",
+    textAlign: "TextAlignLeftIcon",
+    fileEdit: "FileEditIcon",
+    // Sending.
+    mail: "Mail01Icon",
+    mailSend: "MailSend01Icon",
+    sent: "SentIcon",
+    notification: "Notification03Icon",
+    // Looking things up.
+    search: "Search01Icon",
+    globe: "Globe02Icon",
+    database: "DatabaseIcon",
+    link: "Link01Icon",
+    // Thinking.
+    aiBrain: "AiBrain02Icon",
+    idea: "Idea01Icon",
+    aiChat: "AiChat02Icon",
+    brain: "BrainIcon",
+    // Checking.
+    checkmark: "CheckmarkCircle02Icon",
+    shield: "Shield01Icon",
+    taskDone: "TaskDone01Icon",
+    userCheck: "UserCheck01Icon",
+    // Reshaping.
+    magicWand: "MagicWand01Icon",
+    merge: "GitMergeIcon",
+    layers: "Layers01Icon",
+    // Time.
+    calendar: "Calendar03Icon",
+    clock: "Clock01Icon",
+    hourglass: "HourglassIcon",
+    // Money.
+    creditCard: "CreditCardIcon",
+    invoice: "Invoice01Icon",
+    calculator: "Calculator01Icon",
+    money: "Money01Icon",
+    // Code and tools.
+    sourceCode: "SourceCodeIcon",
+    api: "ApiIcon",
+    wrench: "Wrench01Icon",
+    plug: "Plug01Icon",
+    // Talking.
+    message: "Message01Icon",
+    chatting: "Chatting01Icon",
+    translate: "TranslateIcon",
+    // Anything else.
+    sparkles: "SparklesIcon",
+    puzzle: "PuzzleIcon",
+    task: "Task01Icon",
+    package: "Package01Icon",
+    workflow: "WorkflowSquare03Icon",
+    book: "Book02Icon",
+    share: "Share08Icon",
+    news: "News01Icon",
+    image: "Image01Icon",
+    location: "Location01Icon",
+    cart: "ShoppingCart01Icon",
+    cloud: "CloudIcon",
+    play: "PlayIcon",
+  },
+
   // ── §6 Workspace panel tabs ───────────────────────────────────────────────
   //
   // D6: ALL SIX GET ICON + LABEL. The document marked four of them icon-only and left `members`

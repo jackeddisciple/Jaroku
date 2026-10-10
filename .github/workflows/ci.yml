@@ -1572,6 +1572,11 @@ jobs:
           # the top, no edge runs through a card, a fork is a named decision, and every step keeps
           # the one name the code and the trace give it.
           npm run test:graph-layout
+          # AND WHAT EACH NODE IS DRAWN AS. Every model-calling step wore the same robot, so a
+          # five-step agent was five identical tiles. Each now wears its own mark, read off its
+          # name, a connector's logo only where the agent has that connector, and a colour that
+          # says what kind of step it is and is held well clear of running amber and failed red.
+          npm run test:graph-node-icons
           # WHERE EACH COMPOSER CONTROL SITS, which §12 states as two acceptance criteria written
           # as things somebody checks by resizing a window — 1c, that hiding a control moves no
           # other control, and 1d, that the bar never wraps and the right three collapse into the

@@ -128,6 +128,35 @@ export const TAG_TINT = {
   new: "#DB2777",
 } as const;
 
+/**
+ * A COLOUR PER KIND OF STEP, for the Graph tab's node icons — an identifier, like TAG_TINT, and
+ * never a state.
+ *
+ * Each step of an agent is drawn as a white tile with one coloured mark on it, the way n8n draws a
+ * workflow: the mark says what the step does and its colour which kind of thing that is (reading
+ * in, judging, writing, sending…). See components/graphNodeIcons.ts for which kind gets which.
+ *
+ * WHAT THEY MUST NOT LOOK LIKE IS A STATUS. Amber means running and red means failed, on these
+ * same tiles, so no hue here is amber or red, and `test:graph-node-icons` holds each one well away
+ * from both. Each also reaches 3:1 against the panel the tile is drawn on, WCAG's floor for a
+ * graphic that carries meaning.
+ */
+export const NODE_HUE = {
+  blue: "#2563EB",
+  indigo: "#4F46E5",
+  violet: "#7C3AED",
+  purple: "#9333EA",
+  fuchsia: "#C026D3",
+  pink: "#DB2777",
+  sky: "#0284C7",
+  cyan: "#0891B2",
+  teal: "#0D9488",
+  green: "#15803D",
+  emerald: "#047857",
+  lime: "#4D7C0F",
+  slate: "#475569",
+} as const;
+
 
 export type AccentName = keyof typeof ACCENT;
 
