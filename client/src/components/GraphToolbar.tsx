@@ -11,6 +11,7 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 
 import { Icon } from "../lib/icons/registry.ts";
+import { keyHint } from "../lib/modKey.ts";
 import { ICON } from "../lib/tokens.ts";
 import { sendCancelRun, sendPauseRun, sendResumeRun, sendRun } from "../lib/socket.ts";
 import { isRunnable, useProviderStore } from "../store/providerStore.ts";
@@ -191,7 +192,7 @@ export function FindControl({
 
   if (!open) {
     return (
-      <ToolButton label="Find a step (⌘F)" onClick={() => setOpen(true)}>
+      <ToolButton label={`Find a step (${keyHint("⌘F")})`} onClick={() => setOpen(true)}>
         <Icon.graphControl.find size={ICON.sm} />
       </ToolButton>
     );
