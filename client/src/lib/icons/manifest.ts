@@ -414,7 +414,11 @@ export const MANIFEST = {
   mcp: { connectServer: "McpServerIcon" },
 
   // ── §6 Graph ──────────────────────────────────────────────────────────────
-  graph: { retry: "ReloadIcon" },
+  graph: {
+    retry: "ReloadIcon",
+    /** Put a dragged graph back where the layout drew it. Not `retry`'s mark: nothing is asked again. */
+    resetLayout: "Undo02Icon",
+  },
 
   // ── Graph nodes ───────────────────────────────────────────────────────────
   //

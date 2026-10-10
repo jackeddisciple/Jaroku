@@ -24,6 +24,7 @@ import {
   ReactFlow,
   Background,
   BackgroundVariant,
+  ControlButton,
   Controls,
   MiniMap,
   Handle,
@@ -31,10 +32,12 @@ import {
   Position,
   BaseEdge,
   EdgeLabelRenderer,
+  getBezierPath,
   type AriaLabelConfig,
   type Edge,
   type EdgeProps,
   type Node,
+  type NodeChange,
   type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -43,6 +46,8 @@ import { agentMcpToolNames } from "../store/mcpStore.ts";
 import { useGraphStore } from "../store/graphStore.ts";
 import { DRAFT, graphErrorCopy, isDraftGraphError, isMappedGraphError, type GraphErrorCopy } from "../lib/graphError.ts";
 import { useTraceStore } from "../store/traceStore.ts";
+import { useSessionStore } from "../store/sessionStore.ts";
+import { graphPositionsKey, readPositions, topologySig, writePositions, type Positions } from "../lib/graphPositions.ts";
 import { sendLoadAgentGraph } from "../lib/socket.ts";
 import { alpha } from "../lib/palette.ts";
 import { ACCENT, ICON, INTERACTION, RADIUS, STATUS, SURFACE, TEXT } from "../lib/tokens.ts";
@@ -150,6 +155,13 @@ type FlowData = {
 };
 type EdgeData = {
   hot?: boolean;
+  /** The travelled edge of a run in progress: dashes move along it. */
+  flowing?: boolean;
+  /** Touching the hovered node, or not touching it while one is hovered. */
+  lit?: boolean;
+  dim?: boolean;
+  /** Somebody has moved a node, so dagre's routing no longer describes where things are. */
+  free?: boolean;
   branch?: string;
   back?: boolean;
   via?: Point[];
@@ -164,13 +176,16 @@ const ACCENT_MCP = ACCENT.mcp;
 const SURFACE_BG = SURFACE.bg;
 
 // WHAT A SCREEN READER IS TOLD ABOUT THE CANVAS. React Flow's defaults describe an editor: "Press
-// delete to remove it", "use the arrow keys to move the node around". Nothing here can be removed,
-// and saying it can is the same lie a "+" on the last node would tell sighted users.
+// delete to remove it". Nothing here can be removed or connected — a node can only be moved, which
+// changes the drawing and not the agent — and saying more would be the lie a "+" would tell.
 const READ_ONLY_ARIA: Partial<AriaLabelConfig> = {
-  "node.a11yDescription.default": "Press enter to inspect this step.",
+  "node.a11yDescription.default": "Press enter to inspect this step. Arrow keys move it on the canvas.",
   "node.a11yDescription.keyboardDisabled": "Press enter to inspect this step.",
   "edge.a11yDescription.default": "",
 };
+
+/** Whether this viewer has asked for less motion — read once; it stops the run animation. */
+const REDUCED_MOTION = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
 
 // ── small building blocks ─────────────────────────────────────────────────────
 function Diamond({ style }: { style: React.CSSProperties }) {
@@ -291,6 +306,13 @@ function TileNode({ data }: NodeProps) {
   return (
     <div className="relative flex select-none flex-col items-center" style={{ width: spec.w, height: spec.h }}>
       <div className="relative" style={{ width: TILE, height: TILE }}>
+        {d.active && (
+          // A RUNNING STEP BREATHES, in the colour of running — n8n's spinning border, quieter.
+          <span
+            className="pointer-events-none absolute -inset-1.5 animate-stream-pulse motion-reduce:animate-none"
+            style={{ borderRadius: radius, border: `2px solid ${alpha(AMBER, 0.5)}` }}
+          />
+        )}
         <div
           className="flex h-full w-full items-center justify-center"
           style={{
@@ -421,15 +443,30 @@ function ResourceNode({ data }: NodeProps) {
 const nodeTypes = { tile: TileNode, end: EndNode, agent: AgentNode, resource: ResourceNode };
 
 // ── edges ─────────────────────────────────────────────────────────────────────
-function FlowEdge({ sourceX, sourceY, targetX, targetY, data, markerEnd }: EdgeProps) {
+function FlowEdge({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, markerEnd }: EdgeProps) {
   const d = (data ?? {}) as EdgeData;
-  // Down the column through the points dagre routed it by, or — a loop — up its own lane.
   const s = { x: sourceX, y: sourceY };
   const t = { x: targetX, y: targetY };
-  const { d: path, label } = d.lane !== undefined ? loopPath(s, t, d.lane) : routePath(s, t, d.via);
+  let path: string;
+  let label: Point;
+  if (d.free) {
+    // MOVED: dagre's route described where things were. A loop goes round the side it leaves from;
+    // anything else is a plain curve from where it leaves to where it arrives.
+    if (d.back) {
+      const lane = sourcePosition === Position.Left ? Math.min(s.x, t.x) - 36 : Math.max(s.x, t.x) + 36;
+      ({ d: path, label } = loopPath(s, t, lane));
+    } else {
+      const [p, lx, ly] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
+      path = p;
+      label = { x: lx, y: ly };
+    }
+  } else {
+    // Down the column through the points dagre routed it by, or — a loop — up its own lane.
+    ({ d: path, label } = d.lane !== undefined ? loopPath(s, t, d.lane) : routePath(s, t, d.via));
+  }
   // Transient click highlight takes visual precedence over the persistent selection edge.
-  const stroke = d.pulse ? PULSE : d.hot ? AMBER : EDGE;
-  const width = d.pulse || d.hot ? 2.4 : 1.75;
+  const stroke = d.pulse ? PULSE : d.hot ? AMBER : d.lit ? SEL : EDGE;
+  const width = d.pulse || d.hot ? 2.4 : d.lit ? 2 : 1.75;
   return (
     <>
       <BaseEdge
@@ -438,10 +475,17 @@ function FlowEdge({ sourceX, sourceY, targetX, targetY, data, markerEnd }: EdgeP
         style={{
           stroke,
           strokeWidth: width,
+          opacity: d.dim ? 0.25 : 1,
           filter: d.pulse ? `drop-shadow(0 0 3px ${PULSE_GLOW})` : undefined,
-          transition: "stroke 120ms ease",
+          transition: REDUCED_MOTION ? undefined : "stroke 120ms ease, opacity 120ms ease",
         }}
       />
+      {d.flowing && (
+        // THE RUN, MOVING: dashes travelling down the edge a running agent is on.
+        <path d={path} fill="none" stroke={alpha(AMBER, 0.9)} strokeWidth={2.4} strokeDasharray="6 8" strokeLinecap="round">
+          <animate attributeName="stroke-dashoffset" from="28" to="0" dur="0.9s" repeatCount="indefinite" />
+        </path>
+      )}
       {/* a single particle travelling source→target — the real data-flow direction (only when the
           node has executed and this edge was actually traversed). Keyed so re-clicks restart it. */}
       {d.particle && (
@@ -472,10 +516,10 @@ function FlowEdge({ sourceX, sourceY, targetX, targetY, data, markerEnd }: EdgeP
 /** The dashed line from one of the agent's ports to its circle — n8n's sub-node connection — named by the circle. */
 function PortEdge({ sourceX, sourceY, targetX, targetY, data }: EdgeProps) {
   const { d: path } = portPath({ x: sourceX, y: sourceY }, { x: targetX, y: targetY });
-  const port = (data as { port?: string } | undefined)?.port;
+  const { port, dim } = (data ?? {}) as { port?: string; dim?: boolean };
   return (
     <>
-      <BaseEdge path={path} style={{ stroke: EDGE_DASH, strokeWidth: 1.4, strokeDasharray: "5 4" }} />
+      <BaseEdge path={path} style={{ stroke: EDGE_DASH, strokeWidth: 1.4, strokeDasharray: "5 4", opacity: dim ? 0.25 : 1 }} />
       {port && (
         <EdgeLabelRenderer>
           <div
@@ -744,6 +788,53 @@ export function GraphView() {
   );
   const order = useMemo(() => (flow ? readingOrder(flow.nodes) : []), [flow]);
 
+  // ── where somebody has dragged things ───────────────────────────────────────
+  // Saved per workspace and agent, for this graph's shape only (see lib/graphPositions). `edits`
+  // holds the arrangement once it has been touched in this tab, `loaded` what was saved before.
+  const workspaceId = useSessionStore((s) => s.workspaceId);
+  const posKey = activeAgentId ? graphPositionsKey(workspaceId, activeAgentId) : null;
+  const sig = useMemo(() => (flow ? topologySig(flow.nodes, flow.edges) : ""), [flow]);
+  const layoutId = `${posKey}|${sig}`;
+  const loaded = useMemo(() => (posKey && sig ? readPositions(posKey, sig) : {}), [posKey, sig]);
+  const [edits, setEdits] = useState<{ id: string; at: Positions } | null>(null);
+  const positions = edits?.id === layoutId ? edits.at : loaded;
+  const moved = Object.keys(positions).length > 0;
+  const positionsRef = useRef(positions);
+  positionsRef.current = positions;
+  const save = (at: Positions) => {
+    if (posKey && sig) writePositions(posKey, sig, at);
+  };
+  const onNodesChange = (changes: NodeChange[]) => {
+    let next: Positions | null = null;
+    let settled = false;
+    for (const c of changes) {
+      if (c.type !== "position" || !c.position) continue;
+      next = { ...(next ?? positionsRef.current), [c.id]: c.position };
+      if (!c.dragging) settled = true; // the end of a drag, or a keyboard move
+    }
+    if (!next) return;
+    setEdits({ id: layoutId, at: next });
+    if (settled) save(next);
+  };
+  const resetLayout = () => {
+    setEdits({ id: layoutId, at: {} });
+    save({});
+    userMoved.current = false;
+    requestAnimationFrame(frameGraph);
+  };
+
+  // ── hovering a node lights its path ─────────────────────────────────────────
+  const [hovered, setHovered] = useState<string | null>(null);
+  const near = useMemo(() => {
+    if (!hovered || !flow) return null;
+    const set = new Set([hovered]);
+    for (const e of flow.edges) {
+      if (e.source === hovered) set.add(e.target);
+      if (e.target === hovered) set.add(e.source);
+    }
+    return set;
+  }, [hovered, flow]);
+
   // What each node is drawn as: its own mark, never another node's, a connector's logo where the
   // agent has that connector. Taken in the runtime's order, so the same graph draws the same way.
   const marks = useMemo(
@@ -792,8 +883,8 @@ export function GraphView() {
 
   // Read by the ResizeObserver below, which is registered once and must frame against what is
   // true when it fires rather than when it was created.
-  const live = useRef<{ covered: number; flow: FlowLayout | null }>({ covered, flow });
-  live.current = { covered, flow };
+  const live = useRef<{ covered: number; flow: FlowLayout | null; positions: Positions }>({ covered, flow, positions });
+  live.current = { covered, flow, positions };
 
   // NOT SHOWN UNTIL IT IS FRAMED. React Flow paints its first frame at 100% from the origin, and
   // the framing lands a frame later — so the graph appeared in the corner and jumped to the middle.
@@ -803,10 +894,20 @@ export function GraphView() {
   const frameGraph = () => {
     const el = canvasRef.current;
     const inst = rf.current;
-    const { covered: hidden, flow: laid } = live.current;
+    const { covered: hidden, flow: laid, positions: at } = live.current;
     if (!el || !inst || !laid || el.clientWidth === 0) return;
-    const { x, y, zoom } = frameFor(laid, { width: el.clientWidth, height: el.clientHeight }, hidden);
-    inst.setViewport({ x, y, zoom });
+    // A moved arrangement is framed by where its nodes now are, not by the layout's own box.
+    const placed = laid.nodes.map((n) => ({ ...n, ...(at[n.id] ?? {}) }));
+    const box = Object.keys(at).length
+      ? {
+          minX: Math.min(...placed.map((n) => n.x)) - 24,
+          minY: Math.min(...placed.map((n) => n.y)) - 24,
+          maxX: Math.max(...placed.map((n) => n.x + n.w)) + 24,
+          maxY: Math.max(...placed.map((n) => n.y + n.h)) + 24,
+        }
+      : { minX: 0, minY: 0, maxX: laid.width, maxY: laid.height };
+    const f = frameFor({ width: box.maxX - box.minX, height: box.maxY - box.minY }, { width: el.clientWidth, height: el.clientHeight }, hidden);
+    inst.setViewport({ x: f.x - box.minX * f.zoom, y: f.y - box.minY * f.zoom, zoom: f.zoom });
     setFramed(true);
   };
 
@@ -898,7 +999,8 @@ export function GraphView() {
       return {
         id: spec.id,
         type: agentCard ? "agent" : spec.role === "end" ? "end" : spec.role === "resource" ? "resource" : "tile",
-        position: { x: spec.x, y: spec.y },
+        position: positions[spec.id] ?? { x: spec.x, y: spec.y },
+        style: { opacity: near && !near.has(spec.id) ? 0.35 : 1, transition: REDUCED_MOTION ? undefined : "opacity 120ms ease" },
         // Declared, not left to be measured. These nodes are rebuilt from the introspected
         // topology on every render, so React Flow's measured size never survives onto the
         // object it hands the MiniMap — which skips any node whose dimensions it cannot read,
@@ -909,7 +1011,7 @@ export function GraphView() {
         data,
       };
     });
-  }, [flow, order, marks, provider_, subs, activeNode, selectedNode, selected?.id, nodeStatus, mcpNames]);
+  }, [flow, order, marks, provider_, subs, activeNode, selectedNode, selected?.id, nodeStatus, mcpNames, positions, near]);
 
   const edges = useMemo<Edge[]>(() => {
     if (!flow) return [];
@@ -919,12 +1021,14 @@ export function GraphView() {
         ? e.source === pulse.node || e.target === pulse.node || e.from === pulse.node || e.to.includes(pulse.node)
         : false;
       const particle = connected && e.to.some((t) => traversed.has(`${e.from}->${t}`));
-      const color = connected ? PULSE : hot ? AMBER : EDGE;
+      const lit = !!near && (e.source === hovered || e.target === hovered);
+      const dim = !!near && !lit;
+      const color = connected ? PULSE : hot ? AMBER : lit ? SEL : EDGE;
       if (e.port) {
         const i = Number(e.target.slice(4));
         return {
           id: e.id, source: e.source, target: e.target, sourceHandle: `port-${i}`, targetHandle: "in", type: "port", focusable: false,
-          data: { port: e.port === "Model" ? "Model" : "Tool" },
+          data: { port: e.port === "Model" ? "Model" : "Tool", dim },
         };
       }
       const side = e.side === "left" ? "-l" : "";
@@ -936,10 +1040,13 @@ export function GraphView() {
         targetHandle: e.back ? `loop-in${side}` : "in",
         type: "flow",
         markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color },
-        data: { hot, pulse: connected, particle, pulseKey: pulse?.key, branch: e.branch, back: e.back, via: e.via, lane: e.lane } satisfies EdgeData,
+        data: {
+          hot, lit, dim, pulse: connected, particle, pulseKey: pulse?.key, branch: e.branch, back: e.back, via: e.via, lane: e.lane,
+          flowing: hot && running && !REDUCED_MOTION, free: moved,
+        } satisfies EdgeData,
       };
     });
-  }, [flow, hotEdge, pulse, traversed]);
+  }, [flow, hotEdge, pulse, traversed, near, hovered, running, moved]);
 
   // Clicking a node and pressing Enter on it do the same thing: open its inspector, and only that.
   //
@@ -1038,10 +1145,13 @@ export function GraphView() {
         // down a page; a pinch, or the controls, zoom.
         panOnScroll
         proOptions={{ hideAttribution: true }}
-        // READ-ONLY, AND SAYING SO. Nothing here can be dragged, connected or deleted, so
-        // nothing offers to be: no delete key, no focusable edges, and the canvas's own
-        // screen-reader text describes inspecting rather than editing.
-        nodesDraggable={false}
+        // MOVABLE, AND NOTHING MORE. A node can be dragged to rearrange the drawing — remembered
+        // for this agent on this computer — and that is all: nothing connects, nothing deletes,
+        // and the agent itself only changes by being asked to.
+        nodesDraggable
+        onNodesChange={onNodesChange}
+        onNodeMouseEnter={(_, n) => setHovered(n.id)}
+        onNodeMouseLeave={() => setHovered(null)}
         nodesConnectable={false}
         edgesFocusable={false}
         deleteKeyCode={null}
@@ -1061,7 +1171,20 @@ export function GraphView() {
             userMoved.current = false;
             requestAnimationFrame(frameGraph);
           }}
-        />
+        >
+          {moved && (
+            // Only once something has been moved: there is nothing to reset before then.
+            // React Flow's controls fill every svg, which floods a stroke mark; this one keeps its lines.
+            <ControlButton
+              onClick={resetLayout}
+              title="Reset layout"
+              aria-label="Reset layout"
+              className="[&_svg]:!fill-none [&_svg]:!max-h-[14px] [&_svg]:!max-w-[14px]"
+            >
+              <Icon.graph.resetLayout size={ICON.sm} />
+            </ControlButton>
+          )}
+        </Controls>
         {showMinimap && (
           <MiniMap
             pannable

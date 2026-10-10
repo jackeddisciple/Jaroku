@@ -62,7 +62,8 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // two keys already draw, so the count of distinct marks below does not move.
   // 238 WITH THE GRAPH'S NODES: the 70 `graphNode` keys a step of an agent is drawn as, by what it
   // does — so a five-step agent stops being five identical robots.
-  check("238 registry keys", entries.length === 238, `${entries.length}`);
+  // 239 WITH `graph.resetLayout`, which puts a dragged graph back.
+  check("239 registry keys", entries.length === 239, `${entries.length}`);
   const names = new Set(entries.map((e) => e.export));
   // 104 from icons_integration's appendix, plus D8's 13 — the composer glyphs that had to move
   // here when `@hugeicons/react` came out. See the note at the top of `registry.ts`.
@@ -87,6 +88,7 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // still draw it, so this is an addition rather than a swap.
   // 186 WITH THE GRAPH'S NODES: 61 of the 70 `graphNode` marks; the other nine (`DatabaseIcon`,
   // `CreditCardIcon`, `Share08Icon`, `PlayIcon` and so on) were already drawn by other keys.
+  // 186 STILL WITH `graph.resetLayout`: it draws `Undo02Icon`, which `evals.revertRubric` already does.
   check("186 distinct marks", names.size === 186, `${names.size}`);
   check("no key is declared twice", new Set(entries.map((e) => e.key)).size === entries.length);
 }

@@ -29,7 +29,7 @@ import type { AgentGraph, GraphNode, GraphRouter, SourceLocation } from "../type
 export const TILE = 64;
 /** The gap between a tile and the name under it, and the two lines of that name. */
 export const LABEL_GAP = 8;
-export const LABEL_H = 30;
+export const LABEL_H = 34;
 /** A tiled node's box: as wide as its label may run, as tall as tile and label together. */
 export const NODE_W = 168;
 export const NODE_H = TILE + LABEL_GAP + LABEL_H;
