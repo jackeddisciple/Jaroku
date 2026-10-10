@@ -594,12 +594,14 @@ const PILL_DOC: Record<"start" | "end", string> = {
  * prompt file. The prompt belongs to the ReAct agent node alone; a step says what its docstring says.
  */
 function NodeInspector({
-  spec, flow, bucket, onOpen, onClose,
+  spec, flow, bucket, onOpen, onOpenCode, onClose,
 }: {
   spec: FlowNodeSpec;
   flow: FlowLayout;
   bucket: Record<string, Step> | undefined;
   onOpen: (id: string) => void;
+  /** Open the node's function in the code — what double-clicking it does, for a keyboard. */
+  onOpenCode: () => void;
   onClose: () => void;
 }) {
   const files = useBuildStore((s) => s.files);
@@ -625,6 +627,17 @@ function NodeInspector({
           <Icon.workspace.close size={ICON.sm} />
         </button>
       </div>
+
+      {spec.source && (
+        <button
+          type="button"
+          onClick={onOpenCode}
+          className="mt-2 text-tiny text-muted underline decoration-hair underline-offset-2 transition-colors hover:text-ink"
+          title="Double-clicking the node does this too"
+        >
+          Open code · {spec.source.file}:{spec.source.line}
+        </button>
+      )}
 
       {doc ? (
         <p className="mt-3 text-ink">{doc}</p>
@@ -1063,6 +1076,17 @@ export function GraphView() {
     if (viaClick) triggerPulse(spec.id); // transient connected-edge highlight + directional particle
   };
 
+  // DOUBLE-CLICK OPENS THE CODE, at the function the node runs — the runtime says where each is
+  // written (graph schema 3). A circle stands for the agent; a fork, for its deciding function.
+  // Without a location (a library ToolNode, an older graph) it opens agent.py at the top.
+  const openCode = (id: string) => {
+    const hit = flow?.nodes.find((n) => n.id === id);
+    const spec = hit?.role === "resource" ? flow?.nodes.find((n) => n.role === "model" && isReactAgent(n.id)) : hit;
+    if (!spec || spec.role === "start" || spec.role === "end") return;
+    const at = spec.source;
+    useBuildStore.getState().openInCode(at?.file ?? "agent.py", at?.line);
+  };
+
   if (!activeAgentId) return <Empty title="No agent selected" hint="Pick one in the sidebar and its compiled topology is introspected and drawn here." />;
   // A DRAFT IS A STATE, NOT A FAILURE. It used to be asked about, answered "no published version",
   // and drawn as "This graph could not be drawn" over a Try again that could never succeed.
@@ -1158,6 +1182,9 @@ export function GraphView() {
         ariaLabelConfig={READ_ONLY_ARIA}
         elementsSelectable
         onNodeClick={(_, n) => openNode(n.id, true)}
+        onNodeDoubleClick={(_, n) => openCode(n.id)}
+        // Double-click belongs to the nodes; on the canvas it would zoom, which nobody asked for.
+        zoomOnDoubleClick={false}
         onPaneClick={() => setSelected(null)}
       >
         <Background variant={BackgroundVariant.Dots} gap={28} size={1} color={SURFACE.chrome} />
@@ -1203,7 +1230,14 @@ export function GraphView() {
       {selected && flow && (() => {
         const spec = flow.nodes.find((n) => n.id === selected.id);
         return spec ? (
-          <NodeInspector spec={spec} flow={flow} bucket={bucket} onOpen={(id) => openNode(id, true)} onClose={() => setSelected(null)} />
+          <NodeInspector
+            spec={spec}
+            flow={flow}
+            bucket={bucket}
+            onOpen={(id) => openNode(id, true)}
+            onOpenCode={() => openCode(spec.id)}
+            onClose={() => setSelected(null)}
+          />
         ) : null;
       })()}
     </div>

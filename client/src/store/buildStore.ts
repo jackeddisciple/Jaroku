@@ -31,6 +31,12 @@ interface BuildState {
   activeAgentId: string | null;
   // Bumped when something (e.g. a diff-card file row) asks the Code tab to take focus.
   codeFocus: number;
+  /**
+   * The line that focus asked for, when it asked for one — double-clicking a graph node opens its
+   * function. Carries the focus count it was asked with, so the same line asked for twice scrolls
+   * twice.
+   */
+  codeLine: { line: number; nonce: number } | null;
 
   startGeneration: (prompt: string) => void;
   fileStart: (path: string) => void;
@@ -43,7 +49,7 @@ interface BuildState {
   selectAgent: (agentId: string | null) => void;
   setAgentFiles: (agentId: string, files: AgentFile[]) => void;
   setAgentFilesError: (agentId: string, message: string) => void;
-  openInCode: (path: string) => void;
+  openInCode: (path: string, line?: number) => void;
 }
 
 export const useBuildStore = create<BuildState>((set) => ({
@@ -59,6 +65,7 @@ export const useBuildStore = create<BuildState>((set) => ({
   agents: [],
   activeAgentId: null,
   codeFocus: 0,
+  codeLine: null,
 
   startGeneration: (prompt) =>
     set({
@@ -107,10 +114,11 @@ export const useBuildStore = create<BuildState>((set) => ({
 
   selectFile: (path) => set({ activeFile: path }),
 
-  openInCode: (path) =>
+  openInCode: (path, line) =>
     set((s) => ({
       activeFile: s.files[path] ? path : s.activeFile,
       codeFocus: s.codeFocus + 1,
+      codeLine: line && s.files[path] ? { line, nonce: s.codeFocus + 1 } : null,
     })),
 
   setAgents: (agents) =>

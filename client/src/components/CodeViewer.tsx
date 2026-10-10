@@ -9,7 +9,7 @@
 //     half-written Python highlights wrong anyway (an unclosed string colours the rest of
 //     the file). Streaming stays fast; the highlight lands the moment the file closes.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { orderedFiles, useBuildStore } from "../store/buildStore.ts";
 import { ICON } from "../lib/tokens.ts";
 import { Truncate } from "./Truncate.tsx";
@@ -114,9 +114,30 @@ export function CodeViewer() {
   const [copied, setCopied] = useState(false);
   const [wrapped, setWrapped] = useState(false);
 
+
   const content = file?.content ?? "";
   const complete = file?.complete ?? false;
   const lang = activeFile ? langFor(activeFile) : "text";
+
+  // A LINE SOMEBODY ASKED FOR — a graph node's function, double-clicked. Scrolled to the middle of
+  // the pane and marked for a moment, so the eye lands on it rather than hunting for a number.
+  const codeLine = useBuildStore((s) => s.codeLine);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const gutterRef = useRef<HTMLDivElement>(null);
+  const [band, setBand] = useState<{ top: number; height: number } | null>(null);
+  useEffect(() => {
+    if (!codeLine || !content) return;
+    const row = gutterRef.current?.querySelector<HTMLElement>(`[data-line="${codeLine.line}"]`);
+    const pane = scrollRef.current;
+    if (!row || !pane) return;
+    const delta = row.getBoundingClientRect().top - pane.getBoundingClientRect().top;
+    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    pane.scrollTo({ top: pane.scrollTop + delta - pane.clientHeight / 2, behavior: reduced ? "auto" : "smooth" });
+    setBand({ top: row.offsetTop, height: row.offsetHeight });
+    const t = window.setTimeout(() => setBand(null), 1200);
+    return () => window.clearTimeout(t);
+    // `html` is a dependency because the rows move when highlighting lands.
+  }, [codeLine?.nonce, activeFile, html, content]);
 
   // §B.3. Asked only for a file that has finished arriving: a streaming file is one a model is
   // halfway through writing, and annotating it would put a squiggle under every incomplete
@@ -191,7 +212,7 @@ export function CodeViewer() {
 
             `leading-[1.5]` rather than Tailwind's `leading-relaxed` (1.625): the rhythm this app
             names is 1.5, and code should be visibly TIGHTER than prose, not looser. */}
-        <div className="scroll-fade min-h-0 flex-1 overflow-auto p-3">
+        <div ref={scrollRef} className="scroll-fade min-h-0 flex-1 overflow-auto p-3">
           <div className="min-h-full overflow-hidden rounded-card border border-hair bg-panel">
             <div className="flex items-center gap-1 border-b border-hair px-2 py-1">
               <span className="text-tiny text-faint">{lang}</span>
@@ -218,13 +239,21 @@ export function CodeViewer() {
                 <ChevronDownIcon size={ICON.xs} />
               </button>
             </div>
-            <div className="flex min-w-0 text-caption leading-[1.5]">
+            <div className="relative flex min-w-0 text-caption leading-[1.5]">
+              {band && (
+                <div
+                  className="pointer-events-none absolute inset-x-0 bg-active transition-opacity duration-fast motion-reduce:transition-none"
+                  style={{ top: band.top, height: band.height }}
+                  aria-hidden
+                />
+              )}
               <div
+                ref={gutterRef}
                 className="shrink-0 select-none border-r border-hair px-2 py-3 text-right font-mono text-tiny leading-[1.5] text-faint"
                 aria-hidden
               >
                 {content.split("\n").map((_, i) => (
-                  <div key={i}>{i + 1}</div>
+                  <div key={i} data-line={i + 1}>{i + 1}</div>
                 ))}
               </div>
               <div className={`min-w-0 flex-1 overflow-x-auto px-3 py-3 ${wrapped ? "whitespace-pre-wrap" : ""}`}>
