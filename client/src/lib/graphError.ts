@@ -38,6 +38,14 @@ export interface GraphErrorCopy {
   raw: string;
 }
 
+/** What the panel says about a draft, whether it knew before asking or the server said so. */
+export const DRAFT: Omit<GraphErrorCopy, "raw"> = {
+  title: "This agent is a draft",
+  sentence: "A draft has a name and a face but no code, so there is no graph to draw.",
+  next: "Describe what it should do in the composer and press Generate — its graph appears here.",
+  retryable: false,
+};
+
 /**
  * The failure classes this panel has copy for.
  *
@@ -45,6 +53,15 @@ export interface GraphErrorCopy {
  * because that is the more specific diagnosis and the one whose next step is different.
  */
 const CLASSES: { id: string; match: RegExp; copy: Omit<GraphErrorCopy, "raw"> }[] = [
+  {
+    // NOT A FAILURE AT ALL. A draft is a name, a face and a sentence, with no code behind it, so
+    // there is no graph to introspect. It used to fall through to the unrecognised class and read
+    // "This graph could not be drawn" over a Try again that could never succeed. The panel answers
+    // a draft before asking the server (GraphView); this is for an answer that arrives anyway.
+    id: "draft",
+    match: /no published version/i,
+    copy: DRAFT,
+  },
   {
     // FIRST, because the check never reached the project at all. The graph is introspected by the
     // desktop app that asked (the hosted backend runs no agent code), and these are the ways that
@@ -126,6 +143,11 @@ export function graphErrorCopy(error: string | undefined | null): GraphErrorCopy
     retryable: true,
     raw,
   };
+}
+
+/** Whether the server's answer is that the agent is a draft — which the panel shows as a state, not a failure. */
+export function isDraftGraphError(error: string | undefined | null): boolean {
+  return /no published version/i.test((error ?? "").trim());
 }
 
 /** Whether the mapping recognised this failure, for the panel's decision to disclose the raw text. */

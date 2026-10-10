@@ -43,7 +43,7 @@ import "@xyflow/react/dist/style.css";
 import { useBuildStore, type GenFile } from "../store/buildStore.ts";
 import { agentMcpToolNames } from "../store/mcpStore.ts";
 import { useGraphStore } from "../store/graphStore.ts";
-import { graphErrorCopy, isMappedGraphError, type GraphErrorCopy } from "../lib/graphError.ts";
+import { DRAFT, graphErrorCopy, isDraftGraphError, isMappedGraphError, type GraphErrorCopy } from "../lib/graphError.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { sendLoadAgentGraph } from "../lib/socket.ts";
@@ -587,9 +587,11 @@ export function GraphView() {
   const selectedStepId = useTraceStore((s) => s.selectedStepId);
   const selectStep = useTraceStore((s) => s.selectStep);
 
+  // A draft is not asked about: it has no code, so the answer is already known.
+  const draft = agent?.draft === true;
   useEffect(() => {
-    if (activeAgentId && !graph && !loading) sendLoadAgentGraph(activeAgentId);
-  }, [activeAgentId, graph, loading]);
+    if (activeAgentId && !draft && !graph && !loading) sendLoadAgentGraph(activeAgentId);
+  }, [activeAgentId, draft, graph, loading]);
 
   // provider/model for the agent's strip
   const run = activeRunId ? runs[activeRunId] : undefined;
@@ -813,6 +815,24 @@ export function GraphView() {
   };
 
   if (!activeAgentId) return <Empty title="No agent selected" hint="Pick one in the sidebar and its compiled topology is introspected and drawn here." />;
+  // A DRAFT IS A STATE, NOT A FAILURE. It used to be asked about, answered "no published version",
+  // and drawn as "This graph could not be drawn" over a Try again that could never succeed.
+  if (draft || isDraftGraphError(graph?.error)) {
+    return (
+      <div className="graph-canvas h-full">
+        <EmptyState
+          icon={GitBranchIcon}
+          title={agent?.name ? `${agent.name} is a draft` : DRAFT.title}
+          hint={
+            <span className="block">
+              <span className="block">{DRAFT.sentence}</span>
+              <span className="mt-1 block text-muted">{DRAFT.next}</span>
+            </span>
+          }
+        />
+      </div>
+    );
+  }
   if (loading && !graph) return <GraphSkeleton />;
   // THE PATH IS NOT PROSE. This branch rendered the server's raw message as centred sans text —
   // which for the common failure is a 120-character object-store key with two UUIDs in it,

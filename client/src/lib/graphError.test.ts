@@ -17,7 +17,7 @@
 //
 //   npm run test:graph-error
 
-import { graphErrorCopy, isMappedGraphError } from "./graphError.ts";
+import { graphErrorCopy, isDraftGraphError, isMappedGraphError } from "./graphError.ts";
 
 let fail = 0;
 const check = (name: string, ok: boolean, detail = ""): void => {
@@ -117,6 +117,20 @@ for (const raw of [
 ]) {
   const copy = graphErrorCopy(raw);
   check(`"${raw.slice(14, 60)}…" says the graph is drawn on your computer`, copy.title === "This graph is drawn on your computer" && copy.raw === raw && copy.retryable);
+}
+
+console.log("\na draft is a state, not a failure");
+{
+  const raw = "this agent has no published version to build a graph from";
+  const copy = graphErrorCopy(raw);
+  check("the server's draft answer is recognised", isMappedGraphError(raw) && isDraftGraphError(raw));
+  check("...and titled as a draft rather than as something that could not be drawn",
+    copy.title === "This agent is a draft", copy.title);
+  check("...with the way to give it a graph as its next step", /Generate/.test(copy.next ?? ""), String(copy.next));
+  // RETRYING CANNOT BUILD IT. The old panel offered Try again here, which re-asked the server for
+  // the same nothing every time it was pressed.
+  check("...and no retry", copy.retryable === false);
+  check("a real failure is not taken for a draft", !isDraftGraphError(AUDIT) && !isDraftGraphError("timed out"));
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
