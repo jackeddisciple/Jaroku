@@ -394,16 +394,19 @@ export function fitZoom(
 }
 
 /**
- * Where the canvas opens: the whole graph, fitted, when that leaves it readable — or, for an agent
- * too long for the column, at a readable size from the top, the way a document opens.
+ * Where the canvas opens, as a viewport: the whole graph, fitted and centred, when that leaves it
+ * readable — or, for an agent too long for the column, at a readable size from the top, the way a
+ * document opens.
  *
  * FITTING EVERYTHING WAS THE WRONG ANSWER FOR A LONG AGENT. Fifteen steps fitted whole come out at
  * 45%, every label under six pixels: all of it on screen and none of it legible. A column is read
  * downwards, so a long agent starts at Start and scrolls, with the minimap to say where you are.
  *
- * `covered` is how much of the frame's right side an overlay hides.
+ * AND IT IS COMPUTED FROM THE LAYOUT, NOT LEFT TO REACT FLOW'S FIT VIEW, which measures the nodes
+ * alone: a loop's lane runs to the right of every card, so a fit that ignored it put the lane under
+ * the inspector. `covered` is how much of the frame's right side an overlay hides.
  */
-export type Framing = { kind: "fit" } | { kind: "top"; x: number; y: number; zoom: number };
+export type Framing = { kind: "fit" | "top"; x: number; y: number; zoom: number };
 
 export function frameFor(
   layout: { width: number; height: number },
@@ -411,7 +414,15 @@ export function frameFor(
   covered = 0,
 ): Framing {
   const avail = { width: Math.max(1, frame.width - covered), height: frame.height };
-  if (fitZoom(layout, avail) >= READABLE_ZOOM) return { kind: "fit" };
+  const whole = fitZoom(layout, avail);
+  if (whole >= READABLE_ZOOM) {
+    return {
+      kind: "fit",
+      x: (avail.width - layout.width * whole) / 2,
+      y: (avail.height - layout.height * whole) / 2,
+      zoom: whole,
+    };
+  }
   const acrossWhole = avail.width / (layout.width * (1 + FIT_PADDING));
   const zoom = Math.max(MIN_ZOOM, Math.min(READABLE_ZOOM, acrossWhole));
   return { kind: "top", x: Math.max(0, (avail.width - layout.width * zoom) / 2), y: 0, zoom };

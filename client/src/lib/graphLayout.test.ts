@@ -117,8 +117,19 @@ console.log("§1 it fits the panel it is drawn in");
   check("...centred across the column",
     opens.kind === "top" && Math.abs(opens.x * 2 + longFlow.width * opens.zoom - PANEL.width) < 1);
   check("Liven opens fitted whole", frameFor(flow, PANEL).kind === "fit");
+  const fitted = frameFor(flow, PANEL);
+  check("...centred in the panel",
+    Math.abs(fitted.x * 2 + flow.width * fitted.zoom - PANEL.width) < 1 && Math.abs(fitted.y * 2 + flow.height * fitted.zoom - PANEL.height) < 1);
   check("...unless an overlay hides so much of the panel it would not read",
     frameFor(flow, PANEL, 340).kind === (fitZoom(flow, { width: PANEL.width - 340, height: PANEL.height }) >= READABLE_ZOOM ? "fit" : "top"));
+  // THE INSPECTOR, OVER A REACT AGENT. Its loop's lane is right of every card, and a fit measured off
+  // the cards alone put the lane under the inspector.
+  const react = buildFlow(REACT_OLD, { agentFooter: true });
+  const inspector = 280;
+  const under = frameFor(react, PANEL, inspector);
+  const lane = react.edges.find((e) => e.back)!.lane!;
+  check("with the inspector open, a loop's lane stays left of it",
+    under.x + lane * under.zoom < PANEL.width - inspector, `lane ends at ${(under.x + lane * under.zoom).toFixed(0)}`);
   check("a three-step agent is shown at real size, not blown up", fitZoom({ width: 300, height: 200 }, PANEL) === 1);
   check("no graph is framed below the canvas's minimum zoom", fitZoom({ width: 9000, height: 9000 }, PANEL) === MIN_ZOOM);
 }

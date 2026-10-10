@@ -35,7 +35,6 @@ import {
   type AriaLabelConfig,
   type Edge,
   type EdgeProps,
-  type FitViewOptions,
   type Node,
   type NodeProps,
 } from "@xyflow/react";
@@ -53,8 +52,6 @@ import {
   AGENT_FOOTER_H,
   CARD_H,
   CARD_W,
-  FIT_PADDING,
-  MAX_FIT_ZOOM,
   MIN_ZOOM,
   ROLE_LABEL,
   buildFlow,
@@ -87,7 +84,7 @@ import {
 import { Icon } from "../lib/icons/registry.ts";
 
 // How much of this canvas the Step Details overlay covers when it is open. It is drawn over
-// the graph rather than beside it, so this is the one number that tells fitView the right
+// the graph rather than beside it, so this is the one number that tells the framing the right
 // edge is not really the right edge. Kept in step with StepDetailPanel's `w-[340px]`.
 const STEP_PANEL_W = 340;
 // The node inspector, which is an overlay for the same reason. Kept in step with its `w-64`.
@@ -108,7 +105,6 @@ const NODE_ICON = {
 /** The step card's icon well. */
 const WELL = 28;
 
-type FitOptions = Pick<FitViewOptions, "padding" | "maxZoom">;
 
 // ── palette (flat) ────────────────────────────────────────────────────────────
 // Solid, opaque cards on the design-system panel colour; a one-step fill marks the selected/active
@@ -616,15 +612,14 @@ export function GraphView() {
 
   // ── keeping the graph in frame ──────────────────────────────────────────────
   //
-  // `fitView` is an on-mount prop: React Flow frames the graph once, against the canvas as
-  // it was at that instant, and then holds that viewport for good. Four ordinary things
-  // move the frame out from under it, and each one silently cut nodes off with nothing to
-  // say anything was missing:
+  // React Flow frames a graph once, against the canvas as it was at that instant, and then
+  // holds that viewport for good. Four ordinary things move the frame out from under it, and
+  // each one silently cut nodes off with nothing to say anything was missing:
   //
   //   1. Step Details opens. It is an OVERLAY — absolutely positioned over this canvas, not
-  //      a column that shrinks it — so the canvas never resizes and fitView, told to use the
-  //      full width, frames part of the graph underneath an opaque panel. Reserving the
-  //      strip is the whole fix; there is nothing to observe.
+  //      a column that shrinks it — so the canvas never resizes and a frame told to use the
+  //      full width puts part of the graph underneath an opaque panel. Reserving the strip
+  //      is the whole fix; there is nothing to observe.
   //   2. The node inspector opens, which is the same overlay on the same edge.
   //   3. The pane itself is resized (the column splitter, the window).
   //   4. A different agent is selected, and its topology is bigger than the last one's.
@@ -635,11 +630,8 @@ export function GraphView() {
   // old one, so it releases the latch.
   //
   // AND NEVER PAST REAL SIZE. A three-step agent fitted to a 790px column came out at 175%, cards
-  // the size of buttons; `maxZoom` holds a fit at 100% and leaves the space around it empty.
-  const rf = useRef<{
-    fitView: (o?: FitOptions) => void;
-    setViewport: (v: { x: number; y: number; zoom: number }) => void;
-  } | null>(null);
+  // the size of buttons; `frameFor` holds a fit at 100% and leaves the space around it empty.
+  const rf = useRef<{ setViewport: (v: { x: number; y: number; zoom: number }) => void } | null>(null);
   const userMoved = useRef(false);
   const canvasRef = useRef<HTMLDivElement>(null);
   const [frame, setFrame] = useState({ width: 0, height: 0 });
@@ -654,18 +646,11 @@ export function GraphView() {
     const width = canvasRef.current?.clientWidth ?? 0;
     return Math.round(detailOpen ? Math.min(STEP_PANEL_W, width * 0.85) + 24 : inspectorOpen ? INSPECTOR_W + 24 : 0);
   }, [detailOpen, inspectorOpen]);
-  const fitOptions = useMemo<FitOptions>(
-    () =>
-      covered
-        ? { padding: { top: "6%", bottom: "6%", left: "6%", right: `${covered}px` }, maxZoom: MAX_FIT_ZOOM }
-        : { padding: FIT_PADDING, maxZoom: MAX_FIT_ZOOM },
-    [covered],
-  );
 
   // Read by the ResizeObserver below, which is registered once and must frame against what is
   // true when it fires rather than when it was created.
-  const live = useRef<{ fit: FitOptions; covered: number; flow: FlowLayout | null }>({ fit: fitOptions, covered, flow });
-  live.current = { fit: fitOptions, covered, flow };
+  const live = useRef<{ covered: number; flow: FlowLayout | null }>({ covered, flow });
+  live.current = { covered, flow };
 
   // NOT SHOWN UNTIL IT IS FRAMED. React Flow paints its first frame at 100% from the origin, and
   // the framing lands a frame later — so the graph appeared in the corner and jumped to the middle.
@@ -675,11 +660,10 @@ export function GraphView() {
   const frameGraph = () => {
     const el = canvasRef.current;
     const inst = rf.current;
-    const { fit, covered: hidden, flow: laid } = live.current;
+    const { covered: hidden, flow: laid } = live.current;
     if (!el || !inst || !laid || el.clientWidth === 0) return;
-    const framing = frameFor(laid, { width: el.clientWidth, height: el.clientHeight }, hidden);
-    if (framing.kind === "fit") inst.fitView(fit);
-    else inst.setViewport({ x: framing.x, y: framing.y, zoom: framing.zoom });
+    const { x, y, zoom } = frameFor(laid, { width: el.clientWidth, height: el.clientHeight }, hidden);
+    inst.setViewport({ x, y, zoom });
     setFramed(true);
   };
 
@@ -696,7 +680,7 @@ export function GraphView() {
   useLayoutEffect(() => {
     if (userMoved.current) return;
     frameGraph();
-  }, [topologyKey, fitOptions]);
+  }, [topologyKey, covered]);
 
   useEffect(() => {
     const el = canvasRef.current;
@@ -886,7 +870,7 @@ export function GraphView() {
         // mousedown on the canvas — so latching there would have counted an ordinary click
         // on empty space as "the user is driving" and disabled refitting for good. onMove
         // fires only once the viewport actually changes, and reports null when the change
-        // came from our own fitView.
+        // came from our own framing.
         onMove={(event) => {
           if (event) userMoved.current = true;
         }}
@@ -912,7 +896,17 @@ export function GraphView() {
         }}
       >
         <Background variant={BackgroundVariant.Dots} gap={28} size={1} color={SURFACE.chrome} />
-        <Controls showInteractive={false} className="!bg-elevated/80 !backdrop-blur !border-0 !rounded-card !shadow-floating" />
+        <Controls
+          showInteractive={false}
+          className="!bg-elevated/80 !backdrop-blur !border-0 !rounded-card !shadow-floating"
+          // Fit means "frame it for me again": the same framing the canvas opened with, which
+          // counts the loop lanes and the overlays React Flow's own fit does not, and refitting
+          // resumes on resize.
+          onFitView={() => {
+            userMoved.current = false;
+            requestAnimationFrame(frameGraph);
+          }}
+        />
         {showMinimap && (
           <MiniMap
             pannable
