@@ -54,6 +54,7 @@ import {
   AGENT_H,
   END_D,
   END_ID,
+  START_ID,
   LABEL_GAP,
   MAX_SUBS,
   MIN_ZOOM,
@@ -189,6 +190,8 @@ type EdgeData = {
   free?: boolean;
   /** In a comparison: new since the older version, or gone since it. */
   diff?: DiffMark;
+  /** A finished run went this way. */
+  taken?: boolean;
   branch?: string;
   back?: boolean;
   via?: Point[];
@@ -586,8 +589,8 @@ function FlowEdge({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPo
     ({ d: path, label } = d.lane !== undefined ? loopPath(s, t, d.lane) : routePath(s, t, d.via));
   }
   // Transient click highlight takes visual precedence over the persistent selection edge.
-  const stroke = d.pulse ? PULSE : d.hot ? AMBER : d.lit ? SEL : d.diff === "added" ? NODE_HUE.green : EDGE;
-  const width = d.pulse || d.hot ? 2.4 : d.lit ? 2 : 1.75;
+  const stroke = d.pulse ? PULSE : d.hot ? AMBER : d.lit ? SEL : d.diff === "added" ? NODE_HUE.green : d.taken ? STATUS.ok : EDGE;
+  const width = d.pulse || d.hot ? 2.4 : d.lit || d.taken ? 2 : 1.75;
   return (
     <>
       <BaseEdge
@@ -1380,17 +1383,31 @@ export function GraphView() {
     });
   }, [flow, order, marks, provider_, subs, activeNode, selectedNode, selected?.id, nodeStatus, mcpNames, positions, near, hovered, dragging, timings, diff]);
 
+  // THE WAY A FINISHED RUN WENT, drawn on its edges as its dots are on its nodes. The replay lit each
+  // edge in turn; the finished view drew the path the run took exactly like the ones it did not.
+  const finishedPath = useMemo(() => {
+    if (running || replayAt !== null || !bucket || !run || run.status === "paused") return null;
+    const path = new Set(traversed);
+    // Start and End have no steps of their own: the way in, and — for a run that completed — out.
+    const first = frames[0];
+    const last = frames[frames.length - 1];
+    if (first) path.add(`${START_ID}->${first.node}`);
+    if (completed && last) path.add(`${last.node}->${END_ID}`);
+    return path;
+  }, [running, replayAt, bucket, run, traversed, frames, completed]);
+
   const edges = useMemo<Edge[]>(() => {
     if (!flow) return [];
     return flow.edges.map((e) => {
       const hot = matchesEdge(e, hotEdge);
+      const taken = !!finishedPath && e.to.some((t) => finishedPath.has(`${e.from}->${t}`));
       const connected = pulse
         ? e.source === pulse.node || e.target === pulse.node || e.from === pulse.node || e.to.includes(pulse.node)
         : false;
       const particle = connected && e.to.some((t) => traversed.has(`${e.from}->${t}`));
       const lit = !!near && (e.source === hovered || e.target === hovered);
       const dim = !!near && !lit;
-      const color = connected ? PULSE : hot ? AMBER : lit ? SEL : EDGE;
+      const color = connected ? PULSE : hot ? AMBER : lit ? SEL : taken ? STATUS.ok : EDGE;
       if (e.port) {
         const i = Number(e.target.slice(4));
         return {
@@ -1408,13 +1425,13 @@ export function GraphView() {
         type: "flow",
         markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color },
         data: {
-          hot, lit, dim, pulse: connected, particle, pulseKey: pulse?.key, branch: e.branch, back: e.back, via: e.via, lane: e.lane,
+          hot, lit, dim, taken, pulse: connected, particle, pulseKey: pulse?.key, branch: e.branch, back: e.back, via: e.via, lane: e.lane,
           flowing: hot && running && !REDUCED_MOTION, free: moved,
           diff: diff ? segmentMark(diff, e.from, e.to) : undefined,
         } satisfies EdgeData,
       };
     });
-  }, [flow, hotEdge, pulse, traversed, near, hovered, running, moved, diff]);
+  }, [flow, hotEdge, pulse, traversed, near, hovered, running, moved, diff, finishedPath]);
 
   // Clicking a node and pressing Enter on it do the same thing: open its inspector, and only that.
   //
