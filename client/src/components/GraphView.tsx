@@ -1535,6 +1535,14 @@ export function GraphView() {
   // the graph left to keep the node clear of it, and closing it left the graph off-centre until Fit.
   // Only while the view is still where the inspector left it: a pan or zoom since is the user's.
   const inspectorPan = useRef<{ dx: number; at: { x: number; y: number; zoom: number } } | null>(null);
+  // WHOSE CODE A NODE'S SOURCE LINE IS IN: an earlier version's when that version alone is on screen,
+  // and in a comparison only for a step that is gone since — the union draws every step the current
+  // version still has from the current version, its source line included.
+  const olderCodeOf = (spec: FlowNodeSpec): number | null => {
+    if (viewing === null) return null;
+    if (!comparing) return viewing;
+    return diff?.nodes.get(spec.decides?.source ?? spec.id) === "removed" ? viewing : null;
+  };
   const closeInspector = () => {
     setSelected(null);
     const pan = inspectorPan.current;
@@ -1550,14 +1558,14 @@ export function GraphView() {
   // written (graph schema 3). A circle stands for the agent; a fork, for its deciding function.
   // Without a location (a library ToolNode, an older graph) it opens agent.py at the top.
   const openCode = (id: string) => {
-    // An earlier version's line in the current version's file is the wrong code — see NodeInspector.
-    if (viewing !== null) {
-      useUiStore.getState().showToast(`Code opens for v${latest} only`);
-      return;
-    }
     const hit = flow?.nodes.find((n) => n.id === id);
     const spec = hit?.role === "resource" ? flow?.nodes.find((n) => n.role === "model" && isReactAgent(n.id)) : hit;
     if (!spec || spec.role === "start" || spec.role === "end") return;
+    // An earlier version's line in the current version's file is the wrong code — see NodeInspector.
+    if (olderCodeOf(spec) !== null) {
+      useUiStore.getState().showToast(`Code opens for v${latest} only`);
+      return;
+    }
     const at = spec.source;
     useBuildStore.getState().openInCode(at?.file ?? "agent.py", at?.line);
   };
@@ -1964,7 +1972,7 @@ export function GraphView() {
             flow={flow}
             bucket={bucket}
             top={barBottom + pillH + 8}
-            olderVersion={viewing}
+            olderVersion={olderCodeOf(spec)}
             onOpen={(id) => openNode(id, true)}
             onOpenCode={() => openCode(spec.id)}
             onClose={closeInspector}
