@@ -168,9 +168,15 @@ def push_trace_event(envelope: dict) -> None:
 def push_control_line(ctrl: dict) -> None:
     """Push one control line — the HTTP-transported twin of the `@@JAROKU_CTRL@@` stderr line
     debug.py and mcp_bridge.py already emit locally. Both still emit the stderr line too; this
-    is additive, not a replacement — see the module docstring."""
+    is additive, not a replacement — see the module docstring.
+
+    THE STEPS IT IS ABOUT GO FIRST. A boundary stamps the steps the server already has; sent while
+    they sat in the trace buffer, it stamped none of them, the next boundary stamped them instead,
+    and a branch from an early node branched from the end of the run. So whatever is buffered is
+    flushed before any control line leaves."""
     if not configured():
         return
+    flush_trace_events()
     try:
         _request("POST", f"/v1/runs/{_run_id()}/control", {"ctrl": ctrl}, PUSH_TIMEOUT_S)
     except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:

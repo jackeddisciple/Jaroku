@@ -145,6 +145,7 @@
     "test:run-tokens": "tsx src/sandbox/runTokens.test.ts",
     "test:control-plane-routes": "tsx src/sandbox/controlPlaneRoutes.test.ts",
     "test:pool-tokens": "tsx src/runPool.tokens.test.ts",
+    "test:run-boundaries": "tsx src/runBoundaries.test.ts",
     "test:controlplane-http-python": "tsx src/sandbox/controlPlaneHttp.python.test.ts",
     "test:mcp-confirm-http": "tsx src/sandbox/mcpConfirmHttp.test.ts",
     "test:trace-ingest-metrics": "tsx src/sandbox/traceIngestMetrics.test.ts",

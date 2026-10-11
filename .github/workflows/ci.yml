@@ -155,6 +155,9 @@ jobs:
           npm run test:secrets-e2e
           npm run test:checkpoint-threads
           npm run test:branch
+          # WHICH CHECKPOINT A STEP BELONGS TO when its boundary arrives first — a desktop run sends
+          # them on two routes — or a branch from an early node starts from the end of the run.
+          npm run test:run-boundaries
 
       - name: auth, HTTP and the hardening pass
         working-directory: server

@@ -175,6 +175,7 @@ import {
 } from "./checkpoints/threads.ts";
 import { openCheckpointStore } from "./checkpoints/store.ts";
 import { introspectGraph, introspectGraphCached, type GraphResult, type GraphVersionInfo } from "./graphIntrospect.ts";
+import { RunBoundaries } from "./runBoundaries.ts";
 import { streamExplain, EXPLAIN_MODEL, EXPLAIN_MAX_TOKENS } from "./explainer.ts";
 import { classifyProviderFailure } from "./providerFailure.ts";
 import {
@@ -11479,6 +11480,17 @@ async function handleEvalCommand(ctx: TenantContext, cmd: ForwardedCommand): Pro
 // 4 caps bytes, lines and line length per run, and that is where the cap belongs — here it
 // would be a limit on a pipe nobody can flood.
 let ingestChain: Promise<void> = Promise.resolve();
+// The node boundaries each live run has announced, for the steps that arrive after them.
+const runBoundaries = new RunBoundaries();
+/**
+ * A STEP THAT ARRIVES AFTER ITS BOUNDARY, stamped with it. A desktop run's steps and boundaries come
+ * on two routes and the boundary can win: it stamped nothing then, and the step would have taken the
+ * NEXT boundary's checkpoint — a branch from it would start after the wrong node. See runBoundaries.ts.
+ */
+async function stampLateStep(ctx: TenantContext, runId: string, seq: number): Promise<void> {
+  const checkpoint = runBoundaries.checkpointFor(runId, seq);
+  if (checkpoint) await store.stampStep(ctx, runId, seq, checkpoint);
+}
 function ingest(work: () => Promise<void>): void {
   ingestChain = ingestChain.then(work, work).catch((err) => {
     console.error("[store] failed to persist event:", (err as Error)?.message ?? String(err));
@@ -11587,6 +11599,7 @@ onBothPools("event", ({ runId, event }) => {
         }
       } else if (event.kind === "step") {
         await store.insertStep(runCtx, event.step);
+        await stampLateStep(runCtx, runId, event.step.seq);
         // INGESTION LAG, MEASURED FROM WHEN THE STEP ENDED RATHER THAN WHEN IT STARTED.
         //
         // The gauge is "time between a step being emitted in a sandbox and being persisted", and
@@ -11752,6 +11765,7 @@ onBothPools("control", ({ runId: slotRunId, ctrl }) => {
       // would stamp nothing, and the run would silently stop being branchable.
       ingest(async () => {
         if (checkpointId && seqHigh >= 0) {
+          runBoundaries.note(runId, seqHigh, checkpointId);
           await store.setCheckpointUpto(runCtx, runId, seqHigh, checkpointId);
         }
         relay.broadcastDebug(runCtx, { type: "boundary", runId, seq: seqHigh, next });
@@ -11908,6 +11922,8 @@ onBothPools("exit", ({ runId, code, signal, timedOut, elapsedMs }) => {
   // that crashed while blocked would leave a modal asking about a process that no longer
   // exists, and answering it would write a file nobody will ever read.
   clearConfirms(runId, "run ended");
+  // Behind everything the process sent before it went, which may still be on its way into the store.
+  ingest(async () => runBoundaries.forget(runId));
   // AND THE LIST LEARNS THE RUN IS OVER, including the crash that never emitted a `run_end`. The
   // ingest chain's own broadcast covers the ordinary ending; this covers a killed or crashed
   // process, which is exactly the case §3.3 turns red and the badge should count.

@@ -351,6 +351,16 @@ export class TraceStore {
     return asIntOrNull(row?.m) ?? -1;
   }
 
+  // One step that arrived after the boundary covering it (see runBoundaries.ts) — stamped only if it
+  // has no checkpoint yet, like the steps a boundary stamps when it lands after them.
+  async stampStep(ctx: TenantContext, runId: string, seq: number, checkpointId: string): Promise<void> {
+    await this.q(ctx).run(
+      `UPDATE steps SET checkpoint_id = ?
+        WHERE run_id = ? AND workspace_id = ? AND seq = ? AND checkpoint_id IS NULL`,
+      [checkpointId, runId, ctx.workspaceId, seq],
+    );
+  }
+
   // Correlate a boundary's checkpoint to the steps it covers (seq <= uptoSeq, not yet stamped),
   // so branching can later resume from the checkpoint that follows a chosen step's node.
   async setCheckpointUpto(
