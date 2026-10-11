@@ -85,7 +85,7 @@ import { useUiStore } from "../store/uiStore.ts";
 import { ExportControl, FindControl, GraphToolbar, RunControls, ToolButton, ToolDivider, VersionControl, type GraphExport } from "./GraphToolbar.tsx";
 import { download } from "../lib/evalExport.ts";
 import { graphFileStem, graphPng, graphSvg } from "../lib/graphExport.ts";
-import { compareGraphs, segmentMark, type DiffMark } from "../lib/graphCompare.ts";
+import { compareGraphs, segmentMark, type DiffMark, type GraphDiff } from "../lib/graphCompare.ts";
 import { marksFor, type NodeMark } from "./graphNodeIcons.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { fmtCost, fmtLatency } from "../lib/format.ts";
@@ -856,6 +856,40 @@ function computeNodeStatus(bucket: Record<string, Step> | undefined, activeNode:
   }
   if (activeNode && out[activeNode] !== "error") out[activeNode] = "running";
   return out;
+}
+
+/**
+ * What a comparison is showing, in the marks the canvas uses — or that there is nothing to show.
+ *
+ * TURNING COMPARE ON FOR TWO VERSIONS WITH THE SAME STEPS CHANGED NOTHING ON SCREEN, which cannot be
+ * told apart from Compare not working; and nothing said a green ring meant new and a faded dashed
+ * step meant gone. Counts by step, since a step is what somebody looks for.
+ */
+function CompareLegend({ diff, from, to }: { diff: GraphDiff; from: number; to: number }) {
+  const marks = [...diff.nodes.values()];
+  const added = marks.filter((m) => m === "added").length;
+  const removed = marks.filter((m) => m === "removed").length;
+  if (diff.nodes.size === 0 && diff.edges.size === 0) {
+    return <span>No changes to the graph between v{from} and v{to}</span>;
+  }
+  return (
+    <span className="flex items-center gap-2.5">
+      <span>v{from} → v{to}</span>
+      <span className="flex items-center gap-1">
+        <span
+          className="inline-block h-2.5 w-2.5 rounded-xs"
+          style={{ border: `1.5px solid ${NODE_HUE.green}`, boxShadow: `0 0 0 2px ${alpha(NODE_HUE.green, 0.16)}` }}
+          aria-hidden
+        />
+        {added} added
+      </span>
+      <span className="flex items-center gap-1">
+        <span className="inline-block h-2.5 w-2.5 rounded-xs opacity-60" style={{ border: `1.5px dashed ${TEXT.faint}` }} aria-hidden />
+        {removed} removed
+      </span>
+      {added === 0 && removed === 0 && <span className="text-faint">only the connections changed</span>}
+    </span>
+  );
 }
 
 // THE SHAPE OF WHAT IS COMING: three tiles down the column, as the graph will be drawn.
@@ -1686,10 +1720,14 @@ export function GraphView() {
           className="graph-glass absolute left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-card py-1 pl-2.5 pr-1 text-tiny text-muted shadow-floating backdrop-blur-md backdrop-saturate-150"
           style={{ top: barBottom + 6 }}
         >
-          <span>
-            {comparing ? `Comparing v${viewing} with v${latest}` : `Viewing v${viewing}`}
-            <span className="text-faint"> · read-only</span>
-          </span>
+          {comparing && diff ? (
+            <CompareLegend diff={diff} from={viewing} to={latest} />
+          ) : (
+            <span>
+              {comparing ? `Comparing v${viewing} with v${latest}` : `Viewing v${viewing}`}
+              <span className="text-faint"> · read-only</span>
+            </span>
+          )}
           <button
             type="button"
             onClick={() => pickVersion(null)}
