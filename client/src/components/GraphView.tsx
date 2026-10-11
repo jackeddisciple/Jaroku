@@ -45,7 +45,7 @@ import { useBuildStore, type GenFile } from "../store/buildStore.ts";
 import { agentMcpToolNames } from "../store/mcpStore.ts";
 import { graphKey, useGraphStore } from "../store/graphStore.ts";
 import { DRAFT, graphErrorCopy, isDraftGraphError, isMappedGraphError, type GraphErrorCopy } from "../lib/graphError.ts";
-import { useTraceStore } from "../store/traceStore.ts";
+import { CANCELLED_BY_USER, useTraceStore } from "../store/traceStore.ts";
 import { useSessionStore } from "../store/sessionStore.ts";
 import { graphPositionsKey, readPositions, topologySig, writePositions, type Positions } from "../lib/graphPositions.ts";
 import { sendBranchRun, sendLoadAgentGraph } from "../lib/socket.ts";
@@ -1365,7 +1365,7 @@ export function GraphView() {
       return {
         nodes: nextNodes,
         as: "error",
-        note: run.error === "cancelled by user" ? "stopped here" : `the run failed here${run.error ? ` — ${run.error}` : ""}`,
+        note: run.error === CANCELLED_BY_USER ? "stopped here" : `the run failed here${run.error ? ` — ${run.error}` : ""}`,
       };
     }
     return undefined;

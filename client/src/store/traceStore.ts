@@ -63,7 +63,8 @@ interface TraceState {
   /** Drop the run and step selection entirely — used when the run on screen no longer
    *  belongs to the selected agent. See lib/selection.ts for the invariant. */
   clearRunSelection: () => void;
-  setRunStatus: (runId: string, status: RunStatus) => void;
+  /** A status flip from the debug channel — with the reason, for a cancel, as the server records it. */
+  setRunStatus: (runId: string, status: RunStatus, error?: string) => void;
   selectStep: (id: string | null) => void;
   setExpandedStep: (id: string | null) => void;
   needsLoad: (id: string) => boolean;
@@ -73,6 +74,12 @@ interface TraceState {
 }
 
 const LOG_CAP = 200;
+
+/**
+ * The reason the server writes on a run somebody stopped — its `TraceStore.CANCELLED_BY_USER`, held to
+ * it by `test:trace`. A stopped run and a failed one are both `error`; this is what tells them apart.
+ */
+export const CANCELLED_BY_USER = "cancelled by user";
 
 function bucketFrom(steps: Step[]): Record<string, Step> {
   const out: Record<string, Step> = {};
@@ -150,10 +157,10 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   // Debug depth: reflect a control-plane status flip (paused / resumed) on the run row. Only the
   // status changes — steps and seq ordering are untouched; a resumed run's new steps still arrive
   // as normal trace events. No-op if the run isn't known yet.
-  setRunStatus: (runId, status) =>
+  setRunStatus: (runId, status, error) =>
     set((state) =>
       state.runs[runId]
-        ? { runs: { ...state.runs, [runId]: { ...state.runs[runId], status } } }
+        ? { runs: { ...state.runs, [runId]: { ...state.runs[runId], status, ...(error === undefined ? {} : { error }) } } }
         : {},
     ),
 

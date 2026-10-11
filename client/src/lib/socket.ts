@@ -7,7 +7,7 @@ import { chatSubscriptionFor } from "./chatSubscription.ts";
 // debug-client.html (1s backoff) and dispatches each server message into the trace store.
 // The relay only speaks WebSocket, so this is the single channel between UI and pipeline.
 
-import { useTraceStore } from "../store/traceStore.ts";
+import { CANCELLED_BY_USER, useTraceStore } from "../store/traceStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { useChatStore } from "../store/chatStore.ts";
 import { graphKey, useGraphStore } from "../store/graphStore.ts";
@@ -329,7 +329,7 @@ function dispatch(msg: ServerMessage): void {
         // The row stops saying `running` now rather than when the next history snapshot lands.
         // `error` is the status the server stores for it ("cancelled by user" is the reason on the
         // row), so this agrees with what a reload would show rather than inventing a fifth state.
-        s.setRunStatus(msg.runId, "error");
+        s.setRunStatus(msg.runId, "error", CANCELLED_BY_USER);
         s.addLog({ level: "stderr", text: "debug: run cancelled" });
       } else if (msg.type === "error") {
         s.addLog({ level: "stderr", text: `debug: ${msg.message}` });

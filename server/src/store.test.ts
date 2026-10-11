@@ -227,6 +227,12 @@ console.log("\na cancel changes only a run that has not ended");
   check((await store.getRun(A, failed))?.error === "ValueError: no", "...and keeps its own error");
 
   check(!(await store.markRunCancelled(B, live)), "and another workspace cannot cancel this one's run");
+
+  // The app tells a stopped run from a failed one by this reason, and holds its own copy of it.
+  const { readFileSync } = await import("node:fs");
+  const clientStore = readFileSync(new URL("../../client/src/store/traceStore.ts", import.meta.url), "utf8");
+  check(clientStore.includes(`export const CANCELLED_BY_USER = "${TraceStore.CANCELLED_BY_USER}";`),
+    "the app's copy of the cancel reason is the server's");
 }
 
 await store.close();
