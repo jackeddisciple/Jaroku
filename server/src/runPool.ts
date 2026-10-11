@@ -230,8 +230,13 @@ export class RunPool extends EventEmitter<RunPoolEvents> {
     let spec: PoolRunOptions = opts;
     if (opts.workspaceId && this.controlPlaneUrl) {
       this.bus.register(opts.runId);
-      const runToken = mintRunToken(this.signingKey, opts.runId, opts.workspaceId, RUN_TOKEN_TTL_S);
-      slot.tokenExpiresAtMs = Date.now() + RUN_TOKEN_TTL_S * 1000;
+      // ONE CLOCK READING FOR THE TOKEN AND THE RECORD OF IT, since its revocation is matched by
+      // expiry — and later than whatever was revoked for this run before (a resume mints for the
+      // same run id its pause revoked), even when both land within one millisecond.
+      const revokedUntil = this.revocations.revokedUntil(opts.runId);
+      const now = Math.max(Date.now(), revokedUntil === undefined ? 0 : revokedUntil - RUN_TOKEN_TTL_S * 1000 + 1);
+      const runToken = mintRunToken(this.signingKey, opts.runId, opts.workspaceId, RUN_TOKEN_TTL_S, now);
+      slot.tokenExpiresAtMs = now + RUN_TOKEN_TTL_S * 1000;
       spec = { ...opts, controlPlane: { url: this.controlPlaneUrl, runToken } };
     }
     slot.manager.start(spec);

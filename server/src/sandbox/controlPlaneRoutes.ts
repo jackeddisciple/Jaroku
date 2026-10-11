@@ -72,7 +72,8 @@ function authenticate(req: HttpRequest, runId: string, deps: ControlPlaneDeps): 
     // succeeds. 403 says so; 404 would read as "maybe try a different id."
     throw forbidden("this run token is not scoped to this run");
   }
-  if (deps.revocations.isRevoked(runId)) throw unauthorized("this run has already ended");
+  // This token, not the run: a resumed run carries a newer one than the token its pause revoked.
+  if (deps.revocations.isRevoked(runId, result.claims.expiresAtMs)) throw unauthorized("this run has already ended");
   return { workspaceId: result.claims.workspaceId };
 }
 

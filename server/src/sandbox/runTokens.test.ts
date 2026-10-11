@@ -91,6 +91,25 @@ await (async () => {
 })();
 
 await (async () => {
+  // A RESUME IS THE SAME RUN ID WITH A NEW TOKEN. Revoking the id refused the new one as well, so a
+  // resumed run's every push was a 401 and it vanished from the server mid-run.
+  const list = new RunTokenRevocationList();
+  const old = mintRunToken(secret, "run-r", "ws-1", 60, 1_000_000);
+  const oldClaims = verifyRunToken(secret, old, 1_000_000);
+  if (oldClaims.ok) list.revoke("run-r", oldClaims.claims.expiresAtMs);
+  const resumed = mintRunToken(secret, "run-r", "ws-1", 60, 1_005_000);
+  const newClaims = verifyRunToken(secret, resumed, 1_005_000);
+  check("the token a pause revoked stays revoked", oldClaims.ok && list.isRevoked("run-r", oldClaims.claims.expiresAtMs));
+  check("...and so does an older one", oldClaims.ok && list.isRevoked("run-r", oldClaims.claims.expiresAtMs - 1));
+  check("the token minted for its resume is not", newClaims.ok && !list.isRevoked("run-r", newClaims.claims.expiresAtMs));
+  check("asked without a token, the run has a revocation", list.isRevoked("run-r"));
+  if (newClaims.ok) list.revoke("run-r", newClaims.claims.expiresAtMs);
+  check("once the resumed run ends, its token goes too", newClaims.ok && list.isRevoked("run-r", newClaims.claims.expiresAtMs));
+  if (oldClaims.ok) list.revoke("run-r", oldClaims.claims.expiresAtMs);
+  check("...and revoking an older token afterwards does not un-revoke it", newClaims.ok && list.isRevoked("run-r", newClaims.claims.expiresAtMs));
+})();
+
+await (async () => {
   const list = new RunTokenRevocationList();
   list.revoke("run-1", 1_000);
   list.revoke("run-2", 5_000);

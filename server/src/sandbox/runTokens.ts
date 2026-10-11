@@ -129,16 +129,32 @@ export function verifyRunToken(secret: Buffer, raw: string, now = Date.now()): V
 
 /** Revocation, for a run that has already finished. Self-contained tokens cannot be un-minted,
  *  so this is a denylist consulted alongside verification — small and short-lived by
- *  construction, since every entry falls out on its own once the token's own expiry passes. */
+ *  construction, since every entry falls out on its own once the token's own expiry passes.
+ *
+ *  BY THE TOKEN, NOT BY THE RUN, though it is keyed by run id. A paused run's process exits and its
+ *  token is revoked; Resume starts a new process under the SAME run id with a newly minted token.
+ *  Revoking the run id itself refused that new token too: every trace push and control poll of the
+ *  resumed run was a 401, so its steps and its spend never reached the server and it never ended.
+ *  So an entry revokes the tokens for that run that expire no later than the one revoked — the token
+ *  that was live, and any older — and a token minted afterwards, which expires later, is good. */
 export class RunTokenRevocationList {
-  private revoked = new Map<string, number>(); // runId -> expiresAtMs, so a sweep is cheap
+  private revoked = new Map<string, number>(); // runId -> the latest expiry revoked for it, so a sweep is cheap
 
   revoke(runId: string, expiresAtMs: number): void {
-    this.revoked.set(runId, expiresAtMs);
+    this.revoked.set(runId, Math.max(this.revoked.get(runId) ?? 0, expiresAtMs));
   }
 
-  isRevoked(runId: string): boolean {
-    return this.revoked.has(runId);
+  /** Whether a token for this run, expiring at `tokenExpiresAtMs`, is revoked — or, with no expiry
+   *  given, whether any of the run's tokens has been. */
+  isRevoked(runId: string, tokenExpiresAtMs?: number): boolean {
+    const upTo = this.revoked.get(runId);
+    if (upTo === undefined) return false;
+    return tokenExpiresAtMs === undefined || tokenExpiresAtMs <= upTo;
+  }
+
+  /** The latest expiry revoked for this run, so a token minted for it now can be made to outlast it. */
+  revokedUntil(runId: string): number | undefined {
+    return this.revoked.get(runId);
   }
 
   /** Drop entries whose underlying token has expired anyway — nothing to protect against once

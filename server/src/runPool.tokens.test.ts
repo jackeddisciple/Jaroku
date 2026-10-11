@@ -83,6 +83,31 @@ await (async () => {
 })();
 
 await (async () => {
+  // PAUSE, THEN RESUME: the paused process exits (its token revoked) and the run starts again under
+  // the same id, at once — inside one millisecond here, which is the case two clock readings miss.
+  const fakes: FakeSandbox[] = [];
+  const { randomBytes } = await import("node:crypto");
+  const signingKey = randomBytes(32);
+  const revocations = new RunTokenRevocationList();
+  const pool = new RunPool(1, {
+    controlPlaneUrl: "https://cp.example.com",
+    signingKey,
+    revocations,
+    sandbox: () => { const f = new FakeSandbox(); fakes.push(f); return f; },
+  });
+  pool.tryStart({ ...base, runId: "r1", workspaceId: "ws-1" });
+  const first = verifyRunToken(signingKey, fakes[0]!.lastSpec!.controlPlane!.runToken);
+  fakes[0]!.stop(); // the pause: the process exits
+  pool.tryStart({ ...base, runId: "r1", workspaceId: "ws-1" }); // the resume
+  const second = verifyRunToken(signingKey, fakes[0]!.lastSpec!.controlPlane!.runToken);
+  check("the paused segment's token is revoked", first.ok && revocations.isRevoked("r1", first.claims.expiresAtMs));
+  check("the resumed segment's token is not", second.ok && !revocations.isRevoked("r1", second.claims.expiresAtMs),
+    first.ok && second.ok ? `${first.claims.expiresAtMs} -> ${second.claims.expiresAtMs}` : "");
+  fakes[0]!.stop();
+  check("and it is revoked in turn when the resumed segment exits", second.ok && revocations.isRevoked("r1", second.claims.expiresAtMs));
+})();
+
+await (async () => {
   // The token minted is a REAL, verifiable one — not a placeholder string.
   const fakes: FakeSandbox[] = [];
   const { randomBytes } = await import("node:crypto");

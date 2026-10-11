@@ -320,6 +320,12 @@ const token1 = mintRunToken(signingKey, "run-1", "ws-1", 3600);
   revocations.revoke("revoke-me", Date.now() + 3600_000);
   const r = await call("POST", "/v1/runs/revoke-me/control", revokedToken, { ctrl: { ctrl: "boundary" } });
   check("a revoked run's token is refused even though it has not expired", r.status === 401);
+  // A RESUMED RUN keeps its id and gets a new token, minted after the old one was revoked.
+  const resumedToken = mintRunToken(signingKey, "revoke-me", "ws-1", 3600, Date.now() + 5_000);
+  const resumed = await call("POST", "/v1/runs/revoke-me/control", resumedToken, { ctrl: { ctrl: "boundary" } });
+  check(`the same run's token minted after the revocation is accepted (${resumed.status})`, resumed.status >= 200 && resumed.status < 300);
+  const again = await call("POST", "/v1/runs/revoke-me/control", revokedToken, { ctrl: { ctrl: "boundary" } });
+  check("...while the revoked one is still refused", again.status === 401);
 }
 
 http.close();

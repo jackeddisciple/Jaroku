@@ -310,6 +310,9 @@ jobs:
           npm run test:connector-loop
           npm run test:database-url
           npm run test:run-tokens
+          # AND THE POOL THAT MINTS THEM, whose resume — the same run id, a new token — was refused by
+          # a revocation keyed by run id, so a resumed run's every push was a 401.
+          npm run test:pool-tokens
           npm run test:control-plane-routes
           npm run test:backpressure
           npm run test:escape-suite
