@@ -127,6 +127,7 @@
     "test:eval-budget": "tsx src/billing/evalBudget.test.ts",
     "test:estimate": "tsx src/billing/estimate.test.ts",
     "test:byok": "tsx src/billing/byok.test.ts",
+    "test:run-binding": "tsx src/runBinding.test.ts",
     "test:platform-key": "tsx src/billing/platformKey.test.ts",
     "test:key-pool": "tsx src/billing/keyPool.test.ts",
     "test:usage-reporter": "tsx src/billing/usageReporter.test.ts",

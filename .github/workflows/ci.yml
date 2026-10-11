@@ -1048,6 +1048,10 @@ jobs:
           # key must reach its own run and nothing else, and the toggle that chooses between its keys and
           # ours is the one control that changes what a paid plan actually costs.
           npm run test:byok
+          # And the order that BYOK depends on: a run is placed in its workspace before its credentials
+          # are read, because the hosted store gives nothing to a run it cannot place. Read the other
+          # way round, every desktop run was refused for a key that was in Secrets.
+          npm run test:run-binding
           # And the batching, which is not an optimisation. Stripe rate-limits usage records, so per-call
           # reporting loses them under exactly the load that makes reporting matter — and a dropped usage
           # record is revenue that never happened, with no error, no failed run, and nothing to notice

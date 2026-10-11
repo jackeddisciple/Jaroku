@@ -245,6 +245,7 @@ import { MCP_DISCOVER_CLASS, McpDiscoveryQueue } from "./mcpDiscovery.ts";
 import { WorkspaceExporter } from "./lifecycle/export.ts";
 import { lifecycleRoutes } from "./http/lifecycle.ts";
 import { mountSecretsRoutes, type SecretsCaller } from "./http/secrets.ts";
+import { bindForCredentials } from "./runBinding.ts";
 import { GithubRepository } from "./db/repositories/github.ts";
 import { GithubIdentity } from "./githubIdentity.ts";
 import { GithubService } from "./githubService.ts";
@@ -12766,6 +12767,10 @@ async function runAgent(
   // Failure here is not fatal. A credential that cannot be resolved is one the agent reports at
   // the point of use, with the name in the message, which is a far better error than a run that
   // refuses to start for a variable it might not have needed.
+  //
+  // BOUND FIRST: the hosted store answers `getForRun` only for a run it can place, and this run is
+  // registered in `runWorkspaces` further down. See runBinding.ts.
+  const releaseCredentials = bindForCredentials(runWorkspaces, runId, ctx);
   try {
     const agent = agentForRun;
     // THE CONVERSATION-NARROWED LIST, or the agent's own when nothing has been scoped. Every use
@@ -12858,6 +12863,8 @@ async function runAgent(
     runEgress = await buildRunEgress(ctx, runId, provider, activeConnectors, agent?.mcp_tools ?? []);
   } catch (err) {
     console.warn(`[manager] could not resolve credentials for ${runId}: ${(err as Error).message}`);
+  } finally {
+    releaseCredentials();
   }
 
   // NO KEY OF ITS OWN — so this run would spend OURS. The only place in this system where the
@@ -13079,6 +13086,8 @@ async function continuationCredentials(
   agentId: string | null,
 ): Promise<{ env: NodeJS.ProcessEnv; refusal: string | null }> {
   const env: NodeJS.ProcessEnv = {};
+  // Bound for the read, as in runAgent: every caller registers the run only once this returns.
+  const releaseCredentials = bindForCredentials(runWorkspaces, runId, ctx);
   try {
     const agent = agentId ? await agentRepo.bySlug(ctx, agentId).catch(() => undefined) : undefined;
     const declared = agent?.connectors ?? [];
@@ -13098,6 +13107,8 @@ async function continuationCredentials(
     }
   } catch (err) {
     console.warn(`[manager] could not resolve credentials for ${runId}: ${(err as Error).message}`);
+  } finally {
+    releaseCredentials();
   }
   if (desktopExec && isRealProvider(provider) && !env[PROVIDER_ENV_KEY[provider as ProviderId]]) {
     const envKey = PROVIDER_ENV_KEY[provider as ProviderId];
