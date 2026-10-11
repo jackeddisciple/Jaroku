@@ -1177,6 +1177,8 @@ export function GraphView() {
   const userMoved = useRef(false);
   const canvasRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(1);
+  // The whole viewport as of the last settled move, for what the canvas can see of the graph.
+  const [view, setView] = useState<{ x: number; y: number; zoom: number } | null>(null);
   const [frame, setFrame] = useState({ width: 0, height: 0 });
 
   // Kept in a ref as well as in render, so the ResizeObserver below — registered once — fits
@@ -1311,11 +1313,22 @@ export function GraphView() {
     };
   }, [flow !== null]);
 
-  // THE MINIMAP IS FOR A GRAPH TOO BIG TO READ WHOLE. It took a fifth of the panel to show seven
-  // nodes that were already all on screen. It appears when the graph opens from the top because it
-  // would not fit readably — which is exactly when you need it to find your way.
+  // THE MINIMAP IS FOR A GRAPH YOU CANNOT SEE WHOLE. It took a fifth of the panel to show seven
+  // nodes that were already all on screen — and keying it to how the graph OPENED (from the top, for
+  // one that would not fit readably) still showed it beside a seven-step graph wholly in view at the
+  // smallest window. So it is asked of the view as it is: is any of the graph off the canvas?
   // Not under the inspector, which covers the corner it sits in.
-  const showMinimap = !!flow && frame.width > 0 && !inspectorOpen && frameFor(flow, frame, covered).kind === "top";
+  const offCanvas = useMemo(() => {
+    if (!flow || !view || frame.width === 0) return false;
+    const placed = flow.nodes.map((n) => ({ ...n, ...(positions[n.id] ?? {}) }));
+    const left = Math.min(...placed.map((n) => n.x)) * view.zoom + view.x;
+    const right = Math.max(...placed.map((n) => n.x + n.w)) * view.zoom + view.x;
+    const top = Math.min(...placed.map((n) => n.y)) * view.zoom + view.y;
+    const bottom = Math.max(...placed.map((n) => n.y + n.h)) * view.zoom + view.y;
+    const slack = 8;
+    return left < -slack || top < -slack || right > frame.width - covered + slack || bottom > frame.height + slack;
+  }, [flow, view, frame, positions, covered]);
+  const showMinimap = !!flow && !inspectorOpen && offCanvas;
 
   // THE LAST FRAME IS THE RUN AS IT ENDED, not one more step of it: the last node done rather than
   // still ringed as current, and — for a run that completed — the edge on to End taken and End
@@ -1738,6 +1751,7 @@ export function GraphView() {
         // The zoom the bar shows and its limits disable at — read when a move settles, ours or theirs.
         onMoveEnd={(_, vp) => {
           setZoom(vp.zoom);
+          setView(vp);
           // Kept while it is somebody's own view; a frame of ours is not worth keeping.
           if (userMoved.current) savedViews.set(viewKeyRef.current, vp);
           else savedViews.delete(viewKeyRef.current);
@@ -1782,9 +1796,13 @@ export function GraphView() {
           <MiniMap
             pannable
             zoomable
-            className="!bg-panel/80 !rounded-card !border-0"
+            // A MAP READS AS ONE: an edge of its own, and the part on screen outlined. Without them it
+            // was a column of coloured chips over the canvas, its mask the canvas's own colour.
+            className="!rounded-card !border !border-edge !bg-elevated"
             style={{ width: 120, height: 80 }}
             maskColor={MINIMAP_MASK}
+            maskStrokeColor={TEXT.muted}
+            maskStrokeWidth={1.5}
             nodeColor={(n) => {
               const mark = (n.data as FlowData | undefined)?.mark;
               return mark?.kind === "glyph" ? mark.hue : TEXT.faint;
