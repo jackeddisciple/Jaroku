@@ -86,3 +86,38 @@ function nodeStepOf(step: Step, byId: ById): Step | undefined {
   }
   return undefined;
 }
+
+/** How a node went in a run, as its inspector says it. */
+export interface NodeOutcome {
+  /** Its latest pass's own time — the node step's, the model calls inside it included. */
+  ms: number;
+  /** The error its latest pass ended with, from its own step or one inside it; null when it did not fail. */
+  error: string | null;
+  /** How many times it ran. */
+  passes: number;
+}
+
+/**
+ * How a node went in a run: read off its OWN steps, not off the latest step attributed to it.
+ *
+ * THE LATEST STEP OF A NODE IS USUALLY ITS MODEL CALL — a node's step takes its seq as it starts, so
+ * everything inside it comes after — and the inspector read that one: a node that failed said "Ran ·
+ * 1.5s", the model call's time, which had succeeded, while the node step beside it carried the error
+ * and the 2.4s its time chip showed.
+ */
+export function nodeOutcome(nodeId: string, byId: ById | undefined): NodeOutcome | undefined {
+  if (!byId) return undefined;
+  const all = bySeq(byId);
+  const passes = all.filter((s) => s.type === "state_update" && s.name === nodeId);
+  const last = passes[passes.length - 1];
+  if (!last) {
+    // No node step yet (a run cut short inside it): what is inside it is all there is to say.
+    const inside = all.filter((s) => stepNodeId(s, byId) === nodeId);
+    const tail = inside[inside.length - 1];
+    if (!tail) return undefined;
+    return { ms: tail.latency_ms ?? 0, error: inside.find((s) => s.error)?.error ?? null, passes: 0 };
+  }
+  const inLast = all.filter((s) => s.parent_step_id === last.id || s.id === last.id);
+  const error = last.error ?? inLast.find((s) => s.error)?.error ?? null;
+  return { ms: last.latency_ms ?? 0, error, passes: passes.length };
+}

@@ -6,7 +6,7 @@
 //
 //   npm run test:graph-replay
 
-import { nodeTimings, replayFrames, stepsUpTo } from "./graphReplay.ts";
+import { nodeOutcome, nodeTimings, replayFrames, stepsUpTo } from "./graphReplay.ts";
 import type { Step } from "../types.ts";
 
 let fail = 0;
@@ -65,6 +65,26 @@ console.log("\n§2 a run replays in the order it ran");
   check("...and no step of a later node", !first.n2 && !first.n3 && !first.l3, Object.keys(first).join(" "));
   const loop = stepsUpTo(byId, frames[3]!);
   check("a router is counted with the node it decided for", !!loop.r1 && !loop.n4, Object.keys(loop).join(" "));
+}
+
+console.log("\n§3 a node's inspector reads the node, not its last model call");
+{
+  // decline_note's node step failed; extract_jd's model call is its latest step, at a later seq.
+  const failed = nodeOutcome("decline_note", byId);
+  check("a node that failed says so, with its error", failed?.error === "boom", String(failed?.error));
+  const jd = nodeOutcome("extract_jd", byId);
+  check("a node's time is its node step's, not its model call's", jd?.ms === 1200 && jd.error === null, JSON.stringify(jd));
+  const twice = nodeOutcome("score_candidate", byId);
+  check("a node that ran twice says so, with its latest pass's time", twice?.passes === 2 && twice.ms === 700, JSON.stringify(twice));
+  // #33's run: the node step failed while the model call inside it succeeded and came later.
+  const live = Object.fromEntries([
+    step("x0", "state_update", "extract_jd", { latency_ms: 2400, error: "RuntimeError: Model returned invalid JSON: Extra data" }),
+    step("x1", "llm_call", "claude", { latency_ms: 1500, parent_step_id: "x0" }),
+  ].map((s) => [s.id, s]));
+  const o = nodeOutcome("extract_jd", live);
+  check("...the error is the node's, and the time is the node's 2.4s, not the call's 1.5s",
+    o?.error?.startsWith("RuntimeError") === true && o.ms === 2400, JSON.stringify(o));
+  check("a node that never ran has nothing to say", nodeOutcome("shortlist_note", byId) === undefined);
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

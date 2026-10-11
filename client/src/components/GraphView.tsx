@@ -93,7 +93,7 @@ import { compareGraphs, segmentMark, type DiffMark, type GraphDiff } from "../li
 import { marksFor, type NodeMark } from "./graphNodeIcons.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { fmtCost, fmtLatency } from "../lib/format.ts";
-import { nodeTimings, replayFrames, stepsUpTo, type NodeTiming } from "../lib/graphReplay.ts";
+import { nodeOutcome, nodeTimings, replayFrames, stepsUpTo, type NodeTiming } from "../lib/graphReplay.ts";
 import { GraphRunStrip } from "./GraphRunStrip.tsx";
 
 // How much of this canvas the Step Details overlay covers when it is open. It is drawn over
@@ -760,7 +760,7 @@ function NodeInspector({
   const toolFiles = spec.role === "tool" ? findToolFiles(files) : [];
   const { incoming, outgoing } = connections(spec, flow);
   const doc = spec.role === "start" || spec.role === "end" ? PILL_DOC[spec.role] : spec.doc;
-  const step = spec.role === "decision" ? undefined : latestStepForNode(spec.id, bucket);
+  const outcome = spec.role === "decision" ? undefined : nodeOutcome(spec.id, bucket);
   const forkHere = flow.nodes.find((n) => n.decides?.source === spec.id);
 
   return (
@@ -811,12 +811,14 @@ function NodeInspector({
         </Section>
       )}
 
-      {step && (
+      {outcome && (
         <Section title="In this run">
-          <span className={step.error ? "text-ink" : "text-muted"}>
-            {step.error ? "Failed" : "Ran"} · {fmtLatency(step.latency_ms)}
+          <span className={outcome.error ? "text-err" : "text-muted"}>
+            {outcome.error ? "Failed" : "Ran"}
+            {outcome.passes > 1 ? ` ${outcome.passes} times · last ` : " · "}
+            {fmtLatency(outcome.ms)}
           </span>
-          {step.error && <p className="mt-1 whitespace-pre-wrap break-words text-tiny text-muted">{step.error}</p>}
+          {outcome.error && <p className="mt-1 whitespace-pre-wrap break-words text-tiny text-muted">{outcome.error}</p>}
         </Section>
       )}
 
