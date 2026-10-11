@@ -61,11 +61,6 @@ function rowsOf(content: string, tokens: Token[][] | null): Token[][] {
   return tokens ?? content.split("\n").map((line) => (line ? [{ content: line }] : []));
 }
 
-/** How many digits the widest line number has, so the gutter does not change width as it counts. */
-function gutterDigits(content: string): number {
-  return String(content.split("\n").length).length;
-}
-
 function tokenStyle(t: Token): React.CSSProperties | undefined {
   if (!t.color && !t.fontStyle) return undefined;
   const style = t.fontStyle ?? 0;
@@ -188,6 +183,10 @@ export function CodeViewer() {
     };
   }, [content, complete, lang]);
 
+  // Once per render, not once per line: a 3,000-line file was split 3,000 times, on every streamed delta.
+  const rows = rowsOf(content, tokens);
+  const gutterWidth = `calc(${String(rows.length).length}ch + 1rem + 1px)`;
+
   if (!file) {
     return (
       // Inline, at the top of the pane. A full-height centred sentence for a condition that
@@ -221,7 +220,7 @@ export function CodeViewer() {
           )}
           {!complete && <span className="shrink-0 animate-stream-pulse text-tiny text-run motion-reduce:animate-none">writing…</span>}
           <span className="ml-auto text-faint text-tiny shrink-0 tabular-nums">
-            {content.split("\n").length} lines
+            {rows.length} lines
           </span>
         </div>
 
@@ -278,12 +277,12 @@ export function CodeViewer() {
                     aria-hidden
                   />
                 )}
-                {rowsOf(content, tokens).map((row, i) => (
+                {rows.map((row, i) => (
                   <div key={i} data-line={i + 1} className="relative flex">
                     {/* The number in the code's own size and leading, so its baseline is the line's. */}
                     <span
                       className="sticky left-0 shrink-0 select-none border-r border-hair bg-panel px-2 text-right text-faint"
-                      style={{ minWidth: `calc(${gutterDigits(content)}ch + 1rem + 1px)` }}
+                      style={{ minWidth: gutterWidth }}
                       aria-hidden
                     >
                       {i + 1}
