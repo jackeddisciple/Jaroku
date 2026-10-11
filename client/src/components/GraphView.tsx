@@ -1416,6 +1416,9 @@ export function GraphView() {
       // React Flow reports a keyboard selection only for nodes whose state it holds, and these are
       // rebuilt from the introspected topology on every render.
       tabIndex={-1}
+      // THE CANVAS OWNS ITS BARE LETTERS (lib/bareKeys): a click on a node or the canvas focuses it,
+      // and `r` there used to start a paid run.
+      data-owns-bare-keys=""
       onKeyDown={(e) => {
         if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
           e.preventDefault();

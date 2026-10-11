@@ -25,6 +25,19 @@
 //
 //   npm run test:bare-keys
 
+/**
+ * A region that claims the bare letters pressed inside it: `data-owns-bare-keys` on its root.
+ *
+ * THE GRAPH CANVAS IS ONE. Its nodes and the canvas itself take focus — a click on either lands
+ * there — and neither is a typing target, so a bare `r` after clicking a node passed every check
+ * above and dispatched a real run with whatever input was remembered, or swapped the Graph tab for
+ * the Secrets lock screen. Nothing on the canvas says `r` means anything there.
+ */
+export function insideKeyOwner(el: EventTarget | null): boolean {
+  const t = el as { closest?: (selector: string) => unknown } | null;
+  return typeof t?.closest === "function" && !!t.closest("[data-owns-bare-keys]");
+}
+
 /** Anything that swallows a bare letter: a filter field, a rename in progress, the composer. */
 export function isTypingTarget(el: EventTarget | null): boolean {
   const t = el as HTMLElement | null;
@@ -56,7 +69,32 @@ export function paneOwnsBareKey(e: BareKeyEvent, screen: BareKeyScreen): boolean
   if (e.metaKey || e.ctrlKey || e.altKey) return false;
   if (screen.navView !== null) return false;
   if (screen.paletteOpen) return false;
+  if (insideKeyOwner(e.target)) return false;
   return !isTypingTarget(e.target);
+}
+
+/**
+ * WHAT A BARE `R` MAY DO: re-run the last input, say why it cannot, or nothing at all.
+ *
+ * IT DISPATCHED A PAID RUN ON ANY `r` THAT GOT THIS FAR — with an empty input for an agent that had
+ * never run, and once per capital R in a line of text that reached the page instead of a field
+ * (eight runs inside a minute, each refused only for want of a key). And without a key it moved the
+ * panel to Secrets, a navigation for a keystroke nobody may have meant.
+ *
+ * So: only a lowercase `r`, not held down (a capital R is typing, and a held key repeats); only when
+ * there IS a last input to repeat; never while this agent's run is live or one was dispatched a
+ * moment ago; and a missing key is said in a toast rather than by moving the panel.
+ */
+export type RerunDecision = "run" | "needs-key" | "nothing";
+
+export function rerunDecision(
+  e: { key: string; shiftKey: boolean; repeat: boolean },
+  state: { lastInput: string | null; canRun: boolean; live: boolean; justSent: boolean; keyed: boolean },
+): RerunDecision {
+  if (e.key !== "r" || e.shiftKey || e.repeat) return "nothing";
+  if (!state.canRun || state.live || state.justSent) return "nothing";
+  if (!state.lastInput?.trim()) return "nothing";
+  return state.keyed ? "run" : "needs-key";
 }
 
 /**

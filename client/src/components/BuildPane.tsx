@@ -78,7 +78,7 @@ import { TurnMetadata } from "./composer/TurnMetadata.tsx";
 import { turnSource, metaForTurn, promptForRegenerate } from "../lib/turnSource.ts";
 import { canRerunTurn } from "../lib/rerun.ts";
 import { keyHint } from "../lib/modKey.ts";
-import { isTypingTarget, paneOwnsBareKey } from "../lib/bareKeys.ts";
+import { isTypingTarget, paneOwnsBareKey, rerunDecision } from "../lib/bareKeys.ts";
 import { chatKeyAction } from "../lib/chatKeys.ts";
 import {
   FALLBACK_SETTINGS, useComposerSettingsStore, type Effort, type PermissionMode,
@@ -117,6 +117,8 @@ import { VoiceWaveform } from "./VoiceWaveform.tsx";
  * Named rather than written into the style object because the auto-grow effect and the style have
  * to agree about them, and two copies of 240 is how a box grows one line past where it scrolls.
  */
+/** How long after R sends a run another R does nothing — the run's start has not arrived to say it is live. */
+const RERUN_COOLDOWN_MS = 4000;
 const LINE_PX = 20;
 const MAX_LINES = 12;
 
@@ -2451,17 +2453,33 @@ export function BuildPane({
   }, [activeAgentId]);
 
   // R re-runs the last test input (doc §4.5) when focus isn't in a field — reads localStorage, so
-  // it's independent of the composer's live draft and works from any mode.
-  const rerunLast = useCallback(() => {
-    if (!canRun) return;
-    // R runs on the chosen model from any mode, so it is that provider's key it needs.
-    if (providersLoaded && !isRunnable(providerStatuses, provider)) {
-      askForKey(provider || "anthropic");
-      return;
+  // it's independent of the composer's live draft and works from any mode. What it may do is
+  // `rerunDecision`'s call (lib/bareKeys): nothing without a last input, a live run or a run sent a
+  // moment ago, and a toast rather than a trip to Secrets without a key.
+  const lastRerunAt = useRef(0);
+  const rerunLast = useCallback((e: { key: string; shiftKey: boolean; repeat: boolean }): boolean => {
+    const runs = useTraceStore.getState().runs;
+    const live = Object.values(runs).some(
+      (r) => r.agent_id === activeAgentId && (r.status === "running" || (r.status as string) === "paused"),
+    );
+    const decision = rerunDecision(e, {
+      lastInput: activeAgentId ? localStorage.getItem(inputKey(activeAgentId)) : null,
+      canRun,
+      live,
+      justSent: Date.now() - lastRerunAt.current < RERUN_COOLDOWN_MS,
+      // R runs on the chosen model from any mode, so it is that provider's key it needs.
+      keyed: !providersLoaded || isRunnable(providerStatuses, provider),
+    });
+    if (decision === "nothing") return false;
+    if (decision === "needs-key") {
+      useUiStore.getState().showToast("Add a key in Secrets to re-run", "err");
+      return true;
     }
+    lastRerunAt.current = Date.now();
     const last = localStorage.getItem(inputKey(activeAgentId)) ?? "";
     sendRun(last.trim(), provider, model, activeAgentId ?? undefined);
-  }, [canRun, activeAgentId, provider, model, providersLoaded, providerStatuses, askForKey]);
+    return true;
+  }, [canRun, activeAgentId, provider, model, providersLoaded, providerStatuses]);
   /**
    * §14's LISTENER, and it runs BEFORE the `R` one below.
    *
@@ -2593,8 +2611,7 @@ export function BuildPane({
       // happened. On a workspace with a provider key, that spends money silently. See lib/bareKeys.
       const ui = useUiStore.getState();
       if (!paneOwnsBareKey(e, { navView: ui.navView, paletteOpen: ui.paletteOpen })) return;
-      e.preventDefault();
-      rerunLast();
+      if (rerunLast(e)) e.preventDefault();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

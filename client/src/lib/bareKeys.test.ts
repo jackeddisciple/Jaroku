@@ -17,7 +17,7 @@
 //
 //   npm run test:bare-keys
 
-import { isTypingTarget, paneOwnsBareKey, viewOwnsBareKey, type BareKeyEvent } from "./bareKeys.ts";
+import { insideKeyOwner, isTypingTarget, paneOwnsBareKey, rerunDecision, viewOwnsBareKey, type BareKeyEvent } from "./bareKeys.ts";
 
 let fail = 0;
 const check = (name: string, ok: boolean, detail = ""): void => {
@@ -81,6 +81,38 @@ console.log("\nwhat counts as typing");
   check("a plain div is not", isTypingTarget(el("DIV")) === false);
   check("a button is not", isTypingTarget(el("BUTTON")) === false);
   check("nothing at all is not", isTypingTarget(null) === false);
+}
+
+console.log("\na region that owns its bare keys — the graph canvas");
+{
+  // A node or the canvas itself has focus after a click, and neither is a typing target. Faked with
+  // the one method the predicate reads, matching or not.
+  const owned = { tagName: "DIV", isContentEditable: false, closest: (s: string) => (s === "[data-owns-bare-keys]" ? {} : null) } as unknown as EventTarget;
+  const plain = { tagName: "DIV", isContentEditable: false, closest: () => null } as unknown as EventTarget;
+  check("a focused graph node is inside a key owner", insideKeyOwner(owned) === true);
+  check("...a plain element is not", insideKeyOwner(plain) === false);
+  check("...nor nothing at all", insideKeyOwner(null) === false);
+  check("so the pane's `r` stands down there", paneOwnsBareKey(bare({ target: owned }), THREE_PANE) === false);
+  check("...and still fires on a plain element", paneOwnsBareKey(bare({ target: plain }), THREE_PANE) === true);
+}
+
+console.log("\nwhat a bare `r` may do");
+{
+  const r = { key: "r", shiftKey: false, repeat: false };
+  const ready = { lastInput: "abc", canRun: true, live: false, justSent: false, keyed: true };
+  check("a last input, a key, nothing live: it re-runs", rerunDecision(r, ready) === "run");
+  // The issue's two halves: an agent that has never run has nothing to repeat — with a key it ran
+  // an empty input, without one it moved the panel to Secrets.
+  check("no last input: nothing", rerunDecision(r, { ...ready, lastInput: null }) === "nothing");
+  check("...an empty one: nothing", rerunDecision(r, { ...ready, lastInput: "  \n " }) === "nothing");
+  check("...and nothing, not Secrets, without a key either", rerunDecision(r, { ...ready, lastInput: null, keyed: false }) === "nothing");
+  check("a last input without a key says so", rerunDecision(r, { ...ready, keyed: false }) === "needs-key");
+  // Eight runs in a minute, one per capital R in a line of text that reached the page.
+  check("a capital R is typing", rerunDecision({ ...r, key: "R", shiftKey: true }, ready) === "nothing");
+  check("a held r does not repeat a run", rerunDecision({ ...r, repeat: true }, ready) === "nothing");
+  check("a run already live: nothing", rerunDecision(r, { ...ready, live: true }) === "nothing");
+  check("one sent a moment ago: nothing", rerunDecision(r, { ...ready, justSent: true }) === "nothing");
+  check("an agent that cannot run: nothing", rerunDecision(r, { ...ready, canRun: false }) === "nothing");
 }
 
 console.log("\nneither predicate is stuck at a constant");
