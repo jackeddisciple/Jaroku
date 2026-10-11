@@ -77,8 +77,79 @@ export async function graphPng(canvas: HTMLElement): Promise<Blob> {
 /** The graph as an SVG document. */
 export async function graphSvg(canvas: HTMLElement): Promise<string> {
   const { viewport, options } = shotOf(canvas);
-  const url = await toSvg(viewport, options);
-  return decodeURIComponent(url.slice(url.indexOf(",") + 1));
+  // One format of each face: every browser that opens an SVG reads woff2, and the woff beside it
+  // doubled what the fonts cost.
+  const url = await toSvg(viewport, { ...options, preferredFontFormat: "woff2" });
+  return compactSvg(decodeURIComponent(url.slice(url.indexOf(",") + 1)));
+}
+
+/**
+ * The SVG with every inline style declaration that changes nothing taken out.
+ *
+ * 1.8 MB FOR SEVEN STEPS, AND NOT MOSTLY FONTS. html-to-image writes each element's whole computed
+ * style onto its copy — some three hundred properties, nearly all of them what the element would
+ * have anyway — and the graph is a hundred and seventy elements. So the copy is laid out in a page of
+ * its own with no stylesheet, and each declaration is kept only if the element would compute
+ * something else without it: measured against a bare element of the same kind in the same place,
+ * which is exactly what the element becomes once its declaration is gone. What is left draws the same
+ * picture.
+ */
+function compactSvg(svg: string): string {
+  const parsed = new DOMParser().parseFromString(svg, "image/svg+xml");
+  const content = parsed.querySelector("foreignObject")?.firstElementChild;
+  if (!content || typeof document === "undefined") return svg;
+  const frame = document.createElement("iframe");
+  frame.setAttribute("aria-hidden", "true");
+  frame.style.cssText = "position:fixed;left:-10000px;top:0;width:4000px;height:4000px;border:0;visibility:hidden";
+  document.body.appendChild(frame);
+  try {
+    const page = frame.contentDocument;
+    const win = frame.contentWindow;
+    if (!page || !win) return svg;
+    const root = page.importNode(content, true) as Element;
+    page.body.appendChild(root);
+    const trim = (el: Element): void => {
+      const style = (el as HTMLElement).style as CSSStyleDeclaration | undefined;
+      const parent = el.parentElement;
+      if (style && style.length && parent) {
+        const bare = page.createElementNS(el.namespaceURI, el.localName);
+        parent.insertBefore(bare, el);
+        const plain = win.getComputedStyle(bare);
+        const redundant = new Map<string, string>();
+        for (let i = 0; i < style.length; i++) {
+          const name = style.item(i);
+          const value = style.getPropertyValue(name);
+          if (value === plain.getPropertyValue(name)) redundant.set(name, value);
+        }
+        bare.remove();
+        for (const name of redundant.keys()) style.removeProperty(name);
+        // AND CHECKED, because properties lean on each other: a border width of 0 is what a bare
+        // element computes only because its border style is `none`, so with the copied `solid` kept
+        // and the width taken out it drew 3px borders round everything. Whatever no longer computes
+        // to what it was is put back, until nothing moves.
+        for (let pass = 0; pass < 4 && redundant.size; pass++) {
+          const now = win.getComputedStyle(el);
+          let restored = false;
+          for (const [name, value] of redundant) {
+            if (now.getPropertyValue(name) !== value) {
+              style.setProperty(name, value);
+              redundant.delete(name);
+              restored = true;
+            }
+          }
+          if (!restored) break;
+        }
+      }
+      for (const child of Array.from(el.children)) trim(child);
+    };
+    trim(root);
+    content.replaceWith(parsed.importNode(root, true));
+    return new XMLSerializer().serializeToString(parsed);
+  } catch {
+    return svg; // a bigger file that draws is better than none
+  } finally {
+    frame.remove();
+  }
 }
 
 /** `liven-graph-v3`: the agent and the version the picture is of — `-v1-vs-v3` for a comparison. */
