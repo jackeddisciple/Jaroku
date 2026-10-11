@@ -77,7 +77,16 @@ function readLastInput(agentId: string): string {
 const runDrafts = new Map<string, string>();
 
 /** Run ▶, and while this agent's run is on screen, Pause/Resume and Stop. */
-export function RunControls({ agentId, runnable }: { agentId: string; runnable: boolean }) {
+export function RunControls({
+  agentId, runnable, olderVersion = null, onBeforeRun,
+}: {
+  agentId: string;
+  runnable: boolean;
+  /** The earlier version on screen, if one is: a run is always of the current version. */
+  olderVersion?: number | null;
+  /** Called as a run is sent — the graph goes back to the version the run will move through. */
+  onBeforeRun?: () => void;
+}) {
   const connected = useTraceStore((s) => s.connection === "open");
   const run = useTraceStore((s) => (s.activeRunId ? s.runs[s.activeRunId] : undefined));
   const provider = useUiStore((s) => s.provider);
@@ -114,6 +123,7 @@ export function RunControls({ agentId, runnable }: { agentId: string; runnable: 
       /* the last input is a convenience; the run does not need it kept */
     }
     runDrafts.delete(inputKey(agentId));
+    onBeforeRun?.();
     sendRun(input.trim(), provider || undefined, model || undefined, agentId);
     setOpen(false);
   };
@@ -170,7 +180,11 @@ export function RunControls({ agentId, runnable }: { agentId: string; runnable: 
     );
   }
 
-  const why = !connected ? "Run — not connected" : !runnable ? "Run — this agent cannot run yet" : "Run";
+  const why = !connected
+    ? "Run — not connected"
+    : !runnable
+      ? "Run — this agent cannot run yet"
+      : olderVersion !== null ? `Run — runs the current version, not v${olderVersion}` : "Run";
   return (
     <>
     <Popover

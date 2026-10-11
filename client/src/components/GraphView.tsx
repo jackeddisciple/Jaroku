@@ -945,6 +945,12 @@ export function GraphView() {
     setViewing(v);
     if (v === null) setComparing(false);
   };
+  // A RUN IS ALWAYS OF THE CURRENT VERSION, wherever it was started: back to it, or the run's
+  // animation lands on an earlier version's nodes.
+  const runningNow = activeRunId ? runs[activeRunId]?.status === "running" : false;
+  useEffect(() => {
+    if (runningNow) pickVersion(null);
+  }, [runningNow]);
   const latest = graph?.latest ?? graph?.version ?? 0;
   const older = useGraphStore((s) => (activeAgentId && viewing ? s.graphs[graphKey(activeAgentId, viewing)] : undefined));
   const olderLoading = useGraphStore((s) => (activeAgentId && viewing ? s.loading[graphKey(activeAgentId, viewing)] : undefined));
@@ -1366,19 +1372,23 @@ export function GraphView() {
   // of its own under it. The inspector starts below whichever is lower.
   const barRef = useRef<HTMLDivElement>(null);
   const [barBottom, setBarBottom] = useState(TOOLBAR_H + 4);
+  // ...and the version pill under it, while an earlier version is on screen.
+  const pillRef = useRef<HTMLDivElement>(null);
+  const [pillH, setPillH] = useState(0);
   useLayoutEffect(() => {
     const bar = barRef.current;
     if (!bar) return;
     const measure = () => {
       const row = findOpen ? bar.querySelector<HTMLElement>("[role=search]") : null;
       setBarBottom(bar.offsetTop + bar.offsetHeight + (row ? row.offsetHeight + 6 : 0));
+      setPillH(pillRef.current ? pillRef.current.offsetHeight + 6 : 0);
     };
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(measure);
     ro.observe(bar);
     return () => ro.disconnect();
-  }, [findOpen, flow !== null]);
+  }, [findOpen, flow !== null, viewing, comparing]);
   const focusNode = (id: string) => {
     const spec = flow?.nodes.find((n) => n.id === id);
     const inst = rf.current;
@@ -1603,7 +1613,12 @@ export function GraphView() {
       )}
       {/* THE TOOLBAR, over the canvas rather than in it, so it neither pans nor zooms. */}
       <GraphToolbar barRef={barRef}>
-        <RunControls agentId={activeAgentId} runnable={agentMeta?.runnable ?? false} />
+        <RunControls
+          agentId={activeAgentId}
+          runnable={agentMeta?.runnable ?? false}
+          olderVersion={viewing}
+          onBeforeRun={() => pickVersion(null)}
+        />
         <ToolDivider />
         <FindControl
           find={(q) => (flow ? findNodes(flow.nodes, q).map((n) => n.id) : [])}
@@ -1662,6 +1677,28 @@ export function GraphView() {
           <Icon.graph.resetLayout size={ICON.sm} />
         </ToolButton>
       </GraphToolbar>
+      {viewing !== null && (
+        // AN EARLIER VERSION SAYS SO. The small "v1" in the toolbar was the only cue, so it was easy to
+        // forget the canvas was not the agent as it is — floated, so nothing below it moves.
+        <div
+          ref={pillRef}
+          role="status"
+          className="graph-glass absolute left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-card py-1 pl-2.5 pr-1 text-tiny text-muted shadow-floating backdrop-blur-md backdrop-saturate-150"
+          style={{ top: barBottom + 6 }}
+        >
+          <span>
+            {comparing ? `Comparing v${viewing} with v${latest}` : `Viewing v${viewing}`}
+            <span className="text-faint"> · read-only</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => pickVersion(null)}
+            className="rounded-control px-1.5 py-0.5 text-ink transition-colors hover:bg-active"
+          >
+            Back to v{latest}
+          </button>
+        </div>
+      )}
       {selected && flow && (() => {
         const spec = flow.nodes.find((n) => n.id === selected.id);
         return spec ? (
@@ -1669,7 +1706,7 @@ export function GraphView() {
             spec={spec}
             flow={flow}
             bucket={bucket}
-            top={barBottom + 8}
+            top={barBottom + pillH + 8}
             olderVersion={viewing}
             onOpen={(id) => openNode(id, true)}
             onOpenCode={() => openCode(spec.id)}
