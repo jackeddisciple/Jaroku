@@ -334,6 +334,10 @@ export function WorkComposer() {
           }}
           rows={1}
           placeholder={moment.placeholder}
+          // A job is the agent's input, sent as typed: no smart dashes or quotes in it.
+          spellCheck={false}
+          autoCorrect="off"
+          autoCapitalize="off"
           // ONE LINE THAT GROWS TO A SMALL MAXIMUM — §8. `max-h` rather than an auto-resize script,
           // because the growth is bounded and a scrollbar past the bound is the honest end of it.
           className="max-h-[96px] min-h-[36px] flex-1 resize-none rounded-input border border-edge bg-elevated px-2.5 py-2 text-caption leading-[1.5] text-ink placeholder:text-faint focus-visible:outline-none focus-visible:shadow-focusring"

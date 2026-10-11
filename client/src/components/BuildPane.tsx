@@ -3732,6 +3732,12 @@ export function BuildPane({
               }}
               rows={1}
               placeholder={moment.placeholder}
+              // TEST MODE SENDS THE TEXT AS THE AGENT'S INPUT, so it goes as typed: macOS's smart dashes
+              // and quotes turned a `---` separator into an em dash and broke any JSON. Prose to Jaroku
+              // keeps the system's help.
+              spellCheck={composerMode !== "test"}
+              autoCorrect={composerMode === "test" ? "off" : undefined}
+              autoCapitalize={composerMode === "test" ? "off" : undefined}
               // 13px AT REGULAR WEIGHT, in classes — one step down from the 14px it was, the
               // product owner's call on 2026-09-10. `text-label` is the rung and `font-normal`
               // takes back the label's medium weight, because this is prose somebody writes rather

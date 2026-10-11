@@ -87,6 +87,10 @@ function ExampleRow({
           if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commit(); }
         }}
         rows={Math.min(draft.split("\n").length + 1, 6)}
+        // An input and an expected output are compared character for character: no smart dashes or quotes.
+        spellCheck={false}
+        autoCorrect="off"
+        autoCapitalize="off"
         className="w-full resize-none bg-elevated text-ink rounded-input border border-edge px-2 py-1 text-caption outline-none focus:shadow-focusring"
       />
     ) : (

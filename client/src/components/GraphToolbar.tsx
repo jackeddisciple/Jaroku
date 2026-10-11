@@ -151,6 +151,11 @@ export function RunControls({ agentId, runnable }: { agentId: string; runnable: 
             }}
             placeholder="What to give the agent"
             aria-label="Input for this run"
+            // VERBATIM. macOS turned `---` into an em dash and straight quotes into curly ones as they
+            // were typed — a separator the agent looks for, and any JSON, gone without a trace.
+            spellCheck={false}
+            autoCorrect="off"
+            autoCapitalize="off"
             className="min-h-[44px] flex-1 resize-none rounded-input border border-edge bg-panel px-2 py-1.5 text-caption text-ink placeholder:text-faint focus:outline-none focus-visible:shadow-focusring"
           />
           <ToolButton label="Run" onClick={start}>
