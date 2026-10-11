@@ -40,6 +40,12 @@ interface TraceState {
   expandedStepId: string | null;
   connection: ConnectionState;
   logs: LogLine[];
+  /**
+   * Per live run, the nodes it will run next — what each node boundary says on the debug channel.
+   * The trace says what a run has FINISHED (a step is emitted when it ends); this is the only word on
+   * what it is doing now, where a paused run will continue, and where a stopped one stood.
+   */
+  nextByRun: Record<string, string[]>;
 
   /**
    * The run history, merged by id.
@@ -63,6 +69,7 @@ interface TraceState {
   needsLoad: (id: string) => boolean;
   addLog: (line: LogLine) => void;
   setConnection: (c: ConnectionState) => void;
+  setNext: (runId: string, next: string[]) => void;
 }
 
 const LOG_CAP = 200;
@@ -86,6 +93,7 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   expandedStepId: null,
   connection: "connecting",
   logs: [],
+  nextByRun: {},
 
   applyHistory: (runs, meta) =>
     set((state) => {
@@ -159,6 +167,8 @@ export const useTraceStore = create<TraceState>((set, get) => ({
     set((state) => ({ logs: [line, ...state.logs].slice(0, LOG_CAP) })),
 
   setConnection: (connection) => set({ connection }),
+
+  setNext: (runId, next) => set((state) => ({ nextByRun: { ...state.nextByRun, [runId]: next } })),
 }));
 
 // --- selectors (pure; sort-by-seq lives here so no component can render arrival order) ---

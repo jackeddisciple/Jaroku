@@ -151,8 +151,10 @@ const PULSE_GLOW = alpha(INTERACTION.accent, 0.65);
 // that reads as switched off.
 const MINIMAP_MASK = alpha(SURFACE.void, 0.7);
 
-type NodeStatus = "ok" | "error" | "running";
-const STATUS_COLOR: Record<NodeStatus, string> = { ok: STATUS.ok, error: STATUS.error, running: STATUS.pending };
+type NodeStatus = "ok" | "error" | "running" | "paused";
+const STATUS_COLOR: Record<NodeStatus, string> = { ok: STATUS.ok, error: STATUS.error, running: STATUS.pending, paused: STATUS.pending };
+/** What a dot says on hover, and to a screen reader. */
+const STATUS_TITLE: Record<NodeStatus, string> = { ok: "ran", error: "errored", running: "running", paused: "paused — the run continues here" };
 
 type Brand = ReturnType<typeof modelResource>;
 type FlowData = {
@@ -178,6 +180,8 @@ type FlowData = {
   active: boolean;
   selected: boolean;
   status?: NodeStatus;
+  /** Said by the status dot instead of its status's own word: why a run stopped here. */
+  statusNote?: string;
 };
 type EdgeData = {
   hot?: boolean;
@@ -254,14 +258,14 @@ function Handles({ tileMid, tileHalf }: { tileMid: number; tileHalf: number }) {
   );
 }
 
-function StatusDot({ status }: { status?: NodeStatus }) {
+function StatusDot({ status, note }: { status?: NodeStatus; note?: string }) {
   if (!status) return null;
   const c = STATUS_COLOR[status];
   return (
     <span
       className={`absolute -top-1.5 -right-1.5 w-3 h-3 rounded-full ${status === "running" ? "animate-stream-pulse motion-reduce:animate-none" : ""}`}
       style={{ background: c, boxShadow: `0 0 0 2.5px ${CARD_BG}` }}
-      title={status}
+      title={note ?? STATUS_TITLE[status]}
     />
   );
 }
@@ -271,7 +275,7 @@ function StatusDot({ status }: { status?: NodeStatus }) {
  * in a comparison, green for a step that is new and a faint dash for one that is gone.
  */
 function tileBorder(d: FlowData): string {
-  if (d.active) return AMBER;
+  if (d.active || d.status === "paused") return AMBER;
   if (d.selected) return SEL;
   if (d.diff === "added") return NODE_HUE.green;
   if (d.diff === "removed") return TEXT.faint;
@@ -279,7 +283,7 @@ function tileBorder(d: FlowData): string {
 }
 /** ...and the soft ring n8n puts round a selected node. */
 function tileRing(d: FlowData): string | undefined {
-  if (d.active) return `0 0 0 4px ${alpha(AMBER, 0.18)}`;
+  if (d.active || d.status === "paused") return `0 0 0 4px ${alpha(AMBER, 0.18)}`;
   if (d.selected) return `0 0 0 4px ${alpha(SEL, 0.12)}`;
   if (d.diff === "added") return `0 0 0 4px ${alpha(NODE_HUE.green, 0.16)}`;
   return undefined;
@@ -468,7 +472,7 @@ function TileNode({ data }: NodeProps) {
             <McpPlugGlyph />
           </span>
         )}
-        <StatusDot status={d.status} />
+        <StatusDot status={d.status} note={d.statusNote} />
         <Timing t={d.timing} style={{ left: TILE + 8, top: 8 }} />
       </div>
       <Label d={d} sub={start ? (spec.doc ?? "When the agent is asked") : undefined} />
@@ -491,7 +495,7 @@ function EndNode({ data }: NodeProps) {
         style={{ width: END_D, height: END_D, background: CARD_BG, border: `1.5px solid ${tileBorder(d)}`, boxShadow: tileRing(d) }}
       >
         <Mark mark={d.mark} size={NODE_ICON.end} />
-        <StatusDot status={d.status} />
+        <StatusDot status={d.status} note={d.statusNote} />
       </div>
       <div className="text-caption font-medium leading-tight text-ink" style={{ marginTop: LABEL_GAP }}>{spec.title}</div>
       <Handles tileMid={END_D / 2} tileHalf={END_D / 2} />
@@ -524,7 +528,7 @@ function AgentNode({ data }: NodeProps) {
           <Truncate className="text-tiny text-muted" title={spec.doc ?? ROLE_LABEL[spec.role]}>{spec.doc ?? ROLE_LABEL[spec.role]}</Truncate>
         </span>
       </div>
-      <StatusDot status={d.status} />
+      <StatusDot status={d.status} note={d.statusNote} />
       <HoverBar d={d} />
       <Timing t={d.timing} style={{ left: 0, top: spec.h + 6 }} />
       {/* THE PORTS, down the card's right edge, each with the diamond n8n gives one. Their names
@@ -863,16 +867,24 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function computeNodeStatus(bucket: Record<string, Step> | undefined, activeNode: string | undefined): Record<string, NodeStatus> {
+function computeNodeStatus(
+  bucket: Record<string, Step> | undefined,
+  activeNode: string | undefined,
+  live?: { nodes: readonly string[]; as: NodeStatus },
+): Record<string, NodeStatus> {
   const out: Record<string, NodeStatus> = {};
-  if (!bucket) return out;
-  for (const step of Object.values(bucket)) {
-    const nid = stepNodeId(step, bucket);
-    if (!nid) continue;
-    if (step.error) out[nid] = "error";
-    else if (out[nid] !== "error") out[nid] = "ok";
+  if (bucket) {
+    for (const step of Object.values(bucket)) {
+      const nid = stepNodeId(step, bucket);
+      if (!nid) continue;
+      if (step.error) out[nid] = "error";
+      else if (out[nid] !== "error") out[nid] = "ok";
+    }
   }
   if (activeNode && out[activeNode] !== "error") out[activeNode] = "running";
+  // Where a live run is now, where a paused one continues, or where a stopped one stood — over
+  // whatever an earlier pass through the same node left on it.
+  for (const id of live?.nodes ?? []) if (out[id] !== "error") out[id] = live!.as;
   return out;
 }
 
@@ -1196,7 +1208,8 @@ export function GraphView() {
     [replayFrame, bucket],
   );
   const timings = useMemo(() => nodeTimings(shownSteps), [shownSteps]);
-  const stripAvailable = frames.length > 0 && !!run && run.status !== "running";
+  // Not while paused: the run is not over, and a strip of its steps read as if it were.
+  const stripAvailable = frames.length > 0 && !!run && run.status !== "running" && run.status !== "paused";
   const stripShown = stripAvailable && stripClosed !== activeRunId;
   const stripFolded = stripAvailable && stripClosed === activeRunId;
 
@@ -1308,19 +1321,50 @@ export function GraphView() {
   const completed = run?.status === "completed";
   const atLastFrame = replayAt !== null && replayAt === frames.length - 1;
   const endReached = completed && (replayAt === null || atLastFrame);
+  // WHERE A LIVE RUN IS — not where it last finished. A step is emitted when it ends, so the trace
+  // alone put the amber ring on the node that had just finished (after Resume, on extract_jd for
+  // five seconds while the run had moved on), showed nothing at all until the first node was done,
+  // said nothing about where a paused run would continue, and left a stopped or failed run looking
+  // like a shorter finished one. Each node boundary says which nodes run next; before the first,
+  // the run is in the node after Start.
+  const nextNodes = useTraceStore((s) => (activeRunId ? s.nextByRun[activeRunId] : undefined));
+  const firstNodes = useMemo(
+    () => (flow ? [...new Set(flow.edges.filter((e) => e.from === START_ID && !e.port).flatMap((e) => e.to))] : []),
+    [flow],
+  );
+  const liveMark = useMemo<{ nodes: string[]; as: NodeStatus; note?: string } | undefined>(() => {
+    if (replayAt !== null || !run) return undefined;
+    const steps = Object.values(bucket ?? {});
+    if (running) {
+      if (nextNodes?.length) return { nodes: nextNodes, as: "running" };
+      if (!steps.some((st) => st.type === "state_update") && firstNodes.length === 1) return { nodes: firstNodes, as: "running" };
+      return undefined;
+    }
+    if (run.status === "paused" && nextNodes?.length) return { nodes: nextNodes, as: "paused" };
+    // A failure inside a node already marks it red, from its own step; this is the run that ended
+    // without one — stopped, or failed between steps.
+    if (run.status === "error" && nextNodes?.length && !steps.some((st) => st.error)) {
+      return {
+        nodes: nextNodes,
+        as: "error",
+        note: run.error === "cancelled by user" ? "stopped here" : `the run failed here${run.error ? ` — ${run.error}` : ""}`,
+      };
+    }
+    return undefined;
+  }, [replayAt, run, bucket, running, nextNodes, firstNodes]);
   const activeNode = useMemo(
-    () => (replayFrame ? (atLastFrame && completed ? undefined : replayFrame.node) : running ? activeNodeId(bucket) : undefined),
-    [replayFrame, atLastFrame, completed, running, bucket],
+    () => (replayFrame ? (atLastFrame && completed ? undefined : replayFrame.node) : running && !liveMark ? activeNodeId(bucket) : undefined),
+    [replayFrame, atLastFrame, completed, running, liveMark, bucket],
   );
   const selectedNode = useMemo(() => {
     const step = selectedStepId && bucket ? bucket[selectedStepId] : undefined;
     return step ? stepNodeId(step, bucket!) : undefined;
   }, [selectedStepId, bucket]);
   const nodeStatus = useMemo(() => {
-    const out = computeNodeStatus(shownSteps, activeNode);
+    const out = computeNodeStatus(shownSteps, activeNode, liveMark);
     if (endReached) out[END_ID] = "ok";
     return out;
-  }, [shownSteps, activeNode, endReached]);
+  }, [shownSteps, activeNode, endReached, liveMark]);
 
   // Edges the current run actually traversed (source→target = real data direction), reused from
   // traceGraphMap. Drives the directional particle in the click micro-interaction.
@@ -1337,8 +1381,12 @@ export function GraphView() {
       const step = bucket[selectedStepId];
       return step ? stepEdge(step, bucket) : undefined;
     }
-    return running ? activeEdge(bucket) : undefined;
-  }, [replayFrame, atLastFrame, completed, running, selectedStepId, bucket]);
+    if (!running) return undefined;
+    // On its way into the node it is in: from the last one it finished.
+    const last = frames[frames.length - 1];
+    if (liveMark?.as === "running" && liveMark.nodes.length === 1 && last) return { source: last.node, target: liveMark.nodes[0]! };
+    return activeEdge(bucket);
+  }, [replayFrame, atLastFrame, completed, running, selectedStepId, bucket, liveMark, frames]);
 
   const nodes = useMemo<Node[]>(() => {
     if (!flow) return [];
@@ -1362,9 +1410,10 @@ export function GraphView() {
         hover: hovered === spec.id && !dragging,
         timing: timings.get(spec.id),
         diff: diff ? diff.nodes.get(spec.decides?.source ?? spec.id) : undefined,
-        active: spec.id === activeNode,
+        active: spec.id === activeNode || (liveMark?.as === "running" && liveMark.nodes.includes(spec.id)),
         selected: spec.id === selectedNode || spec.id === selected?.id,
         status: nodeStatus[spec.id],
+        statusNote: liveMark?.note && liveMark.nodes.includes(spec.id) ? liveMark.note : undefined,
       };
       return {
         id: spec.id,
@@ -1381,7 +1430,7 @@ export function GraphView() {
         data,
       };
     });
-  }, [flow, order, marks, provider_, subs, activeNode, selectedNode, selected?.id, nodeStatus, mcpNames, positions, near, hovered, dragging, timings, diff]);
+  }, [flow, order, marks, provider_, subs, activeNode, selectedNode, selected?.id, nodeStatus, mcpNames, positions, near, hovered, dragging, timings, diff, liveMark]);
 
   // THE WAY A FINISHED RUN WENT, drawn on its edges as its dots are on its nodes. The replay lit each
   // edge in turn; the finished view drew the path the run took exactly like the ones it did not.
