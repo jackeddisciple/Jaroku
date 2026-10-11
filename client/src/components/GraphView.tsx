@@ -94,7 +94,7 @@ import { marksFor, type NodeMark } from "./graphNodeIcons.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { fmtCost, fmtLatency } from "../lib/format.ts";
 import { nodeOutcome, nodeTimings, replayFrames, stepsUpTo, type NodeTiming } from "../lib/graphReplay.ts";
-import { GraphRunStrip } from "./GraphRunStrip.tsx";
+import { GraphRunStrip, GraphRunStripFolded } from "./GraphRunStrip.tsx";
 
 // How much of this canvas the Step Details overlay covers when it is open. It is drawn over
 // the graph rather than beside it, so this is the one number that tells the framing the right
@@ -1849,18 +1849,7 @@ export function GraphView() {
           }}
         />
       )}
-      {stripFolded && (
-        <GraphRunStrip
-          collapsed
-          onOpen={() => setStripClosed(null)}
-          count={frames.length}
-          at={null}
-          playing={false}
-          onAt={setReplayAt}
-          onPlaying={setPlaying}
-          onClose={() => {}}
-        />
-      )}
+      {stripFolded && <GraphRunStripFolded onOpen={() => setStripClosed(null)} />}
       {/* THE TOOLBAR, over the canvas rather than in it, so it neither pans nor zooms. */}
       <GraphToolbar barRef={barRef}>
         <RunControls

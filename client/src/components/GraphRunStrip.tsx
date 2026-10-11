@@ -11,12 +11,29 @@ import { Icon } from "../lib/icons/registry.ts";
 import { ICON } from "../lib/tokens.ts";
 import { ToolButton, ToolDivider } from "./GraphToolbar.tsx";
 
+/**
+ * The strip closed: the one control that opens it again, where it was.
+ *
+ * CLOSED IS NOT GONE. ✕ used to hide the strip for the rest of the run's life with nothing to bring
+ * it back.
+ */
+export function GraphRunStripFolded({ onOpen }: { onOpen: () => void }) {
+  return (
+    <div
+      role="toolbar"
+      aria-label="Step through the run"
+      className="graph-glass absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center rounded-card px-1 py-1 shadow-floating backdrop-blur-md backdrop-saturate-150"
+    >
+      <ToolButton label="Step through the run" onClick={onOpen}>
+        <Icon.graphControl.run size={ICON.sm} />
+      </ToolButton>
+    </div>
+  );
+}
+
 export function GraphRunStrip({
-  count, at, playing, onAt, onPlaying, onClose, collapsed = false, onOpen,
+  count, at, playing, onAt, onPlaying, onClose,
 }: {
-  /** Closed to one button, which opens it again. */
-  collapsed?: boolean;
-  onOpen?: () => void;
   /** How many frames the run has. */
   count: number;
   /** The frame on screen, or null when the graph shows the run as it ended. */
@@ -38,21 +55,6 @@ export function GraphRunStrip({
   }, [playing, at, count, onAt, onPlaying]);
 
   const i = at ?? count - 1;
-  // CLOSED IS NOT GONE. ✕ used to hide the strip for the rest of the run's life with nothing to bring
-  // it back; it now folds to the one control that opens it again, where it was.
-  if (collapsed) {
-    return (
-      <div
-        role="toolbar"
-        aria-label="Step through the run"
-        className="graph-glass absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center rounded-card px-1 py-1 shadow-floating backdrop-blur-md backdrop-saturate-150"
-      >
-        <ToolButton label="Step through the run" onClick={onOpen}>
-          <Icon.graphControl.run size={ICON.sm} />
-        </ToolButton>
-      </div>
-    );
-  }
   return (
     <div
       role="toolbar"
