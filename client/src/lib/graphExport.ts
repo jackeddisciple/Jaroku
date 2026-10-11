@@ -103,9 +103,15 @@ function compactSvg(svg: string): string {
   frame.style.cssText = "position:fixed;left:-10000px;top:0;width:4000px;height:4000px;border:0;visibility:hidden";
   document.body.appendChild(frame);
   try {
+    // STANDARDS MODE, as the SVG's own XHTML is drawn in: a doctype-less about:blank is quirks mode,
+    // where a few properties compute differently, and a declaration judged redundant there could
+    // matter in the picture.
+    frame.contentDocument?.open();
+    frame.contentDocument?.write("<!DOCTYPE html><html><head></head><body></body></html>");
+    frame.contentDocument?.close();
     const page = frame.contentDocument;
     const win = frame.contentWindow;
-    if (!page || !win) return svg;
+    if (!page || !win || page.compatMode !== "CSS1Compat") return svg;
     const root = page.importNode(content, true) as Element;
     page.body.appendChild(root);
     const trim = (el: Element): void => {
