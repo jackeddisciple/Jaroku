@@ -470,6 +470,9 @@ function SecretRow({ secret, onChanged }: { secret: SecretSummary; onChanged: ()
       kind="connect"
       state={secret.status === "invalid" ? "error" : secret.configured ? "done" : "pending"}
       hideVerb
+      // Up to five actions: at the panel's default width they go to a line of their own rather than
+      // leave the name, the status, the mask and the scope a column one character wide.
+      wrapTrailing
       icon={<KeyIcon size={ICON.sm} />}
       object={
         <Truncate className="font-mono text-ink">
@@ -477,7 +480,7 @@ function SecretRow({ secret, onChanged }: { secret: SecretSummary; onChanged: ()
         </Truncate>
       }
       badges={
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center gap-1 whitespace-nowrap">
           <StatusChip secret={secret} />
           {secret.maskedHint ? (
             <Chip size="sm" tone="faint" mono>

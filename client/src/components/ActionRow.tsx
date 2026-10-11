@@ -83,6 +83,12 @@ export type ActionRowProps = {
    * as a misaligned box.
    */
   className?: string;
+  /**
+   * Let the trailing actions take a line of their own when the row is too narrow for both, rather
+   * than squeezing the text column: a row with five actions left its name and chips a sliver, and
+   * the chips broke one letter per line.
+   */
+  wrapTrailing?: boolean;
 };
 
 export function ActionRow({
@@ -102,6 +108,7 @@ export function ActionRow({
   selected = false,
   title,
   className = "",
+  wrapTrailing = false,
 }: ActionRowProps) {
   const descriptor = action ?? actionFor(kind ?? "update");
   const { Icon } = descriptor;
@@ -123,7 +130,7 @@ export function ActionRow({
   return (
     <div>
       <div
-        className={`flex items-start gap-2 ${
+        className={`flex items-start gap-2 ${wrapTrailing ? "flex-wrap" : ""} ${
           onClick ? "cursor-pointer select-none rounded-control transition-colors duration-fast" : ""
         } ${selected ? "bg-active" : onClick ? "hover:bg-active/40" : ""} ${className}`}
         onClick={onClick}
@@ -144,7 +151,7 @@ export function ActionRow({
           {icon ?? <Icon size={ICON.sm} />}
         </span>
 
-        <span className="min-w-0 flex-1 text-caption">
+        <span className={`flex-1 text-caption ${wrapTrailing ? "min-w-[14rem]" : "min-w-0"}`}>
           {!hideVerb && <span className="text-muted">{word} </span>}
           {object}
           {badges && <span className="ml-1.5 inline-flex items-center gap-1 align-middle">{badges}</span>}
@@ -152,7 +159,13 @@ export function ActionRow({
         </span>
 
         {trailing !== undefined && (
-          <span className="shrink-0 flex h-[19px] items-center gap-2 whitespace-nowrap pl-1 text-tiny tabular-nums">
+          <span
+            className={
+              wrapTrailing
+                ? "ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2 pl-1 text-tiny tabular-nums"
+                : "shrink-0 flex h-[19px] items-center gap-2 whitespace-nowrap pl-1 text-tiny tabular-nums"
+            }
+          >
             {trailing}
           </span>
         )}
