@@ -313,7 +313,7 @@ export function VersionControl({
 export type GraphExport = "copy" | "png" | "svg";
 
 /** The graph as a picture: a mark that opens into three — copy it, or save it as a PNG or an SVG. */
-export function ExportControl({ onExport }: { onExport: (kind: GraphExport) => void }) {
+export function ExportControl({ onExport, disabled }: { onExport: (kind: GraphExport) => void; disabled?: boolean }) {
   const [open, setOpen] = useState(false);
   const pick = (kind: GraphExport) => {
     setOpen(false);
@@ -323,7 +323,7 @@ export function ExportControl({ onExport }: { onExport: (kind: GraphExport) => v
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <span className="inline-flex">
-          <ToolButton label="Export as an image" pressed={open} hide={open}>
+          <ToolButton label="Export as an image" pressed={open} hide={open} disabled={disabled}>
             <Icon.graphControl.export size={ICON.sm} />
           </ToolButton>
         </span>

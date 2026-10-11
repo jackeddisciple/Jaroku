@@ -925,6 +925,10 @@ export function GraphView() {
     setViewing(null);
     setComparing(false);
   }, [activeAgentId]);
+  const pickVersion = (v: number | null) => {
+    setViewing(v);
+    if (v === null) setComparing(false);
+  };
   const latest = graph?.latest ?? graph?.version ?? 0;
   const older = useGraphStore((s) => (activeAgentId && viewing ? s.graphs[graphKey(activeAgentId, viewing)] : undefined));
   const olderLoading = useGraphStore((s) => (activeAgentId && viewing ? s.loading[graphKey(activeAgentId, viewing)] : undefined));
@@ -932,12 +936,20 @@ export function GraphView() {
     if (activeAgentId && viewing && !older && !olderLoading) sendLoadAgentGraph(activeAgentId, viewing);
   }, [activeAgentId, viewing, older, olderLoading]);
   const olderReady = !!older?.nodes?.length;
+  // PICKED AND NOT DRAWN YET: on its way, or it could not be drawn. The canvas used to go on drawing
+  // the current graph under the older label — hover toolbar, current source lines, a Compare that
+  // drew nothing — with no spinner and no error, so v1 looked like v2 and nothing said otherwise.
+  const olderPending = viewing !== null && !olderReady;
+  const olderFailure = olderPending && older && !olderLoading
+    ? graphErrorCopy(older.error ?? "no graph available")
+    : null;
   const diff = useMemo(
     () => (comparing && graph?.nodes && olderReady ? compareGraphs(graph, older!) : undefined),
     [comparing, graph, older, olderReady],
   );
-  // What is drawn: the union when comparing, the picked version alone, or the current graph.
-  const shownGraph = diff ? diff.union : viewing && olderReady ? older! : graph;
+  // What is drawn: the union when comparing, the picked version alone, or the current graph — and
+  // nothing at all while a picked version has not arrived.
+  const shownGraph = diff ? diff.union : viewing !== null ? (olderReady ? older! : undefined) : graph;
   const pastVersion = viewing !== null && olderReady;
 
   const flow = useMemo(
@@ -1394,12 +1406,12 @@ export function GraphView() {
       />
     );
   }
-  if (!flow) return <Empty title="No graph to show" hint="This agent’s build_graph() produced no nodes." />;
+  if (!flow && !olderPending) return <Empty title="No graph to show" hint="This agent’s build_graph() produced no nodes." />;
 
   return (
     <div
       ref={canvasRef}
-      className={`graph-canvas relative h-full w-full focus:outline-none ${framed ? "" : "opacity-0"}`}
+      className={`graph-canvas relative h-full w-full focus:outline-none ${framed || olderPending ? "" : "opacity-0"}`}
       // Enter on a focused node opens it, as a click does. Read off the node's own element, because
       // React Flow reports a keyboard selection only for nodes whose state it holds, and these are
       // rebuilt from the introspected topology on every render.
@@ -1418,7 +1430,24 @@ export function GraphView() {
         }
       }}
     >
-      {/* An earlier version's steps are not the code that is loaded: no toolbar over them. */}
+      {olderPending && (
+        // WHERE THE OLDER GRAPH WILL BE, said as such: the shape of one arriving, or why it did not.
+        <div className="absolute inset-0">
+          {olderFailure ? (
+            <GraphFailure
+              // No "open the Code tab": it shows the current version, not this one.
+              copy={{ ...olderFailure, title: `v${viewing}’s graph could not be drawn`, next: null }}
+              showRaw={isMappedGraphError(olderFailure.raw)}
+              onRetry={() => activeAgentId && viewing && sendLoadAgentGraph(activeAgentId, viewing)}
+              onBack={{ label: `Back to v${latest}`, act: () => pickVersion(null) }}
+            />
+          ) : (
+            <GraphSkeleton />
+          )}
+        </div>
+      )}
+      {flow && (
+      /* An earlier version's steps are not the code that is loaded: no toolbar over them. */
       <NodeActionsContext.Provider value={pastVersion ? null : nodeActions}>
       <ReactFlow
         nodes={nodes}
@@ -1482,6 +1511,7 @@ export function GraphView() {
         )}
       </ReactFlow>
       </NodeActionsContext.Provider>
+      )}
       {stripShown && (
         <GraphRunStrip
           count={frames.length}
@@ -1501,7 +1531,7 @@ export function GraphView() {
         <RunControls agentId={activeAgentId} runnable={agentMeta?.runnable ?? false} />
         <ToolDivider />
         <FindControl
-          find={(q) => findNodes(flow.nodes, q).map((n) => n.id)}
+          find={(q) => (flow ? findNodes(flow.nodes, q).map((n) => n.id) : [])}
           onFocus={focusNode}
           openSignal={findSignal}
         />
@@ -1510,14 +1540,11 @@ export function GraphView() {
           latest={latest}
           viewing={viewing}
           comparing={comparing}
-          onPick={(v) => {
-            setViewing(v);
-            if (v === null) setComparing(false);
-          }}
+          onPick={pickVersion}
           onCompare={setComparing}
         />
         <ToolDivider />
-        <ExportControl onExport={(kind) => void exportGraph(kind)} />
+        <ExportControl onExport={(kind) => void exportGraph(kind)} disabled={!flow} />
         <ToolDivider />
         {/* THE VIEW, IN THE SAME BAR as everything else rather than in React Flow's own box in the
             corner: one surface for every control on the canvas. A zoom is the user driving, so it
@@ -1525,6 +1552,7 @@ export function GraphView() {
             frames it the way the canvas opened, loop lanes and overlays counted. */}
         <ToolButton
           label="Zoom in"
+          disabled={!flow}
           onClick={() => {
             userMoved.current = true;
             rf.current?.zoomIn({ duration: REDUCED_MOTION ? 0 : 200 });
@@ -1534,6 +1562,7 @@ export function GraphView() {
         </ToolButton>
         <ToolButton
           label="Zoom out"
+          disabled={!flow}
           onClick={() => {
             userMoved.current = true;
             rf.current?.zoomOut({ duration: REDUCED_MOTION ? 0 : 200 });
@@ -1543,6 +1572,7 @@ export function GraphView() {
         </ToolButton>
         <ToolButton
           label="Fit the graph"
+          disabled={!flow}
           onClick={() => {
             userMoved.current = false;
             requestAnimationFrame(frameGraph);
@@ -1597,12 +1627,14 @@ export function GraphView() {
  * than what this replaces, where the string was at least true.
  */
 function GraphFailure({
-  copy, showRaw, detail, onRetry,
+  copy, showRaw, detail, onRetry, onBack,
 }: {
   copy: GraphErrorCopy;
   showRaw: boolean;
   detail?: string;
   onRetry?: () => void;
+  /** A way out that is not a retry — back to the version that does draw. */
+  onBack?: { label: string; act: () => void };
 }) {
   return (
     <div className="graph-canvas h-full">
@@ -1637,15 +1669,28 @@ function GraphFailure({
                 </pre>
               </details>
             )}
-            {onRetry && copy.retryable && (
-              <button
-                type="button"
-                onClick={onRetry}
-                className="mx-auto mt-3 inline-flex items-center gap-1.5 rounded-control border border-edge px-2.5 py-1 text-tiny text-muted transition-colors hover:bg-active hover:text-ink"
-              >
-                <Icon.graph.retry size={ICON.xs} />
-                Try again
-              </button>
+            {(onBack || (onRetry && copy.retryable)) && (
+              <span className="mt-3 flex items-center justify-center gap-2">
+                {onRetry && copy.retryable && (
+                  <button
+                    type="button"
+                    onClick={onRetry}
+                    className="inline-flex items-center gap-1.5 rounded-control border border-edge px-2.5 py-1 text-tiny text-muted transition-colors hover:bg-active hover:text-ink"
+                  >
+                    <Icon.graph.retry size={ICON.xs} />
+                    Try again
+                  </button>
+                )}
+                {onBack && (
+                  <button
+                    type="button"
+                    onClick={onBack.act}
+                    className="inline-flex items-center gap-1.5 rounded-control border border-edge px-2.5 py-1 text-tiny text-muted transition-colors hover:bg-active hover:text-ink"
+                  >
+                    {onBack.label}
+                  </button>
+                )}
+              </span>
             )}
           </span>
         }
