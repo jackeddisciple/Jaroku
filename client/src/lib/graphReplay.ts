@@ -91,7 +91,7 @@ function nodeStepOf(step: Step, byId: ById): Step | undefined {
 export interface NodeOutcome {
   /** Its latest pass's own time — the node step's, the model calls inside it included. */
   ms: number;
-  /** The error its latest pass ended with, from its own step or one inside it; null when it did not fail. */
+  /** The latest error among its steps — its own, or one inside it, in any pass; null when none failed. */
   error: string | null;
   /** How many times it ran. */
   passes: number;
@@ -110,14 +110,10 @@ export function nodeOutcome(nodeId: string, byId: ById | undefined): NodeOutcome
   const all = bySeq(byId);
   const passes = all.filter((s) => s.type === "state_update" && s.name === nodeId);
   const last = passes[passes.length - 1];
-  if (!last) {
-    // No node step yet (a run cut short inside it): what is inside it is all there is to say.
-    const inside = all.filter((s) => stepNodeId(s, byId) === nodeId);
-    const tail = inside[inside.length - 1];
-    if (!tail) return undefined;
-    return { ms: tail.latency_ms ?? 0, error: inside.find((s) => s.error)?.error ?? null, passes: 0 };
-  }
-  const inLast = all.filter((s) => s.parent_step_id === last.id || s.id === last.id);
-  const error = last.error ?? inLast.find((s) => s.error)?.error ?? null;
-  return { ms: last.latency_ms ?? 0, error, passes: passes.length };
+  if (!last) return undefined;
+  // THE SAME STEPS ITS STATUS DOT IS DRAWN FROM: every step of the node, at any depth — a tool call
+  // under a model call — and in any pass of a loop. Reading only the latest pass's own children, the
+  // inspector said "Ran" under a red dot.
+  const failed = [...all].reverse().find((s) => s.error && stepNodeId(s, byId) === nodeId);
+  return { ms: last.latency_ms ?? 0, error: failed?.error ?? null, passes: passes.length };
 }

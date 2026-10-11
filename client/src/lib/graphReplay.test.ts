@@ -85,6 +85,20 @@ console.log("\n§3 a node's inspector reads the node, not its last model call");
   check("...the error is the node's, and the time is the node's 2.4s, not the call's 1.5s",
     o?.error?.startsWith("RuntimeError") === true && o.ms === 2400, JSON.stringify(o));
   check("a node that never ran has nothing to say", nodeOutcome("shortlist_note", byId) === undefined);
+  // What the red dot is drawn from, the inspector says: an error two levels down, or in an earlier pass.
+  const deep = Object.fromEntries([
+    step("d0", "state_update", "lookup", { latency_ms: 900 }),
+    step("d1", "llm_call", "claude", { latency_ms: 400, parent_step_id: "d0" }),
+    step("d2", "tool_call", "search", { latency_ms: 100, parent_step_id: "d1", error: "HTTP 500" }),
+  ].map((s) => [s.id, s]));
+  check("an error in a tool call inside the node's model call is the node's", nodeOutcome("lookup", deep)?.error === "HTTP 500");
+  const loop = Object.fromEntries([
+    step("p1", "state_update", "score", { latency_ms: 300, error: "first pass failed" }),
+    step("p2", "state_update", "score", { latency_ms: 200 }),
+  ].map((s) => [s.id, s]));
+  const twiceFailedOnce = nodeOutcome("score", loop);
+  check("a loop that failed on an earlier pass says so, with the latest pass's time",
+    twiceFailedOnce?.error === "first pass failed" && twiceFailedOnce.ms === 200 && twiceFailedOnce.passes === 2, JSON.stringify(twiceFailedOnce));
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
