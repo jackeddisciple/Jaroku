@@ -27,13 +27,16 @@ import { Tip } from "./ui/tooltip.tsx";
  * the control's own popover is open, where it would sit over what the popover holds.
  */
 export function ToolButton({
-  label, onClick, disabled, children, pressed, hide,
+  label, onClick, onBlur, disabled, children, pressed, hide, danger,
 }: {
   label: string;
   hide?: boolean;
   onClick?: () => void;
+  onBlur?: () => void;
   disabled?: boolean;
   pressed?: boolean;
+  /** Armed for something that cannot be undone: the second press does it. */
+  danger?: boolean;
   children: ReactElement;
 }) {
   return (
@@ -44,7 +47,8 @@ export function ToolButton({
         aria-pressed={pressed}
         disabled={disabled}
         onClick={onClick}
-        className={`${iconBtn} h-7 w-7 ${pressed ? "bg-active text-ink" : ""}`}
+        onBlur={onBlur}
+        className={`${iconBtn} h-7 w-7 ${pressed ? "bg-active text-ink" : ""} ${danger ? "bg-err/10 text-err hover:text-err" : ""}`}
       >
         {children}
       </button>
@@ -116,8 +120,35 @@ export function RunControls({ agentId, runnable }: { agentId: string; runnable: 
 
   // STOP KEEPS ITS PLACE whether or not there is anything to stop, so a run starting or ending never
   // moves the controls after it — the one you were reaching for stays under the pointer.
+  //
+  // AND IT ASKS, as the Trace header's does and for its reason: it sits next to Pause, and a stopped
+  // run cannot be resumed, so a mis-click would read as a pause that silently killed the run. The
+  // first press arms it; the second, while it is still armed, stops the run.
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!live) setArmed(false);
+  }, [live]);
+  useEffect(() => {
+    if (!armed) return;
+    const t = window.setTimeout(() => setArmed(false), 4000);
+    return () => window.clearTimeout(t);
+  }, [armed]);
   const stop = (
-    <ToolButton label={live ? "Stop" : "Stop — no run in progress"} disabled={!live} onClick={() => live && sendCancelRun(mine.id)}>
+    <ToolButton
+      label={!live ? "Stop — no run in progress" : armed ? "Stop this run? Press again — it cannot be resumed" : "Stop"}
+      disabled={!live}
+      danger={armed}
+      onBlur={() => setArmed(false)}
+      onClick={() => {
+        if (!live) return;
+        if (!armed) {
+          setArmed(true);
+          return;
+        }
+        setArmed(false);
+        sendCancelRun(mine.id);
+      }}
+    >
       <Icon.graphControl.stop size={ICON.sm} />
     </ToolButton>
   );
