@@ -281,6 +281,11 @@ try {
     // key could not be READ, which sent somebody whose key was saved back to Secrets to add it again.
     check("the refusal names the provider, and tells an unreadable key from a missing one",
       /function ownKeyRefusal\([^)]*\)[\s\S]{0,200}if \(unread\) return `Couldn’t read this workspace’s credentials/.test(index));
+    // "Couldn't read" only when the KEY was never read: a later throw (a connector, the egress policy)
+    // must not tell a workspace with no key to wait instead of to add one.
+    check("...and only when the throw came before the key was read",
+      /credentialsUnread = !providerKeyRead;/.test(index) && /runPayer = [^\n]*\n\s*providerKeyRead = true;/.test(index)
+        && /unread = !keyRead;/.test(index) && /providerKeys\.runEnv\(runId, provider\)\);\n\s*keyRead = true;/.test(index));
     check("every interactive start names who asked", (index.match(/interactivePool\.tryStart\(\{[^}]*host: ctx/g) ?? []).length === 3);
     check("generation and edits ask whether code can run before spending a model turn",
       (index.match(/const cannotCheck = codeCannotRun\(ctx\)/g) ?? []).length === 2);

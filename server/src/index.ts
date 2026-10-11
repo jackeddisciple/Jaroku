@@ -12661,8 +12661,11 @@ async function runAgent(
   // What this run may reach, or undefined when no policy could be computed. Undefined is the
   // local default and is NOT "allow everything" on the hosted path — see SandboxSpec.egress.
   let runEgress: EgressPolicy | undefined;
-  // Whether reading this run's credentials threw — which is not the same as there being no key.
+  // Whether the provider key could not be READ — which is not the same as there being no key. Set
+  // only when the block below threw before the key was read; a throw after it (a connector, the
+  // egress policy) leaves "add your key" as the true answer when there is none.
   let credentialsUnread = false;
+  let providerKeyRead = false;
   clearControl(runId); // no stale pause request from a prior life
   console.log(`[manager] starting ${agentId ?? "test_agent"}${input ? ` — "${input}"` : ""} (run ${runId})`);
   // Model is forwarded explicitly so a real-provider run can't silently fall back to
@@ -12859,6 +12862,7 @@ async function runAgent(
     const own = await providerKeys.runEnv(runId, provider);
     Object.assign(env, own);
     runPayer = Object.keys(own).length > 0 ? "workspace" : "platform";
+    providerKeyRead = true;
 
     // AND THE CONNECTORS THIS AGENT WAS GENERATED WITH, each as a SHORT-LIVED access token.
     //
@@ -12917,7 +12921,7 @@ async function runAgent(
     // by whatever else the model decided to do with an  tool it still had.
     runEgress = await buildRunEgress(ctx, runId, provider, activeConnectors, agent?.mcp_tools ?? []);
   } catch (err) {
-    credentialsUnread = true;
+    credentialsUnread = !providerKeyRead;
     console.warn(`[manager] could not resolve credentials for ${runId}: ${(err as Error).message}`);
   } finally {
     releaseCredentials();
@@ -13151,7 +13155,9 @@ async function continuationCredentials(
   agentId: string | null,
 ): Promise<{ env: NodeJS.ProcessEnv; refusal: string | null }> {
   const env: NodeJS.ProcessEnv = {};
+  // As in runAgent: unreadable only if the throw came before the provider key was read.
   let unread = false;
+  let keyRead = false;
   // Bound for the read, as in runAgent: every caller registers the run only once this returns.
   const releaseCredentials = bindForCredentials(runWorkspaces, runId, ctx);
   try {
@@ -13164,6 +13170,7 @@ async function continuationCredentials(
       .filter((name) => !names.includes(name));
     if (optional.length) Object.assign(env, await secrets.getForRun(runId, optional));
     Object.assign(env, await providerKeys.runEnv(runId, provider));
+    keyRead = true;
     Object.assign(env, (await connectorRunEnv(ctx, tokenRefresher, oauth, { connectors: declared })).env);
     for (const [name, value] of Object.entries(env)) {
       const upper = String(name).toUpperCase();
@@ -13172,7 +13179,7 @@ async function continuationCredentials(
       }
     }
   } catch (err) {
-    unread = true;
+    unread = !keyRead;
     console.warn(`[manager] could not resolve credentials for ${runId}: ${(err as Error).message}`);
   } finally {
     releaseCredentials();
