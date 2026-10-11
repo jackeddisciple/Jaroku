@@ -102,6 +102,8 @@ const STEP_PANEL_W = 340;
 const INSPECTOR_W = 256;
 // How much of the canvas's top the toolbar takes: its height and the gap above it.
 const TOOLBAR_H = 44;
+// As far in as the canvas zooms. Out, it is MIN_ZOOM, which the layout's framing shares.
+const MAX_ZOOM = 1.75;
 
 // Mark sizes on the canvas, named here rather than written out at each call site. A step's mark IS
 // its tile's face, the way n8n draws a node, so it is large; the rest are proportions of the box
@@ -1129,6 +1131,7 @@ export function GraphView() {
   } | null>(null);
   const userMoved = useRef(false);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const [zoom, setZoom] = useState(1);
   const [frame, setFrame] = useState({ width: 0, height: 0 });
 
   // Kept in a ref as well as in render, so the ResizeObserver below — registered once — fits
@@ -1599,7 +1602,9 @@ export function GraphView() {
           }
         }}
         minZoom={MIN_ZOOM}
-        maxZoom={1.75}
+        maxZoom={MAX_ZOOM}
+        // The zoom the bar shows and its limits disable at — read when a move settles, ours or theirs.
+        onMoveEnd={(_, vp) => setZoom(vp.zoom)}
         // A COLUMN SCROLLS. Two fingers on a trackpad move down a long agent the way they move
         // down a page; a pinch, or the controls, zoom.
         panOnScroll
@@ -1690,9 +1695,11 @@ export function GraphView() {
             corner: one surface for every control on the canvas. A zoom is the user driving, so it
             latches as a pan does and a resize stops refitting over it. Fit releases the latch and
             frames it the way the canvas opened, loop lanes and overlays counted. */}
+        {/* OFF AT THE LIMITS, as React Flow's own controls were: at 175% Zoom in went on looking
+            pressable and did nothing, and with no level shown there was no way to see why. */}
         <ToolButton
-          label="Zoom in"
-          disabled={!flow}
+          label={zoom >= MAX_ZOOM - 0.005 ? "Zoom in — as far in as it goes" : "Zoom in"}
+          disabled={!flow || zoom >= MAX_ZOOM - 0.005}
           onClick={() => {
             userMoved.current = true;
             rf.current?.zoomIn({ duration: REDUCED_MOTION ? 0 : 200 });
@@ -1701,8 +1708,8 @@ export function GraphView() {
           <Icon.graphControl.zoomIn size={ICON.sm} />
         </ToolButton>
         <ToolButton
-          label="Zoom out"
-          disabled={!flow}
+          label={zoom <= MIN_ZOOM + 0.005 ? "Zoom out — as far out as it goes" : "Zoom out"}
+          disabled={!flow || zoom <= MIN_ZOOM + 0.005}
           onClick={() => {
             userMoved.current = true;
             rf.current?.zoomOut({ duration: REDUCED_MOTION ? 0 : 200 });
@@ -1710,6 +1717,10 @@ export function GraphView() {
         >
           <Icon.graphControl.zoomOut size={ICON.sm} />
         </ToolButton>
+        {/* Its width held, so the controls after it stay put as the number changes. */}
+        <span className="min-w-[4.5ch] px-0.5 text-center text-tiny tabular-nums text-muted" aria-label={`Zoom ${Math.round(zoom * 100)}%`}>
+          {Math.round(zoom * 100)}%
+        </span>
         <ToolButton
           label="Fit the graph"
           disabled={!flow}
