@@ -1307,12 +1307,31 @@ export function GraphView() {
       const at = positions[spec.id] ?? { x: spec.x, y: spec.y };
       const right = (at.x + spec.w) * vp.zoom + vp.x;
       const limit = el.clientWidth - INSPECTOR_W - 24;
-      if (right > limit) inst.setViewport({ ...vp, x: vp.x - (right - limit) }, { duration: REDUCED_MOTION ? 0 : 200 });
+      if (right > limit) {
+        const dx = right - limit;
+        const next = { ...vp, x: vp.x - dx };
+        inst.setViewport(next, { duration: REDUCED_MOTION ? 0 : 200 });
+        // Remembered, so closing the inspector can put the graph back where it was.
+        inspectorPan.current = { dx: (inspectorPan.current?.dx ?? 0) + dx, at: next };
+      }
     }
     if (viaClick) triggerPulse(spec.id); // transient connected-edge highlight + directional particle
   };
 
-  const closeInspector = () => setSelected(null);
+  // CLOSING PUTS BACK WHAT OPENING MOVED. Opening the inspector on a node near the right edge slides
+  // the graph left to keep the node clear of it, and closing it left the graph off-centre until Fit.
+  // Only while the view is still where the inspector left it: a pan or zoom since is the user's.
+  const inspectorPan = useRef<{ dx: number; at: { x: number; y: number; zoom: number } } | null>(null);
+  const closeInspector = () => {
+    setSelected(null);
+    const pan = inspectorPan.current;
+    inspectorPan.current = null;
+    const inst = rf.current;
+    if (!pan || !inst) return;
+    const vp = inst.getViewport();
+    const untouched = Math.abs(vp.x - pan.at.x) < 1 && Math.abs(vp.y - pan.at.y) < 1 && Math.abs(vp.zoom - pan.at.zoom) < 0.001;
+    if (untouched) inst.setViewport({ ...vp, x: vp.x + pan.dx }, { duration: REDUCED_MOTION ? 0 : 200 });
+  };
 
   // DOUBLE-CLICK OPENS THE CODE, at the function the node runs — the runtime says where each is
   // written (graph schema 3). A circle stands for the agent; a fork, for its deciding function.
@@ -1504,7 +1523,10 @@ export function GraphView() {
         // fires only once the viewport actually changes, and reports null when the change
         // came from our own framing.
         onMove={(event) => {
-          if (event) userMoved.current = true;
+          if (event) {
+            userMoved.current = true;
+            inspectorPan.current = null;
+          }
         }}
         minZoom={MIN_ZOOM}
         maxZoom={1.75}
