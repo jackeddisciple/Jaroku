@@ -20,6 +20,7 @@
 // a node still selects its trace step.
 
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
   ReactFlow,
   Background,
@@ -1114,6 +1115,8 @@ export function GraphView() {
   // toolbar vanishing on the way.
   const [hovered, setHovered] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  // An export is being drawn: no selection, hover, dimming or pulse on the canvas — see exportGraph.
+  const [exporting, setExporting] = useState(false);
   const hideTimer = useRef<number | undefined>(undefined);
   const hover = (id: string | null) => {
     window.clearTimeout(hideTimer.current);
@@ -1422,11 +1425,11 @@ export function GraphView() {
         ports: agentCard ? flow.edges.filter((e) => e.port).map((e) => e.port!) : undefined,
         mcp,
         out: flow.edges.some((e) => e.source === spec.id && !e.back && !e.port),
-        hover: hovered === spec.id && !dragging,
+        hover: hovered === spec.id && !dragging && !exporting,
         timing: timings.get(spec.id),
         diff: diff ? diff.nodes.get(spec.decides?.source ?? spec.id) : undefined,
         active: spec.id === activeNode || (liveMark?.as === "running" && liveMark.nodes.includes(spec.id)),
-        selected: spec.id === selectedNode || spec.id === selected?.id,
+        selected: !exporting && (spec.id === selectedNode || spec.id === selected?.id),
         status: nodeStatus[spec.id],
         statusNote: liveMark?.note && liveMark.nodes.includes(spec.id) ? liveMark.note : undefined,
       };
@@ -1434,7 +1437,7 @@ export function GraphView() {
         id: spec.id,
         type: agentCard ? "agent" : spec.role === "end" ? "end" : spec.role === "resource" ? "resource" : "tile",
         position: positions[spec.id] ?? { x: spec.x, y: spec.y },
-        style: { opacity: near && !near.has(spec.id) ? 0.35 : 1, transition: REDUCED_MOTION ? undefined : "opacity 120ms ease" },
+        style: { opacity: near && !near.has(spec.id) && !exporting ? 0.35 : 1, transition: REDUCED_MOTION || exporting ? undefined : "opacity 120ms ease" },
         // Declared, not left to be measured. These nodes are rebuilt from the introspected
         // topology on every render, so React Flow's measured size never survives onto the
         // object it hands the MiniMap — which skips any node whose dimensions it cannot read,
@@ -1445,7 +1448,7 @@ export function GraphView() {
         data,
       };
     });
-  }, [flow, order, marks, provider_, subs, activeNode, selectedNode, selected?.id, nodeStatus, mcpNames, positions, near, hovered, dragging, timings, diff, liveMark]);
+  }, [flow, order, marks, provider_, subs, activeNode, selectedNode, selected?.id, nodeStatus, mcpNames, positions, near, hovered, dragging, timings, diff, liveMark, exporting]);
 
   // THE WAY A FINISHED RUN WENT, drawn on its edges as its dots are on its nodes. The replay lit each
   // edge in turn; the finished view drew the path the run took exactly like the ones it did not.
@@ -1465,12 +1468,12 @@ export function GraphView() {
     return flow.edges.map((e) => {
       const hot = matchesEdge(e, hotEdge);
       const taken = !!finishedPath && e.to.some((t) => finishedPath.has(`${e.from}->${t}`));
-      const connected = pulse
+      const connected = pulse && !exporting
         ? e.source === pulse.node || e.target === pulse.node || e.from === pulse.node || e.to.includes(pulse.node)
         : false;
       const particle = connected && e.to.some((t) => traversed.has(`${e.from}->${t}`));
-      const lit = !!near && (e.source === hovered || e.target === hovered);
-      const dim = !!near && !lit;
+      const lit = !!near && !exporting && (e.source === hovered || e.target === hovered);
+      const dim = !!near && !exporting && !lit;
       const color = connected ? PULSE : hot ? AMBER : lit ? SEL : taken ? STATUS.ok : EDGE;
       if (e.port) {
         const i = Number(e.target.slice(4));
@@ -1495,7 +1498,7 @@ export function GraphView() {
         } satisfies EdgeData,
       };
     });
-  }, [flow, hotEdge, pulse, traversed, near, hovered, running, moved, diff, finishedPath]);
+  }, [flow, hotEdge, pulse, traversed, near, hovered, running, moved, diff, finishedPath, exporting]);
 
   // Clicking a node and pressing Enter on it do the same thing: open its inspector, and only that.
   //
@@ -1595,23 +1598,37 @@ export function GraphView() {
 
   // EXPORT: the graph as drawn — the version on screen, a comparison included — as a picture. The
   // clipboard is handed the PNG still being drawn, so the copy stays inside the click that asked.
+  //
+  // THE GRAPH AS A DOCUMENT, NOT AS IT WAS BEING HANDLED. The selected tile went out with its outline
+  // and ring — in the desktop app's renderer the ring came out as a hard grey block beside it — and a
+  // hover's dimming or a click's pulse would have too. While the picture is taken none of them is
+  // drawn: set synchronously, so the copy that starts inside the click already sees the plain graph,
+  // and released only once the picture is finished. (`exporting` is declared with the hover state.)
   const exportGraph = async (kind: GraphExport) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const toast = useUiStore.getState().showToast;
     const stem = graphFileStem(agentMeta?.name ?? activeAgentId ?? "agent", viewing ?? (latest || null), diff ? latest : null);
+    flushSync(() => setExporting(true));
+    // React Flow takes new nodes into its own store in an effect, so the tiles redraw a frame or two
+    // after this component does: the picture waits for them. The clipboard item is still made inside
+    // the click — only the image it holds arrives later.
+    const plain = () => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done())));
     try {
       if (kind === "copy") {
-        await navigator.clipboard.write([new ClipboardItem({ "image/png": graphPng(canvas) })]);
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": plain().then(() => graphPng(canvas)) })]);
         toast("Copied the graph as an image", "ok");
       } else {
         const name = `${stem}.${kind}`;
+        await plain();
         if (kind === "png") download(name, await graphPng(canvas), "image/png");
         else download(name, await graphSvg(canvas), "image/svg+xml");
         toast(`Saved ${name} to Downloads`, "ok");
       }
     } catch {
       toast(kind === "copy" ? "Couldn’t copy the graph" : "Couldn’t save the graph", "err");
+    } finally {
+      setExporting(false);
     }
   };
 
