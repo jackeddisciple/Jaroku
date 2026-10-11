@@ -99,7 +99,7 @@ export function RunControls({
   const [input, setInput] = useState("");
   // AN EMPTY INPUT IS ASKED ABOUT, NOT RUN. ⌘↵ on a cleared field started a real, paid run with ""
   // — some agents want nothing, most were simply not given anything yet — so the first press says
-  // so and the second runs it.
+  // so, in a toast and on the button, and the second runs it.
   const [confirmEmpty, setConfirmEmpty] = useState(false);
 
   const mine = run && run.agent_id === agentId ? run : undefined;
@@ -108,6 +108,8 @@ export function RunControls({
   const start = () => {
     if (!input.trim() && !confirmEmpty) {
       setConfirmEmpty(true);
+      // A toast, not a row that grows the popover and shrinks it again on the next keystroke.
+      useUiStore.getState().showToast("No input — press Run again");
       return;
     }
     // NO KEY, NO RUN — and no dead end: the way to the key opens instead, as the composer's does.
@@ -244,11 +246,7 @@ export function RunControls({
             <Icon.graphControl.run size={ICON.sm} />
           </ToolButton>
         </form>
-        {confirmEmpty && (
-          <p role="status" className="mt-1.5 px-0.5 text-tiny text-muted">
-            No input. Press Run again to run it with nothing.
-          </p>
-        )}
+
       </PopoverContent>
     </Popover>
     {stop}
