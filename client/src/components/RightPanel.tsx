@@ -158,9 +158,10 @@ export function useRightPanelFollow(): void {
       const mine = run?.agent_id === useBuildStore.getState().activeAgentId;
       const watched = run?.status === "running" && mine;
       const ui = useUiStore.getState();
-      // Whether or not it is still running by now: one that failed fast arrives already over.
-      if (mine && ui.rightTab === "graph") {
-        if (watched) ui.setRightPanelOpen(true);
+      // Whether or not it is still running by now: one that failed fast arrives already over. On
+      // screen, that is: a closed panel whose last tab was Graph opens on the Trace as it always did.
+      if (mine && ui.rightTab === "graph" && ui.rightPanelOpen) {
+        // Nothing to do: the Graph is showing the run.
       } else if (watched) ui.setRightTab("trace");
       else ui.followRightTab("trace");
     }
