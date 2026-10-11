@@ -392,9 +392,10 @@ export function ExportControl({ onExport, disabled }: { onExport: (kind: GraphEx
 }
 
 /** The pill itself, at the top of the canvas. Its groups are passed in, in order. */
-export function GraphToolbar({ children }: { children: React.ReactNode }) {
+export function GraphToolbar({ children, barRef }: { children: React.ReactNode; barRef?: React.Ref<HTMLDivElement> }) {
   return (
     <div
+      ref={barRef}
       role="toolbar"
       aria-label="Graph"
       // NEVER WIDER THAN THE CANVAS: past that its own controls are cut off and cannot be reached, so

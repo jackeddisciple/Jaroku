@@ -711,11 +711,13 @@ const PILL_DOC: Record<"start" | "end", string> = {
  * prompt file. The prompt belongs to the ReAct agent node alone; a step says what its docstring says.
  */
 function NodeInspector({
-  spec, flow, bucket, onOpen, onOpenCode, onClose,
+  spec, flow, bucket, top, onOpen, onOpenCode, onClose,
 }: {
   spec: FlowNodeSpec;
   flow: FlowLayout;
   bucket: Record<string, Step> | undefined;
+  /** Where it starts: below the toolbar, and below Find's row while that is open. */
+  top: number;
   onOpen: (id: string) => void;
   /** Open the node's function in the code — what double-clicking it does, for a keyboard. */
   onOpenCode: () => void;
@@ -734,7 +736,9 @@ function NodeInspector({
   const forkHere = flow.nodes.find((n) => n.decides?.source === spec.id);
 
   return (
-    <div className="absolute top-2 right-2 bottom-2 w-64 bg-elevated rounded-card border border-edge p-3 overflow-auto text-caption shadow-floating">
+    // BELOW THE TOOLBAR, NOT UNDER IT. Both are overlays on the canvas, and the centred toolbar sat
+    // over the inspector's header — the node's name hidden and "Model call" clipped.
+    <div className="absolute right-2 bottom-2 w-64 bg-elevated rounded-card border border-edge p-3 overflow-auto text-caption shadow-floating" style={{ top }}>
       <div className="flex items-start justify-between gap-2">
         <span className="flex min-w-0 flex-col gap-0.5">
           <Truncate className="text-label text-ink" title={spec.title}>{spec.title}</Truncate>
@@ -1318,6 +1322,25 @@ export function GraphView() {
   // FIND: centre a match and pulse it, at no less than a readable zoom. Not a click — the inspector
   // stays as it was — and not a move of the user's: refitting is not switched off by looking.
   const [findSignal, setFindSignal] = useState(0);
+  const [findOpen, setFindOpen] = useState(false);
+
+  // WHERE THE TOOLBAR ENDS, measured: it wraps to a second row on a narrow panel, and Find opens a row
+  // of its own under it. The inspector starts below whichever is lower.
+  const barRef = useRef<HTMLDivElement>(null);
+  const [barBottom, setBarBottom] = useState(TOOLBAR_H + 4);
+  useLayoutEffect(() => {
+    const bar = barRef.current;
+    if (!bar) return;
+    const measure = () => {
+      const row = findOpen ? bar.querySelector<HTMLElement>("[role=search]") : null;
+      setBarBottom(bar.offsetTop + bar.offsetHeight + (row ? row.offsetHeight + 6 : 0));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(bar);
+    return () => ro.disconnect();
+  }, [findOpen, flow !== null]);
   const focusNode = (id: string) => {
     const spec = flow?.nodes.find((n) => n.id === id);
     const inst = rf.current;
@@ -1530,13 +1553,14 @@ export function GraphView() {
         />
       )}
       {/* THE TOOLBAR, over the canvas rather than in it, so it neither pans nor zooms. */}
-      <GraphToolbar>
+      <GraphToolbar barRef={barRef}>
         <RunControls agentId={activeAgentId} runnable={agentMeta?.runnable ?? false} />
         <ToolDivider />
         <FindControl
           find={(q) => (flow ? findNodes(flow.nodes, q).map((n) => n.id) : [])}
           onFocus={focusNode}
           openSignal={findSignal}
+          onOpenChange={setFindOpen}
         />
         {latest > 1 && <ToolDivider />}
         <VersionControl
@@ -1596,6 +1620,7 @@ export function GraphView() {
             spec={spec}
             flow={flow}
             bucket={bucket}
+            top={barBottom + 8}
             onOpen={(id) => openNode(id, true)}
             onOpenCode={() => openCode(spec.id)}
             onClose={() => setSelected(null)}
