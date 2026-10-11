@@ -168,23 +168,36 @@ export function RunControls({ agentId, runnable }: { agentId: string; runnable: 
 }
 
 /**
- * Find a step: a mark that opens into a field. Enter (or ↓) steps to the next match and Shift+Enter
- * (or ↑) to the one before; each is centred and pulsed by `onFocus`. Esc closes it.
+ * Find a step: a mark that opens a field in a row of its own under the toolbar. Enter (or ↓) steps
+ * to the next match and Shift+Enter (or ↑) to the one before; each is centred and pulsed by
+ * `onFocus`. Esc closes it.
+ *
+ * A ROW OF ITS OWN, NOT A WIDER TOOLBAR. The field used to open inside the bar, which made the bar
+ * nearly as wide as the panel: on a narrow panel Run was cut off on the left and Zoom out, Fit and
+ * Reset layout on the right, out of reach, and on any panel every other control moved as it opened.
  *
  * `openSignal` is bumped by ⌘F on the canvas, so the shortcut and the mark open the same thing.
  */
 export function FindControl({
-  find, onFocus, openSignal,
+  find, onFocus, openSignal, onOpenChange,
 }: {
   find: (query: string) => string[];
   onFocus: (id: string) => void;
   openSignal: number;
+  /** Told when the row opens or closes — what sits under the toolbar has to make room for it. */
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpenState] = useState(false);
   const [query, setQuery] = useState("");
   const [at, setAt] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const hits = open ? find(query) : [];
+  const setOpen = (v: boolean) => {
+    setOpenState(v);
+    onOpenChange?.(v);
+  };
+  // Closed when this goes away (an agent switch remounts it), so nothing waits on a row that is gone.
+  useEffect(() => () => onOpenChange?.(false), []);
 
   // A ⌘F SINCE THIS MOUNTED, not a ⌘F ever. The signal lives in GraphView and stays above zero, and
   // this control remounts whenever the canvas gives way to a loading state — an agent switch does
@@ -207,70 +220,70 @@ export function FindControl({
     setAt(next);
     onFocus(hits[next]!);
   };
+  const close = () => {
+    setOpen(false);
+    setQuery("");
+  };
 
-  if (!open) {
-    return (
-      <ToolButton label={`Find a step (${keyHint("⌘F")})`} onClick={() => setOpen(true)}>
+  return (
+    <>
+      <ToolButton label={`Find a step (${keyHint("⌘F")})`} pressed={open} onClick={() => (open ? close() : setOpen(true))}>
         <Icon.graphControl.find size={ICON.sm} />
       </ToolButton>
-    );
-  }
-  return (
-    <span className="flex items-center gap-0.5">
-      <span className="flex items-center gap-1 rounded-control bg-panel px-1.5 py-0.5">
-        <Icon.graphControl.find size={ICON.xs} />
-        <input
-          ref={inputRef}
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            setAt(0);
-            const first = find(e.target.value)[0];
-            if (first) onFocus(first);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") {
-              e.preventDefault();
-              setOpen(false);
-              setQuery("");
-            } else if (e.key === "Enter" || e.key === "ArrowDown") {
-              e.preventDefault();
-              go(e.shiftKey ? at - 1 : at + 1);
-            } else if (e.key === "ArrowUp") {
-              e.preventDefault();
-              go(at - 1);
-            }
-          }}
-          placeholder="Find a step"
+      {open && (
+        <div
+          role="search"
           aria-label="Find a step"
-          // Step names are snake_case identifiers: no correction bubble, no capital first letter.
-          spellCheck={false}
-          autoCorrect="off"
-          autoCapitalize="off"
-          className="w-28 bg-transparent text-caption text-ink placeholder:text-faint focus:outline-none"
-        />
-        {query.trim() && (
-          <span className="text-tiny tabular-nums text-faint" aria-live="polite">
-            {hits.length ? `${at + 1}/${hits.length}` : "0/0"}
+          className="graph-glass absolute left-0 top-full mt-1.5 flex items-center gap-0.5 rounded-card px-1 py-1 shadow-floating backdrop-blur-md backdrop-saturate-150"
+        >
+          <span className="flex items-center gap-1 rounded-control bg-panel px-1.5 py-0.5">
+            <Icon.graphControl.find size={ICON.xs} />
+            <input
+              ref={inputRef}
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setAt(0);
+                const first = find(e.target.value)[0];
+                if (first) onFocus(first);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  close();
+                } else if (e.key === "Enter" || e.key === "ArrowDown") {
+                  e.preventDefault();
+                  go(e.shiftKey ? at - 1 : at + 1);
+                } else if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  go(at - 1);
+                }
+              }}
+              placeholder="Find a step"
+              aria-label="Find a step"
+              // Step names are snake_case identifiers: no correction bubble, no capital first letter.
+              spellCheck={false}
+              autoCorrect="off"
+              autoCapitalize="off"
+              className="w-28 bg-transparent text-caption text-ink placeholder:text-faint focus:outline-none"
+            />
+            {/* Its width held, so the buttons after it do not move as the count grows. */}
+            <span className="min-w-[4ch] text-right text-tiny tabular-nums text-faint" aria-live="polite">
+              {query.trim() ? (hits.length ? `${at + 1}/${hits.length}` : "0/0") : ""}
+            </span>
           </span>
-        )}
-      </span>
-      <ToolButton label="Previous match" onClick={() => go(at - 1)} disabled={hits.length === 0}>
-        <Icon.graphControl.findPrev size={ICON.sm} />
-      </ToolButton>
-      <ToolButton label="Next match" onClick={() => go(at + 1)} disabled={hits.length === 0}>
-        <Icon.graphControl.findNext size={ICON.sm} />
-      </ToolButton>
-      <ToolButton
-        label="Close find"
-        onClick={() => {
-          setOpen(false);
-          setQuery("");
-        }}
-      >
-        <Icon.graphControl.close size={ICON.sm} />
-      </ToolButton>
-    </span>
+          <ToolButton label="Previous match" onClick={() => go(at - 1)} disabled={hits.length === 0}>
+            <Icon.graphControl.findPrev size={ICON.sm} />
+          </ToolButton>
+          <ToolButton label="Next match" onClick={() => go(at + 1)} disabled={hits.length === 0}>
+            <Icon.graphControl.findNext size={ICON.sm} />
+          </ToolButton>
+          <ToolButton label="Close find" onClick={close}>
+            <Icon.graphControl.close size={ICON.sm} />
+          </ToolButton>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -371,7 +384,9 @@ export function GraphToolbar({ children }: { children: React.ReactNode }) {
     <div
       role="toolbar"
       aria-label="Graph"
-      className="graph-glass absolute left-1/2 top-3 z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-card px-1 py-1 shadow-floating backdrop-blur-md backdrop-saturate-150"
+      // NEVER WIDER THAN THE CANVAS: past that its own controls are cut off and cannot be reached, so
+      // on a panel too narrow for one row it takes two.
+      className="graph-glass absolute left-1/2 top-3 z-10 flex w-max max-w-[calc(100%-1.5rem)] -translate-x-1/2 flex-wrap items-center gap-0.5 rounded-card px-1 py-1 shadow-floating backdrop-blur-md backdrop-saturate-150"
     >
       {children}
     </div>
