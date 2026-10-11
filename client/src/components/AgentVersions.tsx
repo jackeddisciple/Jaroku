@@ -32,8 +32,7 @@ import { relTime } from "../lib/format.ts";
 import { ACCENT, ICON, STATUS, TEXT } from "../lib/tokens.ts";
 import type { AgentDetailView, AgentVersionView } from "../types.ts";
 import { Icon } from "../lib/icons/registry.ts";
-import { useAgentGridStore } from "../store/agentGridStore.ts";
-import { useMemberStore } from "../store/memberStore.ts";
+import { usePublisherOf } from "../lib/publisher.ts";
 
 /** What made a version, as one word and one colour. Borrowed, never invented. */
 const SOURCE_COLOR: Record<AgentVersionView["source"], string> = {
@@ -223,14 +222,8 @@ function VersionRow({
 
 export function AgentVersions({ detail }: { detail: AgentDetailView }) {
   const [open, setOpen] = useState(true);
-  const team = useAgentGridStore((s) => s.team);
-  const members = useMemberStore((s) => s.members);
   /** A member's name for a version's `created_by`, or null — never "?" for a server-made publish. */
-  const publisherOf = (userId: string | null): string | null => {
-    if (!team || !userId) return null;
-    const m = members.find((x) => x.user_id === userId);
-    return m ? (m.display_name || m.email || null) : null;
-  };
+  const publisherOf = usePublisherOf();
   const [selection, setSelection] = useState<Selection>({ from: null, to: null });
 
   const pick = (version: number): void => {
