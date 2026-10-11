@@ -95,6 +95,14 @@ export function RunControls({ agentId, runnable }: { agentId: string; runnable: 
     setOpen(false);
   };
 
+  // STOP KEEPS ITS PLACE whether or not there is anything to stop, so a run starting or ending never
+  // moves the controls after it — the one you were reaching for stays under the pointer.
+  const stop = (
+    <ToolButton label={live ? "Stop" : "Stop — no run in progress"} disabled={!live} onClick={() => live && sendCancelRun(mine.id)}>
+      <Icon.graphControl.stop size={ICON.sm} />
+    </ToolButton>
+  );
+
   if (live) {
     return (
       <>
@@ -107,15 +115,14 @@ export function RunControls({ agentId, runnable }: { agentId: string; runnable: 
             <Icon.graphControl.pause size={ICON.sm} />
           </ToolButton>
         )}
-        <ToolButton label="Stop" onClick={() => sendCancelRun(mine.id)}>
-          <Icon.graphControl.stop size={ICON.sm} />
-        </ToolButton>
+        {stop}
       </>
     );
   }
 
   const why = !connected ? "Run — not connected" : !runnable ? "Run — this agent cannot run yet" : "Run";
   return (
+    <>
     <Popover
       open={open}
       onOpenChange={(v) => {
@@ -164,6 +171,8 @@ export function RunControls({ agentId, runnable }: { agentId: string; runnable: 
         </form>
       </PopoverContent>
     </Popover>
+    {stop}
+    </>
   );
 }
 
@@ -327,15 +336,19 @@ export function VersionControl({
           </DropdownMenuRadioGroup>
         </DropdownMenuContent>
       </DropdownMenu>
-      {viewing !== null && (
-        <ToolButton
-          label={comparing ? "Stop comparing" : `Compare v${viewing} with v${latest}`}
-          pressed={comparing}
-          onClick={() => onCompare(!comparing)}
-        >
-          <Icon.graphControl.compare size={ICON.sm} />
-        </ToolButton>
-      )}
+      {/* Always in its place once there are versions, so picking one does not move what follows. */}
+      <ToolButton
+        label={
+          viewing === null
+            ? "Compare — pick an earlier version first"
+            : comparing ? "Stop comparing" : `Compare v${viewing} with v${latest}`
+        }
+        pressed={comparing}
+        disabled={viewing === null}
+        onClick={() => viewing !== null && onCompare(!comparing)}
+      >
+        <Icon.graphControl.compare size={ICON.sm} />
+      </ToolButton>
     </>
   );
 }

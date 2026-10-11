@@ -1583,12 +1583,11 @@ export function GraphView() {
         >
           <Icon.graphControl.fit size={ICON.sm} />
         </ToolButton>
-        {moved && (
-          // Only once something has been moved: there is nothing to reset before then.
-          <ToolButton label="Reset layout" onClick={resetLayout}>
-            <Icon.graph.resetLayout size={ICON.sm} />
-          </ToolButton>
-        )}
+        {/* Always in its place, and off until something has been moved: appearing after a drag and
+            vanishing after a reset moved the bar's other controls each time. */}
+        <ToolButton label={moved ? "Reset layout" : "Reset layout — nothing has been moved"} disabled={!moved} onClick={resetLayout}>
+          <Icon.graph.resetLayout size={ICON.sm} />
+        </ToolButton>
       </GraphToolbar>
       {selected && flow && (() => {
         const spec = flow.nodes.find((n) => n.id === selected.id);
