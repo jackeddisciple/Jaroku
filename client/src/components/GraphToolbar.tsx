@@ -511,8 +511,10 @@ export function GraphToolbar({ children, barRef }: { children: React.ReactNode; 
       role="toolbar"
       aria-label="Graph"
       // NEVER WIDER THAN THE CANVAS: past that its own controls are cut off and cannot be reached, so
-      // on a panel too narrow for one row it takes two.
-      className="graph-glass absolute left-1/2 top-3 z-10 flex w-max max-w-[calc(100%-1.5rem)] -translate-x-1/2 flex-wrap items-center gap-0.5 rounded-card px-1 py-1 shadow-floating backdrop-blur-md backdrop-saturate-150"
+      // on a panel too narrow for one row it takes two. No gap between the controls: each is a 28px
+      // target round a 16px mark, which already leaves the marks 12px apart, and the 2px gaps were
+      // what pushed the bar onto a second row in the smallest window's panel.
+      className="graph-glass absolute left-1/2 top-3 z-10 flex w-max max-w-[calc(100%-1.5rem)] -translate-x-1/2 flex-wrap items-center rounded-card px-1 py-1 shadow-floating backdrop-blur-md backdrop-saturate-150"
     >
       {children}
     </div>
