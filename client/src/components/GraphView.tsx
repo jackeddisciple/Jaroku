@@ -1026,11 +1026,12 @@ export function GraphView() {
     if (v === null) setComparing(false);
   };
   // A RUN IS ALWAYS OF THE CURRENT VERSION, wherever it was started: back to it, or the run's
-  // animation lands on an earlier version's nodes.
-  const runningNow = activeRunId ? runs[activeRunId]?.status === "running" : false;
+  // animation lands on an earlier version's nodes. This agent's run, that is — another agent's, or
+  // the boot run, is no reason to throw away a comparison somebody is reading.
+  const runningHere = running && run?.agent_id === activeAgentId;
   useEffect(() => {
-    if (runningNow) pickVersion(null);
-  }, [runningNow]);
+    if (runningHere) pickVersion(null);
+  }, [runningHere]);
   const latest = graph?.latest ?? graph?.version ?? 0;
   const older = useGraphStore((s) => (activeAgentId && viewing ? s.graphs[graphKey(activeAgentId, viewing)] : undefined));
   const olderLoading = useGraphStore((s) => (activeAgentId && viewing ? s.loading[graphKey(activeAgentId, viewing)] : undefined));
