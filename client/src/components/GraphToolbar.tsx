@@ -82,11 +82,19 @@ export function RunControls({ agentId, runnable }: { agentId: string; runnable: 
   const providersLoaded = useProviderStore((s) => s.loaded);
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
+  // AN EMPTY INPUT IS ASKED ABOUT, NOT RUN. ⌘↵ on a cleared field started a real, paid run with ""
+  // — some agents want nothing, most were simply not given anything yet — so the first press says
+  // so and the second runs it.
+  const [confirmEmpty, setConfirmEmpty] = useState(false);
 
   const mine = run && run.agent_id === agentId ? run : undefined;
   const live = mine && (mine.status === "running" || mine.status === "paused");
 
   const start = () => {
+    if (!input.trim() && !confirmEmpty) {
+      setConfirmEmpty(true);
+      return;
+    }
     // NO KEY, NO RUN — and no dead end: the way to the key opens instead, as the composer's does.
     if (providersLoaded && !isRunnable(providers, provider)) {
       // KEPT ACROSS THE DETOUR. Secrets takes the panel and this field with it, and the input was
@@ -138,6 +146,7 @@ export function RunControls({ agentId, runnable }: { agentId: string; runnable: 
       open={open}
       onOpenChange={(v) => {
         if (v) setInput(runDrafts.get(inputKey(agentId)) ?? readLastInput(agentId));
+        setConfirmEmpty(false);
         setOpen(v);
       }}
     >
@@ -162,6 +171,7 @@ export function RunControls({ agentId, runnable }: { agentId: string; runnable: 
             value={input}
             onChange={(e) => {
               setInput(e.target.value);
+              setConfirmEmpty(false);
               // AN EDIT IS KEPT WHEN THE POPOVER CLOSES (Esc, a click away) — opening it again used
               // to put back the last run's input over what had been typed since. Typed back to that
               // input exactly, there is nothing to keep.
@@ -183,10 +193,15 @@ export function RunControls({ agentId, runnable }: { agentId: string; runnable: 
             autoCapitalize="off"
             className="min-h-[44px] flex-1 resize-none rounded-input border border-edge bg-panel px-2 py-1.5 text-caption text-ink placeholder:text-faint focus:outline-none focus-visible:shadow-focusring"
           />
-          <ToolButton label="Run" onClick={start}>
+          <ToolButton label={confirmEmpty ? "Run with no input" : "Run"} onClick={start}>
             <Icon.graphControl.run size={ICON.sm} />
           </ToolButton>
         </form>
+        {confirmEmpty && (
+          <p role="status" className="mt-1.5 px-0.5 text-tiny text-muted">
+            No input. Press Run again to run it with nothing.
+          </p>
+        )}
       </PopoverContent>
     </Popover>
     {stop}
