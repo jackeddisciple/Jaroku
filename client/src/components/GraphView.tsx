@@ -104,6 +104,8 @@ const INSPECTOR_W = 256;
 const TOOLBAR_H = 44;
 // As far in as the canvas zooms. Out, it is MIN_ZOOM, which the layout's framing shares.
 const MAX_ZOOM = 1.75;
+// How far from where the layout put it a node has to be to count as moved, in canvas units.
+const MOVE_EPSILON = 4;
 
 // Mark sizes on the canvas, named here rather than written out at each call site. A step's mark IS
 // its tile's face, the way n8n draws a node, so it is large; the rest are proportions of the box
@@ -1047,11 +1049,28 @@ export function GraphView() {
   const loaded = useMemo(() => (posKey && sig ? readPositions(posKey, sig) : {}), [posKey, sig]);
   const [edits, setEdits] = useState<{ id: string; at: Positions } | null>(null);
   const positions = edits?.id === layoutId ? edits.at : loaded;
-  const moved = Object.keys(positions).length > 0;
+  // Moved means somewhere other than where the layout put it — not merely written down.
+  const moved = useMemo(() => {
+    if (!flow) return false;
+    return flow.nodes.some((n) => {
+      const p = positions[n.id];
+      return !!p && (Math.abs(p.x - n.x) > MOVE_EPSILON || Math.abs(p.y - n.y) > MOVE_EPSILON);
+    });
+  }, [flow, positions]);
   const positionsRef = useRef(positions);
   positionsRef.current = positions;
+  // ONLY REAL MOVES ARE KEPT. A click on a node with a pixel of jitter in it was a drag, and its
+  // position — the layout's own, near enough — was saved: Reset layout offered over a layout that
+  // looked untouched, and that near-default arrangement was what came back after a restart.
   const save = (at: Positions) => {
-    if (posKey && sig) writePositions(posKey, sig, at);
+    if (!posKey || !sig || !flow) return;
+    const home = new Map(flow.nodes.map((n) => [n.id, n]));
+    const kept: Positions = {};
+    for (const [id, p] of Object.entries(at)) {
+      const n = home.get(id);
+      if (!n || Math.abs(p.x - n.x) > MOVE_EPSILON || Math.abs(p.y - n.y) > MOVE_EPSILON) kept[id] = p;
+    }
+    writePositions(posKey, sig, kept);
   };
   const onNodesChange = (changes: NodeChange[]) => {
     let next: Positions | null = null;
@@ -1649,7 +1668,16 @@ export function GraphView() {
         onNodeMouseEnter={(_, n) => hover(n.id)}
         onNodeMouseLeave={() => hover(null)}
         onNodeDragStart={() => setDragging(true)}
-        onNodeDragStop={() => setDragging(false)}
+        onNodeDragStop={(_, __, dragged) => {
+          setDragging(false);
+          // AND SAVED HERE TOO, from the nodes the drag ended with: the position change that ends a
+          // drag is the one save path above, and an arrangement lost to it is lost for good.
+          const next = { ...positionsRef.current };
+          for (const n of dragged) next[n.id] = n.position;
+          save(next);
+        }}
+        // A CLICK IS NOT A DRAG. At React Flow's one pixel, a tile clicked with a hand's tremor in it moved.
+        nodeDragThreshold={4}
         nodesConnectable={false}
         edgesFocusable={false}
         deleteKeyCode={null}
