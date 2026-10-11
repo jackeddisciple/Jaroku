@@ -354,7 +354,7 @@ export function GraphToolbar({ children }: { children: React.ReactNode }) {
     <div
       role="toolbar"
       aria-label="Graph"
-      className="absolute left-1/2 top-3 z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-card border border-edge bg-elevated/90 px-1 py-1 shadow-floating backdrop-blur"
+      className="graph-glass absolute left-1/2 top-3 z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-card px-1 py-1 shadow-floating backdrop-blur-xl backdrop-saturate-150"
     >
       {children}
     </div>

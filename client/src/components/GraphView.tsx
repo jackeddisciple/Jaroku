@@ -1468,7 +1468,7 @@ export function GraphView() {
         <Background variant={BackgroundVariant.Dots} gap={20} size={1.6} color={TEXT.disabled} />
         <Controls
           showInteractive={false}
-          className="!bg-elevated/80 !backdrop-blur !border-0 !rounded-card !shadow-floating"
+          className="graph-glass !rounded-card !shadow-floating !backdrop-blur-xl !backdrop-saturate-150"
           // Fit means "frame it for me again": the same framing the canvas opened with, which
           // counts the loop lanes and the overlays React Flow's own fit does not, and refitting
           // resumes on resize.
