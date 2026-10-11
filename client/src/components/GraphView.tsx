@@ -1193,13 +1193,15 @@ export function GraphView() {
     [replayFrame, bucket],
   );
   const timings = useMemo(() => nodeTimings(shownSteps), [shownSteps]);
-  const stripShown = frames.length > 0 && !!run && run.status !== "running" && stripClosed !== activeRunId;
+  const stripAvailable = frames.length > 0 && !!run && run.status !== "running";
+  const stripShown = stripAvailable && stripClosed !== activeRunId;
+  const stripFolded = stripAvailable && stripClosed === activeRunId;
 
   // Read by the ResizeObserver below, which is registered once and must frame against what is
   // true when it fires rather than when it was created.
   // `top` is what floats over the canvas's top edge: the toolbar, and the version pill when there is one.
   const live = useRef<{ covered: number; flow: FlowLayout | null; positions: Positions; strip: boolean; top: number }>({ covered, flow, positions, strip: false, top: TOOLBAR_H });
-  live.current = { covered, flow, positions, strip: stripShown, top: TOOLBAR_H + pillH };
+  live.current = { covered, flow, positions, strip: stripAvailable, top: TOOLBAR_H + pillH };
 
   // NOT SHOWN UNTIL IT IS FRAMED. React Flow paints its first frame at 100% from the origin, and
   // the framing lands a frame later — so the graph appeared in the corner and jumped to the middle.
@@ -1737,6 +1739,18 @@ export function GraphView() {
             setPlaying(false);
             setStripClosed(activeRunId);
           }}
+        />
+      )}
+      {stripFolded && (
+        <GraphRunStrip
+          collapsed
+          onOpen={() => setStripClosed(null)}
+          count={frames.length}
+          at={null}
+          playing={false}
+          onAt={setReplayAt}
+          onPlaying={setPlaying}
+          onClose={() => {}}
         />
       )}
       {/* THE TOOLBAR, over the canvas rather than in it, so it neither pans nor zooms. */}
