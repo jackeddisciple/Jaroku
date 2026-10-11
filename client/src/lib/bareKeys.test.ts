@@ -92,8 +92,13 @@ console.log("\na region that owns its bare keys — the graph canvas");
   check("a focused graph node is inside a key owner", insideKeyOwner(owned) === true);
   check("...a plain element is not", insideKeyOwner(plain) === false);
   check("...nor nothing at all", insideKeyOwner(null) === false);
-  check("so the pane's `r` stands down there", paneOwnsBareKey(bare({ target: owned }), THREE_PANE) === false);
-  check("...and still fires on a plain element", paneOwnsBareKey(bare({ target: plain }), THREE_PANE) === true);
+  const r = { key: "r", shiftKey: false, repeat: false };
+  const ready = { lastInput: "abc", canRun: true, live: false, justSent: false, keyed: true };
+  check("so `r` stands down there", rerunDecision({ ...r, target: owned }, ready) === "nothing");
+  check("...and still re-runs on a plain element", rerunDecision({ ...r, target: plain }, ready) === "run");
+  // ONLY `r`. The pane's other bare keys — j/k through the trace, which light the matching nodes —
+  // are as useful with a node focused as anywhere; silencing them all was a regression.
+  check("while j/k still reach the pane from the graph", paneOwnsBareKey(bare({ target: owned }), THREE_PANE) === true);
 }
 
 console.log("\nwhat a bare `r` may do");

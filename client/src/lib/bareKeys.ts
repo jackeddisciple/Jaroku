@@ -69,7 +69,6 @@ export function paneOwnsBareKey(e: BareKeyEvent, screen: BareKeyScreen): boolean
   if (e.metaKey || e.ctrlKey || e.altKey) return false;
   if (screen.navView !== null) return false;
   if (screen.paletteOpen) return false;
-  if (insideKeyOwner(e.target)) return false;
   return !isTypingTarget(e.target);
 }
 
@@ -88,10 +87,13 @@ export function paneOwnsBareKey(e: BareKeyEvent, screen: BareKeyScreen): boolean
 export type RerunDecision = "run" | "needs-key" | "nothing";
 
 export function rerunDecision(
-  e: { key: string; shiftKey: boolean; repeat: boolean },
+  e: { key: string; shiftKey: boolean; repeat: boolean; target?: EventTarget | null },
   state: { lastInput: string | null; canRun: boolean; live: boolean; justSent: boolean; keyed: boolean },
 ): RerunDecision {
   if (e.key !== "r" || e.shiftKey || e.repeat) return "nothing";
+  // Not in a region that owns its letters — the graph canvas. Only `r` stands down there: `j`/`k`
+  // stepping through the trace, which light the matching nodes, are as useful from the graph as anywhere.
+  if (insideKeyOwner(e.target ?? null)) return "nothing";
   if (!state.canRun || state.live || state.justSent) return "nothing";
   if (!state.lastInput?.trim()) return "nothing";
   return state.keyed ? "run" : "needs-key";

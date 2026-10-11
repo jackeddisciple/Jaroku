@@ -2457,7 +2457,7 @@ export function BuildPane({
   // `rerunDecision`'s call (lib/bareKeys): nothing without a last input, a live run or a run sent a
   // moment ago, and a toast rather than a trip to Secrets without a key.
   const lastRerunAt = useRef(0);
-  const rerunLast = useCallback((e: { key: string; shiftKey: boolean; repeat: boolean }): boolean => {
+  const rerunLast = useCallback((e: { key: string; shiftKey: boolean; repeat: boolean; target: EventTarget | null }): boolean => {
     const runs = useTraceStore.getState().runs;
     const live = Object.values(runs).some(
       (r) => r.agent_id === activeAgentId && (r.status === "running" || (r.status as string) === "paused"),
