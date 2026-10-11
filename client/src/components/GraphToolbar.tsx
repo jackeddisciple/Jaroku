@@ -65,6 +65,12 @@ function readLastInput(agentId: string): string {
   }
 }
 
+/**
+ * An input typed into the Run field and not run yet, per workspace and agent (`inputKey`). In memory:
+ * the field is gone the moment the panel shows another tab, and what was typed has to outlive that.
+ */
+const runDrafts = new Map<string, string>();
+
 /** Run ▶, and while this agent's run is on screen, Pause/Resume and Stop. */
 export function RunControls({ agentId, runnable }: { agentId: string; runnable: boolean }) {
   const connected = useTraceStore((s) => s.connection === "open");
@@ -82,6 +88,9 @@ export function RunControls({ agentId, runnable }: { agentId: string; runnable: 
   const start = () => {
     // NO KEY, NO RUN — and no dead end: the way to the key opens instead, as the composer's does.
     if (providersLoaded && !isRunnable(providers, provider)) {
+      // KEPT ACROSS THE DETOUR. Secrets takes the panel and this field with it, and the input was
+      // written nowhere — so coming back to run it found the field empty.
+      runDrafts.set(inputKey(agentId), input);
       setOpen(false);
       useUiStore.getState().openSecretsForProvider(provider || "anthropic");
       return;
@@ -91,6 +100,7 @@ export function RunControls({ agentId, runnable }: { agentId: string; runnable: 
     } catch {
       /* the last input is a convenience; the run does not need it kept */
     }
+    runDrafts.delete(inputKey(agentId));
     sendRun(input.trim(), provider || undefined, model || undefined, agentId);
     setOpen(false);
   };
@@ -126,7 +136,7 @@ export function RunControls({ agentId, runnable }: { agentId: string; runnable: 
     <Popover
       open={open}
       onOpenChange={(v) => {
-        if (v) setInput(readLastInput(agentId));
+        if (v) setInput(runDrafts.get(inputKey(agentId)) ?? readLastInput(agentId));
         setOpen(v);
       }}
     >
