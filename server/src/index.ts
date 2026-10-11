@@ -246,6 +246,7 @@ import { WorkspaceExporter } from "./lifecycle/export.ts";
 import { lifecycleRoutes } from "./http/lifecycle.ts";
 import { mountSecretsRoutes, type SecretsCaller } from "./http/secrets.ts";
 import { bindForCredentials } from "./runBinding.ts";
+import { providerKeyAnnouncer } from "./providerAnnounce.ts";
 import { GithubRepository } from "./db/repositories/github.ts";
 import { GithubIdentity } from "./githubIdentity.ts";
 import { GithubService } from "./githubService.ts";
@@ -3852,8 +3853,15 @@ mountSecretsRoutes(router, {
   list: (ctx) => secretsManager.list(ctx),
   // `actorUserId` is ATTRIBUTION, never authorisation — the capability check upstream is what
   // decided this may happen. See ADR-018.
-  store: (caller, input) => secretsManager.store(caller.ctx, { ...input, actorUserId: caller.userId }),
-  revoke: (caller, name) => secretsManager.revoke(caller.ctx, name),
+  store: async (caller, input) => {
+    const result = await secretsManager.store(caller.ctx, { ...input, actorUserId: caller.userId });
+    if (result.ok) await announceProviderKeyChange(caller.ctx, input.name);
+    return result;
+  },
+  revoke: async (caller, name) => {
+    await secretsManager.revoke(caller.ctx, name);
+    await announceProviderKeyChange(caller.ctx, name);
+  },
   test: (caller, name) => secretsManager.test(caller.ctx, name),
   isReferenced: (ctx, name) => secretsManager.isReferenced(ctx, name),
   // THE STATIC HALF IS REFRESHED BEFORE THE ANSWER, so a revoke decision is made against the
@@ -6283,6 +6291,11 @@ async function providerSnapshot(ctx: TenantContext): Promise<ProviderSnapshot> {
 
 async function broadcastProviders(ctx: TenantContext): Promise<void> {
   relay.broadcastProviders(ctx, { type: "providers", ...(await providerSnapshot(ctx)) });
+}
+
+// See providerAnnounce.ts. A declaration, so the Secrets routes mounted above can call it whenever.
+function announceProviderKeyChange(ctx: TenantContext, name: string): Promise<void> {
+  return providerKeyAnnouncer(broadcastProviders)(ctx, name);
 }
 
 async function handleProviderCommand(ctx: TenantContext, cmd: ProviderCommand): Promise<void> {

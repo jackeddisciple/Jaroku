@@ -1052,6 +1052,9 @@ jobs:
           # are read, because the hosted store gives nothing to a run it cannot place. Read the other
           # way round, every desktop run was refused for a key that was in Secrets.
           npm run test:run-binding
+          # And the app hears about a provider key the moment it is saved, rather than at its next connect:
+          # Run decides from that snapshot, and a stale one sent people back to Secrets for a key they had.
+          npm run test:provider-announce
           # And the batching, which is not an optimisation. Stripe rate-limits usage records, so per-call
           # reporting loses them under exactly the load that makes reporting matter — and a dropped usage
           # record is revenue that never happened, with no error, no failed run, and nothing to notice
