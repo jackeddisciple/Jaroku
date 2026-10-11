@@ -12661,6 +12661,8 @@ async function runAgent(
   // What this run may reach, or undefined when no policy could be computed. Undefined is the
   // local default and is NOT "allow everything" on the hosted path — see SandboxSpec.egress.
   let runEgress: EgressPolicy | undefined;
+  // Whether reading this run's credentials threw — which is not the same as there being no key.
+  let credentialsUnread = false;
   clearControl(runId); // no stale pause request from a prior life
   console.log(`[manager] starting ${agentId ?? "test_agent"}${input ? ` — "${input}"` : ""} (run ${runId})`);
   // Model is forwarded explicitly so a real-provider run can't silently fall back to
@@ -12915,6 +12917,7 @@ async function runAgent(
     // by whatever else the model decided to do with an  tool it still had.
     runEgress = await buildRunEgress(ctx, runId, provider, activeConnectors, agent?.mcp_tools ?? []);
   } catch (err) {
+    credentialsUnread = true;
     console.warn(`[manager] could not resolve credentials for ${runId}: ${(err as Error).message}`);
   } finally {
     releaseCredentials();
@@ -12933,11 +12936,8 @@ async function runAgent(
     // its environment is a key handed to whoever owns the machine. Their own key is the only one.
     if (desktopExec) {
       const envKey = PROVIDER_ENV_KEY[provider as ProviderId];
-      console.log(`[manager] refused run ${runId}: no ${envKey} of the workspace's own for a desktop run`);
-      relay.broadcastDebug(ctx, {
-        type: "error",
-        message: `Runs use your own ${provider} API key. Add ${envKey} in the Secrets tab, then run again.`,
-      });
+      console.log(`[manager] refused run ${runId}: no ${envKey} of the workspace's own for a desktop run${credentialsUnread ? " (its credentials could not be read)" : ""}`);
+      relay.broadcastDebug(ctx, { type: "error", message: ownKeyRefusal(provider, credentialsUnread, "run again") });
       return;
     }
     const lent = await platformKeyGate.mayUsePlatformKey(ctx, billingPeriod().start);
@@ -13122,6 +13122,18 @@ async function pauseRun(ctx: TenantContext, runId: string): Promise<void> {
 }
 
 /**
+ * Why a desktop run was refused for want of its workspace's own key — said to the person, so the
+ * provider by its name ("Claude", not the id "anthropic") and the variable to add. And not "add a
+ * key" when the real trouble was that the credentials could not be READ: that sent somebody whose
+ * key was saved off to Secrets to add it again, while the reason sat in a log nobody sees.
+ */
+function ownKeyRefusal(provider: string, unread: boolean, retry: string): string {
+  if (unread) return `Couldn’t read this workspace’s credentials for the run. Wait a moment, then ${retry}.`;
+  const envKey = PROVIDER_ENV_KEY[provider as ProviderId];
+  return `Runs use your own ${providerLabel(provider)} API key. Add ${envKey} in the Secrets tab, then ${retry}.`;
+}
+
+/**
  * The credentials a resumed or branched run needs, resolved the way `runAgent` resolves a fresh one's.
  *
  * MISSING UNTIL NOW, and invisible locally: a resumed subprocess inherited this process's environment,
@@ -13139,6 +13151,7 @@ async function continuationCredentials(
   agentId: string | null,
 ): Promise<{ env: NodeJS.ProcessEnv; refusal: string | null }> {
   const env: NodeJS.ProcessEnv = {};
+  let unread = false;
   // Bound for the read, as in runAgent: every caller registers the run only once this returns.
   const releaseCredentials = bindForCredentials(runWorkspaces, runId, ctx);
   try {
@@ -13159,13 +13172,13 @@ async function continuationCredentials(
       }
     }
   } catch (err) {
+    unread = true;
     console.warn(`[manager] could not resolve credentials for ${runId}: ${(err as Error).message}`);
   } finally {
     releaseCredentials();
   }
   if (desktopExec && isRealProvider(provider) && !env[PROVIDER_ENV_KEY[provider as ProviderId]]) {
-    const envKey = PROVIDER_ENV_KEY[provider as ProviderId];
-    return { env, refusal: `Runs use your own ${provider} API key. Add ${envKey} in the Secrets tab, then try again.` };
+    return { env, refusal: ownKeyRefusal(provider, unread, "try again") };
   }
   return { env, refusal: null };
 }

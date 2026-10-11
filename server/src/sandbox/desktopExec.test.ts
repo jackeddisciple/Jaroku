@@ -274,7 +274,13 @@ try {
   {
     const { readFileSync } = await import("node:fs");
     const index = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
-    check("a desktop run is never lent a platform key", /if \(desktopExec\) \{[\s\S]{0,400}Runs use your own/.test(index));
+    check("a desktop run is never lent a platform key",
+      /if \(desktopExec\) \{[\s\S]{0,400}ownKeyRefusal\(provider, credentialsUnread, "run again"\)[\s\S]{0,40}return;/.test(index)
+        && /function ownKeyRefusal[\s\S]{0,600}Runs use your own \$\{providerLabel\(provider\)\} API key/.test(index));
+    // Said to a person, so by the provider's name rather than its id — and not "add a key" when the
+    // key could not be READ, which sent somebody whose key was saved back to Secrets to add it again.
+    check("the refusal names the provider, and tells an unreadable key from a missing one",
+      /function ownKeyRefusal\([^)]*\)[\s\S]{0,200}if \(unread\) return `Couldn’t read this workspace’s credentials/.test(index));
     check("every interactive start names who asked", (index.match(/interactivePool\.tryStart\(\{[^}]*host: ctx/g) ?? []).length === 3);
     check("generation and edits ask whether code can run before spending a model turn",
       (index.match(/const cannotCheck = codeCannotRun\(ctx\)/g) ?? []).length === 2);
