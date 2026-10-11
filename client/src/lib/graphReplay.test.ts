@@ -101,5 +101,18 @@ console.log("\n§3 a node's inspector reads the node, not its last model call");
     twiceFailedOnce?.error === "first pass failed" && twiceFailedOnce.ms === 200 && twiceFailedOnce.passes === 2, JSON.stringify(twiceFailedOnce));
 }
 
+console.log("\n§4 what each run will run next, kept for the runs somebody could be looking at");
+{
+  // Boundaries arrive for every run, an eval's hundreds included; the graph needs the recent ones.
+  const { useTraceStore } = await import("../store/traceStore.ts");
+  const t = useTraceStore.getState();
+  for (let i = 0; i < 120; i++) t.setNext(`run-${i}`, [`n${i}`]);
+  t.setNext("run-100", ["again"]);
+  const kept = useTraceStore.getState().nextByRun;
+  check("it is bounded", Object.keys(kept).length === 50, String(Object.keys(kept).length));
+  check("...keeping the newest", kept["run-119"]?.[0] === "n119" && kept["run-0"] === undefined);
+  check("...and a run heard from again counts as new", kept["run-100"]?.[0] === "again" && Object.keys(kept).at(-1) === "run-100");
+}
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 (globalThis as { process?: { exit(code: number): void } }).process?.exit(fail === 0 ? 0 : 1);

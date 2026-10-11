@@ -74,6 +74,8 @@ interface TraceState {
 }
 
 const LOG_CAP = 200;
+/** How many runs' next nodes are kept — see `setNext`. */
+const NEXT_KEPT = 50;
 
 /**
  * The reason the server writes on a run somebody stopped — its `TraceStore.CANCELLED_BY_USER`, held to
@@ -175,7 +177,13 @@ export const useTraceStore = create<TraceState>((set, get) => ({
 
   setConnection: (connection) => set({ connection }),
 
-  setNext: (runId, next) => set((state) => ({ nextByRun: { ...state.nextByRun, [runId]: next } })),
+  // BOUNDED. Boundaries arrive for every run, an eval's hundreds included, and only the runs somebody
+  // could still be looking at need theirs: the latest is kept at the end, and the oldest go.
+  setNext: (runId, next) =>
+    set((state) => {
+      const others = Object.entries(state.nextByRun).filter(([id]) => id !== runId).slice(-(NEXT_KEPT - 1));
+      return { nextByRun: { ...Object.fromEntries(others), [runId]: next } };
+    }),
 }));
 
 // --- selectors (pure; sort-by-seq lives here so no component can render arrival order) ---
