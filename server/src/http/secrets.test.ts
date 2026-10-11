@@ -620,6 +620,31 @@ try {
       !JSON.stringify(imported.body).includes("a-vault-kv2-credential-value"),
       "and the import response carries names and reasons, never a value",
     );
+
+    // --- a provider key's name, sent with no kind --------------------------------------------------
+    // The Secrets tab's Add sends no kind and Import sends none either, so `ANTHROPIC_API_KEY` typed
+    // there was filed as custom: never probed, never under Model providers.
+    console.log("\na provider key's name is a provider key, whichever way it was added");
+    providerSaysYes = false;
+    const noKindRejected = await statusOf(
+      createRoute.handler,
+      withElevation({ body: { name: "OPENAI_API_KEY", value: SECRET_VALUE } }),
+    );
+    check(noKindRejected.status === 422, "added with no kind, it is probed like the provider dialog's write, and refused on a no");
+    providerSaysYes = true;
+    const noKind = (await createRoute.handler(
+      withElevation({ body: { name: "OPENAI_API_KEY", value: SECRET_VALUE } }),
+    )) as { body: { secret: { kind: string } } };
+    check(noKind.body.secret.kind === "provider_key", "and filed as a provider key, under Model providers");
+    const plain = (await createRoute.handler(
+      withElevation({ body: { name: "WEATHER_SERVICE_TOKEN", value: "a-plain-value-for-a-custom-name" } }),
+    )) as { body: { secret: { kind: string } } };
+    check(plain.body.secret.kind === "custom", "any other name with no kind is still custom");
+    const importedKey = (await importRoute.handler(
+      withElevation({ path: "/v1/secrets/import", body: { text: `META_API_KEY=${SECRET_VALUE}\n` } }),
+    )) as { body: { imported: string[] } };
+    check(importedKey.body.imported.includes("META_API_KEY"), "an imported provider key's name is stored");
+    check((await refs.get(ctxFor(), "META_API_KEY"))?.kind === "provider_key", "...as a provider key too");
   }
 
   // --- reveal: the one route that returns a credential (ADR-035) ---------------------------------

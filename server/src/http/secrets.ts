@@ -41,6 +41,7 @@ import type { TenantContext } from "../db/tenant.ts";
 import { ELEVATION_HEADER, type SecretElevations } from "../secrets/elevation.ts";
 import type { SecretPasscodes } from "../secrets/passcode.ts";
 import { isSecretName } from "../secrets/secretStore.ts";
+import { PROVIDER_ENV_KEY } from "../providers.ts";
 import { parseSecretBundle, validateBundle } from "../secrets/bundle.ts";
 import type { SecretSummary } from "../secrets/manager.ts";
 import type { UsageRow as UsageSite } from "../db/repositories/secretUsages.ts";
@@ -523,7 +524,7 @@ export function secretsRoutes(deps: SecretsRouteDeps): SecretsRoute[] {
           );
         }
         if (typeof value !== "string" || !value) throw badRequest("a value is required");
-        const kind = readKind(body["kind"]);
+        const kind = readKind(body["kind"], name);
         // THE SAME REFUSAL ROTATE MAKES, because this is the same write with a different verb.
         // Rotate and revoke both refuse a connector-managed credential; create did not, and a
         // create against a name that already exists IS a rotation — so POSTing over `GITHUB_TOKEN`
@@ -563,7 +564,7 @@ export function secretsRoutes(deps: SecretsRouteDeps): SecretsRoute[] {
         for (const entry of bundle.accepted) {
           // Each through the SAME store path a single credential takes, so nothing about a bulk
           // import is a way around the rules the single path enforces.
-          const result = await deps.store(caller, { name: entry.name, value: entry.value, kind: "custom" });
+          const result = await deps.store(caller, { name: entry.name, value: entry.value, kind: kindForName(entry.name) });
           if (result.ok) stored.push(entry.name);
           else failed.push({ name: entry.name, reason: result.message ?? "it was not accepted" });
         }
@@ -864,13 +865,27 @@ async function refuseIfManaged(
 }
 
 /** The three origins, read from a request body without trusting it. */
-function readKind(raw: unknown): SecretKind {
+function readKind(raw: unknown, name: string): SecretKind {
   if (raw === "provider_key" || raw === "custom") return raw;
   // `managed` is deliberately not reachable from here. A connector's credential is created by the
   // connector's own flow; letting a client declare one would produce a row claiming a lifecycle
   // Jaroku does not actually own, with a Reconnect button pointing at nothing.
-  if (raw === undefined || raw === null) return "custom";
+  if (raw === undefined || raw === null) return kindForName(name);
   throw badRequest(`unknown kind: ${String(raw).slice(0, 32)}`);
+}
+
+/**
+ * A NAME THE PROVIDER TABLE CLAIMS IS A PROVIDER KEY, whichever form it came through.
+ *
+ * The Secrets tab's generic Add sends no kind, and Import sends none either — so `ANTHROPIC_API_KEY`
+ * typed there was filed as `custom`: never probed (though the form promises "a provider key is
+ * validated with the provider before it is stored"), never under Model providers, and no path in
+ * the app could make one that was. Defaulting by name puts it through the same probe and into the
+ * same group as the provider dialog's write. A kind stated explicitly is still taken as stated.
+ */
+const PROVIDER_KEY_NAMES = new Set<string>(Object.values(PROVIDER_ENV_KEY));
+function kindForName(name: string): SecretKind {
+  return PROVIDER_KEY_NAMES.has(name) ? "provider_key" : "custom";
 }
 
 /**
