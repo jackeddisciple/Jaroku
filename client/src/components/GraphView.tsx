@@ -410,6 +410,7 @@ function TileNode({ data }: NodeProps) {
           />
         )}
         <div
+          data-focus-ring
           className="flex h-full w-full items-center justify-center"
           style={{
             background: CARD_BG,
@@ -467,6 +468,7 @@ function EndNode({ data }: NodeProps) {
   return (
     <div className="relative flex select-none flex-col items-center" style={{ width: spec.w, height: spec.h }}>
       <div
+        data-focus-ring
         className="relative flex items-center justify-center rounded-full"
         style={{ width: END_D, height: END_D, background: CARD_BG, border: `1.5px solid ${tileBorder(d)}`, boxShadow: tileRing(d) }}
       >
@@ -487,6 +489,7 @@ function AgentNode({ data }: NodeProps) {
   return (
     <div className="relative select-none" style={{ width: spec.w, height: spec.h }}>
       <div
+        data-focus-ring
         className="flex h-full items-center gap-3 px-4"
         style={{
           background: d.selected || d.active ? CARD_BG_ACTIVE : CARD_BG,
@@ -531,6 +534,7 @@ function ResourceNode({ data }: NodeProps) {
   return (
     <div className="relative flex select-none flex-col items-center" style={{ width: spec.w, height: spec.h }}>
       <div
+        data-focus-ring
         className="flex items-center justify-center rounded-full"
         style={{ width: SUB_D, height: SUB_D, background: CARD_BG, border: `1.5px solid ${BORDER}` }}
       >

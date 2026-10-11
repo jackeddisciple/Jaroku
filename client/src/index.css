@@ -519,6 +519,15 @@
     font-family: "Geist Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   }
 
+  /* KEYBOARD FOCUS ON A NODE, SEEN. React Flow's stylesheet takes the outline off a focused node and
+     the tiles drew nothing in its place: Tab moved from step to step and Enter opened the one it was
+     on, with nothing on screen saying which. The ring goes on the node's own shape — the element
+     marked `data-focus-ring` — in the focus ring's ink, and only for a keyboard. */
+  .graph-canvas .react-flow__node:focus-visible [data-focus-ring] {
+    outline: 2px solid var(--color-text-primary);
+    outline-offset: 3px;
+  }
+
   /* THE GRAPH'S GLASS — the toolbar and the run strip. Tokens in `:root`. The blur is the call
      site's utility; this is the tint, the light and the rim. Every glass surface is positioned
      (absolute), which is what its two pseudo-elements are laid over. */
