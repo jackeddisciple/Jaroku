@@ -1011,6 +1011,8 @@ export function GraphView() {
   // The pill under the toolbar that says an earlier version is on screen, and how much room it takes.
   const pillRef = useRef<HTMLDivElement>(null);
   const [pillH, setPillH] = useState(0);
+  // How much more than one row the toolbar takes — it wraps on a narrow panel — for the framing.
+  const [barExtra, setBarExtra] = useState(0);
   // Who published a version, by name — a team workspace's members only, as the version history says it.
   const team = useAgentGridStore((s) => s.team);
   const members = useMemberStore((s) => s.members);
@@ -1224,7 +1226,7 @@ export function GraphView() {
   // true when it fires rather than when it was created.
   // `top` is what floats over the canvas's top edge: the toolbar, and the version pill when there is one.
   const live = useRef<{ covered: number; flow: FlowLayout | null; positions: Positions; strip: boolean; top: number }>({ covered, flow, positions, strip: false, top: TOOLBAR_H });
-  live.current = { covered, flow, positions, strip: stripAvailable, top: TOOLBAR_H + pillH };
+  live.current = { covered, flow, positions, strip: stripAvailable, top: TOOLBAR_H + barExtra + pillH };
 
   // NOT SHOWN UNTIL IT IS FRAMED. React Flow paints its first frame at 100% from the origin, and
   // the framing lands a frame later — so the graph appeared in the corner and jumped to the middle.
@@ -1288,8 +1290,8 @@ export function GraphView() {
     }
     if (userMoved.current) return;
     frameGraph();
-  // ...and when the version pill comes or goes, which changes how much of the top is covered.
-  }, [topologyKey, covered, pillH]);
+  // ...and when the version pill comes or goes, or the toolbar wraps, which change how much of the top is covered.
+  }, [topologyKey, covered, pillH, barExtra]);
 
   useEffect(() => {
     const el = canvasRef.current;
@@ -1587,6 +1589,7 @@ export function GraphView() {
       const row = findOpen ? bar.querySelector<HTMLElement>("[role=search]") : null;
       setBarBottom(bar.offsetTop + bar.offsetHeight + (row ? row.offsetHeight + 6 : 0));
       setPillH(pillRef.current ? pillRef.current.offsetHeight + 6 : 0);
+      setBarExtra(Math.max(0, bar.offsetTop + bar.offsetHeight - TOOLBAR_H - 4));
     };
     measure();
     if (typeof ResizeObserver === "undefined") return;
