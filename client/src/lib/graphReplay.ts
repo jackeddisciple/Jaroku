@@ -58,9 +58,31 @@ export function replayFrames(byId: ById | undefined): ReplayFrame[] {
   return frames;
 }
 
-/** The steps of a run up to and including a frame — what the graph's statuses show at that point. */
+/**
+ * The steps of a run up to and including a frame — what the graph shows at that point: each node's
+ * status, and its time and cost.
+ *
+ * A STEP INSIDE A NODE COUNTS WITH ITS NODE. A node's own step takes its seq as the node starts, so
+ * the model call it makes comes AFTER it in seq order while having happened before it finished — cut
+ * by seq alone, the frame where a node finishes showed its time and not its cost.
+ */
 export function stepsUpTo(byId: ById, frame: ReplayFrame): ById {
   const out: ById = {};
-  for (const [id, step] of Object.entries(byId)) if (step.seq <= frame.step.seq) out[id] = step;
+  for (const [id, step] of Object.entries(byId)) {
+    const owner = nodeStepOf(step, byId) ?? step;
+    if (owner.seq <= frame.step.seq) out[id] = step;
+  }
   return out;
+}
+
+/** The node step a step was taken inside — itself, for a node step — walking its parents. */
+function nodeStepOf(step: Step, byId: ById): Step | undefined {
+  const seen = new Set<string>();
+  let cur: Step | undefined = step;
+  while (cur && !seen.has(cur.id)) {
+    seen.add(cur.id);
+    if (cur.type === "state_update") return cur;
+    cur = cur.parent_step_id ? byId[cur.parent_step_id] : undefined;
+  }
+  return undefined;
 }

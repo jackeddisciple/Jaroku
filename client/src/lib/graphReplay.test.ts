@@ -57,6 +57,14 @@ console.log("\n§2 a run replays in the order it ran");
   const upTo = stepsUpTo(byId, frames[1]!);
   check("the statuses at a frame know nothing of what came after it",
     !!upTo.n2 && !upTo.n3 && !upTo.n4 && !!upTo.l1, Object.keys(upTo).join(" "));
+  // A node's model call has a later seq than the node step (taken as the node starts) but happened
+  // inside it: at the frame where extract_jd finishes, its cost is known — and nothing after it is.
+  const first = stepsUpTo(byId, frames[0]!);
+  check("the frame a node finishes in carries that node's own model call", !!first.n1 && !!first.l1, Object.keys(first).join(" "));
+  check("...and so its cost as well as its time", nodeTimings(first).get("extract_jd")?.cost === 0.004);
+  check("...and no step of a later node", !first.n2 && !first.n3 && !first.l3, Object.keys(first).join(" "));
+  const loop = stepsUpTo(byId, frames[3]!);
+  check("a router is counted with the node it decided for", !!loop.r1 && !loop.n4, Object.keys(loop).join(" "));
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

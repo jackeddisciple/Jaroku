@@ -1176,7 +1176,6 @@ export function GraphView() {
   // While a frame is on screen it decides which node is lit, which edge is hot and which statuses
   // show — the run as it was at that step, not as it ended.
   const frames = useMemo(() => replayFrames(bucket), [bucket]);
-  const timings = useMemo(() => nodeTimings(bucket), [bucket]);
   const [replayAt, setReplayAt] = useState<number | null>(null);
   const [playing, setPlaying] = useState(false);
   const [stripClosed, setStripClosed] = useState<string | null>(null);
@@ -1185,6 +1184,14 @@ export function GraphView() {
     setPlaying(false);
   }, [activeRunId]);
   const replayFrame = replayAt !== null ? frames[replayAt] : undefined;
+  // THE RUN AS FAR AS THE FRAME ON SCREEN, for the time and cost beside each step as well as for its
+  // dot. At 1/4 the chips already showed every node's final figures — three steps that had not run
+  // yet, with a time and a cost — and an export taken mid-replay carried the mismatch into the image.
+  const shownSteps = useMemo(
+    () => (replayFrame && bucket ? stepsUpTo(bucket, replayFrame) : bucket),
+    [replayFrame, bucket],
+  );
+  const timings = useMemo(() => nodeTimings(shownSteps), [shownSteps]);
   const stripShown = frames.length > 0 && !!run && run.status !== "running" && stripClosed !== activeRunId;
 
   // Read by the ResizeObserver below, which is registered once and must frame against what is
@@ -1297,10 +1304,7 @@ export function GraphView() {
     const step = selectedStepId && bucket ? bucket[selectedStepId] : undefined;
     return step ? stepNodeId(step, bucket!) : undefined;
   }, [selectedStepId, bucket]);
-  const nodeStatus = useMemo(
-    () => computeNodeStatus(replayFrame && bucket ? stepsUpTo(bucket, replayFrame) : bucket, activeNode),
-    [replayFrame, bucket, activeNode],
-  );
+  const nodeStatus = useMemo(() => computeNodeStatus(shownSteps, activeNode), [shownSteps, activeNode]);
 
   // Edges the current run actually traversed (source→target = real data direction), reused from
   // traceGraphMap. Drives the directional particle in the click micro-interaction.
