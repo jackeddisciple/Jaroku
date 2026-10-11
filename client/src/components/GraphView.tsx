@@ -53,6 +53,7 @@ import { ACCENT, ICON, INTERACTION, NODE_HUE, RADIUS, STATUS, SURFACE, TEXT } fr
 import {
   AGENT_H,
   END_D,
+  END_ID,
   LABEL_GAP,
   MAX_SUBS,
   MIN_ZOOM,
@@ -1296,15 +1297,25 @@ export function GraphView() {
   // Not under the inspector, which covers the corner it sits in.
   const showMinimap = !!flow && frame.width > 0 && !inspectorOpen && frameFor(flow, frame, covered).kind === "top";
 
+  // THE LAST FRAME IS THE RUN AS IT ENDED, not one more step of it: the last node done rather than
+  // still ringed as current, and — for a run that completed — the edge on to End taken and End
+  // reached, which neither the replay nor the finished view ever marked.
+  const completed = run?.status === "completed";
+  const atLastFrame = replayAt !== null && replayAt === frames.length - 1;
+  const endReached = completed && (replayAt === null || atLastFrame);
   const activeNode = useMemo(
-    () => (replayFrame ? replayFrame.node : running ? activeNodeId(bucket) : undefined),
-    [replayFrame, running, bucket],
+    () => (replayFrame ? (atLastFrame && completed ? undefined : replayFrame.node) : running ? activeNodeId(bucket) : undefined),
+    [replayFrame, atLastFrame, completed, running, bucket],
   );
   const selectedNode = useMemo(() => {
     const step = selectedStepId && bucket ? bucket[selectedStepId] : undefined;
     return step ? stepNodeId(step, bucket!) : undefined;
   }, [selectedStepId, bucket]);
-  const nodeStatus = useMemo(() => computeNodeStatus(shownSteps, activeNode), [shownSteps, activeNode]);
+  const nodeStatus = useMemo(() => {
+    const out = computeNodeStatus(shownSteps, activeNode);
+    if (endReached) out[END_ID] = "ok";
+    return out;
+  }, [shownSteps, activeNode, endReached]);
 
   // Edges the current run actually traversed (source→target = real data direction), reused from
   // traceGraphMap. Drives the directional particle in the click micro-interaction.
@@ -1315,13 +1326,14 @@ export function GraphView() {
   }, [bucket]);
 
   const hotEdge = useMemo(() => {
+    if (replayFrame && atLastFrame && completed) return { source: replayFrame.node, target: END_ID };
     if (replayFrame) return replayFrame.edge;
     if (selectedStepId && bucket) {
       const step = bucket[selectedStepId];
       return step ? stepEdge(step, bucket) : undefined;
     }
     return running ? activeEdge(bucket) : undefined;
-  }, [replayFrame, running, selectedStepId, bucket]);
+  }, [replayFrame, atLastFrame, completed, running, selectedStepId, bucket]);
 
   const nodes = useMemo<Node[]>(() => {
     if (!flow) return [];
