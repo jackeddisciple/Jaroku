@@ -147,12 +147,21 @@ export function useRightPanelFollow(): void {
   const prevRunId = useRef(activeRunId);
 
   // A new run starts -> show its trace. That is the moment the product is about.
+  //
+  // UNLESS THE GRAPH IS ON SCREEN, which shows the same run moving — and is where Run and Branch on
+  // the graph's own toolbar are pressed. Turning to Trace there hid the animation, the time and cost
+  // beside each step and the toolbar's Pause and Stop, and it overrode a choice: a run whose start
+  // arrives late (one that fails fast) moved somebody who had gone back to the Graph off it again.
   useEffect(() => {
     if (activeRunId && activeRunId !== prevRunId.current) {
       const run = useTraceStore.getState().runs[activeRunId];
-      const watched = run?.status === "running" && run.agent_id === useBuildStore.getState().activeAgentId;
+      const mine = run?.agent_id === useBuildStore.getState().activeAgentId;
+      const watched = run?.status === "running" && mine;
       const ui = useUiStore.getState();
-      if (watched) ui.setRightTab("trace");
+      // Whether or not it is still running by now: one that failed fast arrives already over.
+      if (mine && ui.rightTab === "graph") {
+        if (watched) ui.setRightPanelOpen(true);
+      } else if (watched) ui.setRightTab("trace");
       else ui.followRightTab("trace");
     }
     prevRunId.current = activeRunId;
