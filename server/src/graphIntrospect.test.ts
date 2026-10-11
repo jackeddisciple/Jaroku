@@ -152,6 +152,14 @@ console.log("\nan unreadable object explains itself without putting a key in the
   check("the client's AgentGraph declares errorKey too", /errorKey\?: string/.test(agentGraph));
   check("the client's AgentGraph declares the schema and the routers the server sends",
     /schema\?: number/.test(agentGraph) && /routers\?: GraphRouter\[\]/.test(agentGraph));
+
+  // THE VERSION PICKER'S ROWS — when, by what, and what each version says it changed — ride beside
+  // `latest`, served rather than cached (a version's history row can gain an undo; its topology cannot).
+  check("the graph is served with its versions beside latest",
+    /latest: agent\.current_version, versions \}/.test(source));
+  check("...read with the undone ones included, and only up to the current version",
+    /agentRepo\.versions\(ctx, agentUuid, true\)/.test(source) && /row\.version <= current/.test(source));
+  check("the client's AgentGraph declares them", /versions\?: GraphVersionInfo\[\]/.test(agentGraph));
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

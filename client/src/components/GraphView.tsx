@@ -82,6 +82,8 @@ import type { Step } from "../types.ts";
 import { TriggerIcon, modelResource, toolResource } from "./graphIcons.tsx";
 import { ProviderMark } from "../lib/icons.tsx";
 import { useUiStore } from "../store/uiStore.ts";
+import { useAgentGridStore } from "../store/agentGridStore.ts";
+import { useMemberStore } from "../store/memberStore.ts";
 import { ExportControl, FindControl, GraphToolbar, RunControls, ToolButton, ToolDivider, VersionControl, type GraphExport } from "./GraphToolbar.tsx";
 import { download } from "../lib/evalExport.ts";
 import { graphFileStem, graphPng, graphSvg } from "../lib/graphExport.ts";
@@ -978,6 +980,14 @@ export function GraphView() {
   // The pill under the toolbar that says an earlier version is on screen, and how much room it takes.
   const pillRef = useRef<HTMLDivElement>(null);
   const [pillH, setPillH] = useState(0);
+  // Who published a version, by name — a team workspace's members only, as the version history says it.
+  const team = useAgentGridStore((s) => s.team);
+  const members = useMemberStore((s) => s.members);
+  const publisherOf = (userId: string | null): string | null => {
+    if (!team || !userId) return null;
+    const m = members.find((x) => x.user_id === userId);
+    return m ? (m.display_name || m.email || null) : null;
+  };
   const pickVersion = (v: number | null) => {
     setViewing(v);
     if (v === null) setComparing(false);
@@ -1668,6 +1678,8 @@ export function GraphView() {
           latest={latest}
           viewing={viewing}
           comparing={comparing}
+          versions={graph?.versions}
+          publisherOf={publisherOf}
           onPick={pickVersion}
           onCompare={setComparing}
         />

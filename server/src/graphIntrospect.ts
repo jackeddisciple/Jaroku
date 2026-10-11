@@ -60,6 +60,19 @@ export interface GraphRouter {
   /** Where the deciding function is written (schema 3). */
   location?: SourceLocation | null;
 }
+/** One version, as the Graph tab's version picker describes it. */
+export interface GraphVersionInfo {
+  version: number;
+  created_at: string;
+  /** What made it: a generation, an edit, an import, a deploy. */
+  source: string;
+  /** What it says it changed — its summary, else the instruction that asked for it. */
+  summary: string | null;
+  created_by: string | null;
+  /** Taken off the line by an undo. */
+  undone: boolean;
+}
+
 export interface GraphResult {
   agent_id: string;
   schema?: number;
@@ -69,6 +82,8 @@ export interface GraphResult {
   /** Which version of the agent this graph is of, and the agent's latest — added when served, never cached. */
   version?: number;
   latest?: number;
+  /** Every version 1..latest as the picker lists them — when, by what, and what it says it changed. Served, never cached. */
+  versions?: GraphVersionInfo[];
   error?: string;
   /**
    * The identifier the failure was about, kept OUT of the sentence.

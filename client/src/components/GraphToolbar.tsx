@@ -18,6 +18,8 @@ import { isRunnable, useProviderStore } from "../store/providerStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { inputKey, useUiStore } from "../store/uiStore.ts";
 import { iconBtn } from "./buttons.ts";
+import { relTime } from "../lib/format.ts";
+import type { GraphVersionInfo } from "../types.ts";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "./ui/dropdown-menu.tsx";
 import { Tip } from "./ui/tooltip.tsx";
@@ -379,16 +381,21 @@ export function FindControl({
  * it against the current one. Versions run 1..latest; nothing is offered for an agent with one.
  */
 export function VersionControl({
-  latest, viewing, comparing, onPick, onCompare,
+  latest, viewing, comparing, versions = [], publisherOf, onPick, onCompare,
 }: {
   latest: number;
   viewing: number | null;
   comparing: boolean;
+  /** What each version is, when the server said. */
+  versions?: GraphVersionInfo[];
+  /** A member's name for a version's publisher, in a team workspace; null otherwise. */
+  publisherOf?: (userId: string | null) => string | null;
   onPick: (version: number | null) => void;
   onCompare: (on: boolean) => void;
 }) {
   if (latest < 2) return null;
   const shown = viewing ?? latest;
+  const info = new Map(versions.map((v) => [v.version, v]));
   return (
     <>
       <DropdownMenu>
@@ -400,17 +407,36 @@ export function VersionControl({
             </button>
           </DropdownMenuTrigger>
         </Tip>
-        <DropdownMenuContent align="center" aria-label="Versions">
+        <DropdownMenuContent align="center" aria-label="Versions" className="max-w-[18rem]">
           <DropdownMenuRadioGroup
             value={String(shown)}
             onValueChange={(v) => onPick(Number(v) === latest ? null : Number(v))}
           >
-            {Array.from({ length: latest }, (_, i) => latest - i).map((v) => (
-              <DropdownMenuRadioItem key={v} value={String(v)}>
-                v{v}
-                {v === latest && <span className="ml-2 text-tiny text-faint">current</span>}
-              </DropdownMenuRadioItem>
-            ))}
+            {Array.from({ length: latest }, (_, i) => latest - i).map((v) => {
+              // WHEN, AND WHAT IT CHANGED. Bare numbers made choosing one to look at or compare
+              // guesswork; the history already knows each version's date and summary.
+              const row = info.get(v);
+              const by = row ? publisherOf?.(row.created_by) ?? null : null;
+              const what = row ? row.summary ?? SOURCE_WORD[row.source] ?? row.source : null;
+              return (
+                <DropdownMenuRadioItem key={v} value={String(v)}>
+                  <span className="flex min-w-0 flex-col">
+                    <span>
+                      v{v}
+                      {v === latest && <span className="ml-2 text-tiny text-faint">current</span>}
+                      {row?.undone && <span className="ml-2 text-tiny text-faint">undone</span>}
+                    </span>
+                    {row && (
+                      <span className="truncate text-tiny text-faint" title={what ?? undefined}>
+                        {relTime(row.created_at)}
+                        {by ? ` · ${by}` : ""}
+                        {what ? ` · ${what}` : ""}
+                      </span>
+                    )}
+                  </span>
+                </DropdownMenuRadioItem>
+              );
+            })}
           </DropdownMenuRadioGroup>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -430,6 +456,14 @@ export function VersionControl({
     </>
   );
 }
+
+/** What made a version, in a word, for a version with no summary of its own. */
+const SOURCE_WORD: Record<string, string> = {
+  generation: "generated",
+  edit: "edited",
+  import: "imported",
+  deploy: "deploy files added",
+};
 
 export type GraphExport = "copy" | "png" | "svg";
 

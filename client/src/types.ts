@@ -395,6 +395,18 @@ export interface GraphRouter {
   location?: SourceLocation | null;
 }
 
+/** One version, as the Graph tab's version picker describes it. */
+export interface GraphVersionInfo {
+  version: number;
+  created_at: string;
+  source: string;
+  /** Its summary, else the instruction that asked for it. */
+  summary: string | null;
+  created_by: string | null;
+  /** Taken off the line by an undo. */
+  undone: boolean;
+}
+
 export interface AgentGraph {
   agent_id: string;
   /** The runner's GRAPH_SCHEMA. Absent on a graph introspected before schema 2. */
@@ -405,6 +417,8 @@ export interface AgentGraph {
   /** Which version this graph is of, and the agent's latest — what the version picker lists. */
   version?: number;
   latest?: number;
+  /** Versions latest..1 — when, by what, and what each says it changed — for the picker's rows. */
+  versions?: GraphVersionInfo[];
   error?: string;
   /**
    * The identifier the failure was about, kept out of the sentence.
