@@ -127,6 +127,10 @@ console.log("\na draft is a state, not a failure");
   check("...and titled as a draft rather than as something that could not be drawn",
     copy.title === "This agent is a draft", copy.title);
   check("...with the way to give it a graph as its next step", /Generate/.test(copy.next ?? ""), String(copy.next));
+  // The composer's only action is Send; Generate is on the plan card that comes back. Saying "press
+  // Generate" in the composer sent people looking for a button that is not there.
+  check("...naming the composer's real action, Send, before it", /^Send\b/.test(copy.next ?? ""), String(copy.next));
+  check("...and where Generate is: the plan", /Generate on the plan/.test(copy.next ?? ""), String(copy.next));
   // RETRYING CANNOT BUILD IT. The old panel offered Try again here, which re-asked the server for
   // the same nothing every time it was pressed.
   check("...and no retry", copy.retryable === false);

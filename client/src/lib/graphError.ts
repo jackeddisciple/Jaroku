@@ -42,7 +42,9 @@ export interface GraphErrorCopy {
 export const DRAFT: Omit<GraphErrorCopy, "raw"> = {
   title: "This agent is a draft",
   sentence: "A draft has a name and a face but no code, so there is no graph to draw.",
-  next: "Describe what it should do in the composer and press Generate — its graph appears here.",
+  // THE CONTROLS THAT EXIST, IN THE ORDER THEY ARE MET. The composer has no Generate button — its one
+  // action is Send — and Generate is on the plan card the send brings back.
+  next: "Send a description of what it should do from the composer, then press Generate on the plan — its graph appears here.",
   retryable: false,
 };
 
