@@ -153,6 +153,9 @@ jobs:
           npm run test:secret-import
           npm run test:provider-key-migration
           npm run test:secrets-e2e
+          # THE TRACE STORE ITSELF — including that a cancel changes only a run that has not ended: Stop
+          # on one that had just finished listed it as failed, and a failed one lost its own error.
+          npm run test:trace
           npm run test:checkpoint-threads
           npm run test:branch
           # WHICH CHECKPOINT A STEP BELONGS TO when its boundary arrives first — a desktop run sends

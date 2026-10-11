@@ -13275,8 +13275,15 @@ async function cancelRun(ctx: TenantContext, runId: string): Promise<void> {
   clearControl(runId); // no stale pause/resume request outlives a cancel
   // A PAUSED run has no process to exit, so nothing else would forget what its resume needed.
   if (pausedRuns.delete(runId) && !liveRuns.has(runId)) runWorkspaces.delete(runId);
-  await store.markRunCancelled(ctx, runId);
-  relay.broadcastDebug(ctx, { type: "cancelled", runId });
+  // A RUN THAT HAS ENDED IS NOT CANCELLED. Stop pressed on one that finished a moment ago — an app
+  // that had not heard the end yet — listed it as failed, cancelled by user. Nothing changes then,
+  // and the app is sent the run as it really ended instead of "cancelled".
+  if (await store.markRunCancelled(ctx, runId)) {
+    relay.broadcastDebug(ctx, { type: "cancelled", runId });
+  } else {
+    console.log(`[debug] cancel of ${runId} changed nothing — it had already ended (${run.status})`);
+    void relay.broadcastHistory();
+  }
   // The exit handler (onBothPools("exit", ...)) does the rest once the process actually
   // dies: clears runActive/activeRunId if this was the interactive run, and releases its
   // reservation — the same teardown a normal completion goes through, just triggered here

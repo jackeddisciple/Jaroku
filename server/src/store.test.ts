@@ -201,6 +201,34 @@ console.log("\ninterrupted runs are closed out at boot");
   check((await store.reconcileInterruptedRuns(A)).length === 0, "a second boot finds nothing left");
 }
 
+console.log("\na cancel changes only a run that has not ended");
+{
+  const live = randomUUID();
+  await store.upsertRun(A, run(live));
+  check(await store.markRunCancelled(A, live), "a running run is cancelled, and says so");
+  const after = await store.getRun(A, live);
+  check(after?.status === "error" && after.error === TraceStore.CANCELLED_BY_USER, `as cancelled by user (${after?.status}, ${after?.error})`);
+
+  const paused = randomUUID();
+  await store.upsertRun(A, run(paused));
+  await store.setRunStatus(A, paused, "paused");
+  check(await store.markRunCancelled(A, paused), "a paused run is cancelled too");
+
+  // Stop pressed on a run that had just finished: Runs listed it as failed, cancelled by user.
+  const finished = randomUUID();
+  await store.upsertRun(A, { ...run(finished), status: "completed", ended_at: new Date().toISOString() });
+  check(!(await store.markRunCancelled(A, finished)), "a finished run is not cancelled");
+  check((await store.getRun(A, finished))?.status === "completed", "...and is still completed");
+
+  // A failed run had its own error replaced by "cancelled by user".
+  const failed = randomUUID();
+  await store.upsertRun(A, { ...run(failed), status: "error", error: "ValueError: no", ended_at: new Date().toISOString() });
+  check(!(await store.markRunCancelled(A, failed)), "a failed run is not cancelled");
+  check((await store.getRun(A, failed))?.error === "ValueError: no", "...and keeps its own error");
+
+  check(!(await store.markRunCancelled(B, live)), "and another workspace cannot cancel this one's run");
+}
+
 await store.close();
 
 console.log(failures === 0 ? "\nALL CORRECT" : `\n${failures} FAILURES`);

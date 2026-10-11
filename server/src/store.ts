@@ -334,12 +334,18 @@ export class TraceStore {
   // run_end (SIGKILL leaves no chance to run its `finally`), so without this the row would
   // read 'running' forever — the same silence reconcileInterruptedRuns exists to close, just
   // triggered by a click instead of a restart.
-  async markRunCancelled(ctx: TenantContext, runId: string): Promise<void> {
-    await this.q(ctx).run(
+  //
+  // ONLY A RUN THAT HAS NOT ENDED. It guarded `completed` alone, so a run that had failed had its own
+  // error replaced by "cancelled by user", and a Stop pressed on a run that had just finished was
+  // answered as if it had stopped something. Whether a row changed is returned, so the caller tells
+  // the app "cancelled" only about a run that was.
+  async markRunCancelled(ctx: TenantContext, runId: string): Promise<boolean> {
+    const result = await this.q(ctx).run(
       `UPDATE runs SET status = 'error', ended_at = ?, error = ?
-        WHERE id = ? AND workspace_id = ? AND status != 'completed'`,
+        WHERE id = ? AND workspace_id = ? AND status IN ('running', 'paused')`,
       [new Date().toISOString(), TraceStore.CANCELLED_BY_USER, runId, ctx.workspaceId],
     );
+    return result.changes > 0;
   }
 
   // The run's current highest seq — the offset a resumed subprocess continues its timeline from.
