@@ -1312,6 +1312,8 @@ export function GraphView() {
     if (viaClick) triggerPulse(spec.id); // transient connected-edge highlight + directional particle
   };
 
+  const closeInspector = () => setSelected(null);
+
   // DOUBLE-CLICK OPENS THE CODE, at the function the node runs — the runtime says where each is
   // written (graph schema 3). A circle stands for the agent; a fork, for its deciding function.
   // Without a location (a library ToolNode, an older graph) it opens agent.py at the top.
@@ -1452,6 +1454,14 @@ export function GraphView() {
           setFindSignal((n) => n + 1);
           return;
         }
+        // ESC CLOSES THE INSPECTOR, as its ✕ has always said. Not for a key something else already
+        // answered (Find's own Esc), and not from a popover portalled out of the canvas (Run's).
+        if (e.key === "Escape" && selected && !e.defaultPrevented && canvasRef.current?.contains(e.target as HTMLElement)) {
+          e.preventDefault();
+          e.stopPropagation();
+          closeInspector();
+          return;
+        }
         if (e.key !== "Enter" && e.key !== " ") return;
         const id = (e.target as HTMLElement).closest?.(".react-flow__node")?.getAttribute("data-id");
         if (id) {
@@ -1520,7 +1530,7 @@ export function GraphView() {
         onNodeDoubleClick={(_, n) => openCode(n.id)}
         // Double-click belongs to the nodes; on the canvas it would zoom, which nobody asked for.
         zoomOnDoubleClick={false}
-        onPaneClick={() => setSelected(null)}
+        onPaneClick={closeInspector}
       >
         {/* n8n's DOTTED CANVAS, and visibly so: the dots were the page's own chrome tone, which on
             this background was a grid nobody could see. */}
@@ -1627,7 +1637,7 @@ export function GraphView() {
             top={barBottom + 8}
             onOpen={(id) => openNode(id, true)}
             onOpenCode={() => openCode(spec.id)}
-            onClose={() => setSelected(null)}
+            onClose={closeInspector}
           />
         ) : null;
       })()}
