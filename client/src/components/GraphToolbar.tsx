@@ -67,7 +67,8 @@ function readLastInput(agentId: string): string {
 
 /**
  * An input typed into the Run field and not run yet, per workspace and agent (`inputKey`). In memory:
- * the field is gone the moment the panel shows another tab, and what was typed has to outlive that.
+ * the field is gone the moment the popover closes or the panel shows another tab, and what was typed
+ * has to outlive both.
  */
 const runDrafts = new Map<string, string>();
 
@@ -159,7 +160,14 @@ export function RunControls({ agentId, runnable }: { agentId: string; runnable: 
             autoFocus
             rows={2}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              setInput(e.target.value);
+              // AN EDIT IS KEPT WHEN THE POPOVER CLOSES (Esc, a click away) — opening it again used
+              // to put back the last run's input over what had been typed since. Typed back to that
+              // input exactly, there is nothing to keep.
+              if (e.target.value === readLastInput(agentId)) runDrafts.delete(inputKey(agentId));
+              else runDrafts.set(inputKey(agentId), e.target.value);
+            }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
