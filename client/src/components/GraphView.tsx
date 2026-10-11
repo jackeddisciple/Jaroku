@@ -715,11 +715,13 @@ const PILL_DOC: Record<"start" | "end", string> = {
  * prompt file. The prompt belongs to the ReAct agent node alone; a step says what its docstring says.
  */
 function NodeInspector({
-  spec, flow, bucket, top, onOpen, onOpenCode, onClose,
+  spec, flow, bucket, top, olderVersion, onOpen, onOpenCode, onClose,
 }: {
   spec: FlowNodeSpec;
   flow: FlowLayout;
   bucket: Record<string, Step> | undefined;
+  /** The earlier version on screen, whose code the drawer does not hold — null for the current one. */
+  olderVersion: number | null;
   /** Where it starts: below the toolbar, and below Find's row while that is open. */
   top: number;
   onOpen: (id: string) => void;
@@ -753,7 +755,13 @@ function NodeInspector({
         </button>
       </div>
 
-      {spec.source && (
+      {spec.source && olderVersion !== null ? (
+        // NOT A LINK ON AN EARLIER VERSION. The Code drawer holds the current version's files, so
+        // this opened them at the older version's line — the wrong code, wherever it landed.
+        <p className="mt-2 text-tiny text-faint" title="The Code drawer holds the current version’s files">
+          {spec.source.file}:{spec.source.line} in v{olderVersion} · the code opens for the current version only
+        </p>
+      ) : spec.source ? (
         <button
           type="button"
           onClick={onOpenCode}
@@ -762,7 +770,7 @@ function NodeInspector({
         >
           Open code · {spec.source.file}:{spec.source.line}
         </button>
-      )}
+      ) : null}
 
       {doc ? (
         <p className="mt-3 text-ink">{doc}</p>
@@ -1337,6 +1345,11 @@ export function GraphView() {
   // written (graph schema 3). A circle stands for the agent; a fork, for its deciding function.
   // Without a location (a library ToolNode, an older graph) it opens agent.py at the top.
   const openCode = (id: string) => {
+    // An earlier version's line in the current version's file is the wrong code — see NodeInspector.
+    if (viewing !== null) {
+      useUiStore.getState().showToast(`Code opens for v${latest} only`);
+      return;
+    }
     const hit = flow?.nodes.find((n) => n.id === id);
     const spec = hit?.role === "resource" ? flow?.nodes.find((n) => n.role === "model" && isReactAgent(n.id)) : hit;
     if (!spec || spec.role === "start" || spec.role === "end") return;
@@ -1657,6 +1670,7 @@ export function GraphView() {
             flow={flow}
             bucket={bucket}
             top={barBottom + 8}
+            olderVersion={viewing}
             onOpen={(id) => openNode(id, true)}
             onOpenCode={() => openCode(spec.id)}
             onClose={closeInspector}
