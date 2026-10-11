@@ -177,6 +177,20 @@ export interface VersionMeta {
   restoredFrom?: number | null;
 }
 
+/** How much of a version's summary or instruction the version picker is given: one line's worth. */
+const VERSION_LINE_CHARS = 160;
+
+/** One version as the Graph tab's version picker lists it — see `versionSummaries`. */
+export interface VersionSummaryRow {
+  version: number;
+  created_at: string;
+  source: string;
+  summary: string | null;
+  instruction: string | null;
+  created_by: string | null;
+  undone: boolean;
+}
+
 export interface AgentVersion {
   id: string;
   agent_id: string;
@@ -863,6 +877,34 @@ export class AgentRepository {
           AND EXISTS (SELECT 1 FROM agents a WHERE a.id = v.agent_id AND a.workspace_id = ?)`,
       [JSON.stringify(graph), agentId, version, ctx.workspaceId],
     );
+  }
+
+  /**
+   * What the Graph tab's version picker says about each version — number, date, what made it, a
+   * short line on what it changed, who published it, whether an undo took it off the line — and
+   * nothing else: no manifest, no per-file stats, and the summary and instruction cut to a line.
+   * `versions()` reads all of that for every row, which is the history panel's business and was too
+   * much to pay on every Graph-tab load. Scoped through the agent like every version read.
+   */
+  async versionSummaries(ctx: TenantContext, agentId: string): Promise<VersionSummaryRow[]> {
+    const rows = await this.q(ctx).all<Record<string, unknown>>(
+      `SELECT v.version, v.created_at, v.source, v.created_by, v.undone_at,
+              SUBSTR(v.summary, 1, ${VERSION_LINE_CHARS}) AS summary,
+              SUBSTR(v.instruction, 1, ${VERSION_LINE_CHARS}) AS instruction
+         FROM agent_versions v JOIN agents a ON a.id = v.agent_id
+        WHERE v.agent_id = ? AND a.workspace_id = ?
+        ORDER BY v.version DESC`,
+      [agentId, ctx.workspaceId],
+    );
+    return rows.map((r) => ({
+      version: asInt(r.version, 0),
+      created_at: String(r.created_at ?? ""),
+      source: String(r.source ?? "import"),
+      summary: (r.summary as string | null) ?? null,
+      instruction: (r.instruction as string | null) ?? null,
+      created_by: (r.created_by as string | null) ?? null,
+      undone: r.undone_at !== null && r.undone_at !== undefined,
+    }));
   }
 
   /**

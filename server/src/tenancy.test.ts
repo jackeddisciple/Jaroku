@@ -362,6 +362,8 @@ async function suite(label: string, db: Db): Promise<void> {
 
   await trace.setCheckpointUpto(A.ctx, B.runId, 0, "hijack");
   check((await trace.boundaryForStep(B.ctx, B.runId, 0)) === null, "nor a checkpoint stamp");
+  await trace.stampStep(A.ctx, B.runId, 0, "hijack-late");
+  check((await trace.boundaryForStep(B.ctx, B.runId, 0)) === null, "nor a late step's stamp");
 
   await evals.renameDataset(A.ctx, B.datasetId, "renamed by A");
   check((await evals.getDataset(B.ctx, B.datasetId))?.name === "b cases", "renaming B's dataset does nothing");
@@ -571,7 +573,7 @@ function coverage(): void {
 const SCOPED_API: Record<string, string[]> = {
   TraceStore: [
     "upsertRun", "insertStep", "listRuns", "getRun", "setRunStatus", "maxSeqForRun",
-    "setCheckpointUpto", "boundaryForStep", "copyRunPrefix", "stepsForRun",
+    "setCheckpointUpto", "stampStep", "boundaryForStep", "copyRunPrefix", "stepsForRun",
     // The first leg of the Inbox's memory-proposal triple. A cross-tenant read here would offer one
     // workspace a proposal built from another workspace's failure.
     "failedRunBefore",
@@ -605,6 +607,8 @@ const SCOPED_API: Record<string, string[]> = {
     "undoVersion", "editCounts",
     // Session 4.
     "getGraphCache", "setGraphCache",
+    // The Graph tab's version picker.
+    "versionSummaries",
     // Session 6 — what a storage bill is computed from.
     "storedBytes",
   ],
@@ -998,6 +1002,8 @@ async function remainder(db: Db): Promise<void> {
   check((await agents.version(A.ctx, theirAgent.id, 2)) === undefined, "version cannot read B's version row");
   check((await agents.versions(A.ctx, theirAgent.id)).length === 0, "versions lists none of B's");
   check((await agents.versions(A.ctx, theirAgent.id, true)).length === 0, "...including the undone ones");
+  check((await agents.versionSummaries(A.ctx, theirAgent.id)).length === 0, "versionSummaries lists none of B's");
+  check((await agents.versionSummaries(B.ctx, theirAgent.id)).length > 0, "...while B sees its own");
   check((await agents.undoVersion(A.ctx, theirAgent.id)) === null, "undoVersion refuses B's agent");
   check(
     (await agents.bySlug(B.ctx, "support_bot"))!.current_version === 2,

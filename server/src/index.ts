@@ -2746,14 +2746,15 @@ async function agentGraph(ctx: TenantContext, agentId: string, version?: number)
   // Graph tab's version picker lists 1..latest, and the latest moves while a version's graph does not.
   // AND WHAT EACH ONE IS — its date, what made it, what it says it changed — because a menu of bare
   // numbers made picking one to look at or compare guesswork. One read of rows the history already has.
-  const versions = await graphVersionList(ctx, agent.id, agent.current_version);
-  return pending.then((r) => (r.error ? r : { ...r, version: v, latest: agent.current_version, versions }));
+  // For the graph of the version the agent is on: the picker reads the list off that one alone.
+  const versions = version === undefined ? await graphVersionList(ctx, agent.id, agent.current_version) : undefined;
+  return pending.then((r) => (r.error ? r : { ...r, version: v, latest: agent.current_version, ...(versions ? { versions } : {}) }));
 }
 
 /** Versions 1..current as the Graph tab's picker describes them. Empty, never a failure, if the read fails. */
 async function graphVersionList(ctx: TenantContext, agentUuid: string, current: number): Promise<GraphVersionInfo[]> {
   try {
-    const rows = await agentRepo.versions(ctx, agentUuid, true);
+    const rows = await agentRepo.versionSummaries(ctx, agentUuid);
     return rows
       .filter((row) => row.version <= current)
       .map((row) => ({
@@ -2762,9 +2763,8 @@ async function graphVersionList(ctx: TenantContext, agentUuid: string, current: 
         source: row.source,
         summary: row.summary ?? row.instruction ?? null,
         created_by: row.created_by,
-        undone: row.undone_at !== null,
-      }))
-      .sort((a, b) => b.version - a.version);
+        undone: row.undone,
+      }));
   } catch (err) {
     console.warn(`[graph] could not list versions: ${(err as Error).message}`);
     return [];

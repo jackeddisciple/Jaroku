@@ -155,10 +155,12 @@ console.log("\nan unreadable object explains itself without putting a key in the
 
   // THE VERSION PICKER'S ROWS — when, by what, and what each version says it changed — ride beside
   // `latest`, served rather than cached (a version's history row can gain an undo; its topology cannot).
-  check("the graph is served with its versions beside latest",
-    /latest: agent\.current_version, versions \}/.test(source));
-  check("...read with the undone ones included, and only up to the current version",
-    /agentRepo\.versions\(ctx, agentUuid, true\)/.test(source) && /row\.version <= current/.test(source));
+  check("the graph of the current version is served with its versions beside latest",
+    /latest: agent\.current_version, \.\.\.\(versions \? \{ versions \} : \{\}\) \}/.test(source)
+      && /const versions = version === undefined \? await graphVersionList/.test(source));
+  // NOT `versions()`, which reads every version's manifest and file stats — on every Graph-tab load.
+  check("...read from the narrow summary query, only up to the current version",
+    /agentRepo\.versionSummaries\(ctx, agentUuid\)/.test(source) && /row\.version <= current/.test(source));
   check("the client's AgentGraph declares them", /versions\?: GraphVersionInfo\[\]/.test(agentGraph));
 }
 
