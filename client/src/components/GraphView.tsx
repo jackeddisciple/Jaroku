@@ -208,6 +208,14 @@ const READ_ONLY_ARIA: Partial<AriaLabelConfig> = {
   "edge.a11yDescription.default": "",
 };
 
+/**
+ * THE VIEW SOMEBODY LEFT, per workspace, agent and graph shape (`layoutId`), once they had zoomed or
+ * panned it. The canvas unmounts whenever the panel shows another tab, and coming back to Graph used
+ * to re-frame it from scratch — dragged positions survived the trip, the zoom and pan did not. In
+ * memory: a view is worth keeping across a tab switch, not across a restart.
+ */
+const savedViews = new Map<string, { x: number; y: number; zoom: number }>();
+
 /** Whether this viewer has asked for less motion — read once; it stops the run animation. */
 const REDUCED_MOTION = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
 
@@ -1202,12 +1210,30 @@ export function GraphView() {
     [activeAgentId, flow],
   );
 
-  useEffect(() => {
-    userMoved.current = false;
-  }, [activeAgentId]);
+  // A view kept for this graph, put back instead of a fresh frame. True when there was one.
+  const viewKeyRef = useRef(layoutId);
+  viewKeyRef.current = layoutId;
+  const restoreView = (): boolean => {
+    const saved = savedViews.get(viewKeyRef.current);
+    const inst = rf.current;
+    if (!saved || !inst) return false;
+    inst.setViewport(saved);
+    setZoom(saved.zoom);
+    userMoved.current = true;
+    setFramed(true);
+    return true;
+  };
 
-  // Before paint, so a new agent's graph is never drawn once in the last one's frame.
+  // Before paint, so a new agent's graph is never drawn once in the last one's frame. A different
+  // graph — another agent, another version — is a new view rather than a new look at the old one, so
+  // it releases the latch, and takes the view it was left at if it has one.
+  const shownTopology = useRef<string | null>(null);
   useLayoutEffect(() => {
+    if (shownTopology.current !== topologyKey && rf.current) {
+      shownTopology.current = topologyKey;
+      userMoved.current = false;
+      if (restoreView()) return;
+    }
     if (userMoved.current) return;
     frameGraph();
   // ...and when the version pill comes or goes, which changes how much of the top is covered.
@@ -1588,7 +1614,8 @@ export function GraphView() {
         edgeTypes={edgeTypes}
         onInit={(inst) => {
           rf.current = inst;
-          frameGraph();
+          shownTopology.current = topologyKey;
+          if (!restoreView()) frameGraph();
         }}
         // onMove, not onMoveStart: panning is a drag gesture, and its START fires on any
         // mousedown on the canvas — so latching there would have counted an ordinary click
@@ -1604,7 +1631,12 @@ export function GraphView() {
         minZoom={MIN_ZOOM}
         maxZoom={MAX_ZOOM}
         // The zoom the bar shows and its limits disable at — read when a move settles, ours or theirs.
-        onMoveEnd={(_, vp) => setZoom(vp.zoom)}
+        onMoveEnd={(_, vp) => {
+          setZoom(vp.zoom);
+          // Kept while it is somebody's own view; a frame of ours is not worth keeping.
+          if (userMoved.current) savedViews.set(viewKeyRef.current, vp);
+          else savedViews.delete(viewKeyRef.current);
+        }}
         // A COLUMN SCROLLS. Two fingers on a trackpad move down a long agent the way they move
         // down a page; a pinch, or the controls, zoom.
         panOnScroll
