@@ -186,12 +186,20 @@ export function FindControl({
   const inputRef = useRef<HTMLInputElement>(null);
   const hits = open ? find(query) : [];
 
+  // A ⌘F SINCE THIS MOUNTED, not a ⌘F ever. The signal lives in GraphView and stays above zero, and
+  // this control remounts whenever the canvas gives way to a loading state — an agent switch does
+  // that — so reading the value reopened Find after every switch, caret in the field, taking the
+  // keystrokes meant for somewhere else.
+  const seenSignal = useRef(openSignal);
   useEffect(() => {
-    if (openSignal > 0) setOpen(true);
+    if (openSignal === seenSignal.current) return;
+    seenSignal.current = openSignal;
+    setOpen(true);
+    inputRef.current?.focus();
   }, [openSignal]);
   useEffect(() => {
     if (open) inputRef.current?.focus();
-  }, [open, openSignal]);
+  }, [open]);
 
   const go = (i: number) => {
     if (hits.length === 0) return;
