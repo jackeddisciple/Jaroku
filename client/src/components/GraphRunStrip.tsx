@@ -39,7 +39,7 @@ export function GraphRunStrip({
     <div
       role="toolbar"
       aria-label="Step through the run"
-      className="graph-glass absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-card px-1 py-1 shadow-floating backdrop-blur-xl backdrop-saturate-150"
+      className="graph-glass absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-card px-1 py-1 shadow-floating backdrop-blur-md backdrop-saturate-150"
     >
       <ToolButton label="First step" onClick={() => onAt(0)} disabled={i <= 0}>
         <Icon.graphControl.first size={ICON.sm} />

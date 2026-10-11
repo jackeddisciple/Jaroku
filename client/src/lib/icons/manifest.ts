@@ -452,6 +452,11 @@ export const MANIFEST = {
     copyImage: "CopyIcon",
     savePng: "PngIcon",
     saveSvg: "SvgIcon",
+    // The view: closer, further, and the whole graph framed again. The same three shapes React Flow's
+    // own zoom box drew, in this set's stroke, now that they live in the toolbar with the rest.
+    zoomIn: "PlusSignIcon",
+    zoomOut: "MinusSignIcon",
+    fit: "FullScreenIcon",
   },
 
   // ── Graph nodes ───────────────────────────────────────────────────────────

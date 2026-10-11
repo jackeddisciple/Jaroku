@@ -24,8 +24,6 @@ import {
   ReactFlow,
   Background,
   BackgroundVariant,
-  ControlButton,
-  Controls,
   MiniMap,
   Handle,
   MarkerType,
@@ -1045,6 +1043,8 @@ export function GraphView() {
     setViewport: (v: { x: number; y: number; zoom: number }, o?: { duration?: number }) => void;
     getViewport: () => { x: number; y: number; zoom: number };
     setCenter: (x: number, y: number, o?: { zoom?: number; duration?: number }) => void;
+    zoomIn: (o?: { duration?: number }) => void;
+    zoomOut: (o?: { duration?: number }) => void;
   } | null>(null);
   const userMoved = useRef(false);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -1466,30 +1466,6 @@ export function GraphView() {
         {/* n8n's DOTTED CANVAS, and visibly so: the dots were the page's own chrome tone, which on
             this background was a grid nobody could see. */}
         <Background variant={BackgroundVariant.Dots} gap={20} size={1.6} color={TEXT.disabled} />
-        <Controls
-          showInteractive={false}
-          className="graph-glass !rounded-card !shadow-floating !backdrop-blur-xl !backdrop-saturate-150"
-          // Fit means "frame it for me again": the same framing the canvas opened with, which
-          // counts the loop lanes and the overlays React Flow's own fit does not, and refitting
-          // resumes on resize.
-          onFitView={() => {
-            userMoved.current = false;
-            requestAnimationFrame(frameGraph);
-          }}
-        >
-          {moved && (
-            // Only once something has been moved: there is nothing to reset before then.
-            // React Flow's controls fill every svg, which floods a stroke mark; this one keeps its lines.
-            <ControlButton
-              onClick={resetLayout}
-              title="Reset layout"
-              aria-label="Reset layout"
-              className="[&_svg]:!fill-none [&_svg]:!max-h-[14px] [&_svg]:!max-w-[14px]"
-            >
-              <Icon.graph.resetLayout size={ICON.sm} />
-            </ControlButton>
-          )}
-        </Controls>
         {showMinimap && (
           <MiniMap
             pannable
@@ -1542,6 +1518,44 @@ export function GraphView() {
         />
         <ToolDivider />
         <ExportControl onExport={(kind) => void exportGraph(kind)} />
+        <ToolDivider />
+        {/* THE VIEW, IN THE SAME BAR as everything else rather than in React Flow's own box in the
+            corner: one surface for every control on the canvas. A zoom is the user driving, so it
+            latches as a pan does and a resize stops refitting over it. Fit releases the latch and
+            frames it the way the canvas opened, loop lanes and overlays counted. */}
+        <ToolButton
+          label="Zoom in"
+          onClick={() => {
+            userMoved.current = true;
+            rf.current?.zoomIn({ duration: REDUCED_MOTION ? 0 : 200 });
+          }}
+        >
+          <Icon.graphControl.zoomIn size={ICON.sm} />
+        </ToolButton>
+        <ToolButton
+          label="Zoom out"
+          onClick={() => {
+            userMoved.current = true;
+            rf.current?.zoomOut({ duration: REDUCED_MOTION ? 0 : 200 });
+          }}
+        >
+          <Icon.graphControl.zoomOut size={ICON.sm} />
+        </ToolButton>
+        <ToolButton
+          label="Fit the graph"
+          onClick={() => {
+            userMoved.current = false;
+            requestAnimationFrame(frameGraph);
+          }}
+        >
+          <Icon.graphControl.fit size={ICON.sm} />
+        </ToolButton>
+        {moved && (
+          // Only once something has been moved: there is nothing to reset before then.
+          <ToolButton label="Reset layout" onClick={resetLayout}>
+            <Icon.graph.resetLayout size={ICON.sm} />
+          </ToolButton>
+        )}
       </GraphToolbar>
       {selected && flow && (() => {
         const spec = flow.nodes.find((n) => n.id === selected.id);

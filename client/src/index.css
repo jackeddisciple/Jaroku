@@ -222,33 +222,37 @@
        and figure on it are unchanged. */
     --sidebar-material-runs: rgba(219, 39, 119, 0.09);
 
-    /* ── The graph's floating controls: matte glass ────────────────────────────
-       UNLIKE THE SIDEBAR, THESE HAVE SOMETHING BEHIND THEM: the dot grid and whatever node has
-       been panned under the toolbar. So the blur is real here, and it is a Tailwind utility at the
-       call site (`backdrop-blur-xl backdrop-saturate-150`); what this block adds is what makes the
-       glass MATTE rather than clear — a milky tint, a grain that catches the light, and a sheen
-       that falls from the top edge and is gone before the middle. Light only: nothing here
-       darkens what is behind it, so a node under the toolbar reads as further away, not shadowed.
+    /* ── The graph's floating controls: liquid glass ───────────────────────────
+       UNLIKE THE SIDEBAR, THESE HAVE SOMETHING BEHIND THEM: the dot grid, and whatever node has been
+       panned under the toolbar. So the blur is real, and it is a Tailwind utility at the call site
+       (`backdrop-blur-md backdrop-saturate-150`). What this block adds is what makes the blur read as
+       a piece of glass rather than a blurred hole: a light that falls on it from the top left and
+       catches its rim there, a glow pooled inside its lower edge as light through a lens has, and a
+       grain faint enough to take the gloss off without turning it to frost.
 
-       The tint is the elevated surface at a little over half, which is where the dots stop
-       resolving as dots and become a tone. Raise it and the glass reads as plastic; lower it and
-       the controls read as floating on nothing. */
-    --graph-glass-tint: rgba(255, 255, 255, 0.4);
-    --graph-glass-sheen: rgba(255, 255, 255, 0.5);
-    /* The rim catches the light all round, which is the "liquid" half: a bright edge, not a grey
-       border. On the canvas's off-white it is the shadow under it that draws the outline. */
-    --graph-glass-rim: rgba(255, 255, 255, 0.85);
-    /* AND THE GLASS HAS A THICKNESS: its top inner edge lit, its foot a shade under. Drawn inside
-       the rim by `::after`, because the drop shadow under it is the call site's `shadow-floating`. */
-    --graph-glass-edge-light: rgba(255, 255, 255, 0.95);
-    --graph-glass-edge-shade: rgba(29, 29, 27, 0.05);
-    /* A control under the pointer is the glass pressed a little darker, as ink — a white or grey
-       fill would punch an opaque patch through it. */
+       CLEAR, NOT MILKY. The tint is white at under a quarter, so a node under the toolbar shows as
+       its own colour, softened, rather than vanishing behind a sheet. Raise it and the glass goes
+       back to frosted plastic; lower it and the icons lose their ground. Light only: nothing here
+       darkens what is behind it except the rim's one shaded pixel at the foot. */
+    --graph-glass-tint: rgba(255, 255, 255, 0.24);
+    --graph-glass-sheen: rgba(255, 255, 255, 0.55);
+    --graph-glass-glow: rgba(255, 255, 255, 0.4);
+    /* The rim, a gradient round the edge: lit where the light lands, thin along the sides, and
+       catching a little again at the far corner, as a curved edge does. */
+    --graph-glass-rim-lit: rgba(255, 255, 255, 0.95);
+    --graph-glass-rim-side: rgba(255, 255, 255, 0.3);
+    --graph-glass-rim-far: rgba(255, 255, 255, 0.65);
+    /* AND THE GLASS HAS A THICKNESS: its top inner edge lit, its foot a shade under, and a soft
+       light all round inside. Drawn by `::after`, because the drop shadow is the call site's
+       `shadow-floating`. */
+    --graph-glass-edge-light: rgba(255, 255, 255, 0.9);
+    --graph-glass-edge-shade: rgba(29, 29, 27, 0.06);
+    --graph-glass-inner-glow: rgba(255, 255, 255, 0.35);
+    /* A control under the pointer, or pressed, is the glass pressed a little darker, as ink: the
+       buttons' opaque grey would punch a solid patch through it. */
     --graph-glass-hover: rgba(29, 29, 27, 0.06);
-    --graph-glass-divider: rgba(29, 29, 27, 0.07);
-    /* Stronger than the sidebar's grain, because it sits on a lighter, smaller surface and is
-       what turns gloss into matte. */
-    --graph-glass-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url%28%23g%29' opacity='0.07'/%3E%3C/svg%3E");
+    --graph-glass-press: rgba(29, 29, 27, 0.1);
+    --graph-glass-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url%28%23g%29' opacity='0.04'/%3E%3C/svg%3E");
   }
   html,
   body,
@@ -515,35 +519,38 @@
     font-family: "Geist Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   }
 
-  /* React Flow chrome — recolour the built-in controls/minimap onto the light system. These are
-     the elements a class cannot reach, which is the whole reason the tokens above are published. */
-  .react-flow__controls-button {
-    background: var(--color-bg-surface);
-    border: none;
-    border-bottom: 1px solid var(--color-bg-active);
-    color: var(--color-text-secondary);
-  }
-  .react-flow__controls-button:hover {
-    background: var(--color-bg-hover);
-    color: var(--color-text-primary);
-  }
-  .react-flow__controls-button svg {
-    fill: currentColor;
-  }
-
-  /* THE GRAPH'S GLASS — the toolbar, the run strip, and the zoom controls. Tokens in `:root`. The
-     blur is the call site's utility; this is the tint, the grain and the light. */
+  /* THE GRAPH'S GLASS — the toolbar and the run strip. Tokens in `:root`. The blur is the call
+     site's utility; this is the tint, the light and the rim. Every glass surface is positioned
+     (absolute), which is what its two pseudo-elements are laid over. */
   .graph-glass {
     background-color: var(--graph-glass-tint);
     background-image:
       var(--graph-glass-grain),
-      linear-gradient(to bottom, var(--graph-glass-sheen), transparent 55%);
-    background-size: 120px 120px, 100% 100%;
-    background-repeat: repeat, no-repeat;
-    border: 1px solid var(--graph-glass-rim);
+      linear-gradient(165deg, var(--graph-glass-sheen), transparent 50%),
+      radial-gradient(120% 140% at 50% 125%, var(--graph-glass-glow), transparent 60%);
+    background-size: 120px 120px, 100% 100%, 100% 100%;
+    background-repeat: repeat, no-repeat, no-repeat;
   }
-  /* Over the controls, never in their way: no fill, no pointer. Every glass surface is positioned
-     (absolute, or React Flow's panel), which is what this box is laid over. */
+  /* The rim: a gradient one pixel wide, cut out of a full box by a mask so only the edge shows. */
+  .graph-glass::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    padding: 1px;
+    border-radius: inherit;
+    background: linear-gradient(
+      150deg,
+      var(--graph-glass-rim-lit),
+      var(--graph-glass-rim-side) 38%,
+      var(--graph-glass-rim-side) 66%,
+      var(--graph-glass-rim-far)
+    );
+    -webkit-mask: linear-gradient(black 0 0) content-box, linear-gradient(black 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+  /* The thickness, inside the rim. No fill and no pointer, so it never covers a control. */
   .graph-glass::after {
     content: "";
     position: absolute;
@@ -551,21 +558,19 @@
     border-radius: inherit;
     box-shadow:
       inset 0 1px 0 var(--graph-glass-edge-light),
-      inset 0 -1px 0 var(--graph-glass-edge-shade);
+      inset 0 -1px 1px var(--graph-glass-edge-shade),
+      inset 0 0 10px var(--graph-glass-inner-glow);
     pointer-events: none;
   }
-  /* The zoom controls' buttons paint white tiles of their own; on glass they are clear, with the
-     glass pressed darker under the pointer. Scoped under the canvas so it outranks React Flow's own
-     stylesheet, which loads after this one and would otherwise win the tie. */
-  .graph-canvas .react-flow__controls {
-    overflow: hidden;
+  /* The controls on it, hovered and pressed, as veils. Specific enough to outrank `iconBtn`'s
+     opaque `hover:bg-active` and a pressed button's `bg-active`. */
+  .graph-glass button:hover,
+  .graph-glass button[aria-expanded="true"] {
+    background-color: var(--graph-glass-hover);
   }
-  .graph-canvas .react-flow__controls-button {
-    background: transparent;
-    border-bottom-color: var(--graph-glass-divider);
-  }
-  .graph-canvas .react-flow__controls-button:hover {
-    background: var(--graph-glass-hover);
+  .graph-glass button:active,
+  .graph-glass button[aria-pressed="true"] {
+    background-color: var(--graph-glass-press);
   }
   /* The mask dims what is OUTSIDE the viewport rectangle, so on a light canvas it has to be the
      canvas itself at an alpha rather than ink — a dark wash here would invert the minimap's
