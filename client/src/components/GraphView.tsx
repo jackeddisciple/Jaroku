@@ -975,6 +975,9 @@ export function GraphView() {
     setViewing(null);
     setComparing(false);
   }, [activeAgentId]);
+  // The pill under the toolbar that says an earlier version is on screen, and how much room it takes.
+  const pillRef = useRef<HTMLDivElement>(null);
+  const [pillH, setPillH] = useState(0);
   const pickVersion = (v: number | null) => {
     setViewing(v);
     if (v === null) setComparing(false);
@@ -1146,8 +1149,9 @@ export function GraphView() {
 
   // Read by the ResizeObserver below, which is registered once and must frame against what is
   // true when it fires rather than when it was created.
-  const live = useRef<{ covered: number; flow: FlowLayout | null; positions: Positions; strip: boolean }>({ covered, flow, positions, strip: false });
-  live.current = { covered, flow, positions, strip: stripShown };
+  // `top` is what floats over the canvas's top edge: the toolbar, and the version pill when there is one.
+  const live = useRef<{ covered: number; flow: FlowLayout | null; positions: Positions; strip: boolean; top: number }>({ covered, flow, positions, strip: false, top: TOOLBAR_H });
+  live.current = { covered, flow, positions, strip: stripShown, top: TOOLBAR_H + pillH };
 
   // NOT SHOWN UNTIL IT IS FRAMED. React Flow paints its first frame at 100% from the origin, and
   // the framing lands a frame later — so the graph appeared in the corner and jumped to the middle.
@@ -1157,7 +1161,7 @@ export function GraphView() {
   const frameGraph = () => {
     const el = canvasRef.current;
     const inst = rf.current;
-    const { covered: hidden, flow: laid, positions: at, strip } = live.current;
+    const { covered: hidden, flow: laid, positions: at, strip, top } = live.current;
     if (!el || !inst || !laid || el.clientWidth === 0) return;
     // A moved arrangement is framed by where its nodes now are, not by the layout's own box.
     const placed = laid.nodes.map((n) => ({ ...n, ...(at[n.id] ?? {}) }));
@@ -1173,10 +1177,10 @@ export function GraphView() {
     // ...and above the run strip, when there is one along the bottom.
     const f = frameFor(
       { width: box.maxX - box.minX, height: box.maxY - box.minY },
-      { width: el.clientWidth, height: el.clientHeight - TOOLBAR_H - (strip ? TOOLBAR_H : 0) },
+      { width: el.clientWidth, height: el.clientHeight - top - (strip ? TOOLBAR_H : 0) },
       hidden,
     );
-    inst.setViewport({ x: f.x - box.minX * f.zoom, y: TOOLBAR_H + f.y - box.minY * f.zoom, zoom: f.zoom });
+    inst.setViewport({ x: f.x - box.minX * f.zoom, y: top + f.y - box.minY * f.zoom, zoom: f.zoom });
     setFramed(true);
   };
 
@@ -1193,7 +1197,8 @@ export function GraphView() {
   useLayoutEffect(() => {
     if (userMoved.current) return;
     frameGraph();
-  }, [topologyKey, covered]);
+  // ...and when the version pill comes or goes, which changes how much of the top is covered.
+  }, [topologyKey, covered, pillH]);
 
   useEffect(() => {
     const el = canvasRef.current;
@@ -1406,9 +1411,7 @@ export function GraphView() {
   // of its own under it. The inspector starts below whichever is lower.
   const barRef = useRef<HTMLDivElement>(null);
   const [barBottom, setBarBottom] = useState(TOOLBAR_H + 4);
-  // ...and the version pill under it, while an earlier version is on screen.
-  const pillRef = useRef<HTMLDivElement>(null);
-  const [pillH, setPillH] = useState(0);
+
   useLayoutEffect(() => {
     const bar = barRef.current;
     if (!bar) return;
