@@ -235,6 +235,10 @@ export function FindControl({
           }}
           placeholder="Find a step"
           aria-label="Find a step"
+          // Step names are snake_case identifiers: no correction bubble, no capital first letter.
+          spellCheck={false}
+          autoCorrect="off"
+          autoCapitalize="off"
           className="w-28 bg-transparent text-caption text-ink placeholder:text-faint focus:outline-none"
         />
         {query.trim() && (
