@@ -33,7 +33,9 @@ const LANGS = ["python", "json", "markdown", "toml"] as const;
 // still means now that it is not.
 const THEME = "vitesse-light";
 
-type Highlighter = { codeToHtml: (code: string, opts: { lang: string; theme: string }) => string };
+/** One coloured run of a line, as shiki tokenises it. `fontStyle` is shiki's bit set: 1 italic, 2 bold, 4 underline. */
+type Token = { content: string; color?: string; fontStyle?: number };
+type Highlighter = { codeToTokens: (code: string, opts: { lang: string; theme: string }) => { tokens: Token[][] } };
 
 let highlighterPromise: Promise<Highlighter> | null = null;
 
@@ -52,6 +54,27 @@ function langFor(path: string): string {
   if (path.endsWith(".md")) return "markdown";
   if (path.endsWith(".toml")) return "toml";
   return "text";
+}
+
+/** The file as rows of tokens: highlighted when shiki has answered, one plain run per line before then. */
+function rowsOf(content: string, tokens: Token[][] | null): Token[][] {
+  return tokens ?? content.split("\n").map((line) => (line ? [{ content: line }] : []));
+}
+
+/** How many digits the widest line number has, so the gutter does not change width as it counts. */
+function gutterDigits(content: string): number {
+  return String(content.split("\n").length).length;
+}
+
+function tokenStyle(t: Token): React.CSSProperties | undefined {
+  if (!t.color && !t.fontStyle) return undefined;
+  const style = t.fontStyle ?? 0;
+  return {
+    color: t.color,
+    fontStyle: style & 1 ? "italic" : undefined,
+    fontWeight: style & 2 ? 600 : undefined,
+    textDecoration: style & 4 ? "underline" : undefined,
+  };
 }
 
 // Slim file rail — the switcher that used to be BuildPane's FileTree before the center
@@ -110,7 +133,7 @@ export function CodeViewer() {
   const activeFile = useBuildStore((s) => s.activeFile);
   const file = useBuildStore((s) => (s.activeFile ? s.files[s.activeFile] : undefined));
   const agentId = useBuildStore((s) => s.activeAgentId);
-  const [html, setHtml] = useState<string | null>(null);
+  const [tokens, setTokens] = useState<Token[][] | null>(null);
   const [copied, setCopied] = useState(false);
   const [wrapped, setWrapped] = useState(false);
 
@@ -136,8 +159,8 @@ export function CodeViewer() {
     setBand({ top: row.offsetTop, height: row.offsetHeight });
     const t = window.setTimeout(() => setBand(null), 1200);
     return () => window.clearTimeout(t);
-    // `html` is a dependency because the rows move when highlighting lands.
-  }, [codeLine?.nonce, activeFile, html, content]);
+    // `tokens` is a dependency because the rows are drawn afresh when highlighting lands.
+  }, [codeLine?.nonce, activeFile, tokens, content]);
 
   // §B.3. Asked only for a file that has finished arriving: a streaming file is one a model is
   // halfway through writing, and annotating it would put a squiggle under every incomplete
@@ -149,16 +172,16 @@ export function CodeViewer() {
   useEffect(() => {
     // Only highlight finished files in a supported language.
     if (!complete || lang === "text" || !content) {
-      setHtml(null);
+      setTokens(null);
       return;
     }
     let cancelled = false;
     getHighlighter()
       .then((h) => {
-        if (!cancelled) setHtml(h.codeToHtml(content, { lang, theme: THEME }));
+        if (!cancelled) setTokens(h.codeToTokens(content, { lang, theme: THEME }).tokens);
       })
       .catch(() => {
-        if (!cancelled) setHtml(null); // fall back to plain text; never blank the pane
+        if (!cancelled) setTokens(null); // fall back to plain text; never blank the pane
       });
     return () => {
       cancelled = true;
@@ -239,29 +262,39 @@ export function CodeViewer() {
                 <ChevronDownIcon size={ICON.xs} />
               </button>
             </div>
-            <div className="relative flex min-w-0 text-caption leading-[1.5]">
-              {band && (
-                <div
-                  className="pointer-events-none absolute inset-x-0 bg-active transition-opacity duration-fast motion-reduce:transition-none"
-                  style={{ top: band.top, height: band.height }}
-                  aria-hidden
-                />
-              )}
-              <div
-                ref={gutterRef}
-                className="shrink-0 select-none border-r border-hair px-2 py-3 text-right font-mono text-tiny leading-[1.5] text-faint"
-                aria-hidden
-              >
-                {content.split("\n").map((_, i) => (
-                  <div key={i} data-line={i + 1}>{i + 1}</div>
-                ))}
-              </div>
-              <div className={`min-w-0 flex-1 overflow-x-auto px-3 py-3 ${wrapped ? "whitespace-pre-wrap" : ""}`}>
-                {html ? (
-                  <div className="shiki-host [&_pre]:!bg-transparent" dangerouslySetInnerHTML={{ __html: html }} />
-                ) : (
-                  <pre className={wrapped ? "whitespace-pre-wrap text-ink" : "whitespace-pre text-ink"}>{content}</pre>
+            {/* ONE ROW PER LINE, ITS NUMBER AND ITS CODE TOGETHER. The gutter used to be a column of its
+                own beside the code, in a smaller face: each of its rows was 16.5px against the code's 18,
+                so the numbers ran ahead of the lines they named — `def score_candidate` on line 92 sat
+                beside a 103 — and a soft-wrapped line took two rows of code and one number. Every
+                "line N" in the app (a graph node's source, a diagnostic) was read against those numbers,
+                and the scroll to a line landed on the gutter's row, eleven lines past the code. In one
+                row the line's height is the row's, whatever wraps. */}
+            <div className="min-w-0 overflow-x-auto py-3 font-mono text-caption leading-[1.5]">
+              <div ref={gutterRef} className={`relative ${wrapped ? "" : "w-max min-w-full"}`}>
+                {band && (
+                  <div
+                    className="pointer-events-none absolute inset-x-0 bg-active transition-opacity duration-fast motion-reduce:transition-none"
+                    style={{ top: band.top, height: band.height }}
+                    aria-hidden
+                  />
                 )}
+                {rowsOf(content, tokens).map((row, i) => (
+                  <div key={i} data-line={i + 1} className="relative flex">
+                    {/* The number in the code's own size and leading, so its baseline is the line's. */}
+                    <span
+                      className="sticky left-0 shrink-0 select-none border-r border-hair bg-panel px-2 text-right text-faint"
+                      style={{ minWidth: `calc(${gutterDigits(content)}ch + 1rem + 1px)` }}
+                      aria-hidden
+                    >
+                      {i + 1}
+                    </span>
+                    <span className={`min-w-0 flex-1 px-3 text-ink ${wrapped ? "whitespace-pre-wrap break-words" : "whitespace-pre"}`}>
+                      {row.map((t, j) => (
+                        <span key={j} style={tokenStyle(t)}>{t.content}</span>
+                      ))}
+                    </span>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
