@@ -391,6 +391,12 @@ export const MANIFEST = {
     // The details drawer's walk through the steps, the same order J/K take.
     prevStep: "ArrowUp01Icon",
     nextStep: "ArrowDown01Icon",
+    // The run's figures, each beside its own mark (the product owner's call, 2026-10-12).
+    metricDuration: "Clock01Icon",
+    metricTokens: "TextFontIcon",
+    metricCost: "Coins01Icon",
+    metricSteps: "Layers01Icon",
+    metricCalls: "AiBrain02Icon",
   },
 
   // ── §5 Global ─────────────────────────────────────────────────────────────
