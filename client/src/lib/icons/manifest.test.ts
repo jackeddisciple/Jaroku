@@ -73,7 +73,8 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // 269 WITH THE TRACE'S OUTCOME PILL: finished, failed, running, stopped and paused.
   // 279 WITH THE TRACE'S STEP MARKS AND ITS OWN CONTROLS: five kinds of step, fold, details, search,
   // close and the empty trace.
-  check("279 registry keys", entries.length === 279, `${entries.length}`);
+  // 281 WITH THE TRAY'S STEP PILL AND ITS CLEAR.
+  check("281 registry keys", entries.length === 281, `${entries.length}`);
   const names = new Set(entries.map((e) => e.export));
   // 104 from icons_integration's appendix, plus D8's 13 — the composer glyphs that had to move
   // here when `@hugeicons/react` came out. See the note at the top of `registry.ts`.
@@ -106,7 +107,8 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // 200 WITH `PlusSignIcon`, `MinusSignIcon` AND `FullScreenIcon`, for the zoom controls.
   // 201 WITH `Loading03Icon`, for a running run's pill; the other four outcomes reuse marks already here.
   // 204 WITH `GitBranchIcon`, `CircleIcon` AND `Activity01Icon`; the rest of the trace's marks were here.
-  check("204 distinct marks", names.size === 204, `${names.size}`);
+  // 205 WITH `WorkflowCircle01Icon`, for that pill; its clear is `XIcon`, already here.
+  check("205 distinct marks", names.size === 205, `${names.size}`);
   check("no key is declared twice", new Set(entries.map((e) => e.key)).size === entries.length);
 }
 

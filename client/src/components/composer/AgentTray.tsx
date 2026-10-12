@@ -53,11 +53,44 @@ const RECENT_SHOWN = 2;
 /** How many matches a search lists. Past that the query is too loose to be worth scrolling. */
 const MATCHES_SHOWN = 8;
 
+/**
+ * THE TRACE STEP THE COMPOSER IS ASKING ABOUT, beside the agent it belongs to — the product owner's
+ * design, 2026-10-12. It was a chip in a row of its own above the composer, a box that came and went
+ * with every click in the trace; here it is a soft violet pill in the tray that already says what the
+ * composer works on, with the step's number and nothing else. Hovering swaps its mark for ×, in place,
+ * so nothing in the tray moves, and pressing it takes the step out of the composer.
+ */
+function StepPill({ step, onClear }: { step: { seq: number; name: string }; onClear: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClear}
+      aria-label={`Remove step ${step.seq} from the composer`}
+      title={`Asking about step ${step.seq}, ${step.name} — press to remove it`}
+      data-step-pill
+      className="group/step inline-flex h-5 shrink-0 items-center gap-1 rounded-pill bg-bespoke/15 px-1.5 text-tiny font-medium tabular-nums text-bespoke
+        transition-colors duration-fast hover:bg-bespoke/20 focus-visible:outline-none focus-visible:shadow-focusring"
+    >
+      <span className="relative inline-flex size-3 shrink-0 items-center justify-center" aria-hidden>
+        <span className="inline-flex transition-opacity duration-fast group-hover/step:opacity-0 group-focus-visible/step:opacity-0">
+          <Icon.composer.stepContext size={ICON.xs} />
+        </span>
+        <span className="absolute inset-0 inline-flex items-center justify-center opacity-0 transition-opacity duration-fast group-hover/step:opacity-100 group-focus-visible/step:opacity-100">
+          <Icon.composer.clearStep size={ICON.xs} />
+        </span>
+      </span>
+      {step.seq}
+    </button>
+  );
+}
+
 export function AgentTray({
   agent,
   agents,
   operating,
   connectors,
+  step,
+  onClearStep,
 }: {
   /** The agent the composer is working on, if one is chosen. */
   agent: AgentSummary | undefined;
@@ -71,6 +104,10 @@ export function AgentTray({
     onToggle: (id: string) => void;
     disabled?: boolean;
   };
+  /** The trace step the composer is asking about, if one is selected. */
+  step?: { seq: number; name: string } | null;
+  /** Takes that step out of the composer. */
+  onClearStep?: () => void;
 }) {
   // Pushed to the tray's right end by `ml-auto`, whatever the left holds.
   const picker = connectors && (
@@ -85,6 +122,7 @@ export function AgentTray({
           <Icon.composer.tray size={ICON.sm} />
         </span>
         <Truncate>{agent.name}</Truncate>
+        {step && onClearStep && <StepPill step={step} onClear={onClearStep} />}
         {!operating && (
           <button
             type="button"
@@ -93,8 +131,11 @@ export function AgentTray({
             title={`Remove ${agent.name} — the next message plans a new agent`}
             // Revealed by hovering the tray, and by keyboard focus, so it is never a control that
             // exists only for a pointer.
+            // NOT WHILE THE STEP PILL IS UNDER THE POINTER: its own × is showing then, and a second ×
+            // beside it — one that removes the whole agent — is a mis-click waiting to happen.
             className="inline-flex size-5 shrink-0 items-center justify-center rounded-control text-muted opacity-0
               transition-opacity duration-fast hover:bg-grip/60 hover:text-ink group-hover:opacity-100
+              [.group:has([data-step-pill]:hover)_&]:opacity-0
               focus-visible:opacity-100 focus-visible:outline-none focus-visible:shadow-focusring"
           >
             <XIcon size={ICON.xs} />

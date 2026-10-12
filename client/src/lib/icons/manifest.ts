@@ -234,6 +234,10 @@ export const MANIFEST = {
     // The effort slider's way back to Medium. An undo — "put it back how it was" — not a refresh,
     // which D3 keeps for "re-fetch the list I am looking at".
     effortReset: "Undo03Icon",
+    // The trace step the composer is asking about, as a pill beside the agent in the tray — and the
+    // mark that takes it out again, shown in its place on hover (the product owner's call, 2026-10-12).
+    stepContext: "WorkflowCircle01Icon",
+    clearStep: "XIcon",
   },
 
   // ── D8 · the composer's ⊕ menu, five sources ──────────────────────────────

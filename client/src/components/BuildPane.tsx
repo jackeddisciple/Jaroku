@@ -2098,6 +2098,13 @@ export function BuildPane({
     : selectedStep
       ? `step #${selectedStep.seq} · ${selectedStep.type}${selectedStep.error ? " · error" : ""}`
       : null;
+  // WHERE THE CONTEXT IS SHOWN. A graph node keeps its chip above the composer; a trace step is shown
+  // as a pill in the tray beside the agent (AgentTray's StepPill) — the product owner's call on
+  // 2026-10-12, after a click in the trace kept opening a row above the composer. Same rule as
+  // before for both: only in Chat, and only when there is an agent to ask about.
+  const contextShown = composerMode === "chat" && Boolean(activeAgentId);
+  const nodeChip = contextShown && selectedNodeId ? contextLabel : null;
+  const stepPill = contextShown && !selectedNodeId && selectedStep ? { seq: selectedStep.seq, name: selectedStep.name } : null;
 
   // How many files generation has started writing. Subscribed to purely so the scroll effect
   // below has something that changes while they stream — see there for why.
@@ -3406,7 +3413,7 @@ export function BuildPane({
             status. On an empty operate composer none of those is true, so the destination label was
             absent at exactly the moment somebody is deciding what to type, which is the one moment
             it exists for. */}
-        {(contextLabel || text.trim() || moment.status || operating) && (
+        {(nodeChip || text.trim() || moment.status || operating) && (
           <div className="mb-2 flex items-center gap-2 text-tiny">
             {/* What the app is doing. The routing hint on the right says where a message would go;
                 this says what is going on regardless of whether anything has been typed. */}
@@ -3420,9 +3427,9 @@ export function BuildPane({
                 agent to ask about. A step stays selected across an agent change, and with none
                 selected a typed message plans a new agent — so the chip would be naming a
                 context the composer is about to ignore. */}
-            {composerMode === "chat" && contextLabel && activeAgentId && (
+            {nodeChip && (
               <Chip mono icon={<span className="text-faint"><ChevronRightIcon size={ICON.xs} /></span>}>
-                {contextLabel}
+                {nodeChip}
                 <button
                   onClick={clearContext}
                   className="text-faint transition-colors duration-fast hover:text-ink"
@@ -3498,6 +3505,8 @@ export function BuildPane({
             agent={agent}
             agents={agents}
             operating={operating}
+            step={stepPill}
+            onClearStep={clearContext}
             // The connector picker, only while describing a new agent in Chat — the condition the
             // chips above the composer had, because it is the same selection.
             connectors={composerMode === "chat" && mode === "generate"
