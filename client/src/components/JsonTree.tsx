@@ -17,7 +17,7 @@
 import { useState } from "react";
 
 import { ICON } from "../lib/tokens.ts";
-import { ChevronDownIcon } from "./panelIcons.tsx";
+import { Icon } from "../lib/icons/registry.ts";
 
 /** Characters of a string shown before "show more". */
 const STRING_SHOWN = 320;
@@ -99,7 +99,7 @@ function Branch({ name, value, depth, openDepth }: { name?: string | number; val
         className="-ml-4 flex max-w-full items-baseline gap-0 rounded-xs text-left focus-visible:outline-none focus-visible:shadow-focusring"
       >
         <span className={`inline-flex w-4 shrink-0 justify-center self-center text-faint transition-transform duration-fast ${open ? "" : "-rotate-90"}`} aria-hidden>
-          <ChevronDownIcon size={ICON.badge} />
+          <Icon.trace.fold size={ICON.badge} />
         </span>
         <span className="min-w-0">
           <Key name={name} />

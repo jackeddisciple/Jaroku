@@ -17,6 +17,7 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { extractAgentOutput } from "../lib/agentOutput.ts";
+import { Icon } from "../lib/icons/registry.ts";
 import { errorParts } from "../lib/traceView.ts";
 import { TYPE } from "../lib/tokens.ts";
 import { CANCELLED_BY_USER, useTraceStore } from "../store/traceStore.ts";
@@ -81,7 +82,7 @@ function FinalAnswer({ text }: { text: string }) {
   const setOpen = useTraceStore((s) => s.setAnswerOpen);
   return (
     <section className={SURFACE} aria-label="Final answer">
-      <CollapsibleRegion label="Final answer" open={open} onToggle={() => setOpen(!open)} trailing={<CopyTurn source={text} />}>
+      <CollapsibleRegion label="Final answer" open={open} onToggle={() => setOpen(!open)} trailing={<CopyTurn source={text} />} chevron={Icon.trace.fold}>
         <div className="pb-1">
           <ClampedAnswer text={text} />
         </div>

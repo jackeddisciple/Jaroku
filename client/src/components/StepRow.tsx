@@ -7,11 +7,11 @@
 //
 // NOW THE NAME LEADS AND THE KIND SITS UNDER IT. The step's own name is what somebody scans a trace
 // for, so it is first and in ink; the kind ("LLM call", "Tool call") is the quiet line beneath, and a
-// failure says "failed" there beside the warning mark it always had — never the colour alone. The
+// failure says "failed" there beside a warning mark — never the colour alone. The
 // figures keep their own right-hand column, so they line up down the trace however long a name gets.
 //
-// THE MARKS ARE THE TRACE'S OWN, UNCHANGED — `actionForStep`'s glyph at its size and accent — on a
-// soft tile in the step type's own STEP_TYPE tint. The tile is the row's node on the timeline's line.
+// THE MARKS ARE HUGEICONS, ONE PER KIND OF STEP, in the kind's own STEP_TYPE colour on a tile of the
+// same colour (the product owner's call, 2026-10-12). The tile is the row's node on the timeline's line.
 //
 // A CLICK SELECTS, AND ONLY SELECTS. The step lights its node on the graph and becomes what the
 // composer is talking about, exactly as before — but the details drawer no longer slides over the
@@ -20,11 +20,10 @@
 
 import { useEffect, useRef } from "react";
 
-import { actionForStep } from "../lib/actionIcons.tsx";
 import { fmtCost, fmtDuration, fmtTokens, jsonPretty } from "../lib/format.ts";
-import { Icon } from "../lib/icons/registry.ts";
-import { CATEGORY_LABEL, stepCategory, type VisibleRow } from "../lib/traceView.ts";
-import { ICON, STATUS, STEP_TYPE } from "../lib/tokens.ts";
+import { Icon, type IconComponent } from "../lib/icons/registry.ts";
+import { CATEGORY_LABEL, stepCategory, type StepCategory, type VisibleRow } from "../lib/traceView.ts";
+import { ICON, STATUS, STEP_TYPE, TEXT } from "../lib/tokens.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { agentMcpToolNames } from "../store/mcpStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
@@ -33,23 +32,33 @@ import type { Step } from "../types.ts";
 import { CopyTurn } from "./composer/CopyTurn.tsx";
 import { IconButton } from "./IconButton.tsx";
 import { McpBadge } from "./McpBadge.tsx";
-import { ChevronDownIcon, ChevronRightIcon } from "./panelIcons.tsx";
-import { StatusDot } from "./StatusBadge.tsx";
 
-/** The tile behind a step's mark: its type's own tint, red for a failure, grey for a type we don't know. */
+/** Each kind of step's mark, from the app's Hugeicons set — the product owner's call on 2026-10-12. */
+const STEP_MARK: Record<StepCategory, IconComponent> = {
+  llm: Icon.trace.modelStep,
+  tool: Icon.trace.toolStep,
+  state: Icon.trace.stateStep,
+  route: Icon.trace.routeStep,
+  other: Icon.trace.otherStep,
+};
+
+/**
+ * A tile's ground: the step's own colour, mixed strong enough to read AS that colour. It was the
+ * STEP_TYPE wash — about six percent — which the product owner found too light to see; a fifth of
+ * the colour keeps the mark legible on it and the kinds tellable apart at a glance.
+ */
+export const tileTint = (colour: string): string => `color-mix(in srgb, ${colour} 20%, white)`;
+
+/** The tile behind a step's mark: its kind's colour, red for a failure, grey for a kind we don't know. */
 export function StepTile({ step }: { step: Pick<Step, "type" | "error"> }) {
-  const { Icon: Mark, accent } = actionForStep(step);
-  const known = STEP_TYPE[step.type as keyof typeof STEP_TYPE] as { fg: string; bg: string } | undefined;
+  const Mark = STEP_MARK[stepCategory(step)];
+  const known = STEP_TYPE[step.type as keyof typeof STEP_TYPE] as { fg: string } | undefined;
+  const colour = step.error ? STATUS.error : known ? known.fg : TEXT.muted;
   return (
     <span
       aria-hidden
-      className={`flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-sm ${
-        step.error ? "bg-err/10" : known ? "" : "bg-active text-muted"
-      }`}
-      style={{
-        background: step.error ? undefined : known?.bg,
-        color: step.error ? STATUS.error : known ? accent : undefined,
-      }}
+      className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-sm"
+      style={{ background: tileTint(colour), color: colour }}
     >
       <Mark size={ICON.sm} />
     </span>
@@ -249,7 +258,7 @@ export function StepRow({
         >
           {group && (
             <span className={`transition-transform duration-fast ${row.collapsed ? "-rotate-90" : ""}`}>
-              <ChevronDownIcon size={ICON.xs} />
+              <Icon.trace.fold size={ICON.xs} />
             </span>
           )}
         </span>
@@ -268,14 +277,14 @@ export function StepRow({
           {fold && <span className="shrink-0">· {fold.steps} {fold.steps === 1 ? "step" : "steps"}</span>}
           {/* A FAILURE INSIDE A FOLD IS STILL SAID. Folding a node must never be how an error disappears. */}
           {fold && fold.failed > 0 && !failed && (
-            <span className="flex shrink-0 items-center gap-1 text-err">
-              <StatusDot state="error" size={ICON.xs} title="A step inside this one failed" />
+            <span className="flex shrink-0 items-center gap-1 text-err" title="A step inside this one failed">
+              <Icon.trace.failed size={ICON.xs} />
               {fold.failed} failed inside
             </span>
           )}
           {failed && (
-            <span className="flex shrink-0 items-center gap-1 text-err">
-              <StatusDot state="error" size={ICON.xs} title="This step failed" />
+            <span className="flex shrink-0 items-center gap-1 text-err" title="This step failed">
+              <Icon.trace.failed size={ICON.xs} />
               failed
             </span>
           )}
@@ -334,7 +343,7 @@ export function StepRow({
           }`}
         >
           Details
-          <ChevronRightIcon size={ICON.xs} />
+          <Icon.trace.details size={ICON.xs} />
         </button>
       </span>
     </div>

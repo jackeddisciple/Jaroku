@@ -3,6 +3,7 @@ import type { RunStatus, Step } from "../types.ts";
 import { textFromLlmOutput } from "../lib/agentOutput.ts";
 import { jsonPretty } from "../lib/format.ts";
 import { errorParts } from "../lib/traceView.ts";
+import { Icon } from "../lib/icons/registry.ts";
 import { StateDiff, canDiff } from "./StateDiff.tsx";
 import { TYPE } from "../lib/tokens.ts";
 import { CollapsibleRegion } from "./CollapsibleRegion.tsx";
@@ -38,6 +39,7 @@ function PayloadSection({ label, value, children }: { label: "Input" | "Output";
         label={label}
         open={open}
         onToggle={() => setOpen((v) => !v)}
+        chevron={Icon.trace.fold}
         trailing={empty ? undefined : <CopyTurn source={jsonPretty(value)} label={`Copy ${label.toLowerCase()}`} title={`Copy this step's ${label.toLowerCase()} as captured`} />}
       >
         {empty ? (
@@ -181,6 +183,7 @@ function RawEvent({ step }: { step: Step }) {
         label="Raw event"
         open={open}
         onToggle={() => setOpen((v) => !v)}
+        chevron={Icon.trace.fold}
         trailing={<CopyTurn source={JSON.stringify(step, null, 2)} label="Copy raw event" title="Copy the step as JSON" />}
       >
         <JsonTree value={step} openDepth={1} />

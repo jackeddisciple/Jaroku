@@ -9,7 +9,7 @@ import { TraceHeader } from "./TraceHeader.tsx";
 import { TraceMetrics } from "./TraceMetrics.tsx";
 import { TraceFilters } from "./TraceFilters.tsx";
 import { TraceResult } from "./TraceResult.tsx";
-import { ActivityIcon } from "./panelIcons.tsx";
+import { Icon } from "../lib/icons/registry.ts";
 
 /** Re-render on an interval while `active`. */
 function useTick(active: boolean, ms: number): number {
@@ -259,7 +259,7 @@ export function TraceTimeline() {
             ) : (
               <EmptyState
                 size="line"
-                icon={ActivityIcon}
+                icon={Icon.trace.empty}
                 title={run ? "This run recorded no steps" : "No trace yet"}
                 hint={
                   run

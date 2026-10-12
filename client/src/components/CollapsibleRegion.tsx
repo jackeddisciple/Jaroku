@@ -50,6 +50,7 @@ export function CollapsibleRegion({
    * word twice — it is `aria-hidden` for the same reason every icon beside a word in this app is.
    */
   mark: Mark,
+  chevron: Chevron = ChevronDownIcon,
   children,
 }: {
   label: string;
@@ -58,6 +59,8 @@ export function CollapsibleRegion({
   onToggle: () => void;
   trailing?: React.ReactNode;
   mark?: IconComponent;
+  /** The disclosure's own mark. The trace draws its from the Hugeicons set; everything else keeps this one. */
+  chevron?: (p: { size?: number }) => React.ReactElement;
   children: React.ReactNode;
 }) {
   return (
@@ -96,7 +99,7 @@ export function CollapsibleRegion({
             } ${open ? "" : "-rotate-90"}`}
             aria-hidden
           >
-            <ChevronDownIcon size={ICON.xs} />
+            <Chevron size={ICON.xs} />
           </span>
         </button>
         {trailing && <span className="shrink-0">{trailing}</span>}

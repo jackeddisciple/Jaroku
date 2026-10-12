@@ -18,7 +18,6 @@ import { Icon } from "../lib/icons/registry.ts";
 import { ICON } from "../lib/tokens.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import type { Step } from "../types.ts";
-import { SearchIcon } from "./panelIcons.tsx";
 import { Segmented, type SegmentOption } from "./Segmented.tsx";
 
 const KINDS: { value: StepFilter; text: string; noun: string }[] = [
@@ -71,7 +70,7 @@ export function TraceFilters({ steps }: { steps: readonly Step[] }) {
         <Segmented options={options} value={filter} onChange={setFilter} ariaLabel="Show steps of kind" />
       </div>
       <div className="flex h-8 min-w-[9rem] flex-1 items-center gap-2 rounded-control border border-hair bg-panel px-2 focus-within:border-edge">
-        <span className="shrink-0 text-faint" aria-hidden><SearchIcon size={ICON.xs} /></span>
+        <span className="shrink-0 text-faint" aria-hidden><Icon.trace.search size={ICON.xs} /></span>
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}

@@ -369,6 +369,21 @@ export const MANIFEST = {
     running: "Loading03Icon",
     stopped: "StopIcon",
     paused: "PauseIcon",
+    // What a step of a run was, on its tile in the timeline and the details drawer — the product
+    // owner's call on 2026-10-12, that every mark in the trace comes from this set. A model call
+    // whose provider has a logo wears the logo instead (lib/icons.tsx's ProviderMark); `modelStep`
+    // is for one that does not.
+    stateStep: "DatabaseIcon",
+    toolStep: "Wrench01Icon",
+    routeStep: "GitBranchIcon",
+    modelStep: "AiBrain02Icon",
+    otherStep: "CircleIcon",
+    // The trace's own controls.
+    fold: "ArrowDown01Icon",
+    details: "ArrowRight01Icon",
+    search: "Search01Icon",
+    closeDetails: "XIcon",
+    empty: "Activity01Icon",
   },
 
   // ── §5 Global ─────────────────────────────────────────────────────────────

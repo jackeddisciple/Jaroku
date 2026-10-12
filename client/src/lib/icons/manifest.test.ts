@@ -71,7 +71,9 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // 261 WITH EXPORT: its menu, and copy, PNG and SVG.
   // 264 WITH ZOOM IN, ZOOM OUT AND FIT, moved into the toolbar from React Flow's own box.
   // 269 WITH THE TRACE'S OUTCOME PILL: finished, failed, running, stopped and paused.
-  check("269 registry keys", entries.length === 269, `${entries.length}`);
+  // 279 WITH THE TRACE'S STEP MARKS AND ITS OWN CONTROLS: five kinds of step, fold, details, search,
+  // close and the empty trace.
+  check("279 registry keys", entries.length === 279, `${entries.length}`);
   const names = new Set(entries.map((e) => e.export));
   // 104 from icons_integration's appendix, plus D8's 13 — the composer glyphs that had to move
   // here when `@hugeicons/react` came out. See the note at the top of `registry.ts`.
@@ -103,7 +105,8 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // 197 WITH `ImageDownloadIcon`, `PngIcon` AND `SvgIcon`, for export; its copy is `CopyIcon`.
   // 200 WITH `PlusSignIcon`, `MinusSignIcon` AND `FullScreenIcon`, for the zoom controls.
   // 201 WITH `Loading03Icon`, for a running run's pill; the other four outcomes reuse marks already here.
-  check("201 distinct marks", names.size === 201, `${names.size}`);
+  // 204 WITH `GitBranchIcon`, `CircleIcon` AND `Activity01Icon`; the rest of the trace's marks were here.
+  check("204 distinct marks", names.size === 204, `${names.size}`);
   check("no key is declared twice", new Set(entries.map((e) => e.key)).size === entries.length);
 }
 

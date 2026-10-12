@@ -25,8 +25,6 @@ import { Chip } from "./Chip.tsx";
 import { CollapsibleRegion } from "./CollapsibleRegion.tsx";
 import { CopyTurn } from "./composer/CopyTurn.tsx";
 import { IconButton } from "./IconButton.tsx";
-import { StatusDot } from "./StatusBadge.tsx";
-import { XIcon } from "./panelIcons.tsx";
 import { ErrorView, StepDetail } from "./StepDetail.tsx";
 import { StateBranchEditor } from "./StateBranchEditor.tsx";
 import { McpBadge } from "./McpBadge.tsx";
@@ -58,7 +56,7 @@ function Region({ label, children }: { label: string; children: React.ReactNode 
   const [open, setOpen] = useState(true);
   return (
     <div className="mt-3 first:mt-0">
-      <CollapsibleRegion label={label} open={open} onToggle={() => setOpen((v) => !v)}>
+      <CollapsibleRegion label={label} open={open} onToggle={() => setOpen((v) => !v)} chevron={Icon.trace.fold}>
         <div className="border-t border-hair pt-1">{children}</div>
       </CollapsibleRegion>
     </div>
@@ -204,7 +202,7 @@ export function StepDetailPanel() {
                   title="Close (Esc)"
                   aria-label="Close step details"
                 >
-                  <XIcon size={ICON.sm} />
+                  <Icon.trace.closeDetails size={ICON.sm} />
                 </button>
               </span>
             </div>
@@ -223,7 +221,7 @@ export function StepDetailPanel() {
                   <span className="tabular-nums">#{step.seq}</span>
                   <span className="text-faint">·</span>
                   <span className={`flex items-center gap-1 ${step.error ? "text-err" : "text-ok"}`}>
-                    <StatusDot state={step.error ? "error" : "ok"} />
+                    {step.error ? <Icon.trace.failed size={ICON.xs} /> : <Icon.trace.finished size={ICON.xs} />}
                     {step.error ? "failed" : "completed"}
                   </span>
                 </div>
