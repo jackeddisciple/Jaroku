@@ -157,7 +157,7 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
     <div ref={frame}>
     <div ref={ref} role="tree" aria-label="Steps" className="relative" onKeyDown={onKeyDown}>
       {/* The timeline's line, through the centre of every top-level step's tile. */}
-      <div aria-hidden className="absolute bottom-4 top-4 w-px bg-hair" style={{ left: tileCentre(0) - 0.5 }} />
+      <div aria-hidden className="absolute bottom-4 top-4 w-0.5 bg-grip" style={{ left: tileCentre(0) - 1 }} />
       {rows.map((r) => (
         <StepRow
           key={r.step.id}

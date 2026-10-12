@@ -192,34 +192,49 @@ export interface FoldSummary {
   failed: number;
 }
 
+/** Connector lines' weight: 2px, the strongest neutral border — the product owner's call, 2026-10-12. */
+const LINE = 2;
+
 /**
- * The lines joining this row to the node above it. The root line is drawn once for the whole list;
- * these are the nested ones: a tick from the parent's line to this tile, the parent's line carrying
- * on below unless this is its last step, and every outer line that still has steps to reach.
+ * The lines joining this row to the tree around it, 2px and in `grip`, with a ROUNDED ELBOW where a
+ * step meets the node it ran inside (the product owner's call on 2026-10-12, "more bolder").
+ *
+ *   a node with steps showing  — a line from the bottom of its tile down to the row's bottom edge;
+ *   a step inside a node       — an elbow: down from the row's top at the node's line, curving into
+ *                                its own tile, and straight on down when another step follows it;
+ *   every outer level          — a straight line wherever that level's node has a step still to come.
+ *
+ * EVERY PIECE STOPS AT A TILE'S EDGE. The lines are positioned and the tile is not, so a line drawn
+ * across a tile would paint over it.
  */
 function Connectors({ row }: { row: VisibleRow }) {
-  if (row.depth === 0) return null;
   const lines: React.ReactNode[] = [];
-  // Outer levels: a full-height line wherever that level's ancestor has a sibling still to come.
+  const v = (key: string, x: number, cls: string, style: React.CSSProperties = {}) =>
+    lines.push(<span key={key} aria-hidden className={`absolute w-0.5 bg-grip ${cls}`} style={{ left: x - LINE / 2, ...style }} />);
+
+  // Down out of a node whose steps are on screen.
+  if (row.childIds.length > 0 && !row.collapsed) {
+    v("down", tileCentre(row.depth), "bottom-0", { top: `calc(50% + ${TILE / 2}px)` });
+  }
+  if (row.depth === 0) return <>{lines}</>;
+
+  // Outer levels: a full-height line wherever that level's node has a step still to come.
   for (let level = 1; level < row.depth; level++) {
-    if (row.lastPath[level - 1] === false && level - 1 >= 1) {
-      lines.push(<span key={`v${level}`} className="absolute bottom-0 top-0 w-px bg-hair" style={{ left: tileCentre(level - 1) - 0.5 }} />);
-    }
+    if (row.lastPath[level - 1] === false) v(`v${level}`, tileCentre(level - 1), "bottom-0 top-0");
   }
   const parentX = tileCentre(row.depth - 1);
-  if (row.depth - 1 >= 1) {
-    lines.push(
-      <span key="own" aria-hidden className={`absolute top-0 w-px bg-hair ${row.lastChild ? "bottom-1/2" : "bottom-0"}`} style={{ left: parentX - 0.5 }} />,
-    );
-  }
+  const tileLeft = tileCentre(row.depth) - TILE / 2;
+  // The elbow: down from the top at the node's line, curving into this step's tile.
   lines.push(
     <span
-      key="tick"
+      key="elbow"
       aria-hidden
-      className="absolute top-1/2 h-px bg-hair"
-      style={{ left: parentX, width: tileCentre(row.depth) - TILE / 2 - parentX }}
+      className="absolute top-0 rounded-bl-control border-b-2 border-l-2 border-grip"
+      style={{ left: parentX - LINE / 2, width: tileLeft - (parentX - LINE / 2), height: `calc(50% + ${LINE / 2}px)` }}
     />,
   );
+  // ...and straight on down past it when another step of the same node follows.
+  if (!row.lastChild) v("on", parentX, "bottom-0 top-1/2");
   // A FRAGMENT, NOT A WRAPPER. The lines are absolute, so on their own they take no part in the row's
   // flex layout; wrapped in a span they made a zero-width flex item that still took a gap, which
   // pushed every nested row's number, tile and name 8px right of the rows above it.
