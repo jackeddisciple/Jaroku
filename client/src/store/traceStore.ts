@@ -174,7 +174,15 @@ export const useTraceStore = create<TraceState>((set, get) => ({
         : {},
     ),
 
-  selectStep: (id) => set({ selectedStepId: id }),
+  // AN OPEN DRAWER FOLLOWS THE SELECTION. Details open on one step while another row is selected
+  // would be two answers to "which step am I looking at"; so picking a different step — a click, J/K,
+  // a graph node — moves the drawer with it. Clearing the selection leaves the drawer alone.
+  selectStep: (id) =>
+    set((state) =>
+      id && state.expandedStepId && state.expandedStepId !== id
+        ? { selectedStepId: id, expandedStepId: id }
+        : { selectedStepId: id },
+    ),
 
   setExpandedStep: (id) => set({ expandedStepId: id }),
 
