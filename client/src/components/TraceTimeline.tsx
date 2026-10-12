@@ -2,7 +2,6 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CANCELLED_BY_USER, orderedSteps, useTraceStore } from "../store/traceStore.ts";
 import type { RunSummary, Step } from "../types.ts";
 import { useUiStore } from "../store/uiStore.ts";
-import { ICON } from "../lib/tokens.ts";
 import { StepRow, tileCentre, type BarPlace, type FoldSummary, type RowTier } from "./StepRow.tsx";
 import { buildTraceTree, descendantSteps, runWindow, stepWindow, traceTotals, visibleRows, type TimeWindow } from "../lib/traceView.ts";
 import { EmptyState } from "./EmptyState.tsx";
@@ -10,49 +9,7 @@ import { TraceHeader } from "./TraceHeader.tsx";
 import { TraceMetrics } from "./TraceMetrics.tsx";
 import { TraceFilters } from "./TraceFilters.tsx";
 import { TraceResult } from "./TraceResult.tsx";
-import { ActivityIcon, XIcon } from "./panelIcons.tsx";
-
-/**
- * The one-time line beside a user's first trace.
- *
- * A sentence, not a tour. The timeline is the thing the whole product is built around, and the
- * first time it fills in, it is a dense column of rows whose significance has to be inferred.
- * One line names what it is; everything after that the panel teaches by being used.
- *
- * Shown once ever, per browser, and recorded the moment it renders — so it does not reappear
- * for the second agent, or after a server restart, or on a reload two minutes later. Because
- * the right panel is not mounted until step 4 of onboarding, the boot autorun cannot burn it.
- */
-function FirstTraceHint() {
-  const shown = useUiStore((s) => s.onboardingHintsShown.includes("trace"));
-  const markHintShown = useUiStore((s) => s.markHintShown);
-  const [dismissed, setDismissed] = useState(false);
-
-  useEffect(() => {
-    if (!shown) markHintShown("trace");
-  }, [shown, markHintShown]);
-
-  // `shown` was read on the first render, before the effect above wrote it — so this component
-  // renders once and never again in a later session.
-  const [visible] = useState(!shown);
-  if (!visible || dismissed) return null;
-
-  return (
-    <div className="mb-3 flex items-start gap-2 rounded-card border border-edge bg-panel px-3 py-2">
-      <p className="text-caption leading-[1.55] text-muted">
-        This is your agent’s execution — every decision it made, in order.
-      </p>
-      <button
-        type="button"
-        onClick={() => setDismissed(true)}
-        title="Dismiss"
-        className="ml-auto shrink-0 text-faint transition-colors hover:text-ink"
-      >
-        <XIcon size={ICON.xs} />
-      </button>
-    </div>
-  );
-}
+import { ActivityIcon } from "./panelIcons.tsx";
 
 /** Re-render on an interval while `active`. */
 function useTick(active: boolean, ms: number): number {
@@ -312,10 +269,7 @@ export function TraceTimeline() {
               />
             )
           ) : (
-            // The hint sits OUTSIDE the positioned list below: that list is what the step connector
-            // line is measured against, and a banner inside it would drag the line's top edge up.
             <>
-              <FirstTraceHint />
               {run && <TraceResult run={run} steps={steps} />}
               <TraceFilters steps={steps} />
               <StepList run={run} steps={steps} />
