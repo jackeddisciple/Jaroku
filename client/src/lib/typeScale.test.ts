@@ -333,7 +333,7 @@ console.log("\n§04's Sans list, at the call sites the specification names by na
   // passed while the text rendered in the face it was written to forbid.
 
   check("a version is Sans", !/font-mono/.test(at("components/GitHubPanel.tsx", "v{row.version}")));
-  check("a model name is Sans", !/font-mono/.test(at("components/TraceTimeline.tsx", "{run.provider}/{run.model}")));
+  check("a model name is Sans", !/font-mono/.test(at("components/TraceHeader.tsx", "{run.provider}/{run.model}")));
   check("a figure is Sans", !/font-mono/.test(at("components/StatRow.tsx", "{s.value}")));
 }
 

@@ -9,14 +9,13 @@ import { useState } from "react";
 import { RUN_PHASE } from "../lib/domainPhase.ts";
 import { absTime, relTime } from "../lib/format.ts";
 import { Icon } from "../lib/icons/registry.ts";
-import { selectAgent, selectRun } from "../lib/selection.ts";
-import { sendLoadHistory, sendLoadRun, sendRun } from "../lib/socket.ts";
+import { openRun, runAgain } from "../lib/runActions.ts";
+import { selectAgent } from "../lib/selection.ts";
+import { sendLoadHistory } from "../lib/socket.ts";
 import { PHASE_WORD, type Phase } from "../lib/statusPhase.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { useBuildStore } from "../store/buildStore.ts";
-import { isRunnable, useProviderStore } from "../store/providerStore.ts";
 import { orderedRuns, useTraceStore } from "../store/traceStore.ts";
-import { useUiStore } from "../store/uiStore.ts";
 import type { RunStatus, RunSummary } from "../types.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { StatusGlyph } from "./StatusGlyph.tsx";
@@ -71,27 +70,6 @@ function RunStatusCapsule({ status }: { status: RunStatus }) {
       {PHASE_WORD[phase]}
     </span>
   );
-}
-
-/**
- * "Run again", for THIS agent on the model the composer has chosen. With no key for that model it
- * opens Secrets at that provider instead.
- */
-function runAgain(agentId: string): void {
-  const { provider, model } = useUiStore.getState();
-  const { providers, loaded } = useProviderStore.getState();
-  if (loaded && !isRunnable(providers, provider)) {
-    useUiStore.getState().openSecretsForProvider(provider || "anthropic");
-    return;
-  }
-  sendRun(undefined, provider, model, agentId);
-}
-
-/** Open a run's trace, fetching its steps first when they are not here yet. */
-function openRun(runId: string): void {
-  if (useTraceStore.getState().needsLoad(runId)) sendLoadRun(runId);
-  selectRun(runId);
-  useUiStore.getState().setRightTab("trace");
 }
 
 /**
