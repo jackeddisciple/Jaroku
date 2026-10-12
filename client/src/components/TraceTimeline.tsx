@@ -115,8 +115,11 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
   const now = useTick(run?.status === "running", 1000);
   const span = useMemo(() => (run ? runWindow(run, steps, now) : null), [run, steps, now]);
   const collapsed = useTraceStore((s) => s.collapsedStepIds);
+  // MEASURED ON A BOX THAT IS ALWAYS THERE. The tree unmounts while "No steps match" shows, and an
+  // observer left on it would keep reading the detached element after the filter is cleared.
+  const frame = useRef<HTMLDivElement>(null);
   const ref = useRef<HTMLDivElement>(null);
-  const tier = useRowTier(ref);
+  const tier = useRowTier(frame);
 
   const tree = useMemo(() => buildTraceTree(steps), [steps]);
   const rows = useMemo(() => visibleRows(tree, { collapsed, filter, query }), [tree, collapsed, filter, query]);
@@ -169,7 +172,7 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
 
   if (rows.length === 0) {
     return (
-      <div className="flex flex-col items-start gap-1.5 px-2 py-6">
+      <div ref={frame} className="flex flex-col items-start gap-1.5 px-2 py-6">
         <p className="text-caption text-ink">No steps match</p>
         <p className="text-tiny text-muted">
           {query.trim() ? `Nothing in this run matches “${query.trim()}”` : "This run has no steps of that kind"}
@@ -190,7 +193,7 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
   }
 
   return (
-    <>
+    <div ref={frame}>
     <div ref={ref} role="tree" aria-label="Steps" className="relative" onKeyDown={onKeyDown}>
       {/* The timeline's line, through the centre of every top-level step's tile. */}
       <div aria-hidden className="absolute bottom-4 top-4 w-px bg-hair" style={{ left: tileCentre(0) - 0.5 }} />
@@ -206,7 +209,7 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
       ))}
     </div>
     {run && <LiveTail run={run} steps={steps} span={span} tier={tier} />}
-    </>
+    </div>
   );
 }
 
