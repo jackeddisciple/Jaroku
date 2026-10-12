@@ -213,7 +213,7 @@ function Connectors({ row }: { row: VisibleRow }) {
     lines.push(<span key={key} aria-hidden className={`absolute w-0.5 bg-grip ${cls}`} style={{ left: x - LINE / 2, ...style }} />);
 
   // Down out of a node whose steps are on screen.
-  if (row.childIds.length > 0 && !row.collapsed) {
+  if (row.shownChildren) {
     v("down", tileCentre(row.depth), "bottom-0", { top: `calc(50% + ${TILE / 2}px)` });
   }
   if (row.depth === 0) return <>{lines}</>;

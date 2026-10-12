@@ -105,6 +105,15 @@ console.log("\nwhat is on screen");
   check("a filter keeps the match and its node", llmOnly.map((r) => r.step.id).join(",") === "a,l");
   check("...with the node marked as context", llmOnly[0]!.context && !llmOnly[1]!.context);
 
+  const drawn = visibleRows(tree, { filter: "llm" });
+  check("a step whose sibling is filtered out is drawn as the last one",
+    drawn.find((r) => r.step.id === "l")!.lastChild === true);
+  check("...and its node knows a step is drawn under it", drawn.find((r) => r.step.id === "a")!.shownChildren);
+  const stateOnly = visibleRows(tree, { filter: "state" });
+  check("a node whose steps are all hidden draws no line down", stateOnly.every((r) => !r.shownChildren));
+  check("a folded node draws no line down", !visibleRows(tree, { collapsed: { a: true } })[0]!.shownChildren);
+  check("...and an open one does", visibleRows(tree)[0]!.shownChildren);
+
   const errors = visibleRows(tree, { filter: "errors", collapsed: { t: true } });
   check("a filter sees past a fold", errors.map((r) => r.step.id).join(",") === "t,p", errors.map((r) => r.step.id).join(","));
 

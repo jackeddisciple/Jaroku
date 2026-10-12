@@ -2,8 +2,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CANCELLED_BY_USER, orderedSteps, useTraceStore } from "../store/traceStore.ts";
 import type { RunSummary, Step } from "../types.ts";
 import { useUiStore } from "../store/uiStore.ts";
-import { StepRow, tileCentre, type BarPlace, type FoldSummary, type RowTier } from "./StepRow.tsx";
-import { buildTraceTree, descendantSteps, runWindow, stepWindow, traceTotals, visibleRows, type TimeWindow } from "../lib/traceView.ts";
+import { StepRow, type BarPlace, type FoldSummary, type RowTier } from "./StepRow.tsx";
+import { buildTraceTree, descendantSteps, runWindow, stepWindow, traceTotals, visibleRows, type TimeWindow, type VisibleRow } from "../lib/traceView.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { TraceHeader } from "./TraceHeader.tsx";
 import { TraceMetrics } from "./TraceMetrics.tsx";
@@ -100,6 +100,15 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
     return out;
   }, [rows, tree]);
   const tabbableId = rows.some((r) => r.step.id === selectedStepId) ? selectedStepId : (rows[0]?.step.id ?? null);
+  // A top-level row starts a card and takes every row after it until the next top-level one.
+  const groups = useMemo(() => {
+    const out: VisibleRow[][] = [];
+    for (const r of rows) {
+      if (r.depth === 0 || out.length === 0) out.push([r]);
+      else out[out.length - 1]!.push(r);
+    }
+    return out;
+  }, [rows]);
 
   const focusRow = (id: string): void => {
     useTraceStore.getState().selectStep(id);
@@ -155,23 +164,33 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
 
   return (
     <div ref={frame}>
-    <div ref={ref} role="tree" aria-label="Steps" className="relative" onKeyDown={onKeyDown}>
-      {/* The timeline's line, through the centre of every top-level step's tile. */}
-      <div aria-hidden className="absolute bottom-4 top-4 w-0.5 bg-grip" style={{ left: tileCentre(0) - 1 }} />
-      {rows.map((r) => (
-        <StepRow
-          key={r.step.id}
-          row={r}
-          tabbable={r.step.id === tabbableId}
-          tier={tier}
-          fold={folds[r.step.id]}
-          bar={barFor(r.step, span)}
-          provider={run?.provider}
-          mark={marks.get(r.step.name)}
-        />
+    <div ref={ref} role="tree" aria-label="Steps" className="flex flex-col gap-1.5" onKeyDown={onKeyDown}>
+      {/* ONE CARD PER NODE — the product owner's call on 2026-10-12: a node and the steps that ran
+          inside it read as one block, and the run as a stack of them. The cards are presentation
+          only (`role="none"`): the rows are still the tree's items, and every line is drawn inside
+          its own row, so a card's padding moves a row without moving anything relative to it. */}
+      {groups.map((group) => (
+        <div key={group[0]!.step.id} role="none" className="rounded-card border border-hair bg-panel p-1">
+          {group.map((r) => (
+            <StepRow
+              key={r.step.id}
+              row={r}
+              tabbable={r.step.id === tabbableId}
+              tier={tier}
+              fold={folds[r.step.id]}
+              bar={barFor(r.step, span)}
+              provider={run?.provider}
+              mark={marks.get(r.step.name)}
+            />
+          ))}
+        </div>
       ))}
     </div>
-    {run && <LiveTail run={run} steps={steps} span={span} tier={tier} />}
+    {run && (
+      <div className="mt-1.5">
+        <LiveTail run={run} steps={steps} span={span} tier={tier} />
+      </div>
+    )}
     </div>
   );
 }
@@ -205,7 +224,12 @@ function LiveTail({ run, steps, span, tier }: { run: RunSummary; steps: readonly
   }
 
   return (
-    <div className="flex items-center gap-2 rounded-control py-1.5 pl-2 pr-1" aria-live="polite">
+    // Its own card, DASHED: it stands where the next node's card will be, and is not one yet.
+    <div
+      className={`rounded-card border border-dashed p-1 ${state === "running" ? "border-run/50 bg-run/[0.04]" : "border-edge bg-panel"}`}
+      aria-live="polite"
+    >
+    <div className="flex items-center gap-2 rounded-control py-1.5 pl-2 pr-1">
       <span className="w-7 shrink-0" />
       <span className="flex shrink-0 items-center" style={{ paddingLeft: 20 }}>
         <span
@@ -231,6 +255,7 @@ function LiveTail({ run, steps, span, tier }: { run: RunSummary; steps: readonly
           />
         </span>
       )}
+    </div>
     </div>
   );
 }

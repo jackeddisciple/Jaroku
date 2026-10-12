@@ -137,6 +137,32 @@ export interface VisibleRow extends TraceRow {
   context: boolean;
   /** Folded, so its children are not drawn. Always false while a filter or a search is on. */
   collapsed: boolean;
+  /**
+   * Its steps are drawn right under it — so a line leaves its tile. Not `childIds.length`: a fold, a
+   * filter or a search can hide every one of them.
+   */
+  shownChildren: boolean;
+}
+
+/**
+ * The lines' view of the rows: `lastChild` and `lastPath` as the SCREEN has them, not the tree.
+ *
+ * A step whose next sibling a filter hid is the last one drawn under its node, and a line carrying on
+ * past it would run into nothing. So both are recomputed over the rows actually shown, with
+ * `shownChildren` beside them.
+ */
+function drawnLinks(rows: VisibleRow[]): VisibleRow[] {
+  const lastAt: boolean[] = [];
+  return rows.map((row, i) => {
+    let j = i + 1;
+    while (j < rows.length && rows[j]!.depth > row.depth) j++;
+    const next = rows[j];
+    const lastChild = !(next && next.depth === row.depth && next.parentId === row.parentId);
+    lastAt[row.depth] = lastChild;
+    const lastPath = row.depth === 0 ? [] : lastAt.slice(1, row.depth + 1);
+    const shownChildren = rows[i + 1]?.parentId === row.step.id;
+    return { ...row, lastChild, lastPath, shownChildren };
+  });
 }
 
 export function matchesFilter(step: Step, filter: StepFilter): boolean {
@@ -224,10 +250,10 @@ export function visibleRows(
         hideBelow = null;
       }
       const folded = Boolean(collapsed[row.step.id]) && row.childIds.length > 0;
-      out.push({ ...row, context: false, collapsed: folded });
+      out.push({ ...row, context: false, collapsed: folded, shownChildren: false });
       if (folded) hideBelow = row.depth;
     }
-    return out;
+    return drawnLinks(out);
   }
 
   const byId = new Map(tree.map((r) => [r.step.id, r]));
@@ -242,9 +268,11 @@ export function visibleRows(
       id = byId.get(id)?.parentId ?? null;
     }
   }
-  return tree
-    .filter((r) => keep.has(r.step.id))
-    .map((r) => ({ ...r, context: !matched.has(r.step.id), collapsed: false }));
+  return drawnLinks(
+    tree
+      .filter((r) => keep.has(r.step.id))
+      .map((r) => ({ ...r, context: !matched.has(r.step.id), collapsed: false, shownChildren: false })),
+  );
 }
 
 /** Every step under a row, at any depth — what a folded node stands for. */
