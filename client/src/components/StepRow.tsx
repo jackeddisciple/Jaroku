@@ -193,9 +193,9 @@ export interface FoldSummary {
 }
 
 /**
- * THE FIGURE COLUMNS, AT FIXED WIDTHS — so the header above them names a real column and every row's
- * numbers line up under it, a node's empty cells included (the product owner's call, 2026-10-12).
- * Narrow enough that a nested step's name keeps a hundred-odd pixels at the panel's usual width.
+ * THE FIGURE COLUMNS, AT FIXED WIDTHS — so every row's numbers line up in a column, a node's empty
+ * cells included. There are no headings over them (the product owner's call, 2026-10-12): the figures
+ * say what they are. Narrow enough that a nested step's name keeps a hundred-odd pixels.
  */
 export const COL = {
   tokens: "w-12",
@@ -206,43 +206,13 @@ export const COL = {
   actions: "w-16",
 } as const;
 
-/** Which columns a width tier can afford — the rows and the header read the same answer. */
+/** Which columns a width tier can afford — every row, and the live row, read the same answer. */
 export const columnsFor = (tier: RowTier) => ({
   tokens: tier !== "narrow",
   cost: tier === "wide" || tier === "full",
   timeline: tier === "full",
   actions: tier !== "narrow",
 });
-
-/**
- * The names of the columns, sticky over the steps, with the timing column as an axis: `0s` at its
- * left edge and the run's span at its right — the same span every bar is placed against.
- *
- * THE SAME BOX AS A STEP'S CARD AND ROW — a transparent border and padding where the card has its
- * own, then the row's own padding and gap — so each heading sits over its column to the pixel.
- */
-export function ColumnHeader({ tier, spanMs }: { tier: RowTier; spanMs: number | null }) {
-  const show = columnsFor(tier);
-  return (
-    <div aria-hidden className="border border-transparent px-1">
-      <div className="flex items-center gap-2 border-b border-hair pb-1.5 pl-2 pr-1 text-tiny uppercase tracking-wider text-faint">
-        <span className="flex-1">Step</span>
-        <span className="flex shrink-0 items-center gap-2">
-          {show.tokens && <span className={`${COL.tokens} text-right`}>Tokens</span>}
-          {show.cost && <span className={`${COL.cost} text-right`}>Cost</span>}
-          <span className={`${COL.time} text-right`}>Time</span>
-          {show.timeline && (
-            <span className={`${COL.timeline} flex justify-between normal-case tracking-normal tabular-nums`}>
-              <span>0s</span>
-              <span>{spanMs == null ? "" : fmtDuration(spanMs)}</span>
-            </span>
-          )}
-        </span>
-        {show.actions && <span className={`${COL.actions} shrink-0`} />}
-      </div>
-    </div>
-  );
-}
 
 /** Connector lines' weight: 2px, the strongest neutral border — the product owner's call, 2026-10-12. */
 const LINE = 2;

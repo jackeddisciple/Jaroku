@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CANCELLED_BY_USER, orderedSteps, useTraceStore } from "../store/traceStore.ts";
 import type { RunSummary, Step } from "../types.ts";
 import { useUiStore } from "../store/uiStore.ts";
-import { COL, ColumnHeader, StepRow, columnsFor, type BarPlace, type FoldSummary, type RowTier } from "./StepRow.tsx";
+import { COL, StepRow, columnsFor, type BarPlace, type FoldSummary, type RowTier } from "./StepRow.tsx";
 import { buildTraceTree, descendantSteps, runWindow, stepWindow, traceTotals, visibleRows, type TimeWindow, type VisibleRow } from "../lib/traceView.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { TraceHeader } from "./TraceHeader.tsx";
@@ -141,12 +141,10 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
     }
   };
 
-  // THE FILTERS AND THE COLUMN NAMES STICK TOGETHER, in one box, so they never overlap whatever the
-  // filter row wraps to — and the frame they sit in is the one the width tiers are measured on.
+  // THE FILTERS STICK, so they stay in reach however far down somebody has scrolled.
   const header = (
-    <div className="sticky top-0 z-10 -mx-1 mb-1.5 bg-bg px-1 pb-1">
+    <div className="sticky top-0 z-10 -mx-1 mb-1 bg-bg px-1">
       <TraceFilters steps={steps} />
-      {rows.length > 0 && <ColumnHeader tier={tier} spanMs={span ? span.end - span.start : null} />}
     </div>
   );
 
