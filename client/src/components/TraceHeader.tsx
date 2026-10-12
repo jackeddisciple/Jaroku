@@ -141,7 +141,8 @@ export function TraceHeader({ run }: { run: RunSummary | undefined }) {
         <span className="shrink-0" title={absTime(run.started_at)}>· {relTime(run.started_at)}</span>
         {run.parent_run_id && (
           <span className="flex min-w-0 shrink items-center gap-1 truncate" title={`Branched from run ${run.parent_run_id}`}>
-            · <Icon.agents.fork size={ICON.xs} />
+            {/* The branch mark in green, the product owner's call on 2026-10-12; its words stay muted. */}
+            · <span aria-hidden className="shrink-0 text-ok"><Icon.agents.fork size={ICON.xs} /></span>
             <span className="truncate">
               branch of {shortId(run.parent_run_id)}
               {run.branch_from_seq != null && ` from #${run.branch_from_seq}`}
