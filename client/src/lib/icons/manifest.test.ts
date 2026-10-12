@@ -70,7 +70,8 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // 257 WITH THE VERSION PICKER AND ITS COMPARE.
   // 261 WITH EXPORT: its menu, and copy, PNG and SVG.
   // 264 WITH ZOOM IN, ZOOM OUT AND FIT, moved into the toolbar from React Flow's own box.
-  check("264 registry keys", entries.length === 264, `${entries.length}`);
+  // 269 WITH THE TRACE'S OUTCOME PILL: finished, failed, running, stopped and paused.
+  check("269 registry keys", entries.length === 269, `${entries.length}`);
   const names = new Set(entries.map((e) => e.export));
   // 104 from icons_integration's appendix, plus D8's 13 — the composer glyphs that had to move
   // here when `@hugeicons/react` came out. See the note at the top of `registry.ts`.
@@ -101,7 +102,8 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // 194 WITH `WorkHistoryIcon` AND `GitCompareIcon`, for them.
   // 197 WITH `ImageDownloadIcon`, `PngIcon` AND `SvgIcon`, for export; its copy is `CopyIcon`.
   // 200 WITH `PlusSignIcon`, `MinusSignIcon` AND `FullScreenIcon`, for the zoom controls.
-  check("200 distinct marks", names.size === 200, `${names.size}`);
+  // 201 WITH `Loading03Icon`, for a running run's pill; the other four outcomes reuse marks already here.
+  check("201 distinct marks", names.size === 201, `${names.size}`);
   check("no key is declared twice", new Set(entries.map((e) => e.key)).size === entries.length);
 }
 

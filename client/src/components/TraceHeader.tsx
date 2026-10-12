@@ -3,48 +3,62 @@
 // IT WAS ONE LINE OF IDENTIFIERS — `Trace anthropic/claude-sonnet-5 · 99d9face` — beside the figures.
 // Nothing on it said which agent ran, and a stopped run and a failed one read the same, because the
 // only status it had was the absence of the word "Working". Now the first line names the panel and
-// the outcome, and the second says whose run it is, on what model, and when.
+// the outcome, as a coloured pill, and the second says whose run it is and when.
 //
-// THE OUTCOME IS THE APP'S SHARED STATUS MARK, through `RUN_PHASE` exactly as the Runs tab draws it,
-// so a run reads the same in the list and in its own header. Two words are this header's own: a
-// paused run says "paused" rather than the phase's "stopped" (it can be resumed), and a run the user
-// stopped says "stopped" rather than "failed" — the server stores both as `error`, and the reason is
-// what tells them apart.
+// A STOPPED RUN SAYS "stopped", NOT "failed": the server stores both as `error`, and the reason is
+// what tells them apart. A paused one says "paused", because it can be resumed.
 //
 // THE MENU HOLDS ONLY WHAT ALREADY WORKS. Copy the id, show this run on the graph, find it in the
 // Runs list, run the agent again — the same `runAgain` the Runs tab's row calls.
 
 import { useState } from "react";
 
-import { RUN_PHASE } from "../lib/domainPhase.ts";
 import { absTime, relTime } from "../lib/format.ts";
-import { Icon } from "../lib/icons/registry.ts";
+import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { runAgain } from "../lib/runActions.ts";
-import type { Phase } from "../lib/statusPhase.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { CANCELLED_BY_USER } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import type { RunSummary } from "../types.ts";
 import { PauseResumeControls } from "./PauseResumeControls.tsx";
-import { StatusGlyph } from "./StatusGlyph.tsx";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu.tsx";
 
 /** The first segment of a uuid — enough to tell two runs apart. */
 const shortId = (id: string): string => id.slice(0, 8);
 
-/** The run's outcome as a phase and the word this header says for it. */
-export function runOutcome(run: Pick<RunSummary, "status" | "error">): { phase: Phase; word: string } {
-  if (run.status === "error" && run.error === CANCELLED_BY_USER) return { phase: "halted", word: "stopped" };
-  if (run.status === "paused") return { phase: "halted", word: "paused" };
-  const phase = RUN_PHASE[run.status];
-  return { phase, word: run.status === "running" ? "running" : run.status === "completed" ? "finished" : "failed" };
+type Outcome = "running" | "paused" | "finished" | "failed" | "stopped";
+
+/** The run's outcome, as the word this header says for it. */
+export function runOutcome(run: Pick<RunSummary, "status" | "error">): Outcome {
+  if (run.status === "error") return run.error === CANCELLED_BY_USER ? "stopped" : "failed";
+  if (run.status === "completed") return "finished";
+  return run.status;
 }
 
-const WORD_TONE: Partial<Record<string, string>> = {
-  running: "text-run",
-  failed: "text-err",
+/**
+ * THE OUTCOME AS A PILL — the product owner's call on 2026-10-12: a finished run is a green pill,
+ * its word and its mark green together. Each outcome keeps the colour it means everywhere else in
+ * the app: amber only for a run still moving, red for a failure, and no colour for a run that was
+ * stopped or paused, which is neither a success nor a fault.
+ */
+const OUTCOME: Record<Outcome, { tone: string; Mark: IconComponent }> = {
+  finished: { tone: "bg-ok/10 text-ok", Mark: Icon.trace.finished },
+  failed: { tone: "bg-err/10 text-err", Mark: Icon.trace.failed },
+  running: { tone: "bg-run/10 text-run", Mark: Icon.trace.running },
+  paused: { tone: "bg-active text-muted", Mark: Icon.trace.paused },
+  stopped: { tone: "bg-active text-muted", Mark: Icon.trace.stopped },
 };
+
+function OutcomePill({ outcome }: { outcome: Outcome }) {
+  const { tone, Mark } = OUTCOME[outcome];
+  return (
+    <span className={`flex h-6 items-center gap-1 rounded-pill px-2 text-tiny font-medium ${tone}`}>
+      <Mark size={ICON.xs} />
+      {outcome}
+    </span>
+  );
+}
 
 function RunMenu({ run }: { run: RunSummary }) {
   const [open, setOpen] = useState(false);
@@ -108,7 +122,6 @@ export function TraceHeader({ run }: { run: RunSummary | undefined }) {
     );
   }
 
-  const { phase, word } = runOutcome(run);
 
   return (
     <div className="shrink-0 border-b border-hair px-6 pb-2.5 pt-3">
@@ -116,21 +129,15 @@ export function TraceHeader({ run }: { run: RunSummary | undefined }) {
         <span className={`min-w-0 truncate ${TYPE.panelLabel}`}>Execution trace</span>
         <span className="ml-auto flex shrink-0 items-center gap-3">
           <PauseResumeControls />
-          <span className={`flex items-center gap-1.5 text-tiny ${WORD_TONE[word] ?? "text-muted"}`}>
-            <StatusGlyph phase={phase} size={ICON.xs} title={word} />
-            {word}
-          </span>
+          <OutcomePill outcome={runOutcome(run)} />
           <RunMenu run={run} />
         </span>
       </div>
-      {/* WHOSE RUN, ON WHAT, WHEN — one line that gives up its tail before it wraps. */}
+      {/* WHOSE RUN AND WHEN — one line that gives up its tail before it wraps. The model is not
+          here (the product owner's call): it is in a step's details, beside the figures it explains. */}
       <div className="mt-1 flex min-w-0 items-baseline gap-1.5 text-tiny text-muted">
         <span className="min-w-0 shrink truncate text-label text-ink" title={agentName ?? run.agent_id}>{agentName}</span>
         <span className="shrink-0" title={run.id}>· {shortId(run.id)}</span>
-        {/* A provider and a model id are identifiers, and still Sans. */}
-        <span className="min-w-0 shrink-[4] truncate" title={`${run.provider}/${run.model}`}>
-          · {run.provider}/{run.model}
-        </span>
         <span className="shrink-0" title={absTime(run.started_at)}>· {relTime(run.started_at)}</span>
         {run.parent_run_id && (
           <span className="flex min-w-0 shrink items-center gap-1 truncate" title={`Branched from run ${run.parent_run_id}`}>

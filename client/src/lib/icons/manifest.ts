@@ -362,6 +362,13 @@ export const MANIFEST = {
     pause: "PauseIcon",
     resume: "PlayIcon",
     stop: "StopIcon",
+    // The run's outcome, in the pill at the top of the trace — the product owner's call on
+    // 2026-10-12: a finished run reads green, mark and word together.
+    finished: "CheckmarkCircle02Icon",
+    failed: "Alert01Icon",
+    running: "Loading03Icon",
+    stopped: "StopIcon",
+    paused: "PauseIcon",
   },
 
   // ── §5 Global ─────────────────────────────────────────────────────────────
