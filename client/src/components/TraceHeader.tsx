@@ -125,10 +125,10 @@ export function TraceHeader({ run }: { run: RunSummary | undefined }) {
       </div>
       {/* WHOSE RUN, ON WHAT, WHEN — one line that gives up its tail before it wraps. */}
       <div className="mt-1 flex min-w-0 items-baseline gap-1.5 text-tiny text-muted">
-        <span className="shrink-0 text-label text-ink" title={run.agent_id}>{agentName}</span>
+        <span className="min-w-[3rem] shrink truncate text-label text-ink" title={agentName ?? run.agent_id}>{agentName}</span>
         <span className="shrink-0" title={run.id}>· {shortId(run.id)}</span>
         {/* A provider and a model id are identifiers, and still Sans. */}
-        <span className="min-w-0 truncate" title={`${run.provider}/${run.model}`}>
+        <span className="min-w-0 shrink-[4] truncate" title={`${run.provider}/${run.model}`}>
           · {run.provider}/{run.model}
         </span>
         <span className="shrink-0" title={absTime(run.started_at)}>· {relTime(run.started_at)}</span>

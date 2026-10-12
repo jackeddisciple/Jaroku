@@ -335,6 +335,14 @@ export interface ErrorParts {
 }
 
 /**
+ * Whether a word before a colon is an exception's class rather than the first word of a sentence:
+ * CamelCase (`TimezoneNotFound`, `KeyError`) or a class-shaped suffix (`Exception`). An old cancel
+ * reason reads `Cancelled: the run was stopped…`, and "Cancelled" is not a class.
+ */
+const looksLikeClass = (word: string): boolean =>
+  /[A-Z].*[A-Z]/.test(word) || /(Error|Exception|Warning|Exit)$/.test(word);
+
+/**
  * A step's error, split the way the interceptor writes it: `f"{type(error).__name__}: {error}"`,
  * sometimes followed by `  at file:line` frames. Anything else is all message.
  */
@@ -343,7 +351,8 @@ export function errorParts(error: string): ErrorParts {
   const nl = text.indexOf("\n");
   const first = nl === -1 ? text : text.slice(0, nl);
   const rest = nl === -1 ? "" : text.slice(nl + 1).replace(/^\s*\n/, "");
-  const m = /^([A-Z][\w.]*): (.+)$/.exec(first);
+  const found = /^([A-Z][\w.]*): (.+)$/.exec(first);
+  const m = found && looksLikeClass(found[1]!) ? found : null;
   return {
     type: m ? m[1]! : null,
     message: m ? m[2]! : first,

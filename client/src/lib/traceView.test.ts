@@ -152,6 +152,8 @@ console.log("\nerrors");
   const plain = errorParts("interrupted by a server restart");
   check("a sentence has no class", plain.type === null && plain.message === "interrupted by a server restart");
   check("a lowercase lead is not a class", errorParts("cancelled by user: twice").type === null);
+  check("nor is a capitalised word", errorParts("Cancelled: the run was stopped at a node boundary").type === null);
+  check("a one-hump class with a class suffix is", errorParts("Exception: boom").type === "Exception");
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

@@ -27,9 +27,15 @@ const CHECK_MS = 1200;
 export function CopyTurn({
   /** The markdown SOURCE of the turn. Never the rendered node's text. */
   source,
+  /** What the button copies, as its accessible name — for a caller copying something other than a turn. */
+  label = "Copy response as markdown",
+  /** Its tooltip. */
+  title = "Copy the markdown source",
   className = "",
 }: {
   source: string;
+  label?: string;
+  title?: string;
   className?: string;
 }) {
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
@@ -59,8 +65,8 @@ export function CopyTurn({
         onClick={() => { void copy(); }}
         // The name changes with the state, because for a screen reader the check IS the feedback
         // and an unchanged label would mean nothing was announced at all.
-        aria-label={copied ? "Copied" : state === "failed" ? "Copy failed" : "Copy response as markdown"}
-        title={state === "failed" ? "Couldn't reach the clipboard" : "Copy the markdown source"}
+        aria-label={copied ? "Copied" : state === "failed" ? "Copy failed" : label}
+        title={state === "failed" ? "Couldn't reach the clipboard" : title}
         className={`inline-flex items-center justify-center rounded-control transition-colors duration-fast
           focus-visible:outline-none focus-visible:shadow-focusring
           ${copied ? "text-ok" : state === "failed" ? "text-err" : "text-muted hover:bg-active hover:text-ink"}

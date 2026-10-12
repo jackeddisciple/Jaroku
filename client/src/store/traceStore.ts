@@ -46,6 +46,12 @@ interface TraceState {
    * what it is doing now, where a paused run will continue, and where a stopped one stood.
    */
   nextByRun: Record<string, string[]>;
+  /**
+   * Whether the trace's Final answer section is open. One choice for every run, kept for the session
+   * and never written to storage: somebody who folded it away to read steps wants the next run's
+   * answer folded too, and a reload is a fair moment to show it again.
+   */
+  answerOpen: boolean;
 
   /**
    * The run history, merged by id.
@@ -71,6 +77,7 @@ interface TraceState {
   addLog: (line: LogLine) => void;
   setConnection: (c: ConnectionState) => void;
   setNext: (runId: string, next: string[]) => void;
+  setAnswerOpen: (open: boolean) => void;
 }
 
 const LOG_CAP = 200;
@@ -103,6 +110,7 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   connection: "connecting",
   logs: [],
   nextByRun: {},
+  answerOpen: true,
 
   applyHistory: (runs, meta) =>
     set((state) => {
@@ -184,6 +192,8 @@ export const useTraceStore = create<TraceState>((set, get) => ({
       const others = Object.entries(state.nextByRun).filter(([id]) => id !== runId).slice(-(NEXT_KEPT - 1));
       return { nextByRun: { ...Object.fromEntries(others), [runId]: next } };
     }),
+
+  setAnswerOpen: (answerOpen) => set({ answerOpen }),
 }));
 
 // --- selectors (pure; sort-by-seq lives here so no component can render arrival order) ---
