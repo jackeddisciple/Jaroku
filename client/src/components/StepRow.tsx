@@ -198,9 +198,10 @@ export interface FoldSummary {
  * say what they are. Narrow enough that a nested step's name keeps a hundred-odd pixels.
  */
 export const COL = {
-  tokens: "w-12",
+  // Tokens and time carry their marks (the product owner's call, 2026-10-12), 16px of each column.
+  tokens: "w-14",
   cost: "w-14",
-  time: "w-10",
+  time: "w-14",
   timeline: "w-16",
   /** The Details slot, held empty when the row is not hovered or selected. */
   actions: "w-16",
@@ -401,10 +402,15 @@ export function StepRow({
       {/* Figures, tabular, and only the ones this step has: a node has no tokens of its own. */}
       <span className="flex shrink-0 items-center gap-2 text-tiny tabular-nums text-muted">
         {/* A folded node shows what its steps add up to, said as such — the node itself has none. An
-            empty cell keeps its width, so the columns stay columns. No "tok": the header says it. */}
+            empty cell keeps its width, so the columns stay columns. The token mark says what it is. */}
         {show.tokens && (
-          <span className={`${COL.tokens} truncate text-right`} title={tokens == null ? undefined : fold ? `${fmtTokens(tokens)} across the ${fold.steps} steps inside` : fmtTokens(tokens)}>
-            {tokens == null ? "" : tier === "medium" ? shortCount(tokens) : tokens.toLocaleString()}
+          <span className={`${COL.tokens} flex items-center justify-end gap-1`} title={tokens == null ? undefined : fold ? `${fmtTokens(tokens)} across the ${fold.steps} steps inside` : fmtTokens(tokens)}>
+            {tokens != null && (
+              <>
+                <span aria-hidden className="shrink-0 text-faint"><Icon.trace.tokens size={ICON.xs} /></span>
+                <span className="truncate">{tier === "medium" ? shortCount(tokens) : tokens.toLocaleString()}</span>
+              </>
+            )}
           </span>
         )}
         {show.cost && (
@@ -412,7 +418,10 @@ export function StepRow({
             {cost == null ? "" : fmtCost(cost)}
           </span>
         )}
-        <span className={`${COL.time} text-right`}>{fmtDuration(step.latency_ms)}</span>
+        <span className={`${COL.time} flex items-center justify-end gap-1`}>
+          <span aria-hidden className="shrink-0 text-faint"><Icon.trace.time size={ICON.xs} /></span>
+          <span className="truncate">{fmtDuration(step.latency_ms)}</span>
+        </span>
         {show.timeline && <Waterfall step={step} bar={bar} colour={stepColour(step, provider, mark)} />}
       </span>
 

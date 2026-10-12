@@ -20,7 +20,7 @@
 import { useEffect, useMemo } from "react";
 import { useTraceStore, visibleTraceRows } from "../store/traceStore.ts";
 import { absTime, fmtCost, fmtDuration } from "../lib/format.ts";
-import { Icon } from "../lib/icons/registry.ts";
+import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { CATEGORY_LABEL, buildTraceTree, descendantSteps, stepCategory, stepWindow, traceTotals } from "../lib/traceView.ts";
 import { ICON, STEP_TYPE, TYPE } from "../lib/tokens.ts";
 import { useUiStore } from "../store/uiStore.ts";
@@ -79,18 +79,19 @@ function StepStatus({ failed }: { failed: boolean }) {
 function Figures({ step, inside }: { step: Step; inside: readonly Step[] }) {
   const llm = step.type === "llm_call";
   const totals = traceTotals(inside);
-  const cells: { label: string; value: string; title: string }[] = [
-    { label: "Duration", value: Number.isFinite(step.latency_ms) ? fmtDuration(step.latency_ms) : "—", title: "How long this step took, start to finish" },
+  // Duration and tokens beside the trace's own two marks, the same ones the rows and the strip wear.
+  const cells: { label: string; value: string; title: string; Mark?: IconComponent }[] = [
+    { label: "Duration", value: Number.isFinite(step.latency_ms) ? fmtDuration(step.latency_ms) : "—", title: "How long this step took, start to finish", Mark: Icon.trace.time },
   ];
   if (llm) {
     cells.push(
-      { label: "Tokens", value: step.tokens == null ? "—" : step.tokens.toLocaleString(), title: "Every token the call consumed; the input/output split isn't recorded" },
+      { label: "Tokens", value: step.tokens == null ? "—" : step.tokens.toLocaleString(), title: "Every token the call consumed; the input/output split isn't recorded", Mark: Icon.trace.tokens },
       { label: "Cost", value: step.cost == null ? "—" : fmtCost(step.cost), title: step.cost == null ? "Not priced" : "What this call cost" },
     );
   } else if (totals.llmCalls > 0) {
     const calls = `${totals.llmCalls} model call${totals.llmCalls === 1 ? "" : "s"} inside this step`;
     cells.push(
-      { label: "Tokens inside", value: totals.tokens == null ? "—" : totals.tokens.toLocaleString(), title: `Summed from the ${calls}` },
+      { label: "Tokens inside", value: totals.tokens == null ? "—" : totals.tokens.toLocaleString(), title: `Summed from the ${calls}`, Mark: Icon.trace.tokens },
       { label: "Cost inside", value: fmtCost(totals.cost), title: `Summed from the ${calls}` },
     );
   }
@@ -99,7 +100,7 @@ function Figures({ step, inside }: { step: Step; inside: readonly Step[] }) {
       className="grid divide-x divide-hair rounded-card border border-hair bg-panel"
       style={{ gridTemplateColumns: `repeat(${cells.length}, minmax(0, 1fr))` }}
     >
-      {cells.map((c) => <Metric key={c.label} label={c.label} value={c.value} title={c.title} />)}
+      {cells.map((c) => <Metric key={c.label} label={c.label} value={c.value} title={c.title} Mark={c.Mark} />)}
     </div>
   );
 }

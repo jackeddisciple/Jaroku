@@ -13,6 +13,7 @@ import { traceMarks } from "./traceMarks.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { fmtDuration } from "../lib/format.ts";
+import { ICON } from "../lib/tokens.ts";
 
 /** Re-render on an interval while `active`. */
 function useTick(active: boolean, ms: number): number {
@@ -45,7 +46,9 @@ function useRowTier(ref: React.RefObject<HTMLDivElement | null>): RowTier {
     if (!el) return;
     const measure = (): void => {
       const w = el.clientWidth;
-      setTier(w >= 540 ? "full" : w >= 480 ? "wide" : w >= 380 ? "medium" : "narrow");
+      // 24px above where they were before tokens and time took their marks, so each tier still leaves
+      // a step's name the room it was sized for.
+      setTier(w >= 564 ? "full" : w >= 504 ? "wide" : w >= 404 ? "medium" : "narrow");
     };
     measure();
     if (typeof ResizeObserver === "undefined") return;
@@ -267,8 +270,13 @@ function LiveTail({ run, steps, span, tier }: { run: RunSummary; steps: readonly
       <span className="flex shrink-0 items-center gap-2 text-tiny tabular-nums">
         {show.tokens && <span className={COL.tokens} />}
         {show.cost && <span className={COL.cost} />}
-        <span className={`${COL.time} text-right ${state === "running" ? "text-run" : "text-faint"}`}>
-          {soFar == null ? "" : fmtDuration(soFar)}
+        <span className={`${COL.time} flex items-center justify-end gap-1 ${state === "running" ? "text-run" : "text-faint"}`}>
+          {soFar != null && (
+            <>
+              <span aria-hidden className="shrink-0"><Icon.trace.time size={ICON.xs} /></span>
+              <span className="truncate">{fmtDuration(soFar)}</span>
+            </>
+          )}
         </span>
         {show.timeline && (
           <span className={`relative h-1.5 shrink-0 rounded-full bg-void ${COL.timeline}`} aria-hidden>

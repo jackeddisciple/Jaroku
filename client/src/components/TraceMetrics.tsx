@@ -30,10 +30,13 @@ function useTick(active: boolean, ms = 200): number {
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-export function Metric({ label, value, title, tone = "text-ink" }: { label: string; value: string; title: string; tone?: string }) {
+export function Metric({ label, value, title, tone = "text-ink", Mark }: { label: string; value: string; title: string; tone?: string; Mark?: IconComponent }) {
   return (
     <div className="min-w-0 px-3 py-2" title={title}>
-      <div className="truncate text-tiny text-faint">{label}</div>
+      <div className="flex min-w-0 items-center gap-1.5 text-tiny text-faint">
+        {Mark && <span aria-hidden className="shrink-0"><Mark size={ICON.xs} /></span>}
+        <span className="truncate">{label}</span>
+      </div>
       <div className={`truncate text-label tabular-nums ${tone}`}>{value}</div>
     </div>
   );
@@ -96,7 +99,7 @@ export function TraceMetrics({ run, steps }: { run: RunSummary; steps: readonly 
         style={{ gridTemplateColumns: `repeat(${roomy ? 5 : 3}, minmax(0, 1fr))` }}
       >
         <Figure
-          Mark={Icon.trace.metricDuration}
+          Mark={Icon.trace.time}
           label={live ? "Elapsed" : "Duration"}
           value={elapsed == null ? "—" : fmtDuration(elapsed)}
           // THE GRAPH ALONE, and saying so: a deployed job's detail shows a longer figure for the
@@ -105,7 +108,7 @@ export function TraceMetrics({ run, steps }: { run: RunSummary; steps: readonly 
           tone={run.status === "running" ? "text-run" : "text-ink"}
         />
         <Figure
-          Mark={Icon.trace.metricTokens}
+          Mark={Icon.trace.tokens}
           label="Tokens"
           value={totals.tokens == null ? "—" : totals.tokens.toLocaleString()}
           title={tokensTitle}

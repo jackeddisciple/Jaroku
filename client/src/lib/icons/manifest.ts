@@ -391,9 +391,11 @@ export const MANIFEST = {
     // The details drawer's walk through the steps, the same order J/K take.
     prevStep: "ArrowUp01Icon",
     nextStep: "ArrowDown01Icon",
-    // The run's figures, each beside its own mark (the product owner's call, 2026-10-12).
-    metricDuration: "Clock01Icon",
-    metricTokens: "TextFontIcon",
+    // The run's figures, each beside its own mark (the product owner's call, 2026-10-12). Time and
+    // tokens wear the same two marks wherever the trace says either — the strip, a step's row, its
+    // details — so a figure is read by its mark before its word.
+    time: "Time04Icon",
+    tokens: "TokenCircleIcon",
     metricCost: "Coins01Icon",
     metricSteps: "Layers01Icon",
     metricCalls: "AiBrain02Icon",
