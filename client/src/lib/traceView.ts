@@ -50,6 +50,20 @@ export const CATEGORY_LABEL: Record<StepCategory, string> = {
   other: "Step",
 };
 
+/**
+ * Which provider a model call went to, for its logo: the chat class's own name first
+ * (`ChatAnthropic`, `ChatOpenAI`) — an agent may call more than one — then the run's provider.
+ * Null for a step that is not a model call.
+ */
+export function stepProvider(step: Pick<Step, "type" | "name">, runProvider?: string | null): string | null {
+  if (step.type !== "llm_call") return null;
+  const name = step.name.toLowerCase();
+  if (/anthropic|claude/.test(name)) return "anthropic";
+  if (/openai|gpt/.test(name)) return "openai";
+  if (/meta|llama|muse/.test(name)) return "meta";
+  return runProvider ? runProvider.toLowerCase() : null;
+}
+
 // ── The tree ─────────────────────────────────────────────────────────────────
 
 export interface TraceRow {

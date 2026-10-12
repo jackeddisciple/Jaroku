@@ -22,7 +22,8 @@ import { useEffect, useRef } from "react";
 
 import { fmtCost, fmtDuration, fmtTokens, jsonPretty } from "../lib/format.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
-import { CATEGORY_LABEL, stepCategory, type StepCategory, type VisibleRow } from "../lib/traceView.ts";
+import { CATEGORY_LABEL, stepCategory, stepProvider, type StepCategory, type VisibleRow } from "../lib/traceView.ts";
+import { BRAND_COLOR, ProviderMark, hasProviderMark } from "../lib/icons.tsx";
 import { ICON, STATUS, STEP_TYPE, TEXT } from "../lib/tokens.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { agentMcpToolNames } from "../store/mcpStore.ts";
@@ -49,8 +50,27 @@ const STEP_MARK: Record<StepCategory, IconComponent> = {
  */
 export const tileTint = (colour: string): string => `color-mix(in srgb, ${colour} 20%, white)`;
 
-/** The tile behind a step's mark: its kind's colour, red for a failure, grey for a kind we don't know. */
-export function StepTile({ step }: { step: Pick<Step, "type" | "error"> }) {
+/**
+ * The tile behind a step's mark: its kind's colour, red for a failure, grey for a kind we don't know.
+ *
+ * A MODEL CALL WEARS ITS PROVIDER'S LOGO — Claude's for Anthropic, OpenAI's for OpenAI — on a tile of
+ * that brand's colour (the product owner's call, 2026-10-12). A provider without a logo here keeps
+ * the Hugeicons model mark.
+ */
+export function StepTile({ step, provider }: { step: Pick<Step, "type" | "error" | "name">; provider?: string | null }) {
+  const brand = stepProvider(step, provider);
+  if (brand && hasProviderMark(brand)) {
+    const colour = step.error ? STATUS.error : BRAND_COLOR[brand] ?? TEXT.muted;
+    return (
+      <span
+        aria-hidden
+        className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-sm"
+        style={{ background: tileTint(colour) }}
+      >
+        <ProviderMark provider={brand} size={ICON.sm} />
+      </span>
+    );
+  }
   const Mark = STEP_MARK[stepCategory(step)];
   const known = STEP_TYPE[step.type as keyof typeof STEP_TYPE] as { fg: string } | undefined;
   const colour = step.error ? STATUS.error : known ? known.fg : TEXT.muted;
@@ -170,6 +190,7 @@ export function StepRow({
   tier,
   fold,
   bar,
+  provider,
 }: {
   row: VisibleRow;
   tabbable: boolean;
@@ -178,6 +199,8 @@ export function StepRow({
   fold?: FoldSummary;
   /** Its place in the run's waterfall, or null when its times can't say. */
   bar: BarPlace | null;
+  /** The run's provider, for a model call whose class does not name one. */
+  provider?: string | null;
 }) {
   const { step } = row;
   const group = row.childIds.length > 0;
@@ -262,7 +285,7 @@ export function StepRow({
             </span>
           )}
         </span>
-        <StepTile step={step} />
+        <StepTile step={step} provider={provider} />
       </span>
 
       <span className="min-w-[4.5rem] flex-1">

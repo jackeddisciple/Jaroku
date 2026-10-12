@@ -209,7 +209,7 @@ export function StepDetailPanel() {
             {/* THE ROW YOU CLICKED, AGAIN: its tile, its name, its kind — so the drawer opens on the
                 step the reader chose rather than on a differently-shaped description of it. */}
             <div className="mt-1 flex min-w-0 items-start gap-2.5">
-              <StepTile step={step} />
+              <StepTile step={step} provider={run?.provider} />
               <div className="min-w-0 flex-1">
                 <div className="flex min-w-0 items-center gap-1.5">
                   <span className="min-w-0 truncate text-label text-ink" title={step.name}>{step.name}</span>

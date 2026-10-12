@@ -51,6 +51,11 @@ const PROVIDER_PATH: Record<string, string> = {
   meta: META_MARK,
 };
 
+/** Whether a provider has its own mark here, rather than the hollow fallback dot. */
+export function hasProviderMark(provider: string): boolean {
+  return provider in PROVIDER_PATH;
+}
+
 /** Provider mark for the rows in the provider-keys dialog and on step 2. */
 export function ProviderMark({ provider, active = true, size = 12 }: { provider: string; active?: boolean; size?: number }) {
   const color = active ? BRAND_COLOR[provider] ?? MUTED : MUTED;

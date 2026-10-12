@@ -162,6 +162,7 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
           tier={tier}
           fold={folds[r.step.id]}
           bar={barFor(r.step, span)}
+          provider={run?.provider}
         />
       ))}
     </div>

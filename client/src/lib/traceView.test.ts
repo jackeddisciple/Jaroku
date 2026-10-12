@@ -17,6 +17,7 @@ import {
   matchesQuery,
   runWindow,
   stepCategory,
+  stepProvider,
   stepWindow,
   traceTotals,
   visibleRows,
@@ -78,6 +79,10 @@ console.log("the tree");
 
   const cycle = buildTraceTree([mk({ id: "c1", seq: 0, parent_step_id: "c2" }), mk({ id: "c2", seq: 1, parent_step_id: "c1" })]);
   check("a cycle strands nothing", cycle.length === 2, String(cycle.length));
+
+  check("a model call's provider comes from its class", stepProvider(llm, "openai") === "anthropic");
+  check("...then from the run", stepProvider(mk({ id: "m", seq: 0, type: "llm_call", name: "chat_model" }), "OpenAI") === "openai");
+  check("...and a node has none", stepProvider(agent, "anthropic") === null);
 
   const legacy = mk({ id: "old", seq: 0, type: "tool" as Step["type"] });
   check("an unknown type is `other`, not a crash", stepCategory(legacy) === "other");
