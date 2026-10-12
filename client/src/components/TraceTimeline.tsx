@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { orderedSteps, useTraceStore } from "../store/traceStore.ts";
+import { CANCELLED_BY_USER, orderedSteps, useTraceStore } from "../store/traceStore.ts";
 import type { RunSummary, Step } from "../types.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { ICON } from "../lib/tokens.ts";
@@ -190,6 +190,7 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
   }
 
   return (
+    <>
     <div ref={ref} role="tree" aria-label="Steps" className="relative" onKeyDown={onKeyDown}>
       {/* The timeline's line, through the centre of every top-level step's tile. */}
       <div aria-hidden className="absolute bottom-4 top-4 w-px bg-hair" style={{ left: tileCentre(0) - 0.5 }} />
@@ -203,6 +204,67 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
           bar={barFor(r.step, span)}
         />
       ))}
+    </div>
+    {run && <LiveTail run={run} steps={steps} span={span} tier={tier} />}
+    </>
+  );
+}
+
+/**
+ * WHAT THE RUN IS DOING NOW, below what it has done.
+ *
+ * A step is emitted when it FINISHES, so the timeline is always a list of things that are over — and
+ * for the seconds a model call takes, a live run looked stalled after its last row. Each node boundary
+ * says which nodes run next (`nextByRun`, the same word the graph's live mark uses); this row says it
+ * here too. Paused, it is where the run will continue; stopped, where it stood.
+ */
+function LiveTail({ run, steps, span, tier }: { run: RunSummary; steps: readonly Step[]; span: TimeWindow | null; tier: RowTier }) {
+  const next = useTraceStore((s) => s.nextByRun[run.id]);
+  const stopped = run.status === "error" && run.error === CANCELLED_BY_USER;
+  const state = run.status === "running" ? "running" : run.status === "paused" ? "paused" : stopped && next?.length ? "stopped" : null;
+  if (!state) return null;
+
+  const names = next?.length ? next.join(", ") : null;
+  const name = names ?? (steps.length === 0 ? "The first step" : "The next step");
+  const word =
+    state === "running" ? (steps.length === 0 ? "Running now — steps appear here as they finish" : "Running now — it appears above when it finishes")
+      : state === "paused" ? "Paused here — Resume continues from this step"
+        : "Stopped here, before this step ran";
+  // Its bar runs from the last thing that finished to now: the time the run has spent on it so far.
+  let bar: { left: number; width: number } | null = null;
+  if (state === "running" && span) {
+    const lastEnd = Math.max(span.start, ...steps.map((st) => stepWindow(st)?.end ?? span.start));
+    const total = span.end - span.start;
+    bar = { left: Math.min(1, (lastEnd - span.start) / total), width: Math.max(0, (span.end - lastEnd) / total) };
+  }
+
+  return (
+    <div className="flex items-center gap-2 rounded-control py-1.5 pl-2 pr-1" aria-live="polite">
+      <span className="w-7 shrink-0" />
+      <span className="flex shrink-0 items-center" style={{ paddingLeft: 20 }}>
+        <span
+          aria-hidden
+          className={`flex h-[22px] w-[22px] items-center justify-center rounded-sm border border-dashed ${
+            state === "running" ? "border-run/60 bg-run/10" : "border-grip bg-void"
+          }`}
+        >
+          <span
+            className={`h-1.5 w-1.5 rounded-full ${state === "running" ? "animate-stream-pulse bg-run motion-reduce:animate-none" : "bg-grip"}`}
+          />
+        </span>
+      </span>
+      <span className="min-w-[4.5rem] flex-1">
+        <span className="block truncate text-caption font-medium text-ink" title={name}>{name}</span>
+        <span className={`block truncate text-tiny ${state === "running" ? "text-run" : "text-faint"}`}>{word}</span>
+      </span>
+      {tier === "full" && bar && (
+        <span className="relative mr-[74px] h-1.5 w-16 shrink-0 rounded-full bg-void" aria-hidden>
+          <span
+            className="absolute bottom-0 top-0 animate-stream-pulse rounded-full bg-run motion-reduce:animate-none"
+            style={{ left: `${bar.left * 100}%`, width: `max(2px, ${bar.width * 100}%)`, opacity: 0.55 }}
+          />
+        </span>
+      )}
     </div>
   );
 }
@@ -227,12 +289,25 @@ export function TraceTimeline() {
       <div className="flex-1 overflow-auto px-6 pb-4">
         <div className="pt-3">
           {steps.length === 0 ? (
-            <EmptyState
-              size="line"
-              icon={ActivityIcon}
-              title="No trace yet"
-              hint="Run the agent below and every LLM call, tool call and routing decision it makes streams in here."
-            />
+            run?.status === "running" || run?.status === "paused" ? (
+              // A RUN WITH NOTHING FINISHED YET is not an empty trace: it is a trace whose first row has
+              // not landed. Say what is happening, and that rows arrive as their steps finish.
+              <>
+                <TraceResult run={run} steps={steps} />
+                <LiveTail run={run} steps={steps} span={null} tier="narrow" />
+              </>
+            ) : (
+              <EmptyState
+                size="line"
+                icon={ActivityIcon}
+                title={run ? "This run recorded no steps" : "No trace yet"}
+                hint={
+                  run
+                    ? "It ended before any step finished, so there is nothing to inspect. Its outcome is in the header."
+                    : "Run the agent below. Each model call, tool call, state update and routing decision appears here, in order, as it finishes."
+                }
+              />
+            )
           ) : (
             // The hint sits OUTSIDE the positioned list below: that list is what the step connector
             // line is measured against, and a banner inside it would drag the line's top edge up.
