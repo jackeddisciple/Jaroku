@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { orderedSteps, useTraceStore } from "../store/traceStore.ts";
-import type { Step } from "../types.ts";
+import type { RunSummary, Step } from "../types.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { ICON } from "../lib/tokens.ts";
-import { StepRow, tileCentre, type FoldSummary, type RowTier } from "./StepRow.tsx";
-import { buildTraceTree, descendantSteps, traceTotals, visibleRows } from "../lib/traceView.ts";
+import { StepRow, tileCentre, type BarPlace, type FoldSummary, type RowTier } from "./StepRow.tsx";
+import { buildTraceTree, descendantSteps, runWindow, stepWindow, traceTotals, visibleRows, type TimeWindow } from "../lib/traceView.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { TraceHeader } from "./TraceHeader.tsx";
 import { TraceMetrics } from "./TraceMetrics.tsx";
@@ -53,6 +53,29 @@ function FirstTraceHint() {
   );
 }
 
+/** Re-render on an interval while `active`. */
+function useTick(active: boolean, ms: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(() => setNow(Date.now()), ms);
+    return () => clearInterval(id);
+  }, [active, ms]);
+  return now;
+}
+
+/** A step's place in the run's span, or null when either has no readable times. */
+function barFor(step: Step, span: TimeWindow | null): BarPlace | null {
+  const w = stepWindow(step);
+  if (!w || !span) return null;
+  const total = span.end - span.start;
+  return {
+    left: Math.min(1, Math.max(0, (w.start - span.start) / total)),
+    width: Math.min(1, Math.max(0, (w.end - w.start) / total)),
+    offsetMs: Math.max(0, w.start - span.start),
+  };
+}
+
 /** The list's own width, as the tier its rows can afford. Measured, because the panel is resizable. */
 function useRowTier(ref: React.RefObject<HTMLDivElement | null>): RowTier {
   const [tier, setTier] = useState<RowTier>("wide");
@@ -61,7 +84,7 @@ function useRowTier(ref: React.RefObject<HTMLDivElement | null>): RowTier {
     if (!el) return;
     const measure = (): void => {
       const w = el.clientWidth;
-      setTier(w >= 500 ? "wide" : w >= 380 ? "medium" : "narrow");
+      setTier(w >= 540 ? "full" : w >= 480 ? "wide" : w >= 380 ? "medium" : "narrow");
     };
     measure();
     if (typeof ResizeObserver === "undefined") return;
@@ -83,8 +106,11 @@ function useRowTier(ref: React.RefObject<HTMLDivElement | null>): RowTier {
  * focus together, ← folds a node (or climbs to it), → unfolds it (or steps into it). J/K walk the same
  * visible rows from anywhere (CommandPalette), and Enter on a row opens its details.
  */
-function StepList({ steps }: { steps: readonly Step[] }) {
+function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly Step[] }) {
   const selectedStepId = useTraceStore((s) => s.selectedStepId);
+  // A live run's span grows, so its bars are re-placed once a second; a finished one never moves.
+  const now = useTick(run?.status === "running", 1000);
+  const span = useMemo(() => (run ? runWindow(run, steps, now) : null), [run, steps, now]);
   const collapsed = useTraceStore((s) => s.collapsedStepIds);
   const ref = useRef<HTMLDivElement>(null);
   const tier = useRowTier(ref);
@@ -143,7 +169,14 @@ function StepList({ steps }: { steps: readonly Step[] }) {
       {/* The timeline's line, through the centre of every top-level step's tile. */}
       <div aria-hidden className="absolute bottom-4 top-4 w-px bg-hair" style={{ left: tileCentre(0) - 0.5 }} />
       {rows.map((r) => (
-        <StepRow key={r.step.id} row={r} tabbable={r.step.id === tabbableId} tier={tier} fold={folds[r.step.id]} />
+        <StepRow
+          key={r.step.id}
+          row={r}
+          tabbable={r.step.id === tabbableId}
+          tier={tier}
+          fold={folds[r.step.id]}
+          bar={barFor(r.step, span)}
+        />
       ))}
     </div>
   );
@@ -177,7 +210,7 @@ export function TraceTimeline() {
           <>
             <FirstTraceHint />
             {run && <TraceResult run={run} steps={steps} />}
-            <StepList steps={steps} />
+            <StepList run={run} steps={steps} />
           </>
         )}
       </div>

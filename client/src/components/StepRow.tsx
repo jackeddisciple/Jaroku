@@ -66,7 +66,45 @@ function outputText(step: Step): string {
  * kept its figures and lost its name would be a row of numbers about nothing. Cost goes first (it is
  * in the details), then tokens; the duration stays, and Details floats instead of holding a slot.
  */
-export type RowTier = "wide" | "medium" | "narrow";
+export type RowTier = "full" | "wide" | "medium" | "narrow";
+
+/** Where a step's bar sits in the waterfall, as fractions of the run's span. */
+export interface BarPlace {
+  left: number;
+  width: number;
+  /** When it began, relative to the run's start, for the tooltip. */
+  offsetMs: number;
+}
+
+/**
+ * WHEN THE STEP RAN, against the whole run. The bar starts where the step really began and ends where
+ * it finished — `started_at` is stamped as a step ends, so its start is that minus its duration — and
+ * so a node's bar spans its model call's, steps that overlapped are drawn overlapping, and the gaps
+ * between nodes are visible as gaps rather than invented away.
+ */
+function Waterfall({ step, bar }: { step: Step; bar: BarPlace | null }) {
+  const known = STEP_TYPE[step.type as keyof typeof STEP_TYPE] as { fg: string } | undefined;
+  return (
+    <span
+      className="relative h-1.5 w-16 shrink-0 rounded-full bg-void"
+      title={bar ? `Started +${fmtDuration(bar.offsetMs)} · took ${fmtDuration(step.latency_ms)}` : "No timing recorded"}
+    >
+      {bar && (
+        <span
+          aria-hidden
+          className={`absolute bottom-0 top-0 rounded-full ${step.error ? "bg-err" : known ? "" : "bg-grip"}`}
+          style={{
+            left: `${bar.left * 100}%`,
+            // Never thinner than a hair, so a 0ms routing decision still marks its moment.
+            width: `max(2px, ${bar.width * 100}%)`,
+            backgroundColor: step.error || !known ? undefined : known.fg,
+            opacity: step.error ? 0.8 : 0.55,
+          }}
+        />
+      )}
+    </span>
+  );
+}
 
 /**
  * Where a row's tile sits, so the lines that join a node to its steps meet it exactly. A row is the
@@ -122,12 +160,15 @@ export function StepRow({
   tabbable,
   tier,
   fold,
+  bar,
 }: {
   row: VisibleRow;
   tabbable: boolean;
   tier: RowTier;
   /** Set while this node is folded: what its hidden steps add up to. */
   fold?: FoldSummary;
+  /** Its place in the run's waterfall, or null when its times can't say. */
+  bar: BarPlace | null;
 }) {
   const { step } = row;
   const group = row.childIds.length > 0;
@@ -244,13 +285,14 @@ export function StepRow({
         {/* A folded node shows what its steps add up to, said as such — the node itself has none. */}
         {tokens != null && tier !== "narrow" && (
           <span title={fold ? `Across the ${fold.steps} steps inside` : fmtTokens(tokens)}>
-            {fmtTokens(tokens, tier === "wide" ? "exact" : "short")}
+            {fmtTokens(tokens, tier === "medium" ? "short" : "exact")}
           </span>
         )}
-        {cost != null && tier === "wide" && (
+        {cost != null && (tier === "wide" || tier === "full") && (
           <span title={fold ? `Across the ${fold.steps} steps inside` : undefined}>{fmtCost(cost)}</span>
         )}
         <span className="min-w-[3rem] text-right">{fmtDuration(step.latency_ms)}</span>
+        {tier === "full" && <Waterfall step={step} bar={bar} />}
       </span>
 
       {/* THE ROW'S ACTIONS. Details holds its own place, so the figures never move when it appears;
