@@ -3168,6 +3168,9 @@ export function BuildPane({
     contextLabel,
     operating,
   });
+  // SAID ONCE, ON TOP. A failed step's fork is headed "Step #N failed", and the status line under its
+  // cards said the same words again (the product owner's call, 2026-10-12). Skipped, the line returns.
+  const momentStatus = showFork && fork?.key.startsWith("step:") ? null : moment.status;
 
   // Which messages open a day of this conversation, and so carry its date and time above them.
   const dayStartIds = dayStarts(turns.map((t) => ({ id: t.id, at: t.role === "user" ? t.at : undefined })));
@@ -3413,14 +3416,14 @@ export function BuildPane({
             status. On an empty operate composer none of those is true, so the destination label was
             absent at exactly the moment somebody is deciding what to type, which is the one moment
             it exists for. */}
-        {(nodeChip || text.trim() || moment.status || operating) && (
+        {(nodeChip || text.trim() || momentStatus || operating) && (
           <div className="mb-2 flex items-center gap-2 text-tiny">
             {/* What the app is doing. The routing hint on the right says where a message would go;
                 this says what is going on regardless of whether anything has been typed. */}
-            {moment.status && (
+            {momentStatus && (
               <span className="inline-flex items-center gap-1.5 text-muted">
                 {busy && <StatusDot state="pending" icon={LoaderIcon} spin size={ICON.xs} />}
-                {moment.status}
+                {momentStatus}
               </span>
             )}
             {/* Same rule the placeholder follows: a selection is only context when there is an
