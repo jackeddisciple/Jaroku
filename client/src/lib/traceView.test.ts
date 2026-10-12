@@ -1,0 +1,158 @@
+// The trace, shaped for reading: the tree, what a filter shows, the totals and the timing.
+//
+// The fixtures are the shapes a real run produces — a node step with the model call and the router
+// that ran inside it, a tool call that failed inside a node that did not, `started_at` stamped when
+// each step FINISHED — because every rule here exists for one of those shapes.
+//
+//   npm run test:trace-view
+
+import type { Step } from "../types.ts";
+import {
+  ancestorIds,
+  buildTraceTree,
+  errorParts,
+  filterCounts,
+  matchesQuery,
+  runWindow,
+  stepCategory,
+  stepWindow,
+  traceTotals,
+  visibleRows,
+} from "./traceView.ts";
+
+let fail = 0;
+const check = (name: string, ok: boolean, detail = ""): void => {
+  if (ok) console.log(`  ok   ${name}`);
+  else { fail++; console.log(`  FAIL ${name}${detail ? ` — ${detail}` : ""}`); }
+};
+
+const mk = (over: Partial<Step> & Pick<Step, "id" | "seq">): Step => ({
+  run_id: "r", type: "state_update", name: "node", input: null, output: null, state_before: null,
+  state_after: null, tokens: null, cost: null, latency_ms: 0, error: null, parent_step_id: null,
+  started_at: "2026-10-09T05:24:47.000Z", ...over,
+});
+
+// One agent turn and one tool turn, as run bf13d39c traced them.
+const agent = mk({ id: "a", seq: 0, name: "agent", latency_ms: 2486, started_at: "2026-10-09T05:24:47.476Z" });
+const llm = mk({
+  id: "l", seq: 1, type: "llm_call", name: "ChatAnthropic", parent_step_id: "a", latency_ms: 2475,
+  tokens: 1572, cost: 0.004344, started_at: "2026-10-09T05:24:47.466Z", input: [{ role: "user", content: "parse the queue" }],
+});
+const route = mk({ id: "r1", seq: 2, type: "router", name: "should_continue", parent_step_id: "a", latency_ms: 0.05 });
+const tools = mk({ id: "t", seq: 3, name: "tools", latency_ms: 4.3, started_at: "2026-10-09T05:24:48.990Z" });
+const parse = mk({
+  id: "p", seq: 4, type: "tool_call", name: "parse_readings", parent_step_id: "t", latency_ms: 0.7,
+  error: "RuntimeError: No parsable readings found", output: "readings: none",
+});
+const steps = [agent, llm, route, tools, parse];
+
+console.log("the tree");
+{
+  const tree = buildTraceTree([parse, route, tools, llm, agent]);
+  check("every step once", tree.length === steps.length, String(tree.length));
+  check("parents before children, siblings by seq",
+    tree.map((r) => r.step.id).join(",") === "a,l,r1,t,p", tree.map((r) => r.step.id).join(","));
+  check("children sit one level down", tree.find((r) => r.step.id === "l")?.depth === 1);
+  check("a node lists its children in order", tree[0]!.childIds.join(",") === "l,r1");
+  check("the last child is marked", tree.find((r) => r.step.id === "r1")!.lastChild && !tree.find((r) => r.step.id === "l")!.lastChild);
+
+  // A live run: the model call has finished, the node it ran inside has not.
+  const live = buildTraceTree([llm, route]);
+  check("a child whose parent has not arrived is a root, not lost",
+    live.length === 2 && live.every((r) => r.depth === 0 && r.parentId === null));
+
+  const self = buildTraceTree([mk({ id: "x", seq: 0, parent_step_id: "x" })]);
+  check("a step naming itself as parent is a root", self.length === 1 && self[0]!.depth === 0);
+
+  const cycle = buildTraceTree([mk({ id: "c1", seq: 0, parent_step_id: "c2" }), mk({ id: "c2", seq: 1, parent_step_id: "c1" })]);
+  check("a cycle strands nothing", cycle.length === 2, String(cycle.length));
+
+  const legacy = mk({ id: "old", seq: 0, type: "tool" as Step["type"] });
+  check("an unknown type is `other`, not a crash", stepCategory(legacy) === "other");
+}
+
+console.log("\nwhat is on screen");
+{
+  const tree = buildTraceTree(steps);
+  check("unfiltered, everything", visibleRows(tree).length === 5);
+
+  const folded = visibleRows(tree, { collapsed: { a: true } });
+  check("a folded node hides its children and nothing else",
+    folded.map((r) => r.step.id).join(",") === "a,t,p", folded.map((r) => r.step.id).join(","));
+  check("...and says it is folded", folded[0]!.collapsed && !folded[1]!.collapsed);
+  check("folding a childless step changes nothing", visibleRows(tree, { collapsed: { p: true } }).length === 5);
+
+  const llmOnly = visibleRows(tree, { filter: "llm" });
+  check("a filter keeps the match and its node", llmOnly.map((r) => r.step.id).join(",") === "a,l");
+  check("...with the node marked as context", llmOnly[0]!.context && !llmOnly[1]!.context);
+
+  const errors = visibleRows(tree, { filter: "errors", collapsed: { t: true } });
+  check("a filter sees past a fold", errors.map((r) => r.step.id).join(",") === "t,p", errors.map((r) => r.step.id).join(","));
+
+  check("a search finds a step by name", visibleRows(tree, { query: "PARSE_read" }).some((r) => r.step.id === "p"));
+  check("...by its error", matchesQuery(parse, "no parsable"));
+  check("...by its payload", matchesQuery(llm, "the queue"));
+  check("...by its seq", matchesQuery(route, "#2"));
+  check("a search that matches nothing shows nothing", visibleRows(tree, { query: "zzz-nothing" }).length === 0);
+
+  const counts = filterCounts(steps);
+  check("counts per filter",
+    counts.all === 5 && counts.llm === 1 && counts.tool === 1 && counts.state === 2 && counts.route === 1 && counts.errors === 1,
+    JSON.stringify(counts));
+
+  const bucket = Object.fromEntries(steps.map((s) => [s.id, s]));
+  check("ancestors, nearest first", ancestorIds(bucket, "p").join(",") === "t" && ancestorIds(bucket, "l").join(",") === "a");
+}
+
+console.log("\ntotals");
+{
+  const t = traceTotals(steps);
+  check("tokens come from the model calls alone", t.tokens === 1572, String(t.tokens));
+  check("cost likewise", t.cost === 0.004344, String(t.cost));
+  check("model calls counted", t.llmCalls === 1 && t.unpricedCalls === 0);
+
+  const none = traceTotals([agent, tools]);
+  check("nothing measured is null, never zero", none.tokens === null && none.cost === null && none.llmCalls === 0);
+
+  const unpriced = traceTotals([mk({ id: "u", seq: 0, type: "llm_call", tokens: 300, cost: null })]);
+  check("an unpriced call has tokens and no cost", unpriced.tokens === 300 && unpriced.cost === null && unpriced.unpricedCalls === 1);
+
+  const zero = traceTotals([mk({ id: "z", seq: 0, type: "llm_call", tokens: 0, cost: 0 })]);
+  check("a real zero stays a zero", zero.tokens === 0 && zero.cost === 0);
+}
+
+console.log("\ntime");
+{
+  const w = stepWindow(agent);
+  check("started_at is the END; the start is that minus the duration",
+    w !== null && w.end === Date.parse("2026-10-09T05:24:47.476Z") && w.end - w.start === 2486);
+  const child = stepWindow(llm)!;
+  check("so a node's window contains its model call's", child.start >= w!.start - 1 && child.end <= w!.end);
+  check("an unreadable timestamp has no window", stepWindow(mk({ id: "b", seq: 0, started_at: "" })) === null);
+  check("a negative duration has no window", stepWindow(mk({ id: "n", seq: 0, latency_ms: -5 })) === null);
+
+  const run = { started_at: "2026-10-09T05:24:44.000Z", ended_at: "2026-10-09T05:24:49.000Z" };
+  const rw = runWindow(run, steps, Date.now())!;
+  check("a finished run spans its own start and end", rw.start === Date.parse(run.started_at) && rw.end === Date.parse(run.ended_at));
+  const early = runWindow({ ...run, started_at: "2026-10-09T05:24:46.000Z" }, steps, 0)!;
+  check("...widened when a step began before it", early.start === w!.start);
+  const now = Date.parse("2026-10-09T05:25:00.000Z");
+  check("a live run runs to now", runWindow({ ...run, ended_at: null }, steps, now)!.end === now);
+  check("an unreadable run has no window", runWindow({ started_at: "nope", ended_at: null }, steps, now) === null);
+}
+
+console.log("\nerrors");
+{
+  const e = errorParts("RuntimeError: No parsable readings found");
+  check("the class and the message", e.type === "RuntimeError" && e.message === "No parsable readings found" && e.detail === null);
+  const s = errorParts('TimezoneNotFound: no IANA zone for "Atlantis"\n  at tools/city_time.py:41 in resolve_zone\n  at agent.py:88 in call_tool');
+  check("a stack is the lines after the first", s.type === "TimezoneNotFound" && (s.detail ?? "").includes("city_time.py:41"));
+  const nested = errorParts("BadRequestError: Error code: 400 - {'type': 'error'}");
+  check("only the first colon splits", nested.type === "BadRequestError" && nested.message.startsWith("Error code: 400"));
+  const plain = errorParts("interrupted by a server restart");
+  check("a sentence has no class", plain.type === null && plain.message === "interrupted by a server restart");
+  check("a lowercase lead is not a class", errorParts("cancelled by user: twice").type === null);
+}
+
+console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
+(globalThis as { process?: { exit(code: number): void } }).process?.exit(fail === 0 ? 0 : 1);

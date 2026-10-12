@@ -1527,6 +1527,9 @@ jobs:
           npm run test:plan-flow
           npm run test:plan-stream
           npm run test:agent-output
+          # The trace as the timeline reads it: the parent tree, filters, totals that never invent a
+          # zero, and timing from `started_at`, which the interceptor stamps when a step FINISHES.
+          npm run test:trace-view
           npm run test:deploy-store
           npm run test:note-kind
           npm run test:inline-code

@@ -1,0 +1,352 @@
+// The trace, shaped for reading. Pure functions over the store's own `Step`s — never a copy of them.
+//
+// THE TIMELINE WAS A FLAT LIST IN `seq` ORDER, and the data was never flat. Every model call, tool
+// call and routing decision carries `parent_step_id`, pointing at the graph node it ran inside —
+// `extract_jd` and the `ChatAnthropic` call it made are a parent and a child, not two neighbours.
+// The tree below is that relationship read back out, and it is the only structure here: rows,
+// filters, totals and timing are all views of the same steps, so nothing can disagree with the trace.
+//
+// THREE FACTS ABOUT THE SCHEMA THAT EVERYTHING HERE LEANS ON:
+//
+//   1. `seq` is assigned when a step STARTS, so a node's seq is below its children's.
+//
+//   2. A step is EMITTED when it ends — so in a live run a child arrives before its parent. A child
+//      whose parent has not landed yet is a root until it does; it never waits off screen.
+//
+//   3. `started_at` IS STAMPED WHEN THE STEP FINISHES. The interceptor builds the `Step` in `_finish`
+//      (runtime/jaroku_interceptor/callback.py) and the field's default is "now". So the moment a
+//      step began is `started_at − latency_ms`, and `started_at` itself is when it ended.
+//
+//   npm run test:trace-view
+
+import type { Run, Step } from "../types.ts";
+
+// ── What kind of thing a step is ─────────────────────────────────────────────
+
+/** The trace's four kinds, plus a bucket for a type this client has never been told about. */
+export type StepCategory = "llm" | "tool" | "state" | "route" | "other";
+
+const CATEGORY_FOR_TYPE: Record<string, StepCategory> = {
+  llm_call: "llm",
+  tool_call: "tool",
+  state_update: "state",
+  router: "route",
+};
+
+/**
+ * A step's kind. UNKNOWN TYPES ARE `other`, NOT A CRASH: rows written before the schema settled
+ * carry `type: "tool"`, and a lookup that assumed the four would take the whole panel down on them.
+ */
+export function stepCategory(step: Pick<Step, "type">): StepCategory {
+  return CATEGORY_FOR_TYPE[step.type] ?? "other";
+}
+
+/** The words under a step's name. The schema's own word for it lives in the inspector. */
+export const CATEGORY_LABEL: Record<StepCategory, string> = {
+  llm: "LLM call",
+  tool: "Tool call",
+  state: "State update",
+  route: "Routing",
+  other: "Step",
+};
+
+// ── The tree ─────────────────────────────────────────────────────────────────
+
+export interface TraceRow {
+  step: Step;
+  /** 0 for a root. */
+  depth: number;
+  /** The parent this row is drawn under — present in the trace, unlike a dangling `parent_step_id`. */
+  parentId: string | null;
+  /** Direct children, in display order. */
+  childIds: string[];
+  /** The last of its parent's children, which is where a connector line stops. */
+  lastChild: boolean;
+}
+
+const bySeq = (a: Step, b: Step): number => a.seq - b.seq;
+
+/**
+ * Every step once, parents before their children, siblings in `seq` order.
+ *
+ * DEFENSIVE ABOUT THE PARENT LINK, because it comes off the wire: a parent that is missing makes a
+ * root, a step naming itself makes a root, and a cycle cannot strand a step — anything the walk did
+ * not reach is appended as a root, so the row count always equals the step count.
+ */
+export function buildTraceTree(steps: readonly Step[]): TraceRow[] {
+  const ordered = [...steps].sort(bySeq);
+  const byId = new Map(ordered.map((s) => [s.id, s]));
+  const children = new Map<string, Step[]>();
+  const roots: Step[] = [];
+
+  for (const s of ordered) {
+    const p = s.parent_step_id;
+    if (p && p !== s.id && byId.has(p)) {
+      const list = children.get(p);
+      if (list) list.push(s);
+      else children.set(p, [s]);
+    } else {
+      roots.push(s);
+    }
+  }
+
+  const rows: TraceRow[] = [];
+  const seen = new Set<string>();
+  const walk = (s: Step, depth: number, parentId: string | null, lastChild: boolean): void => {
+    if (seen.has(s.id)) return;
+    seen.add(s.id);
+    const kids = (children.get(s.id) ?? []).filter((k) => !seen.has(k.id));
+    rows.push({ step: s, depth, parentId, childIds: kids.map((k) => k.id), lastChild });
+    kids.forEach((k, i) => walk(k, depth + 1, s.id, i === kids.length - 1));
+  };
+  roots.forEach((r, i) => walk(r, 0, null, i === roots.length - 1));
+  // A cycle is the only way to get here: none of its members was anybody's root.
+  for (const s of ordered) if (!seen.has(s.id)) walk(s, 0, null, true);
+  return rows;
+}
+
+// ── What is on screen ────────────────────────────────────────────────────────
+
+export type StepFilter = "all" | "llm" | "tool" | "state" | "route" | "errors";
+
+export interface VisibleRow extends TraceRow {
+  /**
+   * Shown only so a match keeps its place in the tree — the node a matching model call ran inside.
+   * Drawn quieter than a match, and never counted as one.
+   */
+  context: boolean;
+  /** Folded, so its children are not drawn. Always false while a filter or a search is on. */
+  collapsed: boolean;
+}
+
+export function matchesFilter(step: Step, filter: StepFilter): boolean {
+  if (filter === "all") return true;
+  if (filter === "errors") return step.error != null;
+  return stepCategory(step) === filter;
+}
+
+/** How many steps each filter would show — the counts beside the filter's words. */
+export function filterCounts(steps: readonly Step[]): Record<StepFilter, number> {
+  const counts: Record<StepFilter, number> = { all: 0, llm: 0, tool: 0, state: 0, route: 0, errors: 0 };
+  for (const s of steps) {
+    counts.all++;
+    const c = stepCategory(s);
+    if (c !== "other") counts[c]++;
+    if (s.error != null) counts.errors++;
+  }
+  return counts;
+}
+
+/** A payload is searched, but only its first few thousand characters — a keystroke must stay cheap. */
+const PAYLOAD_SEARCHED = 4000;
+const haystacks = new WeakMap<Step, string>();
+
+function payloadText(v: unknown): string {
+  if (v == null) return "";
+  if (typeof v === "string") return v.slice(0, PAYLOAD_SEARCHED);
+  try {
+    return (JSON.stringify(v) ?? "").slice(0, PAYLOAD_SEARCHED);
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Everything a search can find a step by, lowercased once per step object. The store replaces a
+ * step's object whenever the step changes, so a WeakMap keyed on it can never serve stale text.
+ */
+export function searchText(step: Step): string {
+  const cached = haystacks.get(step);
+  if (cached !== undefined) return cached;
+  const text = [
+    step.name,
+    step.id,
+    `#${step.seq}`,
+    step.type,
+    CATEGORY_LABEL[stepCategory(step)],
+    step.error ?? "",
+    payloadText(step.input),
+    payloadText(step.output),
+  ].join("\n").toLowerCase();
+  haystacks.set(step, text);
+  return text;
+}
+
+export function matchesQuery(step: Step, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  return q === "" || searchText(step).includes(q);
+}
+
+/**
+ * The rows to draw.
+ *
+ * UNFILTERED, folding applies: a collapsed node hides its descendants and nothing else does.
+ *
+ * FILTERED OR SEARCHED, folding is set aside and every match is drawn with its ancestors, so a
+ * matching model call still appears under the node it ran in. A fold that hid a search's only match
+ * would be a search that says "nothing found" about something that is right there.
+ */
+export function visibleRows(
+  tree: readonly TraceRow[],
+  opts: { collapsed?: Readonly<Record<string, true>>; filter?: StepFilter; query?: string } = {},
+): VisibleRow[] {
+  const collapsed = opts.collapsed ?? {};
+  const filter = opts.filter ?? "all";
+  const query = opts.query ?? "";
+  const narrowed = filter !== "all" || query.trim() !== "";
+
+  if (!narrowed) {
+    const out: VisibleRow[] = [];
+    let hideBelow: number | null = null;
+    for (const row of tree) {
+      if (hideBelow !== null) {
+        if (row.depth > hideBelow) continue;
+        hideBelow = null;
+      }
+      const folded = Boolean(collapsed[row.step.id]) && row.childIds.length > 0;
+      out.push({ ...row, context: false, collapsed: folded });
+      if (folded) hideBelow = row.depth;
+    }
+    return out;
+  }
+
+  const byId = new Map(tree.map((r) => [r.step.id, r]));
+  const matched = new Set<string>();
+  const keep = new Set<string>();
+  for (const row of tree) {
+    if (!matchesFilter(row.step, filter) || !matchesQuery(row.step, query)) continue;
+    matched.add(row.step.id);
+    let id: string | null = row.step.id;
+    while (id && !keep.has(id)) {
+      keep.add(id);
+      id = byId.get(id)?.parentId ?? null;
+    }
+  }
+  return tree
+    .filter((r) => keep.has(r.step.id))
+    .map((r) => ({ ...r, context: !matched.has(r.step.id), collapsed: false }));
+}
+
+/** The ids of a step's ancestors, nearest first — what has to be unfolded to show it. */
+export function ancestorIds(steps: Readonly<Record<string, Step>>, id: string): string[] {
+  const out: string[] = [];
+  const seen = new Set([id]);
+  let parent = steps[id]?.parent_step_id ?? null;
+  while (parent && steps[parent] && !seen.has(parent)) {
+    out.push(parent);
+    seen.add(parent);
+    parent = steps[parent]!.parent_step_id;
+  }
+  return out;
+}
+
+// ── Totals ───────────────────────────────────────────────────────────────────
+
+export interface TraceTotals {
+  /** Every token the run's model calls reported, or null when none reported any. */
+  tokens: number | null;
+  /** What those calls cost, or null when none was priced. */
+  cost: number | null;
+  /** Model calls in the trace, failed ones included. */
+  llmCalls: number;
+  /** Model calls that finished but carry no price — a model the pricing table does not know. */
+  unpricedCalls: number;
+}
+
+/**
+ * The run's tokens and cost, by the schema's own accounting.
+ *
+ * SUMMED OVER EVERY STEP AND NOTHING IS COUNTED TWICE, because only `llm_call` steps carry tokens or
+ * cost — a node's figures are not the sum of its children's, they are null. This is the same total
+ * the interceptor writes onto `run_end`, computed from the steps so it moves while the run does.
+ *
+ * NULL IS NOT ZERO. A run whose calls were never priced has an unknown cost, and writing `$0.00`
+ * for it would be a claim nobody measured.
+ */
+export function traceTotals(steps: readonly Step[]): TraceTotals {
+  let tokens: number | null = null;
+  let cost: number | null = null;
+  let llmCalls = 0;
+  let unpricedCalls = 0;
+  for (const s of steps) {
+    if (s.tokens != null) tokens = (tokens ?? 0) + s.tokens;
+    if (s.cost != null) cost = (cost ?? 0) + s.cost;
+    if (s.type === "llm_call") {
+      llmCalls++;
+      if (s.cost == null && s.error == null) unpricedCalls++;
+    }
+  }
+  return { tokens, cost, llmCalls, unpricedCalls };
+}
+
+// ── Time ─────────────────────────────────────────────────────────────────────
+
+export interface TimeWindow {
+  start: number;
+  end: number;
+}
+
+/**
+ * When a step ran, in epoch milliseconds — or null when its fields cannot say.
+ *
+ * `started_at` IS THE END. See the header: the interceptor stamps it as the step finishes, so the
+ * start is that instant minus the step's own duration.
+ */
+export function stepWindow(step: Pick<Step, "started_at" | "latency_ms">): TimeWindow | null {
+  const end = Date.parse(step.started_at);
+  const ms = step.latency_ms;
+  if (!Number.isFinite(end) || typeof ms !== "number" || !Number.isFinite(ms) || ms < 0) return null;
+  return { start: end - ms, end };
+}
+
+/**
+ * The span the run's bars are drawn against: from its start (or its first step's, if that is
+ * earlier) to its end — or to `now` while it has none.
+ *
+ * WIDENED TO COVER EVERY STEP, because the run and its steps are stamped by different writers and a
+ * step a few milliseconds outside its own run would otherwise draw a bar off the end of the track.
+ */
+export function runWindow(
+  run: Pick<Run, "started_at" | "ended_at">,
+  steps: readonly Step[],
+  now: number,
+): TimeWindow | null {
+  let start = Date.parse(run.started_at);
+  let end = run.ended_at ? Date.parse(run.ended_at) : now;
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  for (const s of steps) {
+    const w = stepWindow(s);
+    if (!w) continue;
+    if (w.start < start) start = w.start;
+    if (w.end > end) end = w.end;
+  }
+  return end > start ? { start, end } : null;
+}
+
+// ── Errors ───────────────────────────────────────────────────────────────────
+
+export interface ErrorParts {
+  /** The exception's class, when the message leads with one: `RuntimeError`, `TimezoneNotFound`. */
+  type: string | null;
+  /** The first line, without the class. */
+  message: string;
+  /** Every line after the first — a stack, when there is one. */
+  detail: string | null;
+}
+
+/**
+ * A step's error, split the way the interceptor writes it: `f"{type(error).__name__}: {error}"`,
+ * sometimes followed by `  at file:line` frames. Anything else is all message.
+ */
+export function errorParts(error: string): ErrorParts {
+  const text = error.replace(/\s+$/, "");
+  const nl = text.indexOf("\n");
+  const first = nl === -1 ? text : text.slice(0, nl);
+  const rest = nl === -1 ? "" : text.slice(nl + 1).replace(/^\s*\n/, "");
+  const m = /^([A-Z][\w.]*): (.+)$/.exec(first);
+  return {
+    type: m ? m[1]! : null,
+    message: m ? m[2]! : first,
+    detail: rest.trim() ? rest : null,
+  };
+}
