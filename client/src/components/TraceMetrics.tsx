@@ -28,7 +28,7 @@ function useTick(active: boolean, ms = 200): number {
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-function Metric({ label, value, title, tone = "text-ink" }: { label: string; value: string; title: string; tone?: string }) {
+export function Metric({ label, value, title, tone = "text-ink" }: { label: string; value: string; title: string; tone?: string }) {
   return (
     <div className="min-w-0 px-3 py-2" title={title}>
       <div className="truncate text-tiny text-faint">{label}</div>

@@ -98,8 +98,8 @@ import { GraphRunStrip, GraphRunStripFolded } from "./GraphRunStrip.tsx";
 
 // How much of this canvas the Step Details overlay covers when it is open. It is drawn over
 // the graph rather than beside it, so this is the one number that tells the framing the right
-// edge is not really the right edge. Kept in step with StepDetailPanel's `w-[340px]`.
-const STEP_PANEL_W = 340;
+// edge is not really the right edge. Kept in step with StepDetailPanel's `w-[380px]`.
+const STEP_PANEL_W = 380;
 // The node inspector, which is an overlay for the same reason. Kept in step with its `w-64`.
 const INSPECTOR_W = 256;
 // How much of the canvas's top the toolbar takes: its height and the gap above it.
@@ -1184,7 +1184,7 @@ export function GraphView() {
   // against the panel state at the time it fires rather than at the time it was created.
   const detailOpen = useTraceStore((s) => Boolean(s.expandedStepId));
   const inspectorOpen = selected !== null;
-  // Mirrors StepDetailPanel's `w-[340px] max-w-[85%]` and the inspector's `w-64`, plus a gutter
+  // Mirrors StepDetailPanel's `w-[380px] max-w-[85%]` and the inspector's `w-64`, plus a gutter
   // so the nearest node does not sit flush against the panel's edge.
   const covered = useMemo(() => {
     const width = canvasRef.current?.clientWidth ?? 0;

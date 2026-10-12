@@ -72,22 +72,27 @@ export function StepTile({
   step,
   provider,
   mark,
+  size = "md",
 }: {
   step: Pick<Step, "type" | "error" | "name">;
   provider?: string | null;
   /** This step's own mark and colour in its run (traceMarks). */
   mark?: StepMark;
+  /** `lg` for the details drawer's header, where the tile introduces the step. */
+  size?: "md" | "lg";
 }) {
+  const box = size === "lg" ? "h-8 w-8 rounded-control" : "h-[22px] w-[22px] rounded-sm";
+  const glyph = size === "lg" ? ICON.md : ICON.sm;
   const brand = stepProvider(step, provider);
   if (brand && hasProviderMark(brand)) {
     const colour = step.error ? STATUS.error : BRAND_COLOR[brand] ?? TEXT.muted;
     return (
       <span
         aria-hidden
-        className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-sm"
+        className={`flex shrink-0 items-center justify-center ${box}`}
         style={{ background: tileTint(colour) }}
       >
-        <ProviderMark provider={brand} size={ICON.sm} />
+        <ProviderMark provider={brand} size={glyph} />
       </span>
     );
   }
@@ -96,11 +101,11 @@ export function StepTile({
     return (
       <span
         aria-hidden
-        className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-sm"
+        className={`flex shrink-0 items-center justify-center ${box}`}
         // A connector's logo keeps its own colours; a glyph takes the step's.
         style={{ background: tileTint(colour), color: mark.brand ? undefined : colour }}
       >
-        <mark.Icon size={ICON.sm} />
+        <mark.Icon size={glyph} />
       </span>
     );
   }
@@ -110,10 +115,10 @@ export function StepTile({
   return (
     <span
       aria-hidden
-      className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-sm"
+      className={`flex shrink-0 items-center justify-center ${box}`}
       style={{ background: tileTint(colour), color: colour }}
     >
-      <Mark size={ICON.sm} />
+      <Mark size={glyph} />
     </span>
   );
 }

@@ -13,6 +13,7 @@ import { useTraceStore } from "../store/traceStore.ts";
 import { stepNodeId } from "../lib/traceGraphMap.ts";
 import { sendBranchRun } from "../lib/socket.ts";
 import { TYPE } from "../lib/tokens.ts";
+import { primaryBtn } from "./buttons.ts";
 
 function domainFields(stateAfter: unknown): Record<string, unknown> {
   if (!stateAfter || typeof stateAfter !== "object") return {};
@@ -60,11 +61,12 @@ export function StateBranchEditor({ step }: { step: Step }) {
   };
 
   return (
-    <div className="mt-4 border-t border-hair pt-3">
-      <div className="flex items-center gap-2 mb-2">
-        <span className={TYPE.panelLabel}>Branch from here</span>
+    <section aria-label="Branch from here" className="mt-5">
+      <div className="mb-1.5 flex items-center gap-2">
+        <span className={TYPE.sectionLabel}>Branch from here</span>
         {node && <span className="text-tiny text-muted">node: {node}</span>}
       </div>
+      <div className="rounded-card border border-hair bg-panel p-3">
 
       {fieldKeys.length === 0 ? (
         <p className="text-tiny text-muted mb-2">
@@ -99,24 +101,29 @@ export function StateBranchEditor({ step }: { step: Step }) {
 
       {error && <p className="text-tiny text-err mb-2">{error}</p>}
 
+      {/* THE DRAWER'S TWO DECISIONS, BOTH BLACK — the product owner's call on 2026-10-12, that every
+          major button there is the app's ink-filled primary. Re-run leads because it always works;
+          Branch with edits waits, greyed, until a field has been changed. */}
       <div className="flex items-center gap-2">
         <button
-          onClick={() => branch(true)}
-          disabled={dirtyKeys.length === 0}
-          className="flex-1 rounded-control py-1.5 text-caption border border-hair text-ink
-            enabled:hover:bg-active active:bg-chrome disabled:opacity-40 disabled:cursor-not-allowed"
-          title={dirtyKeys.length === 0 ? "Edit a field to branch with changes" : "Fork a new run with these edits"}
-        >
-          Branch with edits{dirtyKeys.length ? ` (${dirtyKeys.length})` : ""}
-        </button>
-        <button
+          type="button"
           onClick={() => branch(false)}
-          className="rounded-control px-3 py-1.5 text-caption border border-hair text-muted hover:bg-active active:bg-chrome hover:text-ink"
+          className={`${primaryBtn} flex-1 justify-center focus-visible:outline-none focus-visible:shadow-focusring`}
           title="Fork a new run from this checkpoint without changes"
         >
           Re-run from here
         </button>
+        <button
+          type="button"
+          onClick={() => branch(true)}
+          disabled={dirtyKeys.length === 0}
+          className={`${primaryBtn} flex-1 justify-center focus-visible:outline-none focus-visible:shadow-focusring`}
+          title={dirtyKeys.length === 0 ? "Edit a field to branch with changes" : "Fork a new run with these edits"}
+        >
+          Branch with edits{dirtyKeys.length ? ` (${dirtyKeys.length})` : ""}
+        </button>
       </div>
-    </div>
+      </div>
+    </section>
   );
 }

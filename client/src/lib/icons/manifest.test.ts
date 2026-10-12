@@ -74,7 +74,8 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // 279 WITH THE TRACE'S STEP MARKS AND ITS OWN CONTROLS: five kinds of step, fold, details, search,
   // close and the empty trace.
   // 281 WITH THE TRAY'S STEP PILL AND ITS CLEAR.
-  check("281 registry keys", entries.length === 281, `${entries.length}`);
+  // 283 WITH THE DETAILS DRAWER'S PREVIOUS AND NEXT STEP — marks already here.
+  check("283 registry keys", entries.length === 283, `${entries.length}`);
   const names = new Set(entries.map((e) => e.export));
   // 104 from icons_integration's appendix, plus D8's 13 — the composer glyphs that had to move
   // here when `@hugeicons/react` came out. See the note at the top of `registry.ts`.

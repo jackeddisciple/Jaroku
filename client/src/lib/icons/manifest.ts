@@ -388,6 +388,9 @@ export const MANIFEST = {
     search: "Search01Icon",
     closeDetails: "XIcon",
     empty: "Activity01Icon",
+    // The details drawer's walk through the steps, the same order J/K take.
+    prevStep: "ArrowUp01Icon",
+    nextStep: "ArrowDown01Icon",
   },
 
   // ── §5 Global ─────────────────────────────────────────────────────────────
