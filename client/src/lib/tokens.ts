@@ -158,6 +158,31 @@ export const NODE_HUE = {
 } as const;
 
 
+/**
+ * A TRACE STEP'S OWN COLOUR — the product owner's call on 2026-10-12: "every state is having same icon
+ * and bg", so each distinct step in a run takes the next of these, drawn as a pastel tile (a fifth of
+ * the colour on white) with its mark in the colour itself. Green, yellow, pink, blue, brown, turquoise
+ * and more, in an order that puts unlike colours next to each other.
+ *
+ * MID-DARK SO THE MARK READS ON ITS OWN PASTEL, and kept clear of the three status colours — no value
+ * here is `STATUS.ok`, `.error` or `.pending` — because a failed step's red tile and a running row's
+ * amber must still be the only red and the only amber in the list.
+ */
+export const STEP_HUE = [
+  "#2E8B57", // green
+  "#A07C00", // yellow
+  "#C2407A", // pink
+  "#2F6DB5", // blue
+  "#8B5E3C", // brown
+  "#15938C", // turquoise
+  "#7B4FC2", // violet
+  "#C4652A", // orange
+  "#4A55C2", // indigo
+  "#6B8E23", // olive
+  "#A8487E", // plum
+  "#4E7A99", // steel
+] as const;
+
 export type AccentName = keyof typeof ACCENT;
 
 /**

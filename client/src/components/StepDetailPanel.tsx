@@ -13,7 +13,7 @@
 // not the input/output split, so the split is named as not recorded rather than guessed. Its start is
 // `started_at − latency_ms`, because `started_at` is stamped when the step finishes (see traceView).
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTraceStore } from "../store/traceStore.ts";
 import { absTime, fmtCost, fmtDuration, fmtTokens } from "../lib/format.ts";
 import { Icon } from "../lib/icons/registry.ts";
@@ -29,6 +29,7 @@ import { ErrorView, StepDetail } from "./StepDetail.tsx";
 import { StateBranchEditor } from "./StateBranchEditor.tsx";
 import { McpBadge } from "./McpBadge.tsx";
 import { StepTile } from "./StepRow.tsx";
+import { traceMarks } from "./traceMarks.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { agentMcpToolNames } from "../store/mcpStore.ts";
 
@@ -165,6 +166,8 @@ export function StepDetailPanel() {
   const run = useTraceStore((s) => (s.activeRunId ? s.runs[s.activeRunId] : undefined));
   const setExpandedStep = useTraceStore((s) => s.setExpandedStep);
   const open = Boolean(expandedStepId && step);
+  const connectors = useBuildStore((s) => s.agents.find((a) => a.agent_id === run?.agent_id)?.connectors);
+  const marks = useMemo(() => traceMarks(Object.values(bucket ?? {}), connectors ?? []), [bucket, connectors]);
 
   // Escape closes the panel.
   useEffect(() => {
@@ -209,7 +212,7 @@ export function StepDetailPanel() {
             {/* THE ROW YOU CLICKED, AGAIN: its tile, its name, its kind — so the drawer opens on the
                 step the reader chose rather than on a differently-shaped description of it. */}
             <div className="mt-1 flex min-w-0 items-start gap-2.5">
-              <StepTile step={step} provider={run?.provider} />
+              <StepTile step={step} provider={run?.provider} mark={marks.get(step.name)} />
               <div className="min-w-0 flex-1">
                 <div className="flex min-w-0 items-center gap-1.5">
                   <span className="min-w-0 truncate text-label text-ink" title={step.name}>{step.name}</span>

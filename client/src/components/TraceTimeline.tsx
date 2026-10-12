@@ -9,6 +9,8 @@ import { TraceHeader } from "./TraceHeader.tsx";
 import { TraceMetrics } from "./TraceMetrics.tsx";
 import { TraceFilters } from "./TraceFilters.tsx";
 import { TraceResult } from "./TraceResult.tsx";
+import { traceMarks } from "./traceMarks.ts";
+import { useBuildStore } from "../store/buildStore.ts";
 import { Icon } from "../lib/icons/registry.ts";
 
 /** Re-render on an interval while `active`. */
@@ -79,6 +81,8 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
   const tier = useRowTier(frame);
 
   const tree = useMemo(() => buildTraceTree(steps), [steps]);
+  const connectors = useBuildStore((s) => s.agents.find((a) => a.agent_id === run?.agent_id)?.connectors);
+  const marks = useMemo(() => traceMarks(steps, connectors ?? []), [steps, connectors]);
   const rows = useMemo(() => visibleRows(tree, { collapsed, filter, query }), [tree, collapsed, filter, query]);
   const folds = useMemo(() => {
     const out: Record<string, FoldSummary> = {};
@@ -163,6 +167,7 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
           fold={folds[r.step.id]}
           bar={barFor(r.step, span)}
           provider={run?.provider}
+          mark={marks.get(r.step.name)}
         />
       ))}
     </div>

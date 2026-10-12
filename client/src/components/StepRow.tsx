@@ -24,6 +24,7 @@ import { fmtCost, fmtDuration, fmtTokens, jsonPretty } from "../lib/format.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { CATEGORY_LABEL, stepCategory, stepProvider, type StepCategory, type VisibleRow } from "../lib/traceView.ts";
 import { BRAND_COLOR, ProviderMark, hasProviderMark } from "../lib/icons.tsx";
+import type { StepMark } from "./traceMarks.ts";
 import { ICON, STATUS, STEP_TYPE, TEXT } from "../lib/tokens.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { agentMcpToolNames } from "../store/mcpStore.ts";
@@ -33,6 +34,16 @@ import type { Step } from "../types.ts";
 import { CopyTurn } from "./composer/CopyTurn.tsx";
 import { IconButton } from "./IconButton.tsx";
 import { McpBadge } from "./McpBadge.tsx";
+
+/** The one colour a step is drawn in — its tile, its bar: red if it failed, else its own. */
+export function stepColour(step: Pick<Step, "type" | "error" | "name">, provider?: string | null, mark?: StepMark): string {
+  if (step.error) return STATUS.error;
+  if (mark) return mark.colour;
+  const brand = stepProvider(step, provider);
+  if (brand && BRAND_COLOR[brand]) return BRAND_COLOR[brand]!;
+  const known = STEP_TYPE[step.type as keyof typeof STEP_TYPE] as { fg: string } | undefined;
+  return known ? known.fg : TEXT.muted;
+}
 
 /** Each kind of step's mark, from the app's Hugeicons set — the product owner's call on 2026-10-12. */
 const STEP_MARK: Record<StepCategory, IconComponent> = {
@@ -57,7 +68,16 @@ export const tileTint = (colour: string): string => `color-mix(in srgb, ${colour
  * that brand's colour (the product owner's call, 2026-10-12). A provider without a logo here keeps
  * the Hugeicons model mark.
  */
-export function StepTile({ step, provider }: { step: Pick<Step, "type" | "error" | "name">; provider?: string | null }) {
+export function StepTile({
+  step,
+  provider,
+  mark,
+}: {
+  step: Pick<Step, "type" | "error" | "name">;
+  provider?: string | null;
+  /** This step's own mark and colour in its run (traceMarks). */
+  mark?: StepMark;
+}) {
   const brand = stepProvider(step, provider);
   if (brand && hasProviderMark(brand)) {
     const colour = step.error ? STATUS.error : BRAND_COLOR[brand] ?? TEXT.muted;
@@ -68,6 +88,19 @@ export function StepTile({ step, provider }: { step: Pick<Step, "type" | "error"
         style={{ background: tileTint(colour) }}
       >
         <ProviderMark provider={brand} size={ICON.sm} />
+      </span>
+    );
+  }
+  if (mark) {
+    const colour = step.error ? STATUS.error : mark.colour;
+    return (
+      <span
+        aria-hidden
+        className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-sm"
+        // A connector's logo keeps its own colours; a glyph takes the step's.
+        style={{ background: tileTint(colour), color: mark.brand ? undefined : colour }}
+      >
+        <mark.Icon size={ICON.sm} />
       </span>
     );
   }
@@ -111,8 +144,7 @@ export interface BarPlace {
  * so a node's bar spans its model call's, steps that overlapped are drawn overlapping, and the gaps
  * between nodes are visible as gaps rather than invented away.
  */
-function Waterfall({ step, bar }: { step: Step; bar: BarPlace | null }) {
-  const known = STEP_TYPE[step.type as keyof typeof STEP_TYPE] as { fg: string } | undefined;
+function Waterfall({ step, bar, colour }: { step: Step; bar: BarPlace | null; colour: string }) {
   return (
     <span
       className="relative h-1.5 w-16 shrink-0 rounded-full bg-void"
@@ -121,13 +153,14 @@ function Waterfall({ step, bar }: { step: Step; bar: BarPlace | null }) {
       {bar && (
         <span
           aria-hidden
-          className={`absolute bottom-0 top-0 rounded-full ${step.error ? "bg-err" : known ? "" : "bg-grip"}`}
+          // The step's own colour — the same one as its tile — so a bar is findable from its row.
+          className="absolute bottom-0 top-0 rounded-full"
           style={{
             left: `${bar.left * 100}%`,
             // Never thinner than a hair, so a 0ms routing decision still marks its moment.
             width: `max(2px, ${bar.width * 100}%)`,
-            backgroundColor: step.error || !known ? undefined : known.fg,
-            opacity: step.error ? 0.8 : 0.55,
+            backgroundColor: colour,
+            opacity: step.error ? 0.8 : 0.6,
           }}
         />
       )}
@@ -191,6 +224,7 @@ export function StepRow({
   fold,
   bar,
   provider,
+  mark,
 }: {
   row: VisibleRow;
   tabbable: boolean;
@@ -201,6 +235,8 @@ export function StepRow({
   bar: BarPlace | null;
   /** The run's provider, for a model call whose class does not name one. */
   provider?: string | null;
+  /** This step's own mark and colour (traceMarks). */
+  mark?: StepMark;
 }) {
   const { step } = row;
   const group = row.childIds.length > 0;
@@ -285,7 +321,7 @@ export function StepRow({
             </span>
           )}
         </span>
-        <StepTile step={step} provider={provider} />
+        <StepTile step={step} provider={provider} mark={mark} />
       </span>
 
       <span className="min-w-[4.5rem] flex-1">
@@ -326,7 +362,7 @@ export function StepRow({
           <span title={fold ? `Across the ${fold.steps} steps inside` : undefined}>{fmtCost(cost)}</span>
         )}
         <span className="min-w-[3rem] text-right">{fmtDuration(step.latency_ms)}</span>
-        {tier === "full" && <Waterfall step={step} bar={bar} />}
+        {tier === "full" && <Waterfall step={step} bar={bar} colour={stepColour(step, provider, mark)} />}
       </span>
 
       {/* THE ROW'S ACTIONS. Details holds its own place, so the figures never move when it appears;

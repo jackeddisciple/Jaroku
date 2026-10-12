@@ -7,6 +7,8 @@
 //   npm run test:trace-view
 
 import { useTraceStore, visibleTraceRows } from "../store/traceStore.ts";
+import { traceMarks } from "../components/traceMarks.ts";
+import { STATUS, STEP_HUE } from "./tokens.ts";
 import type { Step } from "../types.ts";
 import {
   ancestorIds,
@@ -171,6 +173,21 @@ console.log("\nerrors");
   check("a lowercase lead is not a class", errorParts("cancelled by user: twice").type === null);
   check("nor is a capitalised word", errorParts("Cancelled: the run was stopped at a node boundary").type === null);
   check("a one-hump class with a class suffix is", errorParts("Exception: boom").type === "Exception");
+}
+
+console.log("\neach step's own mark and colour");
+{
+  const again = mk({ id: "a2", seq: 5, name: "agent" });
+  const marks = traceMarks([...steps, again]);
+  check("every distinct step has one", marks.has("agent") && marks.has("tools") && marks.has("parse_readings") && marks.has("should_continue"));
+  check("...and model calls are left to their logos", !marks.has("ChatAnthropic"));
+  const colours = [...marks.values()].map((m) => m.colour);
+  check("no two distinct steps share a colour", new Set(colours).size === colours.length, colours.join());
+  const icons = [...marks.values()].map((m) => m.Icon);
+  check("...or a mark", new Set(icons).size === icons.length);
+  check("a step that runs again keeps its look", traceMarks(steps).get("agent")!.colour === marks.get("agent")!.colour);
+  check("no colour is a status colour",
+    STEP_HUE.every((h) => ![STATUS.ok, STATUS.error, STATUS.pending].map((x) => x.toLowerCase()).includes(h.toLowerCase())));
 }
 
 console.log("\nthe store's rules for selection and folding");
