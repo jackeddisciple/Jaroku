@@ -8,6 +8,7 @@
 
 import { create } from "zustand";
 import type { Run, RunStatus, RunSummary, Step, TraceEvent } from "../types.ts";
+import { ancestorIds, buildTraceTree, visibleRows, type VisibleRow } from "../lib/traceView.ts";
 
 export type ConnectionState = "connecting" | "open" | "closed";
 export type LogLine = { level: "stderr" | "parseError"; text: string };
@@ -52,6 +53,11 @@ interface TraceState {
    * answer folded too, and a reload is a fair moment to show it again.
    */
   answerOpen: boolean;
+  /**
+   * Node steps folded away in the timeline, by step id. Ids are unique across runs, so one map serves
+   * every trace; kept for the session and never written to storage.
+   */
+  collapsedStepIds: Record<string, true>;
 
   /**
    * The run history, merged by id.
@@ -78,6 +84,7 @@ interface TraceState {
   setConnection: (c: ConnectionState) => void;
   setNext: (runId: string, next: string[]) => void;
   setAnswerOpen: (open: boolean) => void;
+  setCollapsed: (stepId: string, collapsed: boolean) => void;
 }
 
 const LOG_CAP = 200;
@@ -111,6 +118,7 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   logs: [],
   nextByRun: {},
   answerOpen: true,
+  collapsedStepIds: {},
 
   applyHistory: (runs, meta) =>
     set((state) => {
@@ -177,12 +185,22 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   // AN OPEN DRAWER FOLLOWS THE SELECTION. Details open on one step while another row is selected
   // would be two answers to "which step am I looking at"; so picking a different step — a click, J/K,
   // a graph node — moves the drawer with it. Clearing the selection leaves the drawer alone.
+  //
+  // AND A SELECTED STEP IS ALWAYS ON SCREEN. A graph node, the sparkline or J/K can pick a step whose
+  // node is folded away; its ancestors unfold, rather than the selection landing on a hidden row.
   selectStep: (id) =>
-    set((state) =>
-      id && state.expandedStepId && state.expandedStepId !== id
-        ? { selectedStepId: id, expandedStepId: id }
-        : { selectedStepId: id },
-    ),
+    set((state) => {
+      const next: Partial<TraceState> = { selectedStepId: id };
+      if (id && state.expandedStepId && state.expandedStepId !== id) next.expandedStepId = id;
+      const bucket = id && state.activeRunId ? state.stepsByRun[state.activeRunId] : undefined;
+      const folded = bucket ? ancestorIds(bucket, id!).filter((a) => state.collapsedStepIds[a]) : [];
+      if (folded.length > 0) {
+        const collapsedStepIds = { ...state.collapsedStepIds };
+        for (const a of folded) delete collapsedStepIds[a];
+        next.collapsedStepIds = collapsedStepIds;
+      }
+      return next;
+    }),
 
   setExpandedStep: (id) => set({ expandedStepId: id }),
 
@@ -202,6 +220,18 @@ export const useTraceStore = create<TraceState>((set, get) => ({
     }),
 
   setAnswerOpen: (answerOpen) => set({ answerOpen }),
+
+  setCollapsed: (stepId, collapsed) =>
+    set((state) => {
+      if (Boolean(state.collapsedStepIds[stepId]) === collapsed) return {};
+      const collapsedStepIds = { ...state.collapsedStepIds };
+      if (collapsed) collapsedStepIds[stepId] = true;
+      else delete collapsedStepIds[stepId];
+      // Folding away the selected step's node moves the selection up to the node, so it stays visible.
+      const bucket = state.activeRunId ? state.stepsByRun[state.activeRunId] : undefined;
+      const hidden = collapsed && state.selectedStepId && bucket && ancestorIds(bucket, state.selectedStepId).includes(stepId);
+      return hidden ? { collapsedStepIds, selectedStepId: stepId } : { collapsedStepIds };
+    }),
 }));
 
 // --- selectors (pure; sort-by-seq lives here so no component can render arrival order) ---
@@ -210,6 +240,17 @@ export const useTraceStore = create<TraceState>((set, get) => ({
 export function orderedSteps(bucket: Record<string, Step> | undefined): Step[] {
   if (!bucket) return [];
   return Object.values(bucket).sort((a, b) => a.seq - b.seq);
+}
+
+/**
+ * The rows the active run's timeline draws, in order — what J/K and the arrow keys walk, so the
+ * keyboard can never land on a step the screen is not showing.
+ */
+export function visibleTraceRows(state: Pick<TraceState, "activeRunId" | "stepsByRun" | "collapsedStepIds">): VisibleRow[] {
+  if (!state.activeRunId) return [];
+  const bucket = state.stepsByRun[state.activeRunId];
+  if (!bucket) return [];
+  return visibleRows(buildTraceTree(Object.values(bucket)), { collapsed: state.collapsedStepIds });
 }
 
 /** Runs for the sidebar, newest first. */

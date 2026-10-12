@@ -6,10 +6,12 @@
 //
 //   npm run test:trace-view
 
+import { useTraceStore, visibleTraceRows } from "../store/traceStore.ts";
 import type { Step } from "../types.ts";
 import {
   ancestorIds,
   buildTraceTree,
+  descendantSteps,
   errorParts,
   filterCounts,
   matchesQuery,
@@ -55,6 +57,16 @@ console.log("the tree");
   check("children sit one level down", tree.find((r) => r.step.id === "l")?.depth === 1);
   check("a node lists its children in order", tree[0]!.childIds.join(",") === "l,r1");
   check("the last child is marked", tree.find((r) => r.step.id === "r1")!.lastChild && !tree.find((r) => r.step.id === "l")!.lastChild);
+  check("a root carries no path; a child carries its own place",
+    tree[0]!.lastPath.length === 0 && tree.find((r) => r.step.id === "l")!.lastPath.join() === "false");
+  const deep = buildTraceTree([
+    mk({ id: "n", seq: 0 }), mk({ id: "c1", seq: 1, parent_step_id: "n" }), mk({ id: "g", seq: 2, parent_step_id: "c1" }),
+    mk({ id: "c2", seq: 3, parent_step_id: "n" }),
+  ]);
+  check("a grandchild's path says its parent has a sibling below",
+    deep.find((r) => r.step.id === "g")!.lastPath.join() === "false,true", deep.find((r) => r.step.id === "g")!.lastPath.join());
+  check("descendants are everything under a row",
+    descendantSteps(deep, "n").map((s) => s.id).join() === "c1,g,c2" && descendantSteps(deep, "c2").length === 0);
 
   // A live run: the model call has finished, the node it ran inside has not.
   const live = buildTraceTree([llm, route]);
@@ -154,6 +166,39 @@ console.log("\nerrors");
   check("a lowercase lead is not a class", errorParts("cancelled by user: twice").type === null);
   check("nor is a capitalised word", errorParts("Cancelled: the run was stopped at a node boundary").type === null);
   check("a one-hump class with a class suffix is", errorParts("Exception: boom").type === "Exception");
+}
+
+console.log("\nthe store's rules for selection and folding");
+{
+  const run = "r";
+  const bucket = Object.fromEntries(steps.map((s) => [s.id, s]));
+  const reset = (): void => useTraceStore.setState({
+    activeRunId: run, stepsByRun: { [run]: bucket }, selectedStepId: null, expandedStepId: null, collapsedStepIds: {},
+  });
+
+  reset();
+  useTraceStore.getState().setCollapsed("t", true);
+  useTraceStore.getState().selectStep("p");
+  check("selecting a step inside a fold unfolds it", !useTraceStore.getState().collapsedStepIds.t);
+
+  reset();
+  useTraceStore.getState().selectStep("l");
+  useTraceStore.getState().setCollapsed("a", true);
+  check("folding away the selected step selects its node", useTraceStore.getState().selectedStepId === "a");
+
+  reset();
+  useTraceStore.getState().selectStep("l");
+  check("a plain selection opens nothing", useTraceStore.getState().expandedStepId === null);
+  useTraceStore.getState().setExpandedStep("l");
+  useTraceStore.getState().selectStep("r1");
+  check("an open drawer follows the selection", useTraceStore.getState().expandedStepId === "r1");
+  useTraceStore.getState().selectStep(null);
+  check("...and clearing the selection leaves it alone", useTraceStore.getState().expandedStepId === "r1");
+
+  reset();
+  useTraceStore.getState().setCollapsed("a", true);
+  check("the keyboard walks only what is drawn",
+    visibleTraceRows(useTraceStore.getState()).map((r) => r.step.id).join() === "a,t,p");
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

@@ -3,7 +3,8 @@ import { orderedSteps, useTraceStore } from "../store/traceStore.ts";
 import type { Step } from "../types.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { ICON } from "../lib/tokens.ts";
-import { StepRow, type RowTier } from "./StepRow.tsx";
+import { StepRow, tileCentre, type FoldSummary, type RowTier } from "./StepRow.tsx";
+import { buildTraceTree, descendantSteps, traceTotals, visibleRows } from "../lib/traceView.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { TraceHeader } from "./TraceHeader.tsx";
 import { TraceMetrics } from "./TraceMetrics.tsx";
@@ -74,33 +75,75 @@ function useRowTier(ref: React.RefObject<HTMLDivElement | null>): RowTier {
 /**
  * The steps, as a tree a keyboard can walk.
  *
+ * NESTED THE WAY THEY RAN. A model call, tool call or routing decision sits under the node it ran
+ * inside (`parent_step_id`), and a node folds away to one row that still says how many steps it
+ * holds, what they cost, and whether any of them failed.
+ *
  * ONE ROW IS IN THE TAB ORDER — the selected one, or the first — and ↑/↓ move the selection and the
- * focus together, which is the tree pattern rather than eighty tab stops. J/K keep working from
- * anywhere (CommandPalette), and Enter on a row opens its details.
+ * focus together, ← folds a node (or climbs to it), → unfolds it (or steps into it). J/K walk the same
+ * visible rows from anywhere (CommandPalette), and Enter on a row opens its details.
  */
 function StepList({ steps }: { steps: readonly Step[] }) {
   const selectedStepId = useTraceStore((s) => s.selectedStepId);
+  const collapsed = useTraceStore((s) => s.collapsedStepIds);
   const ref = useRef<HTMLDivElement>(null);
   const tier = useRowTier(ref);
-  const tabbableId = steps.some((s) => s.id === selectedStepId) ? selectedStepId : (steps[0]?.id ?? null);
+
+  const tree = useMemo(() => buildTraceTree(steps), [steps]);
+  const rows = useMemo(() => visibleRows(tree, { collapsed }), [tree, collapsed]);
+  const folds = useMemo(() => {
+    const out: Record<string, FoldSummary> = {};
+    for (const row of rows) {
+      if (!row.collapsed) continue;
+      const inside = descendantSteps(tree, row.step.id);
+      const totals = traceTotals(inside);
+      out[row.step.id] = {
+        steps: inside.length,
+        tokens: totals.tokens,
+        cost: totals.cost,
+        failed: inside.filter((s) => s.error != null).length,
+      };
+    }
+    return out;
+  }, [rows, tree]);
+  const tabbableId = rows.some((r) => r.step.id === selectedStepId) ? selectedStepId : (rows[0]?.step.id ?? null);
+
+  const focusRow = (id: string): void => {
+    useTraceStore.getState().selectStep(id);
+    useUiStore.getState().setSelectedNodeId(null);
+    // After the store has re-rendered the rows — a fold changes which ones exist.
+    requestAnimationFrame(() => ref.current?.querySelector<HTMLElement>(`[data-step-id="${id}"]`)?.focus());
+  };
 
   const onKeyDown = (e: React.KeyboardEvent): void => {
-    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    if (!["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"].includes(e.key)) return;
+    if (e.target instanceof HTMLElement && e.target.getAttribute("role") !== "treeitem") return;
     e.preventDefault();
-    const at = steps.findIndex((s) => s.id === useTraceStore.getState().selectedStepId);
-    const next = steps[at === -1 ? 0 : Math.min(steps.length - 1, Math.max(0, at + (e.key === "ArrowDown" ? 1 : -1)))];
-    if (!next) return;
-    useTraceStore.getState().selectStep(next.id);
-    useUiStore.getState().setSelectedNodeId(null);
-    ref.current?.querySelector<HTMLElement>(`[data-step-id="${next.id}"]`)?.focus();
+    const at = rows.findIndex((r) => r.step.id === useTraceStore.getState().selectedStepId);
+    const row = rows[at];
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      const next = rows[at === -1 ? 0 : Math.min(rows.length - 1, Math.max(0, at + (e.key === "ArrowDown" ? 1 : -1)))];
+      if (next) focusRow(next.step.id);
+      return;
+    }
+    if (!row) return;
+    const group = row.childIds.length > 0;
+    if (e.key === "ArrowLeft") {
+      if (group && !row.collapsed) useTraceStore.getState().setCollapsed(row.step.id, true);
+      else if (row.parentId) focusRow(row.parentId);
+    } else if (group && row.collapsed) {
+      useTraceStore.getState().setCollapsed(row.step.id, false);
+    } else if (group) {
+      focusRow(row.childIds[0]!);
+    }
   };
 
   return (
     <div ref={ref} role="tree" aria-label="Steps" className="relative" onKeyDown={onKeyDown}>
-      {/* The timeline's line, through the centre of every step's tile. */}
-      <div aria-hidden className="absolute bottom-4 left-[54px] top-4 w-px bg-hair" />
-      {steps.map((s) => (
-        <StepRow key={s.id} step={s} tabbable={s.id === tabbableId} tier={tier} />
+      {/* The timeline's line, through the centre of every top-level step's tile. */}
+      <div aria-hidden className="absolute bottom-4 top-4 w-px bg-hair" style={{ left: tileCentre(0) - 0.5 }} />
+      {rows.map((r) => (
+        <StepRow key={r.step.id} row={r} tabbable={r.step.id === tabbableId} tier={tier} fold={folds[r.step.id]} />
       ))}
     </div>
   );

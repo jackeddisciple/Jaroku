@@ -62,6 +62,11 @@ export interface TraceRow {
   childIds: string[];
   /** The last of its parent's children, which is where a connector line stops. */
   lastChild: boolean;
+  /**
+   * For each level from 1 down to this row's own, whether the row's ancestor at that level (or the
+   * row itself, last) is a last child — which connector lines carry on past this row.
+   */
+  lastPath: boolean[];
 }
 
 const bySeq = (a: Step, b: Step): number => a.seq - b.seq;
@@ -92,16 +97,17 @@ export function buildTraceTree(steps: readonly Step[]): TraceRow[] {
 
   const rows: TraceRow[] = [];
   const seen = new Set<string>();
-  const walk = (s: Step, depth: number, parentId: string | null, lastChild: boolean): void => {
+  const walk = (s: Step, depth: number, parentId: string | null, lastChild: boolean, path: boolean[]): void => {
     if (seen.has(s.id)) return;
     seen.add(s.id);
     const kids = (children.get(s.id) ?? []).filter((k) => !seen.has(k.id));
-    rows.push({ step: s, depth, parentId, childIds: kids.map((k) => k.id), lastChild });
-    kids.forEach((k, i) => walk(k, depth + 1, s.id, i === kids.length - 1));
+    const lastPath = depth === 0 ? [] : [...path, lastChild];
+    rows.push({ step: s, depth, parentId, childIds: kids.map((k) => k.id), lastChild, lastPath });
+    kids.forEach((k, i) => walk(k, depth + 1, s.id, i === kids.length - 1, lastPath));
   };
-  roots.forEach((r, i) => walk(r, 0, null, i === roots.length - 1));
+  roots.forEach((r, i) => walk(r, 0, null, i === roots.length - 1, []));
   // A cycle is the only way to get here: none of its members was anybody's root.
-  for (const s of ordered) if (!seen.has(s.id)) walk(s, 0, null, true);
+  for (const s of ordered) if (!seen.has(s.id)) walk(s, 0, null, true, []);
   return rows;
 }
 
@@ -225,6 +231,15 @@ export function visibleRows(
   return tree
     .filter((r) => keep.has(r.step.id))
     .map((r) => ({ ...r, context: !matched.has(r.step.id), collapsed: false }));
+}
+
+/** Every step under a row, at any depth — what a folded node stands for. */
+export function descendantSteps(tree: readonly TraceRow[], id: string): Step[] {
+  const at = tree.findIndex((r) => r.step.id === id);
+  if (at === -1) return [];
+  const out: Step[] = [];
+  for (let i = at + 1; i < tree.length && tree[i]!.depth > tree[at]!.depth; i++) out.push(tree[i]!.step);
+  return out;
 }
 
 /** The ids of a step's ancestors, nearest first — what has to be unfolded to show it. */

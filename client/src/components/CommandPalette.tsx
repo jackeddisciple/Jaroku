@@ -8,7 +8,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Command } from "cmdk";
-import { orderedSteps, useTraceStore } from "../store/traceStore.ts";
+import { useTraceStore, visibleTraceRows } from "../store/traceStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { isRunnable, runProviders, useProviderStore } from "../store/providerStore.ts";
@@ -35,11 +35,10 @@ import { startNewChat } from "../lib/newChat.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { ICON } from "../lib/tokens.ts";
 
-/** Move the trace selection by ±1 in seq order (J/K). */
+/** Move the trace selection by ±1 through the rows the timeline is showing (J/K). */
 function moveStep(delta: 1 | -1): void {
   const st = useTraceStore.getState();
-  if (!st.activeRunId) return;
-  const steps = orderedSteps(st.stepsByRun[st.activeRunId]);
+  const steps = visibleTraceRows(st).map((r) => r.step);
   if (steps.length === 0) return;
   const idx = steps.findIndex((s) => s.id === st.selectedStepId);
   const next = idx === -1 ? (delta === 1 ? 0 : steps.length - 1) : Math.min(steps.length - 1, Math.max(0, idx + delta));

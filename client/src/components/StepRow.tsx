@@ -23,7 +23,7 @@ import { useEffect, useRef } from "react";
 import { actionForStep } from "../lib/actionIcons.tsx";
 import { fmtCost, fmtDuration, fmtTokens, jsonPretty } from "../lib/format.ts";
 import { Icon } from "../lib/icons/registry.ts";
-import { CATEGORY_LABEL, stepCategory } from "../lib/traceView.ts";
+import { CATEGORY_LABEL, stepCategory, type VisibleRow } from "../lib/traceView.ts";
 import { ICON, STATUS, STEP_TYPE } from "../lib/tokens.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { agentMcpToolNames } from "../store/mcpStore.ts";
@@ -33,7 +33,7 @@ import type { Step } from "../types.ts";
 import { CopyTurn } from "./composer/CopyTurn.tsx";
 import { IconButton } from "./IconButton.tsx";
 import { McpBadge } from "./McpBadge.tsx";
-import { ChevronRightIcon } from "./panelIcons.tsx";
+import { ChevronDownIcon, ChevronRightIcon } from "./panelIcons.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
 
 /** The tile behind a step's mark: its type's own tint, red for a failure, grey for a type we don't know. */
@@ -68,7 +68,69 @@ function outputText(step: Step): string {
  */
 export type RowTier = "wide" | "medium" | "narrow";
 
-export function StepRow({ step, tabbable, tier }: { step: Step; tabbable: boolean; tier: RowTier }) {
+/**
+ * Where a row's tile sits, so the lines that join a node to its steps meet it exactly. A row is the
+ * seq gutter (44px with its padding), then INDENT per level, a fold chevron's slot, then the tile.
+ */
+const GUTTER = 44;
+const INDENT = 20;
+const CHEVRON = 20; // the chevron's 16px slot and the 4px before the tile
+const TILE = 22;
+/** The x of the centre of a tile at `depth` — where that level's connector line runs. */
+export const tileCentre = (depth: number): number => GUTTER + depth * INDENT + CHEVRON + TILE / 2;
+
+/** What a folded node stands for: its steps, what they cost, and whether any of them failed. */
+export interface FoldSummary {
+  steps: number;
+  tokens: number | null;
+  cost: number | null;
+  failed: number;
+}
+
+/**
+ * The lines joining this row to the node above it. The root line is drawn once for the whole list;
+ * these are the nested ones: a tick from the parent's line to this tile, the parent's line carrying
+ * on below unless this is its last step, and every outer line that still has steps to reach.
+ */
+function Connectors({ row }: { row: VisibleRow }) {
+  if (row.depth === 0) return null;
+  const lines: React.ReactNode[] = [];
+  // Outer levels: a full-height line wherever that level's ancestor has a sibling still to come.
+  for (let level = 1; level < row.depth; level++) {
+    if (row.lastPath[level - 1] === false && level - 1 >= 1) {
+      lines.push(<span key={`v${level}`} className="absolute bottom-0 top-0 w-px bg-hair" style={{ left: tileCentre(level - 1) - 0.5 }} />);
+    }
+  }
+  const parentX = tileCentre(row.depth - 1);
+  if (row.depth - 1 >= 1) {
+    lines.push(
+      <span key="own" className={`absolute top-0 w-px bg-hair ${row.lastChild ? "bottom-1/2" : "bottom-0"}`} style={{ left: parentX - 0.5 }} />,
+    );
+  }
+  lines.push(
+    <span
+      key="tick"
+      className="absolute top-1/2 h-px bg-hair"
+      style={{ left: parentX, width: tileCentre(row.depth) - TILE / 2 - parentX }}
+    />,
+  );
+  return <span aria-hidden>{lines}</span>;
+}
+
+export function StepRow({
+  row,
+  tabbable,
+  tier,
+  fold,
+}: {
+  row: VisibleRow;
+  tabbable: boolean;
+  tier: RowTier;
+  /** Set while this node is folded: what its hidden steps add up to. */
+  fold?: FoldSummary;
+}) {
+  const { step } = row;
+  const group = row.childIds.length > 0;
   const agent = useBuildStore((s) => s.agents.find((a) => a.agent_id === s.activeAgentId));
   const mcpNames = agentMcpToolNames(agent?.mcp_tools);
   const expanded = useTraceStore((s) => s.expandedStepId === step.id);
@@ -90,6 +152,8 @@ export function StepRow({ step, tabbable, tier }: { step: Step; tabbable: boolea
   };
 
   const category = stepCategory(step);
+  const tokens = step.tokens ?? fold?.tokens ?? null;
+  const cost = step.cost ?? fold?.cost ?? null;
   const output = outputText(step);
   const failed = step.error != null;
 
@@ -97,7 +161,8 @@ export function StepRow({ step, tabbable, tier }: { step: Step; tabbable: boolea
     <div
       ref={rowRef}
       role="treeitem"
-      aria-level={1}
+      aria-level={row.depth + 1}
+      aria-expanded={group ? !row.collapsed : undefined}
       aria-selected={selected}
       aria-label={`#${step.seq} ${step.name}, ${CATEGORY_LABEL[category]}${failed ? ", failed" : ""}`}
       data-step-id={step.id}
@@ -120,8 +185,33 @@ export function StepRow({ step, tabbable, tier }: { step: Step; tabbable: boolea
       {/* The same selection mark the other lists use — inset, square, ink. */}
       {selected && <span aria-hidden className="absolute left-0 top-1 bottom-1 w-0.5 bg-accent" />}
 
+      <Connectors row={row} />
       <span className="w-7 shrink-0 text-right text-tiny tabular-nums text-faint">#{step.seq}</span>
-      <StepTile step={step} />
+      <span className="flex shrink-0 items-center" style={{ paddingLeft: row.depth * INDENT }}>
+        {/* THE FOLD, FOR A POINTER. A span rather than a button: the row is the tree item and owns the
+            keys (← folds, → unfolds), and a button here would be one more tab stop per node. */}
+        <span
+          aria-hidden
+          onClick={
+            group
+              ? (e) => {
+                  e.stopPropagation();
+                  useTraceStore.getState().setCollapsed(step.id, !row.collapsed);
+                }
+              : undefined
+          }
+          className={`mr-1 flex h-4 w-4 items-center justify-center rounded-xs ${
+            group ? "text-faint transition-colors hover:bg-active hover:text-ink" : ""
+          }`}
+        >
+          {group && (
+            <span className={`transition-transform duration-fast ${row.collapsed ? "-rotate-90" : ""}`}>
+              <ChevronDownIcon size={ICON.xs} />
+            </span>
+          )}
+        </span>
+        <StepTile step={step} />
+      </span>
 
       <span className="min-w-[4.5rem] flex-1">
         <span className="flex min-w-0 items-center gap-1.5">
@@ -132,6 +222,14 @@ export function StepRow({ step, tabbable, tier }: { step: Step; tabbable: boolea
         </span>
         <span className="flex min-w-0 items-center gap-1.5 text-tiny text-faint">
           <span className="truncate">{CATEGORY_LABEL[category]}</span>
+          {fold && <span className="shrink-0">· {fold.steps} {fold.steps === 1 ? "step" : "steps"}</span>}
+          {/* A FAILURE INSIDE A FOLD IS STILL SAID. Folding a node must never be how an error disappears. */}
+          {fold && fold.failed > 0 && !failed && (
+            <span className="flex shrink-0 items-center gap-1 text-err">
+              <StatusDot state="error" size={ICON.xs} title="A step inside this one failed" />
+              {fold.failed} failed inside
+            </span>
+          )}
           {failed && (
             <span className="flex shrink-0 items-center gap-1 text-err">
               <StatusDot state="error" size={ICON.xs} title="This step failed" />
@@ -143,10 +241,15 @@ export function StepRow({ step, tabbable, tier }: { step: Step; tabbable: boolea
 
       {/* Figures, tabular, and only the ones this step has: a node has no tokens of its own. */}
       <span className="flex shrink-0 items-center gap-3 text-tiny tabular-nums text-muted">
-        {step.tokens != null && tier !== "narrow" && (
-          <span title={fmtTokens(step.tokens)}>{fmtTokens(step.tokens, tier === "wide" ? "exact" : "short")}</span>
+        {/* A folded node shows what its steps add up to, said as such — the node itself has none. */}
+        {tokens != null && tier !== "narrow" && (
+          <span title={fold ? `Across the ${fold.steps} steps inside` : fmtTokens(tokens)}>
+            {fmtTokens(tokens, tier === "wide" ? "exact" : "short")}
+          </span>
         )}
-        {step.cost != null && tier === "wide" && <span>{fmtCost(step.cost)}</span>}
+        {cost != null && tier === "wide" && (
+          <span title={fold ? `Across the ${fold.steps} steps inside` : undefined}>{fmtCost(cost)}</span>
+        )}
         <span className="min-w-[3rem] text-right">{fmtDuration(step.latency_ms)}</span>
       </span>
 
