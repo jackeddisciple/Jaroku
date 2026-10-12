@@ -221,7 +221,9 @@ export function StepRow({
       }}
       className={`group/step relative flex animate-slide-in cursor-pointer select-none items-center gap-2 rounded-control py-1.5 pl-2 pr-1 outline-none transition-colors duration-fast focus-visible:shadow-focusring motion-reduce:animate-none ${
         selected ? "bg-active" : "hover:bg-active/40"
-      }`}
+      } ${row.context ? "text-muted [&_.text-ink]:text-muted" : ""}`}
+      // A row kept only so a match keeps its place in the tree reads quieter than the matches.
+      title={row.context ? "Shown because a step inside it matches" : undefined}
     >
       {/* The same selection mark the other lists use — inset, square, ink. */}
       {selected && <span aria-hidden className="absolute left-0 top-1 bottom-1 w-0.5 bg-accent" />}

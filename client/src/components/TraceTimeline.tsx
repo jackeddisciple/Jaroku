@@ -8,6 +8,7 @@ import { buildTraceTree, descendantSteps, runWindow, stepWindow, traceTotals, vi
 import { EmptyState } from "./EmptyState.tsx";
 import { TraceHeader } from "./TraceHeader.tsx";
 import { TraceMetrics } from "./TraceMetrics.tsx";
+import { TraceFilters } from "./TraceFilters.tsx";
 import { TraceResult } from "./TraceResult.tsx";
 import { ActivityIcon, XIcon } from "./panelIcons.tsx";
 
@@ -108,6 +109,8 @@ function useRowTier(ref: React.RefObject<HTMLDivElement | null>): RowTier {
  */
 function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly Step[] }) {
   const selectedStepId = useTraceStore((s) => s.selectedStepId);
+  const filter = useTraceStore((s) => s.stepFilter);
+  const query = useTraceStore((s) => s.stepQuery);
   // A live run's span grows, so its bars are re-placed once a second; a finished one never moves.
   const now = useTick(run?.status === "running", 1000);
   const span = useMemo(() => (run ? runWindow(run, steps, now) : null), [run, steps, now]);
@@ -116,7 +119,7 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
   const tier = useRowTier(ref);
 
   const tree = useMemo(() => buildTraceTree(steps), [steps]);
-  const rows = useMemo(() => visibleRows(tree, { collapsed }), [tree, collapsed]);
+  const rows = useMemo(() => visibleRows(tree, { collapsed, filter, query }), [tree, collapsed, filter, query]);
   const folds = useMemo(() => {
     const out: Record<string, FoldSummary> = {};
     for (const row of rows) {
@@ -164,6 +167,28 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
     }
   };
 
+  if (rows.length === 0) {
+    return (
+      <div className="flex flex-col items-start gap-1.5 px-2 py-6">
+        <p className="text-caption text-ink">No steps match</p>
+        <p className="text-tiny text-muted">
+          {query.trim() ? `Nothing in this run matches “${query.trim()}”` : "This run has no steps of that kind"}
+          {filter !== "all" && query.trim() ? " with that filter on." : "."}
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            useTraceStore.getState().setStepFilter("all");
+            useTraceStore.getState().setStepQuery("");
+          }}
+          className="mt-1 rounded-control border border-hair px-2.5 py-1 text-tiny text-ink transition-colors hover:bg-active focus-visible:outline-none focus-visible:shadow-focusring"
+        >
+          Clear filters
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div ref={ref} role="tree" aria-label="Steps" className="relative" onKeyDown={onKeyDown}>
       {/* The timeline's line, through the centre of every top-level step's tile. */}
@@ -195,24 +220,30 @@ export function TraceTimeline() {
       {run && <TraceMetrics run={run} steps={steps} />}
 
       {/* timeline body */}
-      <div className="scroll-fade flex-1 overflow-auto px-6 pb-4 pt-3">
-        {steps.length === 0 ? (
-          <EmptyState
-            size="line"
-            icon={ActivityIcon}
-            title="No trace yet"
-            hint="Run the agent below and every LLM call, tool call and routing decision it makes streams in here."
-          />
-        ) : (
-          // The hint sits OUTSIDE the positioned wrapper below: that wrapper is what the step
-          // connector line is measured against, and a banner inside it would drag the line's
-          // top edge up beside the text.
-          <>
-            <FirstTraceHint />
-            {run && <TraceResult run={run} steps={steps} />}
-            <StepList run={run} steps={steps} />
-          </>
-        )}
+      {/* NO `scroll-fade` HERE: the filter row sticks to the top of this region, and a mask over the
+          first 16px would dim the controls it is meant to keep in reach. */}
+      {/* The padding is on the INNER box: a sticky child sticks to the scroller's padding edge, so
+          top padding here would leave a strip above the filter row for steps to scroll through. */}
+      <div className="flex-1 overflow-auto px-6 pb-4">
+        <div className="pt-3">
+          {steps.length === 0 ? (
+            <EmptyState
+              size="line"
+              icon={ActivityIcon}
+              title="No trace yet"
+              hint="Run the agent below and every LLM call, tool call and routing decision it makes streams in here."
+            />
+          ) : (
+            // The hint sits OUTSIDE the positioned list below: that list is what the step connector
+            // line is measured against, and a banner inside it would drag the line's top edge up.
+            <>
+              <FirstTraceHint />
+              {run && <TraceResult run={run} steps={steps} />}
+              <TraceFilters steps={steps} />
+              <StepList run={run} steps={steps} />
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

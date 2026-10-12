@@ -8,7 +8,7 @@
 
 import { create } from "zustand";
 import type { Run, RunStatus, RunSummary, Step, TraceEvent } from "../types.ts";
-import { ancestorIds, buildTraceTree, visibleRows, type VisibleRow } from "../lib/traceView.ts";
+import { ancestorIds, buildTraceTree, visibleRows, type StepFilter, type VisibleRow } from "../lib/traceView.ts";
 
 export type ConnectionState = "connecting" | "open" | "closed";
 export type LogLine = { level: "stderr" | "parseError"; text: string };
@@ -58,6 +58,9 @@ interface TraceState {
    * every trace; kept for the session and never written to storage.
    */
   collapsedStepIds: Record<string, true>;
+  /** Which kind of step the timeline shows, and the words it is searched for — both session-only. */
+  stepFilter: StepFilter;
+  stepQuery: string;
 
   /**
    * The run history, merged by id.
@@ -85,6 +88,8 @@ interface TraceState {
   setNext: (runId: string, next: string[]) => void;
   setAnswerOpen: (open: boolean) => void;
   setCollapsed: (stepId: string, collapsed: boolean) => void;
+  setStepFilter: (filter: StepFilter) => void;
+  setStepQuery: (query: string) => void;
 }
 
 const LOG_CAP = 200;
@@ -119,6 +124,8 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   nextByRun: {},
   answerOpen: true,
   collapsedStepIds: {},
+  stepFilter: "all",
+  stepQuery: "",
 
   applyHistory: (runs, meta) =>
     set((state) => {
@@ -186,18 +193,27 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   // would be two answers to "which step am I looking at"; so picking a different step — a click, J/K,
   // a graph node — moves the drawer with it. Clearing the selection leaves the drawer alone.
   //
-  // AND A SELECTED STEP IS ALWAYS ON SCREEN. A graph node, the sparkline or J/K can pick a step whose
-  // node is folded away; its ancestors unfold, rather than the selection landing on a hidden row.
+  // AND A SELECTED STEP IS ALWAYS ON SCREEN. A graph node or the sparkline can pick a step whose
+  // node is folded away, or that the filter or search is hiding; its ancestors unfold and the filter
+  // steps aside, rather than the selection landing on a row nobody can see.
   selectStep: (id) =>
     set((state) => {
       const next: Partial<TraceState> = { selectedStepId: id };
       if (id && state.expandedStepId && state.expandedStepId !== id) next.expandedStepId = id;
       const bucket = id && state.activeRunId ? state.stepsByRun[state.activeRunId] : undefined;
-      const folded = bucket ? ancestorIds(bucket, id!).filter((a) => state.collapsedStepIds[a]) : [];
+      if (!id || !bucket?.[id]) return next;
+      const folded = ancestorIds(bucket, id).filter((a) => state.collapsedStepIds[a]);
       if (folded.length > 0) {
         const collapsedStepIds = { ...state.collapsedStepIds };
         for (const a of folded) delete collapsedStepIds[a];
         next.collapsedStepIds = collapsedStepIds;
+      }
+      if (state.stepFilter !== "all" || state.stepQuery.trim() !== "") {
+        const shown = visibleRows(buildTraceTree(Object.values(bucket)), { filter: state.stepFilter, query: state.stepQuery });
+        if (!shown.some((r) => r.step.id === id)) {
+          next.stepFilter = "all";
+          next.stepQuery = "";
+        }
       }
       return next;
     }),
@@ -220,6 +236,10 @@ export const useTraceStore = create<TraceState>((set, get) => ({
     }),
 
   setAnswerOpen: (answerOpen) => set({ answerOpen }),
+
+  setStepFilter: (stepFilter) => set({ stepFilter }),
+
+  setStepQuery: (stepQuery) => set({ stepQuery }),
 
   setCollapsed: (stepId, collapsed) =>
     set((state) => {
@@ -246,11 +266,17 @@ export function orderedSteps(bucket: Record<string, Step> | undefined): Step[] {
  * The rows the active run's timeline draws, in order — what J/K and the arrow keys walk, so the
  * keyboard can never land on a step the screen is not showing.
  */
-export function visibleTraceRows(state: Pick<TraceState, "activeRunId" | "stepsByRun" | "collapsedStepIds">): VisibleRow[] {
+export function visibleTraceRows(
+  state: Pick<TraceState, "activeRunId" | "stepsByRun" | "collapsedStepIds" | "stepFilter" | "stepQuery">,
+): VisibleRow[] {
   if (!state.activeRunId) return [];
   const bucket = state.stepsByRun[state.activeRunId];
   if (!bucket) return [];
-  return visibleRows(buildTraceTree(Object.values(bucket)), { collapsed: state.collapsedStepIds });
+  return visibleRows(buildTraceTree(Object.values(bucket)), {
+    collapsed: state.collapsedStepIds,
+    filter: state.stepFilter,
+    query: state.stepQuery,
+  });
 }
 
 /** Runs for the sidebar, newest first. */

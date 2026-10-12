@@ -174,6 +174,7 @@ console.log("\nthe store's rules for selection and folding");
   const bucket = Object.fromEntries(steps.map((s) => [s.id, s]));
   const reset = (): void => useTraceStore.setState({
     activeRunId: run, stepsByRun: { [run]: bucket }, selectedStepId: null, expandedStepId: null, collapsedStepIds: {},
+    stepFilter: "all", stepQuery: "",
   });
 
   reset();
@@ -198,7 +199,19 @@ console.log("\nthe store's rules for selection and folding");
   reset();
   useTraceStore.getState().setCollapsed("a", true);
   check("the keyboard walks only what is drawn",
-    visibleTraceRows(useTraceStore.getState()).map((r) => r.step.id).join() === "a,t,p");
+    visibleTraceRows({ ...useTraceStore.getState(), stepFilter: "all", stepQuery: "" }).map((r) => r.step.id).join() === "a,t,p");
+
+  reset();
+  useTraceStore.setState({ stepFilter: "llm", stepQuery: "" });
+  check("...and only what the filter lets through",
+    visibleTraceRows(useTraceStore.getState()).map((r) => r.step.id).join() === "a,l");
+  useTraceStore.getState().selectStep("l");
+  check("selecting a step the filter shows keeps the filter", useTraceStore.getState().stepFilter === "llm");
+  useTraceStore.getState().selectStep("p");
+  check("selecting one it hides sets the filter aside", useTraceStore.getState().stepFilter === "all");
+  useTraceStore.setState({ stepFilter: "all", stepQuery: "no such words" });
+  useTraceStore.getState().selectStep("t");
+  check("...and the search too", useTraceStore.getState().stepQuery === "");
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

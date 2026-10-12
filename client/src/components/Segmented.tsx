@@ -34,6 +34,15 @@ export interface SegmentOption<T extends string> {
   icon?: IconComponent;
   /** What is drawn for a text segment, when the accessible name is longer than the word. */
   text?: string;
+  /** A figure beside a text segment's word: how many things choosing it would show. */
+  count?: number;
+  /** The count's colour when it is news rather than a size — `danger` for failures. */
+  countTone?: "danger";
+  /**
+   * Nothing to choose right now. The segment STAYS, greyed, rather than leaving the group: a filter
+   * whose options come and go as a live run streams in is a row whose buttons move under the pointer.
+   */
+  disabled?: boolean;
 }
 
 export function Segmented<T extends string>({
@@ -77,15 +86,25 @@ export function Segmented<T extends string>({
             aria-checked={o.value === value}
             aria-label={o.label}
             title={o.label}
+            disabled={o.disabled}
             onClick={() => onChange(o.value)}
             // THE SAME 32px FLOOR AS A MARK'S. A text segment is still a hit target, and three
             // durations set in `text-tiny` would otherwise be a 16px-tall row of things to miss.
             style={{ minHeight: HIT_TARGET }}
             className={`px-2.5 text-tiny tabular-nums transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
-              o.value === value ? "bg-active text-ink" : "text-faint hover:bg-active hover:text-ink"
+              o.value === value
+                ? "bg-active text-ink"
+                : o.disabled
+                  ? "cursor-default text-disabled"
+                  : "text-faint hover:bg-active hover:text-ink"
             }`}
           >
             {o.text ?? o.label}
+            {o.count !== undefined && (
+              <span className={`ml-1 ${o.countTone === "danger" && o.count > 0 ? "text-err" : o.disabled ? "" : "text-faint"}`}>
+                {o.count}
+              </span>
+            )}
           </button>
         ),
       )}
