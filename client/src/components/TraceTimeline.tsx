@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CANCELLED_BY_USER, orderedSteps, useTraceStore } from "../store/traceStore.ts";
 import type { RunSummary, Step } from "../types.ts";
 import { useUiStore } from "../store/uiStore.ts";
-import { StepRow, type BarPlace, type FoldSummary, type RowTier } from "./StepRow.tsx";
+import { COL, ColumnHeader, StepRow, columnsFor, type BarPlace, type FoldSummary, type RowTier } from "./StepRow.tsx";
 import { buildTraceTree, descendantSteps, runWindow, stepWindow, traceTotals, visibleRows, type TimeWindow, type VisibleRow } from "../lib/traceView.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { TraceHeader } from "./TraceHeader.tsx";
@@ -12,6 +12,7 @@ import { TraceResult } from "./TraceResult.tsx";
 import { traceMarks } from "./traceMarks.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { Icon } from "../lib/icons/registry.ts";
+import { fmtDuration } from "../lib/format.ts";
 
 /** Re-render on an interval while `active`. */
 function useTick(active: boolean, ms: number): number {
@@ -140,9 +141,20 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
     }
   };
 
+  // THE FILTERS AND THE COLUMN NAMES STICK TOGETHER, in one box, so they never overlap whatever the
+  // filter row wraps to — and the frame they sit in is the one the width tiers are measured on.
+  const header = (
+    <div className="sticky top-0 z-10 -mx-1 mb-1.5 bg-bg px-1 pb-1">
+      <TraceFilters steps={steps} />
+      {rows.length > 0 && <ColumnHeader tier={tier} spanMs={span ? span.end - span.start : null} />}
+    </div>
+  );
+
   if (rows.length === 0) {
     return (
-      <div ref={frame} className="flex flex-col items-start gap-1.5 px-2 py-6">
+      <div ref={frame}>
+      {header}
+      <div className="flex flex-col items-start gap-1.5 px-2 py-6">
         <p className="text-caption text-ink">No steps match</p>
         <p className="text-tiny text-muted">
           {query.trim() ? `Nothing in this run matches “${query.trim()}”` : "This run has no steps of that kind"}
@@ -159,11 +171,13 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
           Clear filters
         </button>
       </div>
+      </div>
     );
   }
 
   return (
     <div ref={frame}>
+    {header}
     <div ref={ref} role="tree" aria-label="Steps" className="flex flex-col gap-1.5" onKeyDown={onKeyDown}>
       {/* ONE CARD PER NODE — the product owner's call on 2026-10-12: a node and the steps that ran
           inside it read as one block, and the run as a stack of them. The cards are presentation
@@ -217,11 +231,14 @@ function LiveTail({ run, steps, span, tier }: { run: RunSummary; steps: readonly
         : "Stopped here, before this step ran";
   // Its bar runs from the last thing that finished to now: the time the run has spent on it so far.
   let bar: { left: number; width: number } | null = null;
+  let soFar: number | null = null;
   if (state === "running" && span) {
     const lastEnd = Math.max(span.start, ...steps.map((st) => stepWindow(st)?.end ?? span.start));
     const total = span.end - span.start;
     bar = { left: Math.min(1, (lastEnd - span.start) / total), width: Math.max(0, (span.end - lastEnd) / total) };
+    soFar = Math.max(0, span.end - lastEnd);
   }
+  const show = columnsFor(tier);
 
   return (
     // Its own card, DASHED: it stands where the next node's card will be, and is not one yet.
@@ -247,14 +264,26 @@ function LiveTail({ run, steps, span, tier }: { run: RunSummary; steps: readonly
         <span className="block truncate text-caption font-medium text-ink" title={name}>{name}</span>
         <span className={`block truncate text-tiny ${state === "running" ? "text-run" : "text-faint"}`}>{word}</span>
       </span>
-      {tier === "full" && bar && (
-        <span className="relative mr-[74px] h-1.5 w-16 shrink-0 rounded-full bg-void" aria-hidden>
-          <span
-            className="absolute bottom-0 top-0 animate-stream-pulse rounded-full bg-run motion-reduce:animate-none"
-            style={{ left: `${bar.left * 100}%`, width: `max(2px, ${bar.width * 100}%)`, opacity: 0.55 }}
-          />
+      {/* THE STEPS' OWN COLUMNS, so its time and bar sit under the headers: the time it has run so
+          far, in amber, and its bar from the last finished step to now. */}
+      <span className="flex shrink-0 items-center gap-2 text-tiny tabular-nums">
+        {show.tokens && <span className={COL.tokens} />}
+        {show.cost && <span className={COL.cost} />}
+        <span className={`${COL.time} text-right ${state === "running" ? "text-run" : "text-faint"}`}>
+          {soFar == null ? "" : fmtDuration(soFar)}
         </span>
-      )}
+        {show.timeline && (
+          <span className={`relative h-1.5 shrink-0 rounded-full bg-void ${COL.timeline}`} aria-hidden>
+            {bar && (
+              <span
+                className="absolute bottom-0 top-0 animate-stream-pulse rounded-full bg-run motion-reduce:animate-none"
+                style={{ left: `${bar.left * 100}%`, width: `max(2px, ${bar.width * 100}%)`, opacity: 0.55 }}
+              />
+            )}
+          </span>
+        )}
+      </span>
+      {show.actions && <span className={`${COL.actions} shrink-0`} />}
     </div>
     </div>
   );
@@ -302,7 +331,6 @@ export function TraceTimeline() {
           ) : (
             <>
               {run && <TraceResult run={run} steps={steps} />}
-              <TraceFilters steps={steps} />
               <StepList run={run} steps={steps} />
             </>
           )}

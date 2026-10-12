@@ -62,8 +62,8 @@ export function TraceFilters({ steps }: { steps: readonly Step[] }) {
   }));
 
   return (
-    // STICKY, so the controls stay in reach however far down the timeline somebody has scrolled.
-    <div ref={ref} className="sticky top-0 z-10 -mx-1 mb-1 flex flex-wrap items-center gap-2 bg-bg px-1 py-2">
+    // Sticky with the column names under it — StepList holds the two in one box.
+    <div ref={ref} className="flex flex-wrap items-center gap-2 py-2">
       {/* At the pane's very narrowest the words alone do not fit; the strip scrolls in its own box
           rather than pushing the panel wide. */}
       <div className="max-w-full overflow-x-auto">

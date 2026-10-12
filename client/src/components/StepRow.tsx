@@ -20,7 +20,7 @@
 
 import { useEffect, useRef } from "react";
 
-import { fmtCost, fmtDuration, fmtTokens, jsonPretty } from "../lib/format.ts";
+import { fmtCost, fmtDuration, fmtTokens, jsonPretty, shortCount } from "../lib/format.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { CATEGORY_LABEL, stepCategory, stepProvider, type StepCategory, type VisibleRow } from "../lib/traceView.ts";
 import { BRAND_COLOR, ProviderMark, hasProviderMark } from "../lib/icons.tsx";
@@ -152,7 +152,7 @@ export interface BarPlace {
 function Waterfall({ step, bar, colour }: { step: Step; bar: BarPlace | null; colour: string }) {
   return (
     <span
-      className="relative h-1.5 w-16 shrink-0 rounded-full bg-void"
+      className={`relative h-1.5 shrink-0 rounded-full bg-void ${COL.timeline}`}
       title={bar ? `Started +${fmtDuration(bar.offsetMs)} · took ${fmtDuration(step.latency_ms)}` : "No timing recorded"}
     >
       {bar && (
@@ -190,6 +190,58 @@ export interface FoldSummary {
   tokens: number | null;
   cost: number | null;
   failed: number;
+}
+
+/**
+ * THE FIGURE COLUMNS, AT FIXED WIDTHS — so the header above them names a real column and every row's
+ * numbers line up under it, a node's empty cells included (the product owner's call, 2026-10-12).
+ * Narrow enough that a nested step's name keeps a hundred-odd pixels at the panel's usual width.
+ */
+export const COL = {
+  tokens: "w-12",
+  cost: "w-14",
+  time: "w-10",
+  timeline: "w-16",
+  /** The Details slot, held empty when the row is not hovered or selected. */
+  actions: "w-16",
+} as const;
+
+/** Which columns a width tier can afford — the rows and the header read the same answer. */
+export const columnsFor = (tier: RowTier) => ({
+  tokens: tier !== "narrow",
+  cost: tier === "wide" || tier === "full",
+  timeline: tier === "full",
+  actions: tier !== "narrow",
+});
+
+/**
+ * The names of the columns, sticky over the steps, with the timing column as an axis: `0s` at its
+ * left edge and the run's span at its right — the same span every bar is placed against.
+ *
+ * THE SAME BOX AS A STEP'S CARD AND ROW — a transparent border and padding where the card has its
+ * own, then the row's own padding and gap — so each heading sits over its column to the pixel.
+ */
+export function ColumnHeader({ tier, spanMs }: { tier: RowTier; spanMs: number | null }) {
+  const show = columnsFor(tier);
+  return (
+    <div aria-hidden className="border border-transparent px-1">
+      <div className="flex items-center gap-2 border-b border-hair pb-1.5 pl-2 pr-1 text-tiny uppercase tracking-wider text-faint">
+        <span className="flex-1">Step</span>
+        <span className="flex shrink-0 items-center gap-2">
+          {show.tokens && <span className={`${COL.tokens} text-right`}>Tokens</span>}
+          {show.cost && <span className={`${COL.cost} text-right`}>Cost</span>}
+          <span className={`${COL.time} text-right`}>Time</span>
+          {show.timeline && (
+            <span className={`${COL.timeline} flex justify-between normal-case tracking-normal tabular-nums`}>
+              <span>0s</span>
+              <span>{spanMs == null ? "" : fmtDuration(spanMs)}</span>
+            </span>
+          )}
+        </span>
+        {show.actions && <span className={`${COL.actions} shrink-0`} />}
+      </div>
+    </div>
+  );
 }
 
 /** Connector lines' weight: 2px, the strongest neutral border — the product owner's call, 2026-10-12. */
@@ -285,6 +337,7 @@ export function StepRow({
   };
 
   const category = stepCategory(step);
+  const show = columnsFor(tier);
   const tokens = step.tokens ?? fold?.tokens ?? null;
   const cost = step.cost ?? fold?.cost ?? null;
   const output = outputText(step);
@@ -376,24 +429,27 @@ export function StepRow({
       </span>
 
       {/* Figures, tabular, and only the ones this step has: a node has no tokens of its own. */}
-      <span className="flex shrink-0 items-center gap-3 text-tiny tabular-nums text-muted">
-        {/* A folded node shows what its steps add up to, said as such — the node itself has none. */}
-        {tokens != null && tier !== "narrow" && (
-          <span title={fold ? `Across the ${fold.steps} steps inside` : fmtTokens(tokens)}>
-            {fmtTokens(tokens, tier === "medium" ? "short" : "exact")}
+      <span className="flex shrink-0 items-center gap-2 text-tiny tabular-nums text-muted">
+        {/* A folded node shows what its steps add up to, said as such — the node itself has none. An
+            empty cell keeps its width, so the columns stay columns. No "tok": the header says it. */}
+        {show.tokens && (
+          <span className={`${COL.tokens} truncate text-right`} title={tokens == null ? undefined : fold ? `${fmtTokens(tokens)} across the ${fold.steps} steps inside` : fmtTokens(tokens)}>
+            {tokens == null ? "" : tier === "medium" ? shortCount(tokens) : tokens.toLocaleString()}
           </span>
         )}
-        {cost != null && (tier === "wide" || tier === "full") && (
-          <span title={fold ? `Across the ${fold.steps} steps inside` : undefined}>{fmtCost(cost)}</span>
+        {show.cost && (
+          <span className={`${COL.cost} truncate text-right`} title={cost != null && fold ? `Across the ${fold.steps} steps inside` : undefined}>
+            {cost == null ? "" : fmtCost(cost)}
+          </span>
         )}
-        <span className="min-w-[3rem] text-right">{fmtDuration(step.latency_ms)}</span>
-        {tier === "full" && <Waterfall step={step} bar={bar} colour={stepColour(step, provider, mark)} />}
+        <span className={`${COL.time} text-right`}>{fmtDuration(step.latency_ms)}</span>
+        {show.timeline && <Waterfall step={step} bar={bar} colour={stepColour(step, provider, mark)} />}
       </span>
 
       {/* THE ROW'S ACTIONS. Details holds its own place, so the figures never move when it appears;
           the other two float over the figures while the row is hovered or focused. Too narrow for a
           slot, Details floats over the duration instead and the other two stay in the drawer. */}
-      <span className={tier === "narrow" ? "absolute right-1 top-1/2 flex -translate-y-1/2 items-center" : "relative flex shrink-0 items-center"}>
+      <span className={tier === "narrow" ? "absolute right-1 top-1/2 flex -translate-y-1/2 items-center" : `relative flex shrink-0 items-center justify-end ${COL.actions}`}>
         {tier !== "narrow" && (
         <span
           className="absolute right-full top-1/2 flex -translate-y-1/2 items-center rounded-control bg-bg opacity-0 transition-opacity duration-fast group-hover/step:opacity-100 group-focus-within/step:opacity-100"
