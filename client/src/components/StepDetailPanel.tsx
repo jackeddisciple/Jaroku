@@ -27,7 +27,7 @@ import { CopyTurn } from "./composer/CopyTurn.tsx";
 import { IconButton } from "./IconButton.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
 import { XIcon } from "./panelIcons.tsx";
-import { StepDetail } from "./StepDetail.tsx";
+import { ErrorView, StepDetail } from "./StepDetail.tsx";
 import { StateBranchEditor } from "./StateBranchEditor.tsx";
 import { McpBadge } from "./McpBadge.tsx";
 import { StepTile } from "./StepRow.tsx";
@@ -232,6 +232,8 @@ export function StepDetailPanel() {
           </div>
 
           <div className="flex-1 overflow-auto border-t border-hair px-4 pb-6 pt-3">
+            {/* A failure first: it is what somebody opening a red step came for. */}
+            {step.error && <ErrorView error={step.error} runStatus={run?.status} />}
             <Overview step={step} run={run} bucket={bucket} />
             <Performance step={step} run={run} bucket={bucket} />
             <div className="mt-3">

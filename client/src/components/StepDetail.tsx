@@ -1,7 +1,8 @@
 import { useState } from "react";
-import type { Step } from "../types.ts";
+import type { RunStatus, Step } from "../types.ts";
 import { textFromLlmOutput } from "../lib/agentOutput.ts";
 import { jsonPretty } from "../lib/format.ts";
+import { errorParts } from "../lib/traceView.ts";
 import { StateDiff, canDiff } from "./StateDiff.tsx";
 import { TYPE } from "../lib/tokens.ts";
 import { CollapsibleRegion } from "./CollapsibleRegion.tsx";
@@ -121,22 +122,79 @@ function StateView({ step }: { step: Step }) {
   );
 }
 
+/**
+ * Why the step failed, first and findable.
+ *
+ * THE EXCEPTION'S CLASS, ITS MESSAGE, THEN ITS STACK — split the way the interceptor writes them
+ * (`errorParts`), so "RuntimeError" is a word to scan for rather than the start of a sentence. Red is
+ * the edge and the class name, not a red box: the failure has to be easy to find without the drawer
+ * shouting over the input and output that explain it.
+ *
+ * NO RETRY BUTTON. The trace has no notion of a retry, and a button that looked like one would be a
+ * promise the schema cannot keep; "Re-run from here" below is the real thing, and the composer
+ * answers "why did this fail?" about the selected step.
+ */
+export function ErrorView({ error, runStatus }: { error: string; runStatus: RunStatus | undefined }) {
+  const { type, message, detail } = errorParts(error);
+  const [stackOpen, setStackOpen] = useState(false);
+  return (
+    <section className="mb-4 mt-3 first:mt-0" aria-label="Error">
+      <div className="flex min-h-8 items-center">
+        <span className={`${TYPE.sectionLabel} !text-err`}>Error</span>
+        <CopyTurn source={error} label="Copy error" title="Copy the full error" className="ml-auto" />
+      </div>
+      <div className="border-l-2 border-err pl-3">
+        {type && <div className="text-caption font-medium text-err">{type}</div>}
+        <p className="whitespace-pre-wrap break-words text-caption leading-relaxed text-ink [overflow-wrap:anywhere]">{message}</p>
+        {detail && (
+          <div className="mt-1.5">
+            <button
+              type="button"
+              onClick={() => setStackOpen((v) => !v)}
+              aria-expanded={stackOpen}
+              className="rounded-xs text-tiny text-muted underline decoration-hair underline-offset-2 transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+            >
+              {stackOpen ? "Hide the stack" : `Show the stack (${detail.trim().split("\n").length} lines)`}
+            </button>
+            {stackOpen && <div className="mt-1.5"><PayloadText text={detail} /></div>}
+          </div>
+        )}
+        {/* What happened next, when the run says: a failure the agent recovered from reads differently
+            from the one that ended it. */}
+        {runStatus === "completed" && (
+          <p className="mt-1.5 text-tiny text-muted">The run still finished — the agent carried on past this failure.</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * The step exactly as it arrived, for anybody who needs a field this drawer does not lay out. Folded
+ * by default, and nothing new: every value in it is one the sections above already show.
+ */
+function RawEvent({ step }: { step: Step }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-3">
+      <CollapsibleRegion
+        label="Raw event"
+        open={open}
+        onToggle={() => setOpen((v) => !v)}
+        trailing={<CopyTurn source={JSON.stringify(step, null, 2)} label="Copy raw event" title="Copy the step as JSON" />}
+      >
+        <JsonTree value={step} openDepth={1} />
+      </CollapsibleRegion>
+    </div>
+  );
+}
+
 export function StepDetail({ step }: { step: Step }) {
   const diffable = canDiff(step.state_before, step.state_after);
   const hasState = step.state_before != null || step.state_after != null;
 
   return (
     <div className="pb-1">
-      {step.error && (
-        <div className="mt-3 first:mt-0">
-          <div className={`mb-1 ${TYPE.sectionLabel} !text-err`}>error</div>
-          <pre className="whitespace-pre-wrap break-words rounded-control border border-err/25 bg-err/[0.04] p-2 text-caption leading-relaxed text-err">
-            {step.error}
-          </pre>
-          {/* One-Click Fix is now the unified composer: select this step and type "fix this"
-              (or "why did this fail?") — one place to type, no per-step button. */}
-        </div>
-      )}
       <PayloadSection label="Input" value={step.input}>
         <InputView step={step} />
       </PayloadSection>
@@ -153,6 +211,7 @@ export function StepDetail({ step }: { step: Step }) {
           </>
         )
       )}
+      <RawEvent step={step} />
     </div>
   );
 }
