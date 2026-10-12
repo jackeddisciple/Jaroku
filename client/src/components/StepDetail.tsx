@@ -1,8 +1,12 @@
 import { useState } from "react";
 import type { Step } from "../types.ts";
+import { textFromLlmOutput } from "../lib/agentOutput.ts";
 import { jsonPretty } from "../lib/format.ts";
 import { StateDiff, canDiff } from "./StateDiff.tsx";
 import { TYPE } from "../lib/tokens.ts";
+import { CollapsibleRegion } from "./CollapsibleRegion.tsx";
+import { CopyTurn } from "./composer/CopyTurn.tsx";
+import { JsonTree, MessageList, PayloadText, asMessages } from "./JsonTree.tsx";
 
 function Section({ label, value }: { label: string; value: unknown }) {
   const text = jsonPretty(value);
@@ -18,6 +22,72 @@ function Section({ label, value }: { label: string; value: unknown }) {
       </pre>
     </div>
   );
+}
+
+/**
+ * A payload section: its name, a copy of exactly what was captured, and the payload drawn for what it
+ * is. Folds, so somebody after the output is not made to scroll a forty-message input to reach it.
+ */
+function PayloadSection({ label, value, children }: { label: "Input" | "Output"; value: unknown; children: React.ReactNode }) {
+  const [open, setOpen] = useState(true);
+  const empty = value === null || value === undefined || value === "";
+  return (
+    <div className="mt-3 first:mt-0">
+      <CollapsibleRegion
+        label={label}
+        open={open}
+        onToggle={() => setOpen((v) => !v)}
+        trailing={empty ? undefined : <CopyTurn source={jsonPretty(value)} label={`Copy ${label.toLowerCase()}`} title={`Copy this step's ${label.toLowerCase()} as captured`} />}
+      >
+        {empty ? (
+          <p className="text-tiny text-faint">
+            {value === "" ? `The ${label.toLowerCase()} was an empty string.` : `No ${label.toLowerCase()} was recorded for this step.`}
+          </p>
+        ) : (
+          children
+        )}
+      </CollapsibleRegion>
+    </div>
+  );
+}
+
+/** What went in: a model's messages as a conversation, text as text, anything else as a tree. */
+function InputView({ step }: { step: Step }) {
+  const messages = step.type === "llm_call" ? asMessages(step.input) : null;
+  if (messages) return <MessageList messages={messages} />;
+  if (typeof step.input === "string") return <PayloadText text={step.input} />;
+  // A node's input is the whole agent state; its first level is the useful map, the rest folds.
+  return <JsonTree value={step.input} openDepth={step.type === "state_update" ? 1 : 2} />;
+}
+
+/** What came out: a model's reply as its text and any tool calls, a router's choice, text, or a tree. */
+function OutputView({ step }: { step: Step }) {
+  if (step.type === "llm_call") {
+    const text = textFromLlmOutput(step.output);
+    const calls = Array.isArray(step.output)
+      ? step.output.flatMap((g) => (typeof g === "object" && g !== null && Array.isArray((g as { tool_calls?: unknown }).tool_calls)
+        ? ((g as { tool_calls: unknown[] }).tool_calls)
+        : []))
+      : [];
+    if (text || calls.length > 0) {
+      return (
+        <div className="flex flex-col gap-1.5">
+          {text && <PayloadText text={text} prose />}
+          {calls.length > 0 && <JsonTree value={{ tool_calls: calls }} openDepth={3} />}
+        </div>
+      );
+    }
+  }
+  if (step.type === "router" && typeof step.output === "string") {
+    return (
+      <p className="text-caption text-ink">
+        <span className="text-muted">Chose </span>
+        <span className="font-medium">{step.output}</span>
+      </p>
+    );
+  }
+  if (typeof step.output === "string") return <PayloadText text={step.output} />;
+  return <JsonTree value={step.output} openDepth={2} />;
 }
 
 /**
@@ -67,8 +137,12 @@ export function StepDetail({ step }: { step: Step }) {
               (or "why did this fail?") — one place to type, no per-step button. */}
         </div>
       )}
-      <Section label="input" value={step.input} />
-      <Section label="output" value={step.output} />
+      <PayloadSection label="Input" value={step.input}>
+        <InputView step={step} />
+      </PayloadSection>
+      <PayloadSection label="Output" value={step.output}>
+        <OutputView step={step} />
+      </PayloadSection>
       {diffable ? (
         <StateView step={step} />
       ) : (

@@ -10,7 +10,7 @@
 import type { Step } from "../types.ts";
 
 /** Pull display text out of whatever shape the interceptor captured for `output`. */
-function textFromLlmOutput(output: unknown): string | null {
+export function textFromLlmOutput(output: unknown): string | null {
   // The tracer emits llm_call output as [{ content, tool_calls? }, ...].
   if (Array.isArray(output)) {
     const parts: string[] = [];

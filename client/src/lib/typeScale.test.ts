@@ -256,8 +256,8 @@ console.log("\n§04: the mono face is confined to the files that are about code"
     // structured document, and §05's test is "would fixed-width columns materially help somebody
     // parse it" rather than "does this look technical".
     "components/WorkDetail.tsx",
-    // Literal payloads.
-    "components/McpConfirmModal.tsx", "components/StateBranchEditor.tsx",
+    // Literal payloads — including a trace step's input and output, drawn as a tree or as text.
+    "components/McpConfirmModal.tsx", "components/StateBranchEditor.tsx", "components/JsonTree.tsx",
     // Environment variable names and .env paths, quoted inside prose.
     "components/DeployPanel.tsx", "components/McpPanel.tsx",
     "components/composer/ShieldControl.tsx",
