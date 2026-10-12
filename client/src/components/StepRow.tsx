@@ -204,17 +204,21 @@ function Connectors({ row }: { row: VisibleRow }) {
   const parentX = tileCentre(row.depth - 1);
   if (row.depth - 1 >= 1) {
     lines.push(
-      <span key="own" className={`absolute top-0 w-px bg-hair ${row.lastChild ? "bottom-1/2" : "bottom-0"}`} style={{ left: parentX - 0.5 }} />,
+      <span key="own" aria-hidden className={`absolute top-0 w-px bg-hair ${row.lastChild ? "bottom-1/2" : "bottom-0"}`} style={{ left: parentX - 0.5 }} />,
     );
   }
   lines.push(
     <span
       key="tick"
+      aria-hidden
       className="absolute top-1/2 h-px bg-hair"
       style={{ left: parentX, width: tileCentre(row.depth) - TILE / 2 - parentX }}
     />,
   );
-  return <span aria-hidden>{lines}</span>;
+  // A FRAGMENT, NOT A WRAPPER. The lines are absolute, so on their own they take no part in the row's
+  // flex layout; wrapped in a span they made a zero-width flex item that still took a gap, which
+  // pushed every nested row's number, tile and name 8px right of the rows above it.
+  return <>{lines}</>;
 }
 
 export function StepRow({
@@ -297,7 +301,8 @@ export function StepRow({
       {selected && <span aria-hidden className="absolute left-0 top-1 bottom-1 w-0.5 bg-accent" />}
 
       <Connectors row={row} />
-      <span className="w-7 shrink-0 text-right text-tiny tabular-nums text-faint">#{step.seq}</span>
+      {/* LEFT-ALIGNED, so every row's # stands in one column whatever its number's digits. */}
+      <span className="w-7 shrink-0 text-left text-tiny tabular-nums text-faint">#{step.seq}</span>
       <span className="flex shrink-0 items-center" style={{ paddingLeft: row.depth * INDENT }}>
         {/* THE FOLD, FOR A POINTER. A span rather than a button: the row is the tree item and owns the
             keys (← folds, → unfolds), and a button here would be one more tab stop per node. */}
