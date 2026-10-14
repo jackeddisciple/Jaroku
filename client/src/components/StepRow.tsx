@@ -475,6 +475,8 @@ export function StepRow({
             e.stopPropagation();
             toggleDetails();
           }}
+          // WHICH STEP, SAID. Nine buttons all read "Details — Open step details" to VoiceOver.
+          aria-label={`${expanded ? "Close" : "Open"} details for #${step.seq} ${step.name}`}
           title={expanded ? "Close step details" : "Open step details"}
           className={`flex h-7 items-center gap-0.5 rounded-control px-2 text-tiny transition-[opacity,color,background-color] duration-fast focus-visible:opacity-100 focus-visible:outline-none focus-visible:shadow-focusring ${
             expanded
