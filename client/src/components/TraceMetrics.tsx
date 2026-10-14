@@ -12,7 +12,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { fmtCost, fmtDuration } from "../lib/format.ts";
-import { traceTotals } from "../lib/traceView.ts";
+import { runElapsed, traceTotals } from "../lib/traceView.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { ICON } from "../lib/tokens.ts";
 import type { RunSummary, Step } from "../types.ts";
@@ -78,9 +78,7 @@ export function TraceMetrics({ run, steps }: { run: RunSummary; steps: readonly 
   const now = useTick(run.status === "running");
   const totals = useMemo(() => traceTotals(steps), [steps]);
 
-  const start = Date.parse(run.started_at);
-  const end = run.ended_at ? Date.parse(run.ended_at) : now;
-  const elapsed = Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, end - start) : null;
+  const elapsed = runElapsed(run, steps, now);
 
   const calls = plural(totals.llmCalls, "model call");
   const tokensTitle = totals.tokens == null
@@ -103,8 +101,15 @@ export function TraceMetrics({ run, steps }: { run: RunSummary; steps: readonly 
           label={live ? "Elapsed" : "Duration"}
           value={elapsed == null ? "—" : fmtDuration(elapsed)}
           // THE GRAPH ALONE, and saying so: a deployed job's detail shows a longer figure for the
-          // same run, measured end to end, and the two read as a contradiction.
-          title="The agent's graph alone, from its first step to its last"
+          // same run, measured end to end, and the two read as a contradiction. A paused run has
+          // stopped its clock at the last step it finished.
+          title={
+            run.status === "paused"
+              ? "How long the agent's graph ran before it paused"
+              : live
+                ? "The agent's graph alone, from its start until now"
+                : "The agent's graph alone, from its start to its end — any time it sat paused included"
+          }
           tone={run.status === "running" ? "text-run" : "text-ink"}
         />
         <Figure

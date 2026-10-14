@@ -419,6 +419,33 @@ export function runWindow(
   return end > start ? { start, end } : null;
 }
 
+/**
+ * How long a run has taken, in milliseconds — or null when its times cannot say.
+ *
+ * ENDED, its end less its start. RUNNING, `now` less its start. PAUSED, up to the last step that
+ * finished: a paused run is not doing anything, and counting the wall clock from its start made one
+ * reopened from history read "1d 01h" and keep ticking, while the same state reached live froze at
+ * the moment the pause landed. Both read the run's own last step now, so they agree.
+ */
+export function runElapsed(
+  run: Pick<Run, "status" | "started_at" | "ended_at">,
+  steps: readonly Step[],
+  now: number,
+): number | null {
+  const start = Date.parse(run.started_at);
+  if (!Number.isFinite(start)) return null;
+  let end = now;
+  if (run.ended_at) end = Date.parse(run.ended_at);
+  else if (run.status === "paused") {
+    end = start;
+    for (const s of steps) {
+      const w = stepWindow(s);
+      if (w && w.end > end) end = w.end;
+    }
+  }
+  return Number.isFinite(end) ? Math.max(0, end - start) : null;
+}
+
 // ── Errors ───────────────────────────────────────────────────────────────────
 
 export interface ErrorParts {

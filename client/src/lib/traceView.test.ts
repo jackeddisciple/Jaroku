@@ -18,6 +18,7 @@ import {
   errorParts,
   filterCounts,
   matchesQuery,
+  runElapsed,
   runWindow,
   stepCategory,
   stepProvider,
@@ -280,6 +281,20 @@ console.log("\na run starts once");
   check("...and takes the rest of the end", after?.status === "completed" && after.ended_at === "2026-10-12T15:40:57.300Z");
   useTraceStore.getState().applyEvent({ kind: "run_end", schema_version: 1, run: { ...base, id: "unseen", status: "completed", started_at: resumedAt, ended_at: resumedAt } });
   check("a run heard of only at its end takes the end's start", useTraceStore.getState().runs["unseen"]?.started_at === resumedAt);
+}
+
+console.log("\nhow long a run has taken");
+{
+  const start = "2026-10-09T05:24:45.000Z";
+  const later = Date.parse("2026-10-10T06:24:45.000Z"); // a day on, reopened from history
+  const paused = { status: "paused" as const, started_at: start, ended_at: null };
+  check("a paused run stops its clock at its last finished step, however late it is reopened",
+    runElapsed(paused, steps, later) === Date.parse(tools.started_at) - Date.parse(start), String(runElapsed(paused, steps, later)));
+  check("...and a paused run with no steps yet has taken nothing", runElapsed(paused, [], later) === 0);
+  check("a running one counts to now", runElapsed({ ...paused, status: "running" }, steps, Date.parse(start) + 5000) === 5000);
+  check("an ended one is its end less its start",
+    runElapsed({ status: "completed", started_at: start, ended_at: "2026-10-09T05:24:54.400Z" }, steps, later) === 9400);
+  check("unreadable times say nothing", runElapsed({ ...paused, started_at: "nope" }, steps, later) === null);
 }
 
 console.log("\nwhat Copy output copies");
