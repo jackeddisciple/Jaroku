@@ -71,7 +71,10 @@ export function CollapsibleRegion({
           onClick={onToggle}
           aria-expanded={open}
           title={open ? `Hide ${label}` : `Show ${label}`}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-control text-left focus-visible:outline-none focus-visible:shadow-focusring"
+          // ROOM FOR ITS RING, NOT A SHIFT. The focus ring hugged the label, so the "F" of FINAL ANSWER
+          // sat under it; padding taken back by a negative margin gives the ring space around the
+          // words without moving them a pixel.
+          className="-mx-1.5 -my-0.5 flex min-w-0 flex-1 items-center gap-2 rounded-control px-1.5 py-0.5 text-left focus-visible:outline-none focus-visible:shadow-focusring"
         >
           {/* THE TOKEN, not a copy of it. This string was a verbatim duplicate of
               `TYPE.sectionLabel` — in the one component whose entire job is to be the reusable
