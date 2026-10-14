@@ -36,7 +36,15 @@ export function Metric({ label, value, title, tone = "text-ink", Mark }: { label
  * One of the strip's figures: its mark and its word, then the number, large — the number is what
  * somebody opens a trace to read (the product owner's call on 2026-10-12, "richer metrics").
  */
-function Figure({ Mark, label, value, title, tone = "text-ink" }: { Mark: IconComponent; label: string; value: string; title: string; tone?: string }) {
+interface FigureProps {
+  Mark: IconComponent;
+  label: string;
+  value: string;
+  title: string;
+  tone?: string;
+}
+
+function Figure({ Mark, label, value, title, tone = "text-ink" }: FigureProps) {
   return (
     <div className="min-w-0 px-3 py-2.5" title={title}>
       <div className="flex min-w-0 items-center gap-1.5 text-tiny text-faint">
@@ -48,20 +56,29 @@ function Figure({ Mark, label, value, title, tone = "text-ink" }: { Mark: IconCo
   );
 }
 
-/** Below this width the strip keeps the three figures a run is judged by and drops the two counts. */
-const ALL_FIVE_FROM = 460;
-
+/**
+ * THE STRIP KEEPS ALL FIVE FIGURES ONLY WHILE EACH ONE FITS WHOLE. Five cells came in at 460px, and at
+ * the panel's default width that read "Durati…", "Model …" and "$0.00…" — the one figure that differs
+ * between runs was the one cut off. Now an invisible copy of the five says how wide the widest is,
+ * and below five of those the strip keeps the three a run is judged by and drops the two counts.
+ */
 export function TraceMetrics({ run, steps }: { run: RunSummary; steps: readonly Step[] }) {
   const ref = useRef<HTMLDivElement>(null);
+  const natural = useRef<HTMLDivElement>(null);
   const [roomy, setRoomy] = useState(true);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const measure = (): void => setRoomy(el.clientWidth >= ALL_FIVE_FROM);
+    const measure = (): void => {
+      const widest = Math.max(0, ...[...(natural.current?.children ?? [])].map((c) => (c as HTMLElement).offsetWidth));
+      // Five cells and the strip's own border; the padding is the outer box's (px-6).
+      setRoomy(el.clientWidth - 48 >= widest * 5 + 2);
+    };
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(measure);
     ro.observe(el);
+    if (natural.current) ro.observe(natural.current);
     return () => ro.disconnect();
   }, []);
   const live = run.status === "running" || run.status === "paused";
@@ -95,56 +112,55 @@ export function TraceMetrics({ run, steps }: { run: RunSummary; steps: readonly 
       : `Across ${calls}`)
     + fromParent(parent?.cost != null ? fmtCost(parent.cost) : null);
 
+  const figures: FigureProps[] = [
+    {
+      Mark: Icon.trace.time,
+      label: live ? "Elapsed" : "Duration",
+      value: elapsed == null ? "—" : fmtDuration(elapsed),
+      // THE GRAPH ALONE, and saying so: a deployed job's detail shows a longer figure for the
+      // same run, measured end to end, and the two read as a contradiction. A paused run has
+      // stopped its clock at the last step it finished.
+      title:
+        run.status === "paused"
+          ? "How long the agent's graph ran before it paused"
+          : live
+            ? "The agent's graph alone, from its start until now"
+            : "The agent's graph alone, from its start to its end — any time it sat paused included",
+      tone: run.status === "running" ? "text-run" : "text-ink",
+    },
+    { Mark: Icon.trace.tokens, label: "Tokens", value: totals.tokens == null ? "—" : totals.tokens.toLocaleString(), title: tokensTitle },
+    {
+      Mark: Icon.trace.metricCost,
+      label: totals.unpricedCalls > 0 && totals.cost != null ? "Cost (partial)" : "Cost",
+      value: fmtCost(totals.cost),
+      title: costTitle,
+    },
+    {
+      Mark: Icon.trace.metricSteps,
+      label: "Steps",
+      value: own.length.toLocaleString(),
+      title: inheritedSteps > 0 ? `Every step this run ran · ${inheritedSteps} more inherited from its parent run` : "Every step this run recorded",
+    },
+    {
+      Mark: Icon.trace.metricCalls,
+      label: "Model calls",
+      value: totals.llmCalls.toLocaleString(),
+      title: "Calls to a model in this run, failed ones included",
+    },
+  ];
+  const shown = roomy ? figures : figures.slice(0, 3);
+
   return (
-    <div ref={ref} className="shrink-0 px-6 pt-3">
+    <div ref={ref} className="relative shrink-0 px-6 pt-3">
+      {/* The measure: each figure at its natural width, laid out and never seen. */}
+      <div ref={natural} aria-hidden className="pointer-events-none invisible absolute left-0 top-0 flex w-max">
+        {figures.map((f) => <Figure key={f.label} {...f} />)}
+      </div>
       <div
         className="grid divide-x divide-hair rounded-card border border-hair bg-panel"
-        style={{ gridTemplateColumns: `repeat(${roomy ? 5 : 3}, minmax(0, 1fr))` }}
+        style={{ gridTemplateColumns: `repeat(${shown.length}, minmax(0, 1fr))` }}
       >
-        <Figure
-          Mark={Icon.trace.time}
-          label={live ? "Elapsed" : "Duration"}
-          value={elapsed == null ? "—" : fmtDuration(elapsed)}
-          // THE GRAPH ALONE, and saying so: a deployed job's detail shows a longer figure for the
-          // same run, measured end to end, and the two read as a contradiction. A paused run has
-          // stopped its clock at the last step it finished.
-          title={
-            run.status === "paused"
-              ? "How long the agent's graph ran before it paused"
-              : live
-                ? "The agent's graph alone, from its start until now"
-                : "The agent's graph alone, from its start to its end — any time it sat paused included"
-          }
-          tone={run.status === "running" ? "text-run" : "text-ink"}
-        />
-        <Figure
-          Mark={Icon.trace.tokens}
-          label="Tokens"
-          value={totals.tokens == null ? "—" : totals.tokens.toLocaleString()}
-          title={tokensTitle}
-        />
-        <Figure
-          Mark={Icon.trace.metricCost}
-          label={totals.unpricedCalls > 0 && totals.cost != null ? "Cost (partial)" : "Cost"}
-          value={fmtCost(totals.cost)}
-          title={costTitle}
-        />
-        {roomy && (
-          <Figure
-            Mark={Icon.trace.metricSteps}
-            label="Steps"
-            value={own.length.toLocaleString()}
-            title={inheritedSteps > 0 ? `Every step this run ran · ${inheritedSteps} more inherited from its parent run` : "Every step this run recorded"}
-          />
-        )}
-        {roomy && (
-          <Figure
-            Mark={Icon.trace.metricCalls}
-            label="Model calls"
-            value={totals.llmCalls.toLocaleString()}
-            title="Calls to a model in this run, failed ones included"
-          />
-        )}
+        {shown.map((f) => <Figure key={f.label} {...f} />)}
       </div>
     </div>
   );
