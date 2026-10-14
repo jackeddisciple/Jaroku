@@ -363,7 +363,9 @@ export function StepDetailPanel({ dock }: { dock: StepDetailDock }) {
             <div className="mt-4">
               <StepDetail step={step} />
             </div>
-            <StateBranchEditor step={step} />
+            {/* KEYED BY STEP: its drafts are this step's fields. Without the key, prev/next kept the
+                last step's edits and offered to re-run the new step with them. */}
+            <StateBranchEditor key={step.id} step={step} />
           </div>
         </>
       )}
