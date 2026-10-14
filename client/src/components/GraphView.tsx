@@ -401,7 +401,7 @@ function HoverBar({ d }: { d: FlowData }) {
           <Icon.graphControl.openCode size={ICON.sm} />
         </ToolButton>
         {actions.canBranch(id) && (
-          <ToolButton label="Branch a run from here" onClick={() => actions.branch(id)}>
+          <ToolButton label="Re-run from here" onClick={() => actions.branch(id)}>
             <Icon.graphControl.branch size={ICON.sm} />
           </ToolButton>
         )}

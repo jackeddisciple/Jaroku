@@ -61,9 +61,12 @@ export function StateBranchEditor({ step }: { step: Step }) {
   };
 
   return (
-    <section aria-label="Branch from here" className="mt-5">
+    <section aria-label="Re-run from this step" className="mt-5">
       <div className="mb-1.5 flex items-center gap-2">
-        <span className={TYPE.sectionLabel}>Branch from here</span>
+        {/* ONE NAME FOR ONE ACTION. It was "Re-run" on the composer's card, "Re-run from here" and
+            "Branch with edits" here, and "Branch a run from here" on the graph: all of them fork a
+            new run from this step's checkpoint and leave this one as it was. */}
+        <span className={TYPE.sectionLabel}>Re-run from this step</span>
         {node && <span className="text-tiny text-muted">node: {node}</span>}
       </div>
       <div className="rounded-card border border-hair bg-panel p-3">
@@ -103,13 +106,13 @@ export function StateBranchEditor({ step }: { step: Step }) {
 
       {/* THE DRAWER'S TWO DECISIONS, BOTH BLACK — the product owner's call on 2026-10-12, that every
           major button there is the app's ink-filled primary. Re-run leads because it always works;
-          Branch with edits waits, greyed, until a field has been changed. */}
+          Re-run with edits waits, greyed, until a field has been changed. */}
       <div className="flex items-center gap-2">
         <button
           type="button"
           onClick={() => branch(false)}
           className={`${primaryBtn} flex-1 justify-center focus-visible:outline-none focus-visible:shadow-focusring`}
-          title="Fork a new run from this checkpoint without changes"
+          title="Start a new run from this step, as it was — this run stays as it is"
         >
           Re-run from here
         </button>
@@ -118,9 +121,9 @@ export function StateBranchEditor({ step }: { step: Step }) {
           onClick={() => branch(true)}
           disabled={dirtyKeys.length === 0}
           className={`${primaryBtn} flex-1 justify-center focus-visible:outline-none focus-visible:shadow-focusring`}
-          title={dirtyKeys.length === 0 ? "Edit a field to branch with changes" : "Fork a new run with these edits"}
+          title={dirtyKeys.length === 0 ? "Edit a field above to re-run with changes" : "Start a new run from this step with these edits — this run stays as it is"}
         >
-          Branch with edits{dirtyKeys.length ? ` (${dirtyKeys.length})` : ""}
+          Re-run with edits{dirtyKeys.length ? ` (${dirtyKeys.length})` : ""}
         </button>
       </div>
       </div>
