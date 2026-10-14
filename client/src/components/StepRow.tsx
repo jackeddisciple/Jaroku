@@ -20,7 +20,7 @@
 
 import { useEffect, useRef } from "react";
 
-import { fmtCost, fmtDuration, fmtOffset, fmtTokens, shortCount } from "../lib/format.ts";
+import { fmtCost, fmtDuration, fmtOffset, shortCount } from "../lib/format.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { CATEGORY_LABEL, matchPlaces, stepCategory, stepOutputText, stepProvider, type StepCategory, type VisibleRow } from "../lib/traceView.ts";
 import { BRAND_COLOR, ProviderMark, hasProviderMark } from "../lib/icons.tsx";
@@ -466,11 +466,17 @@ export function StepRow({
         {/* A folded node shows what its steps add up to, said as such — the node itself has none. An
             empty cell keeps its width, so the columns stay columns. The token mark says what it is. */}
         {show.tokens && (
-          <span className={`${COL.tokens} flex items-center justify-end gap-1`} title={tokens == null ? undefined : fold ? `${fmtTokens(tokens)} across the ${fold.steps} steps inside` : fmtTokens(tokens)}>
+          <span
+            className={`${COL.tokens} flex items-center justify-end gap-1`}
+            // THE UNIT, IN WORDS, wherever the mark beside the figure is not read: "1,572 tokens" on
+            // hover and to a screen reader, never a bare number beside a duration.
+            title={tokens == null ? undefined : `${tokens.toLocaleString()} tokens${fold ? ` across the ${fold.steps} steps inside` : ""}`}
+          >
             {tokens != null && (
               <>
                 <span aria-hidden className="shrink-0 text-faint"><Icon.trace.tokens size={ICON.xs} /></span>
                 <span className="truncate">{tier === "medium" ? shortCount(tokens) : tokens.toLocaleString()}</span>
+                <span className="sr-only"> tokens</span>
               </>
             )}
           </span>
@@ -480,7 +486,7 @@ export function StepRow({
             {cost == null ? "" : fmtCost(cost)}
           </span>
         )}
-        <span className={`${COL.time} flex items-center justify-end gap-1`}>
+        <span className={`${COL.time} flex items-center justify-end gap-1`} title={`Took ${fmtDuration(step.latency_ms)}`}>
           <span aria-hidden className="shrink-0 text-faint"><Icon.trace.time size={ICON.xs} /></span>
           <span className="truncate">{fmtDuration(step.latency_ms)}</span>
         </span>
