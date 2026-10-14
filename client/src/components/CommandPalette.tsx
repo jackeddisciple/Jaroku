@@ -29,7 +29,7 @@ import { chatTitle } from "../lib/chatTitle.ts";
 import { openAgentDetail } from "../lib/agentNav.ts";
 import { AgentFace, FACE_SIZE } from "./AgentFace.tsx";
 import { relTime } from "../lib/format.ts";
-import { paneOwnsBareKey } from "../lib/bareKeys.ts";
+import { isActivationTarget, paneOwnsBareKey } from "../lib/bareKeys.ts";
 import { keyHint } from "../lib/modKey.ts";
 import { startNewChat } from "../lib/newChat.ts";
 import { Icon } from "../lib/icons/registry.ts";
@@ -186,7 +186,9 @@ export function CommandPalette() {
       if (!paneOwnsBareKey(e, { navView: ui.navView, paletteOpen: ui.paletteOpen })) return;
       if (e.key === "j" || e.key === "J") { e.preventDefault(); moveStep(1); }
       else if (e.key === "k" || e.key === "K") { e.preventDefault(); moveStep(-1); }
-      else if (e.key === "Enter") { toggleExpandSelected(); }
+      // ONLY AN ENTER NOTHING ELSE TOOK. A menu item, a button or a tab handles its own (Radix marks
+      // it handled); answering it here as well toggled the step drawer under whatever it opened.
+      else if (e.key === "Enter" && !e.defaultPrevented && !isActivationTarget(e.target)) { toggleExpandSelected(); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

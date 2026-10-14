@@ -17,7 +17,7 @@
 //
 //   npm run test:bare-keys
 
-import { insideKeyOwner, isTypingTarget, paneOwnsBareKey, rerunDecision, viewOwnsBareKey, type BareKeyEvent } from "./bareKeys.ts";
+import { insideKeyOwner, isActivationTarget, isTypingTarget, paneOwnsBareKey, rerunDecision, viewOwnsBareKey, type BareKeyEvent } from "./bareKeys.ts";
 
 let fail = 0;
 const check = (name: string, ok: boolean, detail = ""): void => {
@@ -118,6 +118,21 @@ console.log("\nwhat a bare `r` may do");
   check("a run already live: nothing", rerunDecision(r, { ...ready, live: true }) === "nothing");
   check("one sent a moment ago: nothing", rerunDecision(r, { ...ready, justSent: true }) === "nothing");
   check("an agent that cannot run: nothing", rerunDecision(r, { ...ready, canRun: false }) === "nothing");
+}
+
+console.log("\nwhat the trace's window-wide Enter leaves alone");
+{
+  // A node with `closest`, answering for the roles the element (or an ancestor) has.
+  const inside = (tagName: string, roles: string[]): EventTarget =>
+    ({ tagName, closest: (sel: string) => roles.some((r) => sel.includes(`[role="${r}"]`)) || null }) as unknown as EventTarget;
+  check("a menu item: Enter is the item's", isActivationTarget(inside("DIV", ["menuitem"])));
+  check("anything inside an open menu", isActivationTarget(inside("SPAN", ["menu"])));
+  check("a button", isActivationTarget(inside("BUTTON", [])));
+  check("a link", isActivationTarget(inside("A", [])));
+  check("a tab in the rail", isActivationTarget(inside("BUTTON", ["tab"])));
+  check("the body is not one", !isActivationTarget(inside("BODY", [])));
+  check("a step row is not one", !isActivationTarget(inside("DIV", ["treeitem"])));
+  check("nothing at all is not one", !isActivationTarget(null));
 }
 
 console.log("\nneither predicate is stuck at a constant");

@@ -44,6 +44,23 @@ export function isTypingTarget(el: EventTarget | null): boolean {
   return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
 }
 
+/**
+ * Something Enter already means something to: a button, a link, a menu item, an option, a tab.
+ *
+ * THE TRACE'S WINDOW-WIDE ENTER OPENS THE SELECTED STEP, and it was written as though Enter only ever
+ * reached the window from nowhere in particular. A Radix menu item is not a typing target, so Enter on
+ * the trace header's "Open in Runs" ran the item AND toggled the step drawer over the Runs tab. Enter
+ * pressed on a control belongs to that control; the window only gets the presses nothing else took.
+ */
+export function isActivationTarget(el: EventTarget | null): boolean {
+  const t = el as { tagName?: string; closest?: (selector: string) => unknown } | null;
+  if (!t) return false;
+  if (t.tagName === "BUTTON" || t.tagName === "A" || t.tagName === "SUMMARY") return true;
+  return typeof t.closest === "function" && !!t.closest(
+    '[role="menu"],[role="menuitem"],[role="option"],[role="listbox"],[role="tab"],[role="radio"],[role="checkbox"],[role="switch"],[role="button"],[role="dialog"]',
+  );
+}
+
 /** The parts of an event a bare-key guard reads. A real `KeyboardEvent` satisfies it. */
 export interface BareKeyEvent {
   metaKey: boolean;
