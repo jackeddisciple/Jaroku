@@ -360,22 +360,6 @@ function ViewedBox({ runId, step, viewed, selected }: { runId: string; step: Ste
   );
 }
 
-/** The same box with its word, for the step details' header — in the Tab order there. */
-export function ViewedToggle({ runId, step, viewed }: { runId: string; step: Step; viewed: boolean }) {
-  return (
-    <button
-      type="button"
-      role="checkbox"
-      aria-checked={viewed}
-      title={viewed ? "Viewed — press to unmark (V)" : "Mark this step as viewed (V)"}
-      onClick={() => markTraceStep(runId, step.id, "viewed", !viewed)}
-      className="mx-1 flex h-7 items-center gap-1.5 rounded-control px-1.5 text-tiny text-muted transition-colors duration-fast hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
-    >
-      <ViewedMark viewed={viewed} />
-      Viewed
-    </button>
-  );
-}
 
 /** Re-run from this step as it was — the drawer's first button, from the row. Why not, when it can't. */
 function rerunFromRow(step: Step): void {
