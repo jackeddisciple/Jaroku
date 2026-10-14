@@ -21,7 +21,7 @@ import { sendDiscardPlan, sendGenerate } from "../lib/socket.ts";
 import { fmtCost } from "../lib/format.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { Icon } from "../lib/icons/registry.ts";
-import { ACCENT, ICON } from "../lib/tokens.ts";
+import { ACCENT, CODE, ICON } from "../lib/tokens.ts";
 import { noteKind } from "../lib/noteKind.ts";
 import { useStreamedText } from "../lib/useStreamedText.ts";
 import { readablePlanStream } from "../lib/planStream.ts";
@@ -587,7 +587,8 @@ export function PlanCard({ turn }: { turn: PlanTurn }) {
                     detail={
                       <>
                         {f.type && (
-                          <span className="font-mono text-stateful [overflow-wrap:anywhere]">{f.type}</span>
+                          // A type annotation — code, so in the code palette's colour for types.
+                          <span className="font-mono [overflow-wrap:anywhere]" style={{ color: CODE.type }}>{f.type}</span>
                         )}
                         {f.purpose && (
                           <span className={f.type ? "ml-2" : undefined}>
