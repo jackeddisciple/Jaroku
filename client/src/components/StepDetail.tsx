@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { RunStatus, Step } from "../types.ts";
 import { textFromLlmOutput } from "../lib/agentOutput.ts";
 import { jsonPretty } from "../lib/format.ts";
-import { errorParts, llmToolCalls, stepOutputText } from "../lib/traceView.ts";
+import { errorParts, jsonReply, llmToolCalls, stepOutputText } from "../lib/traceView.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { StateDiff, canDiff } from "./StateDiff.tsx";
 import { TYPE } from "../lib/tokens.ts";
@@ -75,15 +75,36 @@ function InputView({ step }: { step: Step }) {
   return <JsonTree value={step.input} openDepth={step.type === "state_update" ? 1 : 2} />;
 }
 
+/**
+ * A model's reply that is JSON, drawn as the tree state is drawn — `{"must_haves": …}` was one long
+ * string — with the text it arrived as one press away, since that is what the model actually said.
+ */
+function JsonReply({ text, value }: { text: string; value: object }) {
+  const [asText, setAsText] = useState(false);
+  return (
+    <div className="flex flex-col gap-1">
+      {asText ? <PayloadText text={text} /> : <JsonTree value={value} openDepth={2} />}
+      <button
+        type="button"
+        onClick={() => setAsText((v) => !v)}
+        className="self-start rounded-xs text-tiny text-faint underline decoration-hair underline-offset-2 transition-colors hover:text-muted focus-visible:outline-none focus-visible:shadow-focusring"
+      >
+        {asText ? "Show as JSON" : "Show the reply as text"}
+      </button>
+    </div>
+  );
+}
+
 /** What came out: a model's reply as its text and any tool calls, a router's choice, text, or a tree. */
 function OutputView({ step }: { step: Step }) {
   if (step.type === "llm_call") {
     const text = textFromLlmOutput(step.output);
     const calls = llmToolCalls(step.output);
+    const json = text ? jsonReply(text) : undefined;
     if (text || calls.length > 0) {
       return (
         <div className="flex flex-col gap-1.5">
-          {text && <PayloadText text={text} prose />}
+          {text && (json ? <JsonReply text={text} value={json} /> : <PayloadText text={text} prose />)}
           {calls.length > 0 && <JsonTree value={{ tool_calls: calls }} openDepth={3} />}
         </div>
       );

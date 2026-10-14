@@ -103,6 +103,23 @@ export function stepOutputText(step: Pick<Step, "type" | "output">): string {
   }
 }
 
+/**
+ * A model's reply, read as the JSON it is when it is JSON — an object or an array, bare or in a
+ * ```json fence, which is how structured-output prompts come back. Undefined for anything else,
+ * including JSON that is only a string or a number: those read fine as text.
+ */
+export function jsonReply(text: string): object | undefined {
+  const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n?```$/i.exec(text.trim());
+  const body = (fenced ? fenced[1]! : text).trim();
+  if (!/^[[{]/.test(body)) return undefined;
+  try {
+    const v: unknown = JSON.parse(body);
+    return typeof v === "object" && v !== null ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // ── The tree ─────────────────────────────────────────────────────────────────
 
 export interface TraceRow {

@@ -18,6 +18,7 @@ import {
   errorParts,
   filterCounts,
   isInherited,
+  jsonReply,
   matchPlaces,
   matchesQuery,
   ownSteps,
@@ -330,6 +331,16 @@ console.log("\na branch's inherited steps");
   const span = runWindow(branch, ownSteps(branch, all), Date.now());
   check("its track starts when IT started, not at its parent's first step",
     span?.start === Date.parse(branch.started_at), String(span && new Date(span.start).toISOString()));
+}
+
+console.log("\na reply that is JSON");
+{
+  check("an object", JSON.stringify(jsonReply('{"must_haves": ["Python"]}')) === '{"must_haves":["Python"]}');
+  check("an array", Array.isArray(jsonReply(" [1, 2] ")));
+  check("in a json fence", JSON.stringify(jsonReply('```json\n{"a": 1}\n```')) === '{"a":1}');
+  check("prose is not", jsonReply("Here is the shortlist: {see below}") === undefined);
+  check("a bare string or number is not", jsonReply('"hi"') === undefined && jsonReply("42") === undefined);
+  check("broken JSON is not", jsonReply('{"a": ') === undefined);
 }
 
 console.log("\nwhere a search matched");
