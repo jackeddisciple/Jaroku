@@ -594,6 +594,22 @@ export function stepsTime(steps: readonly Step[]): number {
   return ms;
 }
 
+/**
+ * How hot a step runs, 0–1: the larger of its share of the run's costliest step and of its slowest —
+ * or of just one of them, when the reader has asked for that one (`by`). Steps a branch inherited are
+ * the parent's work and run cold.
+ */
+export function stepHeat(
+  step: Pick<Step, "cost" | "latency_ms">,
+  scale: { cost: number; time: number },
+  by: "both" | "cost" | "time" = "both",
+): number {
+  const cost = scale.cost > 0 && step.cost != null ? step.cost / scale.cost : 0;
+  const time = scale.time > 0 && Number.isFinite(step.latency_ms) ? step.latency_ms / scale.time : 0;
+  const heat = by === "cost" ? cost : by === "time" ? time : Math.max(cost, time);
+  return Math.min(1, Math.max(0, heat));
+}
+
 // ── Errors ───────────────────────────────────────────────────────────────────
 
 export interface ErrorParts {

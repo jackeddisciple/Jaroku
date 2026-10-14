@@ -29,6 +29,7 @@ import {
   stepCategory,
   stepProvider,
   rerunBlocked,
+  stepHeat,
   stepOutputText,
   stepsTime,
   stepWindow,
@@ -381,6 +382,16 @@ console.log("\nhow long the steps themselves took");
   // agent (2486ms, its model call inside it) and tools (4.3ms, its tool call inside it).
   check("the top-level steps, their insides not counted again", Math.abs(stepsTime(steps) - (2486 + 4.3)) < 1e-9, String(stepsTime(steps)));
   check("no steps, no time", stepsTime([]) === 0);
+}
+
+console.log("\nhow hot a step runs");
+{
+  const scale = { cost: 0.01, time: 2000 };
+  check("the costliest is fully hot", stepHeat({ cost: 0.01, latency_ms: 10 }, scale) === 1);
+  check("the slowest too", stepHeat({ cost: null, latency_ms: 2000 }, scale) === 1);
+  check("half of either is half", stepHeat({ cost: 0.005, latency_ms: 100 }, scale) === 0.5);
+  check("asked for cost alone, time does not count", stepHeat({ cost: null, latency_ms: 2000 }, scale, "cost") === 0);
+  check("an empty run is cold", stepHeat({ cost: 1, latency_ms: 1 }, { cost: 0, time: 0 }) === 0);
 }
 
 console.log("\nwhere a search matched");

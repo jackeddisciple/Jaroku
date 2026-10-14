@@ -3,7 +3,7 @@ import { CANCELLED_BY_USER, jumpToError, orderedSteps, treeSteps, useTraceStore 
 import type { RunSummary, Step } from "../types.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { COL, StepRow, columnsFor, tileCentre, type BarPlace, type FoldSummary, type MetricScale, type RowTier } from "./StepRow.tsx";
-import { buildTraceTree, descendantSteps, isInherited, ownSteps, runWindow, stepWindow, traceTotals, visibleRows, type TimeWindow, type VisibleRow } from "../lib/traceView.ts";
+import { buildTraceTree, descendantSteps, isInherited, ownSteps, runWindow, stepHeat, stepWindow, traceTotals, visibleRows, type TimeWindow, type VisibleRow } from "../lib/traceView.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { TraceHeader } from "./TraceHeader.tsx";
 import { TraceMetrics } from "./TraceMetrics.tsx";
@@ -242,6 +242,7 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
               provider={run?.provider}
               mark={marks.get(r.step.name)}
               scale={scale}
+              heat={isInherited(r.step, run) ? 0 : stepHeat(r.step, scale)}
             />
           ))}
         </div>
