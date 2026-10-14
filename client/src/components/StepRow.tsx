@@ -33,7 +33,6 @@ import { useUiStore } from "../store/uiStore.ts";
 import { markTraceStep, sendBranchRun } from "../lib/socket.ts";
 import { stepNodeId } from "../lib/traceGraphMap.ts";
 import type { Step } from "../types.ts";
-import { CopyTurn } from "./composer/CopyTurn.tsx";
 import { IconButton } from "./IconButton.tsx";
 import { McpBadge } from "./McpBadge.tsx";
 
@@ -310,15 +309,6 @@ function Marked({ text, query }: { text: string; query: string }) {
 }
 
 /**
- * A STEP'S ROW HAS NO WASH OF ITS OWN. A red one warmed the costliest and slowest steps (2026-10-14)
- * and read as a failure — the product owner took it out the same day; the mini bars show the heavy
- * steps. What is left is an inherited step's hatch.
- */
-function rowBackground(inherited: boolean): React.CSSProperties | undefined {
-  return inherited ? { backgroundImage: `repeating-linear-gradient(135deg, transparent 0 6px, ${SURFACE.hair} 6px 7px)` } : undefined;
-}
-
-/**
  * "VIEWED", AS A CODE REVIEW TICKS OFF A FILE (2026-10-14): a box at the end of every row, filled green
  * with a white tick once somebody has read the step — theirs alone, kept on the server. Empty, it shows
  * only under the pointer or on the selected row, so a run nobody has reviewed is not a column of boxes.
@@ -467,9 +457,9 @@ export function StepRow({
       className={`group/step relative isolate flex animate-slide-in cursor-pointer select-none items-center gap-2 rounded-control py-1.5 pl-2 pr-1 outline-none transition-colors duration-fast focus-visible:shadow-focusring motion-reduce:animate-none ${
         selected ? "bg-active" : "hover:bg-active/40"
       } ${row.context || inherited ? "text-muted [&_.text-ink]:text-muted" : ""}`}
-      // AN INHERITED STEP IS HATCHED (2026-10-14): a faint diagonal in the hairline grey behind a
-      // dimmed row, so "this was not re-executed" reads before a word of it does.
-      style={rowBackground(inherited)}
+      // NO BACKGROUND OF ITS OWN (the product owner's call, 2026-10-14): a red wash on the heavy steps
+      // read as a failure, and a grey hatch on an inherited one read as nothing anyone could name. An
+      // inherited step is dimmed and says "inherited"; the heavy ones show in their mini bars.
       // A row kept only so a match keeps its place in the tree reads quieter than the matches.
       title={row.context ? "Shown because a step inside it matches" : undefined}
     >
@@ -546,7 +536,7 @@ export function StepRow({
             </span>
           )}
           {/* SAID, NOT ONLY SHOWN. A branch's copied prefix looked exactly like the steps it ran: now the
-              row is hatched and dimmed, and the word comes with a link mark (copied, not re-run). */}
+              row is dimmed, and the word comes with a link mark (copied, not re-run). */}
           {inherited && (
             <span className="flex shrink-0 items-center gap-1" title="Copied from the run this one branched from — it ran there, before this run began, and was not re-run">
               · <span aria-hidden className="shrink-0"><Icon.trace.inherited size={ICON.xs} /></span>inherited
@@ -572,23 +562,12 @@ export function StepRow({
             focus, so the selected row never showed its own time and its tokens lost a digit. The
             name is truncated anyway and whole in its tooltip; the figures are not, so they stay
             visible. Out of the Tab order: the keyboard opens the details (Enter), which carry them.
-            COPY ID, PIN AND RE-RUN (the product owner's list, 2026-10-14) — the graph and the output
-            are a tab and a header button away in the details. */}
+            RE-RUN ALONE (the product owner's call, 2026-10-14): copy ID and pin came and went the same
+            day — both are in the details, the ID in Overview and the pin in its header. */}
         {tier !== "narrow" && (
           <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center opacity-0 transition-opacity duration-fast group-hover/step:pointer-events-auto group-hover/step:opacity-100">
             <span className="flex items-center rounded-control bg-panel">
               <span className={`flex items-center rounded-control ${selected ? "bg-active" : "bg-active/40"}`}>
-                <CopyTurn source={step.id} label="Copy step ID" title={`Copy this step's ID (${step.id.slice(0, 8)}…)`} tabIndex={-1} />
-                {runId && (
-                  <IconButton
-                    icon={Icon.trace.pinStep}
-                    label={pinned ? "Unpin this step" : "Pin this step"}
-                    active={pinned}
-                    tabIndex={-1}
-                    stopPropagation
-                    onClick={() => markTraceStep(runId, step.id, "pinned", !pinned)}
-                  />
-                )}
                 <IconButton
                   icon={Icon.trace.rerunStep}
                   label="Re-run from here — a new run from this step, as it was"
