@@ -12,6 +12,7 @@ import { nodeKind } from "../components/graphNodeIcons.ts";
 import { outcomePhase, runOutcome } from "./runOutcome.ts";
 import { agentTrend, branchFigures, compareRuns, finalState, runArtifacts } from "./traceCompare.ts";
 import { isVerdict, readVerdict, verdictTone } from "./runVerdict.ts";
+import { jsonLines, jsonMatches, jsonType } from "./jsonShape.ts";
 import { answerPreview } from "../components/TraceResult.tsx";
 import { STATUS, STEP_HUE } from "./tokens.ts";
 import type { RunSummary, Step } from "../types.ts";
@@ -480,6 +481,15 @@ console.log("\nwhat a run decided");
   check("advance words read as advance", verdictTone("Advance to onsite") === "advance" && verdictTone("Strong yes") === "advance");
   check("reject words as reject, a negated advance too", verdictTone("decline") === "reject" && verdictTone("Do not advance") === "reject" && verdictTone("No hire") === "reject");
   check("anything else is neither", verdictTone("hold for review") === "other");
+}
+
+console.log("\nthe JSON viewer's lines, types and search");
+{
+  const v = { name: "Ada", skills: ["Python", "Go"], meta: {}, score: 92 };
+  check("lines are the value pretty-printed", jsonLines(v) === (JSON.stringify(v, null, 2).split("\n").length), String(jsonLines(v)));
+  check("...a leaf is one", jsonLines("x") === 1 && jsonLines(null) === 1);
+  check("types read as badges", jsonType(v.skills) === "array[2]" && jsonType(v) === "object{4}" && jsonType("a") === "string" && jsonType(true) === "bool" && jsonType(null) === "null");
+  check("search counts keys and values, ignoring case", jsonMatches(v, "py") === 1 && jsonMatches(v, "s") === 2, String(jsonMatches(v, "s")));
 }
 
 console.log("\nwhere a search matched");
