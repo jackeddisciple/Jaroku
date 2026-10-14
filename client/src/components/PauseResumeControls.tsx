@@ -44,7 +44,8 @@ export function PauseResumeControls() {
     <button
       onClick={() => setConfirming(true)}
       className={`${base} border-hair text-muted hover:bg-active active:bg-chrome hover:text-err`}
-      title="Stop the run — nothing is left to resume from"
+      // What pressing it does, then what follows — not a reason.
+      title="Stop the run. It can't be resumed afterwards"
     >
       <Icon.trace.stop size={ICON.xs} /> Stop
     </button>

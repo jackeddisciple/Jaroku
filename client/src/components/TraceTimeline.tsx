@@ -12,6 +12,8 @@ import { TraceResult } from "./TraceResult.tsx";
 import { StepDetailPanel } from "./StepDetailPanel.tsx";
 import { traceMarks } from "./traceMarks.ts";
 import { useBuildStore } from "../store/buildStore.ts";
+import { useGraphStore } from "../store/graphStore.ts";
+import { START_ID } from "../lib/graphLayout.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { fmtDuration } from "../lib/format.ts";
 import { ICON } from "../lib/tokens.ts";
@@ -242,15 +244,26 @@ function LiveTail({ run, steps, span, tier }: { run: RunSummary; steps: readonly
   // list's once-a-second span — so it changed once a second and always ended in the same tenth.
   const now = useRunClock(run.id, run.status === "running", 200);
   const stopped = run.status === "error" && run.error === CANCELLED_BY_USER;
+  // BEFORE THE FIRST BOUNDARY, THE GRAPH SAYS WHERE A RUN STARTS: the node after Start, when there is
+  // one. "The next step" stood there while extract_jd was the step running.
+  const edges = useGraphStore((s) => s.graphs[run.agent_id]?.edges);
+  const firstNodes = useMemo(() => edges?.filter((e) => e.source === START_ID).map((e) => e.target), [edges]);
   const state = run.status === "running" ? "running" : run.status === "paused" ? "paused" : stopped && next?.length ? "stopped" : null;
   if (!state) return null;
 
   const names = next?.length ? next.join(", ") : null;
-  const name = names ?? (steps.length === 0 ? "The first step" : "The next step");
-  const word =
-    state === "running" ? (steps.length === 0 ? "Running now — steps appear here as they finish" : "Running now — it appears above when it finishes")
-      : state === "paused" ? "Paused here — Resume continues from this step"
-        : "Stopped here, before this step ran";
+  const name = names
+    ?? (steps.length === 0 && firstNodes?.length === 1 ? firstNodes[0]! : steps.length === 0 ? "The first step" : "The next step");
+  // SHORT ENOUGH TO READ WHOLE at the panel's default width — "Paused here — Resume co…" was the
+  // sentence's useful half cut off. The longer form is the line's tooltip.
+  const [word, more] =
+    state === "running"
+      ? steps.length === 0
+        ? ["Running — steps appear as they finish", "Each step appears here as it finishes"]
+        : ["Running now", "Running now — this step appears above when it finishes"]
+      : state === "paused"
+        ? ["Paused here", "Paused here — Resume continues the run from this step"]
+        : ["Stopped here", "Stopped here, before this step ran"];
   // Its bar runs from the last thing that finished to now: the time the run has spent on it so far.
   let bar: { left: number; width: number } | null = null;
   let soFar: number | null = null;
@@ -285,7 +298,7 @@ function LiveTail({ run, steps, span, tier }: { run: RunSummary; steps: readonly
       </span>
       <span className="min-w-[4.5rem] flex-1">
         <span className="block truncate text-caption font-medium text-ink" title={name}>{name}</span>
-        <span className={`block truncate text-tiny ${state === "running" ? "text-run" : "text-faint"}`}>{word}</span>
+        <span className={`block truncate text-tiny ${state === "running" ? "text-run" : "text-faint"}`} title={more}>{word}</span>
       </span>
       {/* THE STEPS' OWN COLUMNS, so its time and bar sit under the headers: the time it has run so
           far, in amber, and its bar from the last finished step to now. */}
