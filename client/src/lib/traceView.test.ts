@@ -8,6 +8,7 @@
 
 import { useTraceStore, visibleTraceRows } from "../store/traceStore.ts";
 import { traceMarks } from "../components/traceMarks.ts";
+import { outcomePhase, runOutcome } from "./runOutcome.ts";
 import { STATUS, STEP_HUE } from "./tokens.ts";
 import type { Step } from "../types.ts";
 import {
@@ -261,6 +262,18 @@ console.log("\nthe store's rules for selection and folding");
   });
   check("a run that starts and takes the screen starts unfiltered",
     useTraceStore.getState().stepFilter === "all" && useTraceStore.getState().stepQuery === "");
+}
+
+console.log("\none word for how a run went, on every surface");
+{
+  const paused = { status: "paused" as const, error: null };
+  const stopped = { status: "error" as const, error: "cancelled by user" };
+  const failed = { status: "error" as const, error: "ValueError: no" };
+  check("a paused run is paused, not stopped", runOutcome(paused) === "paused" && outcomePhase(paused) === "halted");
+  check("a run somebody stopped is stopped, not failed", runOutcome(stopped) === "stopped" && outcomePhase(stopped) === "halted");
+  check("a failed run is failed", runOutcome(failed) === "failed" && outcomePhase(failed) === "failed");
+  check("a completed run is finished", runOutcome({ status: "completed", error: null }) === "finished");
+  check("a running one is running", runOutcome({ status: "running", error: null }) === "running");
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

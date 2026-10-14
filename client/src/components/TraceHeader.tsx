@@ -16,9 +16,9 @@ import { useState } from "react";
 import { absTime, relTime } from "../lib/format.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { runAgain } from "../lib/runActions.ts";
+import { runOutcome, type RunOutcome } from "../lib/runOutcome.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { useBuildStore } from "../store/buildStore.ts";
-import { CANCELLED_BY_USER } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import type { RunSummary } from "../types.ts";
 import { PauseResumeControls } from "./PauseResumeControls.tsx";
@@ -27,14 +27,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 /** The first segment of a uuid — enough to tell two runs apart. */
 const shortId = (id: string): string => id.slice(0, 8);
 
-type Outcome = "running" | "paused" | "finished" | "failed" | "stopped";
-
-/** The run's outcome, as the word this header says for it. */
-export function runOutcome(run: Pick<RunSummary, "status" | "error">): Outcome {
-  if (run.status === "error") return run.error === CANCELLED_BY_USER ? "stopped" : "failed";
-  if (run.status === "completed") return "finished";
-  return run.status;
-}
+type Outcome = RunOutcome;
 
 /**
  * THE OUTCOME AS A PILL — the product owner's call on 2026-10-12: a finished run is a green pill,

@@ -6,17 +6,17 @@
 
 import { useState } from "react";
 
-import { RUN_PHASE } from "../lib/domainPhase.ts";
 import { absTime, relTime } from "../lib/format.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { openRun, runAgain } from "../lib/runActions.ts";
+import { outcomePhase, runOutcome } from "../lib/runOutcome.ts";
 import { selectAgent } from "../lib/selection.ts";
 import { sendLoadHistory } from "../lib/socket.ts";
-import { PHASE_WORD, type Phase } from "../lib/statusPhase.ts";
+import type { Phase } from "../lib/statusPhase.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { orderedRuns, useTraceStore } from "../store/traceStore.ts";
-import type { RunStatus, RunSummary } from "../types.ts";
+import type { RunSummary } from "../types.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { StatusGlyph } from "./StatusGlyph.tsx";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu.tsx";
@@ -46,9 +46,9 @@ function errorSnippet(error: string): string {
 /**
  * A run's outcome as a capsule: a soft ground, the SHARED glyph, and the phase's own word.
  *
- * THE MARK IS `StatusGlyph` AND THE WORD IS `PHASE_WORD` — the one status vocabulary `test:status-glyph`
- * holds every surface to. `RUN_PHASE` maps the four run statuses onto the phases, so `paused` gets
- * amber and its own word rather than falling into a green-or-red that would call it a failure.
+ * THE MARK IS `StatusGlyph` — the one status vocabulary `test:status-glyph` holds every surface to —
+ * in the phase `RUN_PHASE` gives the run's status (through `outcomePhase`, which draws a run somebody
+ * stopped as halted). THE WORD IS `runOutcome`'s, the same one the trace header says for the run.
  */
 const PHASE_TONE: Record<Phase, string> = {
   pending: "bg-active text-muted",
@@ -62,12 +62,15 @@ const PHASE_TONE: Record<Phase, string> = {
   halted: "bg-active text-muted",
 };
 
-function RunStatusCapsule({ status }: { status: RunStatus }) {
-  const phase = RUN_PHASE[status];
+function RunStatusCapsule({ run }: { run: Pick<RunSummary, "status" | "error"> }) {
+  // THE TRACE HEADER'S WORD FOR THE RUN (`runOutcome`), not the phase's: the phase calls a paused run
+  // "stopped" and a run somebody stopped "failed", and the header said "paused" and "stopped". The
+  // glyph is still the phase's, with a stopped run drawn `halted` rather than `failed`.
+  const phase = outcomePhase(run);
   return (
     <span className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-tiny font-medium ${PHASE_TONE[phase]}`}>
-      <StatusGlyph phase={phase} size={ICON.xs} />
-      {PHASE_WORD[phase]}
+      <StatusGlyph phase={phase} size={ICON.xs} title={runOutcome(run)} />
+      {runOutcome(run)}
     </span>
   );
 }
@@ -134,7 +137,8 @@ const shortRunId = (id: string): string => id.slice(0, 8);
 function RunRow({ run, runs, agentId }: { run: RunSummary; runs: RunSummary[]; agentId: string }) {
   const active = useTraceStore((s) => s.activeRunId === run.id);
   const duration = runDuration(run);
-  const failed = run.status === "error";
+  // A run somebody stopped is not a failure, and its reason is not an error to read in red.
+  const failed = runOutcome(run) === "failed";
 
   return (
     <div
@@ -149,7 +153,7 @@ function RunRow({ run, runs, agentId }: { run: RunSummary; runs: RunSummary[]; a
         title={`${shortRunId(run.id)} · ${run.provider} · ${absTime(run.started_at)}`}
         className="flex min-w-0 flex-1 items-center gap-2 text-left focus-visible:outline-none focus-visible:shadow-focusring"
       >
-        <RunStatusCapsule status={run.status} />
+        <RunStatusCapsule run={run} />
         {/* Branches keep their fork mark: a branched run is a different thing from a re-run. */}
         {run.parent_run_id && (
           <span className="shrink-0 text-faint" title="branch"><Icon.agents.fork size={ICON.xs} /></span>
