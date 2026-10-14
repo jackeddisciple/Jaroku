@@ -211,6 +211,9 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
  */
 function LiveTail({ run, steps, span, tier }: { run: RunSummary; steps: readonly Step[]; span: TimeWindow | null; tier: RowTier }) {
   const next = useTraceStore((s) => s.nextByRun[run.id]);
+  // ITS OWN CLOCK, FIVE TIMES A SECOND. The time it shows is in tenths, and it was read off the
+  // list's once-a-second span — so it changed once a second and always ended in the same tenth.
+  const now = useRunClock(run.id, run.status === "running", 200);
   const stopped = run.status === "error" && run.error === CANCELLED_BY_USER;
   const state = run.status === "running" ? "running" : run.status === "paused" ? "paused" : stopped && next?.length ? "stopped" : null;
   if (!state) return null;
@@ -226,9 +229,10 @@ function LiveTail({ run, steps, span, tier }: { run: RunSummary; steps: readonly
   let soFar: number | null = null;
   if (state === "running" && span) {
     const lastEnd = Math.max(span.start, ...steps.map((st) => stepWindow(st)?.end ?? span.start));
-    const total = span.end - span.start;
-    bar = { left: Math.min(1, (lastEnd - span.start) / total), width: Math.max(0, (span.end - lastEnd) / total) };
-    soFar = Math.max(0, span.end - lastEnd);
+    const end = Math.max(span.end, now);
+    const total = end - span.start;
+    bar = { left: Math.min(1, (lastEnd - span.start) / total), width: Math.max(0, (end - lastEnd) / total) };
+    soFar = Math.max(0, now - lastEnd);
   }
   const show = columnsFor(tier);
 
