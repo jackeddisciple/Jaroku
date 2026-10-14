@@ -377,7 +377,7 @@ export function StepRow({
         <StepTile step={step} provider={provider} mark={mark} />
       </span>
 
-      <span className="min-w-[4.5rem] flex-1">
+      <span className="relative min-w-[4.5rem] flex-1">
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="min-w-0 truncate text-caption font-medium text-ink" title={step.name}>{step.name}</span>
           {/* Derived from the AGENT's manifest, not from the step: the frozen Step schema has no
@@ -407,6 +407,30 @@ export function StepRow({
             </span>
           )}
         </span>
+        {/* THE POINTER'S SHORTCUTS, OVER THE END OF THE NAME AND ONLY UNDER THE POINTER (the product
+            owner's call, 2026-10-14). They floated over the figures and stayed up while the row had
+            focus, so the selected row never showed its own time and its tokens lost a digit. The
+            name is truncated anyway and whole in its tooltip; the figures are not, so they stay
+            visible. Out of the Tab order: the keyboard opens the details (Enter), which carry both. */}
+        {tier !== "narrow" && (
+          <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center opacity-0 transition-opacity duration-fast group-hover/step:pointer-events-auto group-hover/step:opacity-100">
+            <span className="flex items-center rounded-control bg-panel">
+              <span className={`flex items-center rounded-control ${selected ? "bg-active" : "bg-active/40"}`}>
+                <IconButton
+                  icon={Icon.panel.graph}
+                  label="Show this step on the graph"
+                  tabIndex={-1}
+                  stopPropagation
+                  onClick={() => {
+                    select();
+                    useUiStore.getState().setRightTab("graph");
+                  }}
+                />
+                {output && <CopyTurn source={output} label="Copy output" title="Copy this step's output" tabIndex={-1} />}
+              </span>
+            </span>
+          </span>
+        )}
       </span>
 
       {/* Figures, tabular, and only the ones this step has: a node has no tokens of its own. An
@@ -436,28 +460,9 @@ export function StepRow({
         {show.timeline && <Waterfall step={step} bar={bar} colour={stepColour(step, provider, mark)} inherited={inherited} />}
       </span>
 
-      {/* THE ROW'S ACTIONS. Details holds its own place, so the figures never move when it appears;
-          the other two float over the figures while the row is hovered or focused. Too narrow for a
-          slot, Details floats over the duration instead and the other two stay in the drawer. */}
+      {/* DETAILS HOLDS ITS OWN PLACE, so the figures never move when it appears. Too narrow for a
+          slot, it floats over the duration instead, and the two shortcuts stay in the details. */}
       <span className={tier === "narrow" ? "absolute right-1 top-1/2 flex -translate-y-1/2 items-center" : `relative flex shrink-0 items-center justify-end ${COL.actions}`}>
-        {tier !== "narrow" && (
-        <span
-          className="absolute right-full top-1/2 flex -translate-y-1/2 items-center rounded-control bg-bg opacity-0 transition-opacity duration-fast group-hover/step:opacity-100 group-focus-within/step:opacity-100"
-        >
-          <span className={`flex items-center rounded-control ${selected ? "bg-active" : "bg-active/40"}`}>
-            <IconButton
-              icon={Icon.panel.graph}
-              label="Show this step on the graph"
-              stopPropagation
-              onClick={() => {
-                select();
-                useUiStore.getState().setRightTab("graph");
-              }}
-            />
-            {output && <CopyTurn source={output} label="Copy output" title="Copy this step's output" />}
-          </span>
-        </span>
-        )}
         <button
           type="button"
           aria-pressed={expanded}

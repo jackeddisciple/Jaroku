@@ -78,6 +78,11 @@ export interface IconButtonProps {
    * something also opened it.
    */
   stopPropagation?: boolean;
+  /**
+   * -1 to leave the button out of the Tab order, for a control a row or a tree reaches another way
+   * (the trace's rows: Enter opens their details, and the details carry the same actions).
+   */
+  tabIndex?: number;
   className?: string;
   /**
    * An ARIA role, for the one case a plain button is not what this is.
@@ -102,6 +107,7 @@ export function IconButton({
   stopPropagation = false,
   className,
   role,
+  tabIndex,
 }: IconButtonProps) {
   const disabled = disabledReason !== null && disabledReason !== undefined;
   // A CHOSEN SEGMENT IS HELD DOWN, NOT ACCENTED. `active` is a toggle that is on and takes the
@@ -130,6 +136,7 @@ export function IconButton({
       aria-checked={checked === undefined ? undefined : checked}
       aria-pressed={checked === undefined && active ? true : undefined}
       disabled={disabled}
+      tabIndex={tabIndex}
       onClick={(event) => {
         if (stopPropagation) event.stopPropagation();
         onClick?.(event);

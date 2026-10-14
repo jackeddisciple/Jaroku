@@ -32,11 +32,14 @@ export function CopyTurn({
   /** Its tooltip. */
   title = "Copy the markdown source",
   className = "",
+  /** -1 to leave it out of the Tab order where its row is reached another way (see IconButton). */
+  tabIndex,
 }: {
   source: string;
   label?: string;
   title?: string;
   className?: string;
+  tabIndex?: number;
 }) {
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -62,6 +65,7 @@ export function CopyTurn({
     <>
       <button
         type="button"
+        tabIndex={tabIndex}
         onClick={() => { void copy(); }}
         // The name changes with the state, because for a screen reader the check IS the feedback
         // and an unchanged label would mean nothing was announced at all.
