@@ -2024,6 +2024,9 @@ export function BuildPane({
   const clearContext = () => {
     useTraceStore.getState().selectStep(null);
     useUiStore.getState().setSelectedNodeId(null);
+    // The pill (or chip) that was pressed is gone with the context; the composer is where the
+    // keyboard was headed, rather than <body>.
+    useUiStore.getState().focusChat();
   };
 
   /**

@@ -115,7 +115,14 @@ function Figures({ step, inside }: { step: Step; inside: readonly Step[] }) {
   );
 }
 
-function Overview({ step, run, bucket, inside }: { step: Step; run: RunSummary | undefined; bucket: Record<string, Step>; inside: readonly Step[] }) {
+function Overview({ step, run, bucket, inside, onNavigate }: {
+  step: Step;
+  run: RunSummary | undefined;
+  bucket: Record<string, Step>;
+  inside: readonly Step[];
+  /** After a link here has moved the panel to another step — the link may be gone on that one. */
+  onNavigate: () => void;
+}) {
   const window = stepWindow(step);
   const runStart = run ? Date.parse(run.started_at) : NaN;
   const parent = step.parent_step_id ? bucket[step.parent_step_id] : undefined;
@@ -140,7 +147,10 @@ function Overview({ step, run, bucket, inside }: { step: Step; run: RunSummary |
             {parent ? (
               <button
                 type="button"
-                onClick={() => useTraceStore.getState().selectStep(parent.id)}
+                onClick={() => {
+                  useTraceStore.getState().selectStep(parent.id);
+                  onNavigate();
+                }}
                 className="min-w-0 truncate rounded-xs text-ink underline decoration-hair underline-offset-2 transition-colors hover:decoration-ink focus-visible:outline-none focus-visible:shadow-focusring"
                 title={`Select #${parent.seq} ${parent.name}`}
               >
@@ -213,15 +223,42 @@ export function StepDetailPanel({ dock }: { dock: StepDetailDock }) {
     body.current?.scrollTo({ top: 0 });
   }, [expandedStepId]);
 
-  // Escape closes the panel.
+  // THE KEYBOARD IS NEVER DROPPED. Closing the panel from inside it unmounted whatever had focus, and
+  // focus fell to <body>, where the arrows do nothing — so it goes back to the step's row, where ↑/↓
+  // carry on. A step change that takes away the focused control (the "Ran inside" link on a step
+  // with no parent, Next on the last step) leaves focus on the panel itself rather than on nothing.
+  const panel = useRef<HTMLDivElement>(null);
+  const lostFocus = (): boolean => {
+    const at = document.activeElement;
+    return !at || at === document.body || Boolean(panel.current?.contains(at));
+  };
+  const close = (): void => {
+    const st = useTraceStore.getState();
+    const id = st.selectedStepId ?? st.expandedStepId;
+    const refocus = lostFocus();
+    setExpandedStep(null);
+    if (refocus && id) {
+      requestAnimationFrame(() => document.querySelector<HTMLElement>(`[role="treeitem"][data-step-id="${id}"]`)?.focus());
+    }
+  };
+  const keepFocus = (): void => {
+    requestAnimationFrame(() => {
+      const at = document.activeElement as HTMLButtonElement | null;
+      if (!at || at === document.body || at.disabled) panel.current?.focus();
+    });
+  };
+
+  // Escape closes the panel — through the latest `close`, from a listener registered once per opening.
+  const closeRef = useRef(close);
+  closeRef.current = close;
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setExpandedStep(null);
+      if (e.key === "Escape") closeRef.current();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, setExpandedStep]);
+  }, [open]);
 
   /** The step before or after this one, through the rows the timeline shows — J/K's order. */
   const neighbour = (delta: 1 | -1): Step | undefined => {
@@ -234,14 +271,18 @@ export function StepDetailPanel({ dock }: { dock: StepDetailDock }) {
   const go = (delta: 1 | -1): void => {
     const next = neighbour(delta);
     if (next) useTraceStore.getState().selectStep(next.id);
+    keepFocus();
   };
 
   if (!open) return null;
   return (
     <div
+      ref={panel}
       role="region"
       aria-label="Step details"
-      className={`flex min-h-0 flex-col bg-elevated ${
+      // A place for focus to rest when the control that had it goes (see `keepFocus`), never a stop.
+      tabIndex={-1}
+      className={`flex min-h-0 flex-col bg-elevated outline-none ${
         dock === "side" ? "w-[380px] shrink-0 border-l border-edge" : "min-w-0 flex-1 border-t border-edge"
       }`}
     >
@@ -268,7 +309,7 @@ export function StepDetailPanel({ dock }: { dock: StepDetailDock }) {
                   label="Show this step on the graph"
                   onClick={() => useUiStore.getState().setRightTab("graph")}
                 />
-                <IconButton icon={Icon.trace.closeDetails} label="Close step details" onClick={() => setExpandedStep(null)} />
+                <IconButton icon={Icon.trace.closeDetails} label="Close step details" onClick={close} />
               </span>
             </div>
             {/* THE ROW YOU CLICKED, AGAIN, AND LARGER: its tile, its name, its kind and how it went —
@@ -304,7 +345,7 @@ export function StepDetailPanel({ dock }: { dock: StepDetailDock }) {
                 <ErrorView error={step.error} runStatus={run?.status} />
               </div>
             )}
-            <Overview step={step} run={run} bucket={bucket} inside={inside} />
+            <Overview step={step} run={run} bucket={bucket} inside={inside} onNavigate={keepFocus} />
             <div className="mt-4">
               <StepDetail step={step} />
             </div>
