@@ -20,8 +20,9 @@
 //   what went in and came out — Input and Output (StepDetail), and the state it changed;
 //   what to do next — re-run or branch from here, as the drawer's two black buttons.
 //
-// EVERY FIELD IS ONE THE SCHEMA CARRIES, AND NOTHING IS ESTIMATED. A step records its total tokens and
-// not the input/output split, so the split is named as not recorded rather than guessed. Its start is
+// EVERY FIELD IS ONE THE SCHEMA CARRIES, AND NOTHING IS ESTIMATED. A model call's tokens are drawn as
+// prompt against completion when it recorded the split (2026-10-14), and only then — an older step
+// has its total alone, and the bar is not guessed for it. Its start is
 // `started_at − latency_ms`, because `started_at` is stamped when the step finishes (see traceView).
 
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
@@ -29,7 +30,7 @@ import { DRAWER_SNAP, useTraceStore, visibleTraceRows, type DrawerSnap, type Dra
 import { absTime, fmtCost, fmtDuration, fmtOffset, tokenCount } from "../lib/format.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { buildTraceTree, descendantSteps, isInherited, stepWindow, traceTotals } from "../lib/traceView.ts";
-import { ICON, STEP_TYPE, TYPE } from "../lib/tokens.ts";
+import { ICON, STEP_TYPE, TOKEN_SPLIT, TYPE } from "../lib/tokens.ts";
 import { showStepOnGraph } from "../lib/runActions.ts";
 import { markTraceStep, sendEdit, sendExplain } from "../lib/socket.ts";
 import { fixPrompt } from "../lib/intent.ts";
@@ -90,9 +91,42 @@ function StepStatus({ failed }: { failed: boolean }) {
  * are summed from the model calls inside it, and the labels say so. A step that spent nothing a model
  * would bill shows its duration alone rather than two columns of dashes.
  */
+/**
+ * PROMPT AGAINST COMPLETION, AS ONE BAR (the product owner's list, 2026-10-14): what the model read,
+ * cached parts included, in blue, and what it wrote in violet, with the numbers beneath. Only for
+ * tokens whose split was recorded.
+ */
+function TokenSplit({ input, output, inside }: { input: number; output: number; inside: boolean }) {
+  const total = input + output;
+  if (total <= 0) return null;
+  const pct = (n: number): number => Math.round((n / total) * 100);
+  return (
+    <div className="mt-2 rounded-card border border-hair bg-panel px-3 py-2.5" title={`${input.toLocaleString()} prompt + ${output.toLocaleString()} completion = ${total.toLocaleString()} tokens`}>
+      <div className="text-tiny text-faint">{inside ? "Prompt and completion, inside" : "Prompt and completion"}</div>
+      <div aria-hidden className="mt-1.5 flex h-1.5 overflow-hidden rounded-full bg-active">
+        <span style={{ width: `${(input / total) * 100}%`, backgroundColor: TOKEN_SPLIT.prompt }} />
+        <span style={{ width: `${(output / total) * 100}%`, backgroundColor: TOKEN_SPLIT.completion }} />
+      </div>
+      <div className="mt-1.5 flex items-center justify-between gap-3 text-tiny tabular-nums text-muted">
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: TOKEN_SPLIT.prompt }} />
+          <span className="truncate">Prompt {tokenCount(input)} <span className="text-faint">· {pct(input)}%</span></span>
+        </span>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: TOKEN_SPLIT.completion }} />
+          <span className="truncate">Completion {tokenCount(output)} <span className="text-faint">· {pct(output)}%</span></span>
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function Figures({ step, inside }: { step: Step; inside: readonly Step[] }) {
   const llm = step.type === "llm_call";
   const totals = traceTotals(inside);
+  const split = llm
+    ? (step.input_tokens != null && step.output_tokens != null ? { input: step.input_tokens, output: step.output_tokens } : null)
+    : totals.split;
   // Duration and tokens beside the trace's own two marks, the same ones the rows and the strip wear.
   const cells: { label: string; value: string; title: string; Mark?: IconComponent }[] = [
     { label: "Duration", value: Number.isFinite(step.latency_ms) ? fmtDuration(step.latency_ms) : "—", title: "How long this step took, start to finish", Mark: Icon.trace.time },
@@ -110,12 +144,15 @@ function Figures({ step, inside }: { step: Step; inside: readonly Step[] }) {
     );
   }
   return (
-    <div
-      className="grid divide-x divide-hair rounded-card border border-hair bg-panel"
-      style={{ gridTemplateColumns: `repeat(${cells.length}, minmax(0, 1fr))` }}
-    >
-      {cells.map((c) => <Metric key={c.label} label={c.label} value={c.value} title={c.title} Mark={c.Mark} />)}
-    </div>
+    <>
+      <div
+        className="grid divide-x divide-hair rounded-card border border-hair bg-panel"
+        style={{ gridTemplateColumns: `repeat(${cells.length}, minmax(0, 1fr))` }}
+      >
+        {cells.map((c) => <Metric key={c.label} label={c.label} value={c.value} title={c.title} Mark={c.Mark} />)}
+      </div>
+      {split && <TokenSplit input={split.input} output={split.output} inside={!llm} />}
+    </>
   );
 }
 

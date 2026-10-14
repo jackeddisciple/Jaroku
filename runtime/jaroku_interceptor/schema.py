@@ -82,6 +82,11 @@ class Step:
     error: Optional[str] = None
     parent_step_id: Optional[str] = None
     started_at: str = field(default_factory=now_iso)
+    # THE SPLIT OF `tokens`, added 2026-10-14 for the trace's prompt/completion bar: what the model
+    # read (cached or not) and what it wrote. Optional and additive — the two add up to `tokens`, a
+    # reader that does not know them still has the total, and a step without them predates them.
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
 
 
 def _clean(obj: Any) -> dict:

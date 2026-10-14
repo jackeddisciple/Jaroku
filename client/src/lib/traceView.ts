@@ -468,6 +468,11 @@ export interface TraceTotals {
   llmCalls: number;
   /** Model calls that finished but carry no price — a model the pricing table does not know. */
   unpricedCalls: number;
+  /**
+   * The tokens split into prompt (read) and completion (written) — only when EVERY call that
+   * reported tokens also reported its split, so the two always add up to `tokens`. Null otherwise.
+   */
+  split: { input: number; output: number } | null;
 }
 
 /**
@@ -485,15 +490,24 @@ export function traceTotals(steps: readonly Step[]): TraceTotals {
   let cost: number | null = null;
   let llmCalls = 0;
   let unpricedCalls = 0;
+  let input = 0;
+  let output = 0;
+  let whole = true;
   for (const s of steps) {
-    if (s.tokens != null) tokens = (tokens ?? 0) + s.tokens;
+    if (s.tokens != null) {
+      tokens = (tokens ?? 0) + s.tokens;
+      if (s.input_tokens != null && s.output_tokens != null) {
+        input += s.input_tokens;
+        output += s.output_tokens;
+      } else whole = false;
+    }
     if (s.cost != null) cost = (cost ?? 0) + s.cost;
     if (s.type === "llm_call") {
       llmCalls++;
       if (s.cost == null && s.error == null) unpricedCalls++;
     }
   }
-  return { tokens, cost, llmCalls, unpricedCalls };
+  return { tokens, cost, llmCalls, unpricedCalls, split: tokens != null && whole ? { input, output } : null };
 }
 
 // ── A branch's own steps ─────────────────────────────────────────────────────

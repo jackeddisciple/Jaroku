@@ -467,6 +467,16 @@ export const EDITED = "#EA580C";
  * a press away (the palette's bespoke violet, given a second job).
  */
 export const VIEWED = "#2E6B45";
+
+/**
+ * TOKEN_SPLIT — a model call's tokens as one bar, prompt against completion (the product owner's
+ * colours, 2026-10-14): what it read in the info blue the tokens figure already wears, what it wrote
+ * in the violet.
+ */
+export const TOKEN_SPLIT = {
+  prompt: SEMANTIC.info,
+  completion: ACCENT.bespoke,
+} as const;
 export const PINNED = ACCENT.bespoke;
 
 /** Tailwind class equivalents, for the common case where a class is what's wanted. */

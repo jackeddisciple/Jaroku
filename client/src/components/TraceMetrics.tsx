@@ -192,7 +192,9 @@ export function TraceMetrics({ run, steps }: { run: RunSummary; steps: readonly 
   const calls = plural(totals.llmCalls, "model call");
   const tokensTitle = (totals.tokens == null
     ? totals.llmCalls === 0 ? "No model calls yet" : `None of the ${calls} reported tokens`
-    : `Across ${calls} · the input/output split isn't recorded`)
+    : totals.split
+      ? `Across ${calls} · ${tokenCount(totals.split.input)} prompt, ${tokenCount(totals.split.output)} completion`
+      : `Across ${calls} · the prompt/completion split isn't recorded for all of them`)
     + fromParent(parent?.tokens != null ? `${tokenCount(parent.tokens)} tokens` : null);
   const costTitle = (totals.cost == null
     ? totals.llmCalls === 0 ? "No model calls yet" : "Not priced: the pricing table doesn't know this model"

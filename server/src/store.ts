@@ -43,6 +43,9 @@ export const RUN_COLUMNS = [
 export const STEP_COLUMNS = [
   "id", "run_id", "seq", "type", "name", "input", "output", "state_before", "state_after",
   "tokens", "cost", "latency_ms", "error", "parent_step_id", "started_at", "checkpoint_id",
+  // A model call's tokens split into what it read and what it wrote (migration 086); null on a
+  // step recorded before the interceptor sent them, and on every step that is not a model call.
+  "input_tokens", "output_tokens",
 ] as const;
 
 const cols = (list: readonly string[], alias?: string): string =>
@@ -88,6 +91,11 @@ export class TraceStore {
   private static j(v: unknown): string | null {
     if (v === null || v === undefined) return null;
     return JSON.stringify(v);
+  }
+
+  /** A token count as a column holds one: a whole, non-negative number, or null for anything else. */
+  private static count(v: unknown): number | null {
+    return typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : null;
   }
 
   // Inverse of `j`, and the reason it takes the dialect rather than sniffing the value.
@@ -153,8 +161,8 @@ export class TraceStore {
     await this.q(ctx).run(
       `INSERT INTO steps
          (id, workspace_id, run_id, seq, type, name, input, output, state_before, state_after,
-          tokens, cost, latency_ms, error, parent_step_id, started_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          tokens, cost, latency_ms, error, parent_step_id, started_at, input_tokens, output_tokens)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id, started_at) DO NOTHING`,
       [
         step.id, ctx.workspaceId, step.run_id, step.seq, step.type, step.name,
@@ -162,6 +170,8 @@ export class TraceStore {
         TraceStore.j(step.state_before), TraceStore.j(step.state_after),
         step.tokens, step.cost, step.latency_ms, step.error,
         step.parent_step_id, step.started_at,
+        // The split, when the interceptor sent one — a whole number or nothing, whatever arrived.
+        TraceStore.count(step.input_tokens), TraceStore.count(step.output_tokens),
       ],
     );
   }
@@ -522,13 +532,13 @@ export class TraceStore {
           `INSERT INTO steps
              (id, workspace_id, run_id, seq, type, name, input, output, state_before,
               state_after, tokens, cost, latency_ms, error, parent_step_id, started_at,
-              checkpoint_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              checkpoint_id, input_tokens, output_tokens)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             idMap.get(r["id"] as string)!, ctx.workspaceId, newRunId, r["seq"], r["type"],
             r["name"], payload(r["input"]), payload(r["output"]), payload(r["state_before"]),
             payload(r["state_after"]), r["tokens"], r["cost"], r["latency_ms"], r["error"], newParent,
-            r["started_at"], r["checkpoint_id"],
+            r["started_at"], r["checkpoint_id"], r["input_tokens"] ?? null, r["output_tokens"] ?? null,
           ],
         );
       }

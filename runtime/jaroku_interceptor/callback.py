@@ -149,7 +149,8 @@ class JarokuTracer(BaseCallbackHandler):
         )
 
     def _finish(self, run_id, *, output=None, state_after=None, tokens=None,
-                cost=None, error=None, type_=None, name=None) -> None:
+                cost=None, error=None, type_=None, name=None,
+                input_tokens=None, output_tokens=None) -> None:
         pend = self._pending.pop(run_id, None)
         if pend is None:
             return
@@ -168,6 +169,8 @@ class JarokuTracer(BaseCallbackHandler):
             latency_ms=round((time.perf_counter() - pend.t0) * 1000, 3),
             error=error,
             parent_step_id=pend.parent,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
         )
         emit_step(step)
 
@@ -196,8 +199,13 @@ class JarokuTracer(BaseCallbackHandler):
             self.run.tokens += tokens
         if cost is not None:
             self.run.cost = round(self.run.cost + cost, 8)
+        # The split the trace draws as prompt against completion: everything the model read —
+        # the cached parts too, which are tokens it read — and everything it wrote. They add up
+        # to `tokens`.
         self._finish(run_id, output=self._extract_generations(response),
-                     tokens=tokens, cost=cost)
+                     tokens=tokens, cost=cost,
+                     input_tokens=None if usage is None else usage.input + usage.cache_read + usage.cache_write,
+                     output_tokens=None if usage is None else usage.output)
 
     def on_llm_error(self, error, *, run_id, **kwargs) -> None:
         self._finish(run_id, error=self._fmt_error(error))

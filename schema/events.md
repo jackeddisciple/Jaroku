@@ -66,9 +66,16 @@ Step {
   "latency_ms":    number,   // wall-clock duration of the step
   "error":         string | null,  // stack/message if this step failed
   "parent_step_id": string | null, // FK -> Step.id, for nested steps (tool inside a node)
-  "started_at":    string    // ISO-8601 UTC
+  "started_at":    string,   // ISO-8601 UTC
+  "input_tokens":  number | null,  // OPTIONAL — `tokens` the call read, cached included (llm_call only)
+  "output_tokens": number | null   // OPTIONAL — `tokens` the call wrote; the two add up to `tokens`
 }
 ```
+
+`input_tokens` / `output_tokens` were added on 2026-10-14 for the trace's prompt/completion bar. They
+are **additive and optional**: `tokens` keeps its meaning, an older interceptor sends neither, and a
+consumer treats an absent or null split as "not recorded" — never as zero. `schema_version` stays 1,
+because nothing a v1 reader relies on changed.
 
 ### Step `type` semantics
 - `llm_call` — a model invocation. `tokens`/`cost` populated; `input` = messages, `output` = response text/tool-calls.

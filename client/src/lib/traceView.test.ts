@@ -493,6 +493,16 @@ console.log("\nthe JSON viewer's lines, types and search");
   check("search counts keys and values, ignoring case", jsonMatches(v, "py") === 1 && jsonMatches(v, "s") === 2, String(jsonMatches(v, "s")));
 }
 
+console.log("\nprompt against completion");
+{
+  const a = mk({ id: "s1", seq: 0, type: "llm_call", tokens: 150, input_tokens: 120, output_tokens: 30 });
+  const b = mk({ id: "s2", seq: 1, type: "llm_call", tokens: 50, input_tokens: 40, output_tokens: 10 });
+  const old = mk({ id: "s3", seq: 2, type: "llm_call", tokens: 99 });
+  check("the split adds up across the calls", JSON.stringify(traceTotals([a, b]).split) === '{"input":160,"output":40}');
+  check("...and is not given when any call that reported tokens did not split them", traceTotals([a, old]).split === null);
+  check("...nor when nothing reported tokens", traceTotals([mk({ id: "s4", seq: 3 })]).split === null);
+}
+
 console.log("\nan edit against what it was");
 {
   const d = lineDiff("[\n  \"Python\",\n  \"Go\"\n]", "[\n  \"Python\",\n  \"Rust\"\n]");

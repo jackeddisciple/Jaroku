@@ -68,7 +68,7 @@ const steps: Step[] = [
     input: { messages: [{ role: "user", content: 'he said "hi"\nthen left' }], n: 0.1 },
     output: { messages: [], notes: ["ünïcödé — ✓"] },
     state_before: { count: 0 }, state_after: { count: 1 },
-    tokens: null, cost: null, latency_ms: 12.5, error: null, parent_step_id: null,
+    tokens: null, cost: null, latency_ms: 12.5, error: null, parent_step_id: null, input_tokens: null, output_tokens: null,
     started_at: "2026-01-01T00:00:00.100Z",
   },
   {
@@ -79,14 +79,14 @@ const steps: Step[] = [
     input: "plain string argument",
     output: "123",
     state_before: null, state_after: null,
-    tokens: null, cost: null, latency_ms: 3, error: null, parent_step_id: null,
+    tokens: null, cost: null, latency_ms: 3, error: null, parent_step_id: null, input_tokens: null, output_tokens: null,
     started_at: "2026-01-01T00:00:00.200Z",
   },
   {
     id: randomUUID(), run_id: runId, seq: 2, type: "llm_call", name: "model",
     input: [1, 2, 3], output: null,
     state_before: null, state_after: null,
-    tokens: 4242, cost: 0.01234567, latency_ms: 900.25,
+    tokens: 4242, cost: 0.01234567, latency_ms: 900.25, input_tokens: 4000, output_tokens: 242,
     error: "boom", parent_step_id: null,
     started_at: "2026-01-01T00:00:01.000Z",
   },
@@ -95,7 +95,7 @@ const steps: Step[] = [
     id: randomUUID(), run_id: runId, seq: 3, type: "router", name: "should_continue",
     input: { done: false, retry: true }, output: {},
     state_before: {}, state_after: { done: true },
-    tokens: null, cost: null, latency_ms: 0, error: null, parent_step_id: null,
+    tokens: null, cost: null, latency_ms: 0, error: null, parent_step_id: null, input_tokens: null, output_tokens: null,
     started_at: "2026-01-01T00:00:01.500Z",
   },
 ];
@@ -127,6 +127,8 @@ const STEP_FIELDS = [
   "id", "run_id", "seq", "type", "name", "input", "output",
   "state_before", "state_after", "tokens", "cost", "latency_ms",
   "error", "parent_step_id", "started_at",
+  // The split of `tokens` (migration 086): optional, and the same on both drivers when present.
+  "input_tokens", "output_tokens",
 ] as const;
 const RUN_FIELDS = [
   "id", "agent_id", "provider", "model", "status",

@@ -34,6 +34,12 @@ export interface Step {
   error: string | null;
   parent_step_id: string | null;
   started_at: string;
+  /**
+   * `tokens` split into what the call read (cached parts included) and what it wrote — added
+   * 2026-10-14, optional and additive (schema/events.md). Absent from an older interceptor's steps.
+   */
+  input_tokens?: number | null;
+  output_tokens?: number | null;
 }
 
 export type TraceEvent =

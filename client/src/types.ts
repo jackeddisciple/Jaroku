@@ -38,6 +38,12 @@ export interface Step {
   error: string | null;
   parent_step_id: string | null;
   started_at: string;
+  /**
+   * `tokens` split into what the call read (cached parts included) and what it wrote — optional and
+   * additive (schema/events.md, 2026-10-14). Absent or null: not recorded, never zero.
+   */
+  input_tokens?: number | null;
+  output_tokens?: number | null;
 }
 
 // A run plus the derived step count the relay's history snapshot includes (read-side only).

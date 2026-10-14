@@ -108,6 +108,7 @@ const TABLES: { name: string; columns: string[]; conflict: string }[] = [
     columns: [
       "id", "run_id", "seq", "type", "name", "input", "output", "state_before", "state_after",
       "tokens", "cost", "latency_ms", "error", "parent_step_id", "started_at", "checkpoint_id",
+      "input_tokens", "output_tokens",
     ],
     conflict: "(id)",
   },

@@ -187,6 +187,23 @@ console.log("\na run keeps what it was started with");
   check((await store.runInput(A, forked)) === "Do not return JSON… banana", "a branch was started with its parent's input");
 }
 
+console.log("\na model call's tokens, split");
+{
+  const split = randomUUID();
+  await store.upsertRun(A, run(split));
+  await store.insertStep(A, { ...step(split, 0), tokens: 150, input_tokens: 120, output_tokens: 30 });
+  await store.insertStep(A, { ...step(split, 1), input_tokens: 2.5 as number, output_tokens: -1 });
+  await store.insertStep(A, step(split, 2));
+  const [a, b, c] = await store.stepsForRun(A, split);
+  check(a?.input_tokens === 120 && a.output_tokens === 30, "what the call read and what it wrote come back beside its total");
+  check(b?.input_tokens === null && b.output_tokens === null, "...and a count that is not a whole number is kept as none");
+  check(c?.input_tokens === null && c.output_tokens === null, "...and a step from an interceptor that sent none has none");
+  const forked = randomUUID();
+  await store.copyRunPrefix(A, split, forked, 0, 0);
+  const [copied] = await store.stepsForRun(A, forked);
+  check(copied?.input_tokens === 120 && copied.output_tokens === 30, "a branch's inherited step keeps its split");
+}
+
 console.log("\nthe storage column stays in storage");
 
 // The one documented exception to the frozen schema. `SELECT *` would put it into the object

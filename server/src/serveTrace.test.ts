@@ -175,8 +175,10 @@ const deployed = control.eventsFor(runId);
   // absence: a deployed run's events carry exactly the keys events.md names and no more, so a
   // "deployment_id" or an "is_hosted" added here in a hurry fails on the way past.
   const RUN_KEYS = ["agent_id", "cost", "ended_at", "error", "id", "model", "provider", "started_at", "status", "tokens"];
-  const STEP_KEYS = ["cost", "error", "id", "input", "latency_ms", "name", "output", "parent_step_id",
-    "run_id", "seq", "started_at", "state_after", "state_before", "tokens", "type"];
+  // `input_tokens` and `output_tokens` are events.md's own (the optional split of `tokens`, added
+  // 2026-10-14 for the trace's prompt/completion bar) — named there, so named here.
+  const STEP_KEYS = ["cost", "error", "id", "input", "input_tokens", "latency_ms", "name", "output", "output_tokens",
+    "parent_step_id", "run_id", "seq", "started_at", "state_after", "state_before", "tokens", "type"];
   const extraneous: string[] = [];
   for (const e of deployed) {
     if (e.kind === "step") {
