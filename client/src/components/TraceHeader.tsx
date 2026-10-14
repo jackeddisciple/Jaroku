@@ -158,6 +158,15 @@ export function TraceHeader({ run }: { run: RunSummary | undefined }) {
             </button>
           </Tip>
         )}
+        {/* WHAT A BRANCH WAS RE-RUN WITH (2026-10-14), when it was given a temperature or a seed —
+            the model is the run's own and already in its details. */}
+        {(run.temperature != null || run.seed != null) && (
+          <Tip label="The sampling this run was re-run with — the model's own default otherwise">
+            <span className={`${CHIP} shrink-0 cursor-default tabular-nums`} tabIndex={0}>
+              {[run.temperature != null ? `temperature ${run.temperature}` : null, run.seed != null ? `seed ${run.seed}` : null].filter(Boolean).join(" · ")}
+            </span>
+          </Tip>
+        )}
       </div>
     </div>
   );

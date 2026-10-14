@@ -12,6 +12,7 @@
 //
 //   npm run test:pricing
 
+import { branchSettings } from "./branchSettings.ts";
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -234,6 +235,28 @@ CASES.forEach((c, i) => {
   const nameless = offered.filter((m) => !m.name?.trim());
   if (nameless.length) { fail++; console.log(`  FAIL models with no display name: ${nameless.map((m) => m.id).join(", ")}`); }
   else console.log("  ok   every offered model has a display name");
+}
+
+console.log("\nwhat a re-run may change");
+{
+  const ok = (name: string, cond: boolean, detail = ""): void => {
+    if (cond) console.log(`  ok   ${name}`);
+    else { fail++; console.log(`  FAIL ${name}${detail ? ` — ${detail}` : ""}`); }
+  };
+  const parent = { provider: "anthropic", model: "claude-sonnet-5" };
+  const same = branchSettings(parent, {});
+  ok("nothing asked: the parent's model, the provider's defaults", JSON.stringify(same) === '{"provider":"anthropic","model":"claude-sonnet-5","temperature":null,"seed":null}', JSON.stringify(same));
+  const gpt = branchSettings(parent, { model: "gpt-6-astra" });
+  ok("another model brings its own provider", "model" in gpt && gpt.provider === "openai" && gpt.model === "gpt-6-astra");
+  ok("...but not one the catalogue lacks", "refusal" in branchSettings(parent, { model: "gpt-9-imaginary" }));
+  ok("...nor the dry run", "refusal" in branchSettings(parent, { model: "fake-dry-run" }));
+  const refused = branchSettings(parent, { temperature: 0.2 });
+  ok("a model that rejects a temperature is not sent one", "refusal" in refused && /doesn't take a temperature/.test(refused.refusal), JSON.stringify(refused));
+  const haiku = branchSettings(parent, { model: "claude-haiku-4-5", temperature: 0.2 });
+  ok("...and one that takes it is", "model" in haiku && haiku.temperature === 0.2);
+  ok("a temperature is 0 to 1", "refusal" in branchSettings(parent, { model: "claude-haiku-4-5", temperature: 1.5 }));
+  ok("a seed goes only to a model listed as taking one", "refusal" in branchSettings(parent, { model: "claude-haiku-4-5", seed: 7 }));
+  ok("...and is a whole number", "refusal" in branchSettings(parent, { seed: 1.5 }));
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

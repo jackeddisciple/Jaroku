@@ -99,7 +99,7 @@ const TABLES: { name: string; columns: string[]; conflict: string }[] = [
     name: "runs",
     columns: [
       "id", "agent_id", "provider", "model", "status", "started_at", "ended_at", "cost",
-      "tokens", "error", "parent_run_id", "branch_from_seq", "input",
+      "tokens", "error", "parent_run_id", "branch_from_seq", "input", "temperature", "seed",
     ],
     conflict: "(id)",
   },

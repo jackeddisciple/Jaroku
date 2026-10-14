@@ -22,6 +22,11 @@ import { Icon } from "../lib/icons/registry.ts";
 import { EDITED, ICON, TYPE } from "../lib/tokens.ts";
 import { primaryBtnSm } from "./buttons.ts";
 import { IconButton } from "./IconButton.tsx";
+import { ChevronDownIcon } from "./panelIcons.tsx";
+import { Select } from "./Select.tsx";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
+import { useProviderStore } from "../store/providerStore.ts";
+import { isProviderId } from "../types.ts";
 
 /**
  * How a field is edited, and read back: a STRING as the text it is, anything else as JSON.
@@ -66,7 +71,14 @@ export interface Rerun {
   blocked: string | null;
   starting: boolean;
   refusal: string | null;
-  branch: (withEdits: boolean) => void;
+  branch: (withEdits: boolean, settings?: RerunSettings) => void;
+}
+
+/** What a re-run may change about the branch it starts (2026-10-14). */
+export interface RerunSettings {
+  model?: string;
+  temperature?: number;
+  seed?: number;
 }
 
 /**
@@ -115,7 +127,7 @@ export function useRerun(step: Step | undefined): Rerun {
     if (problem) invalid[k] = problem;
   }
 
-  const branch = (withEdits: boolean): void => {
+  const branch = (withEdits: boolean, settings: RerunSettings = {}): void => {
     if (!activeRunId || !step) return;
     let editedState: Record<string, unknown> | undefined;
     if (withEdits) {
@@ -126,7 +138,7 @@ export function useRerun(step: Step | undefined): Rerun {
       for (const k of dirtyKeys) editedState[k] = asText(fields[k]) ? (draft[k] ?? "") : JSON.parse(draft[k]!);
     }
     setPressedAt(Date.now());
-    sendBranchRun(activeRunId, step.seq, node, editedState);
+    sendBranchRun(activeRunId, step.seq, node, editedState, settings);
   };
 
   return { node, fields, fieldKeys, draft, setField, resetField, dirtyKeys, invalid, blocked, starting, refusal, branch };
@@ -250,15 +262,7 @@ export function RerunFooter({ rerun }: { rerun: Rerun }) {
         </p>
       )}
       <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => branch(false)}
-          disabled={blocked !== null || starting}
-          className={`${primaryBtnSm} focus-visible:outline-none focus-visible:shadow-focusring`}
-          title={blocked ?? (starting ? "Starting the new run…" : "Start a new run from this step, as it was — this run stays as it is")}
-        >
-          {starting ? "Starting…" : "Re-run from here"}
-        </button>
+        <RerunSplit rerun={rerun} />
         <button
           type="button"
           onClick={() => branch(true)}
@@ -284,5 +288,116 @@ export function RerunFooter({ rerun }: { rerun: Rerun }) {
       </div>
       {blocked && <p className="mt-1.5 text-tiny text-muted">{blocked}.</p>}
     </div>
+  );
+}
+
+// ── Re-run with settings (2026-10-14) ───────────────────────────────────────
+
+/**
+ * "RE-RUN FROM HERE", WITH ANOTHER MODEL, TEMPERATURE OR SEED — the split half of the button. The
+ * model is always offered, from the server's catalogue; a temperature or a seed only where that model
+ * takes one (pricing.json `sampling`), and where it does not, the field says so rather than vanishing.
+ */
+function RerunOptions({ rerun, model: runModel, onStart }: { rerun: Rerun; model: string; onStart: () => void }) {
+  const models = useProviderStore((s) => s.models);
+  const providers = useProviderStore((s) => s.providers);
+  const offered = useMemo(() => models.filter((m) => isProviderId(m.provider)), [models]);
+  const [model, setModel] = useState(offered.some((m) => m.id === runModel) ? runModel : (offered[0]?.id ?? runModel));
+  const [temperature, setTemperature] = useState("");
+  const [seed, setSeed] = useState("");
+  const chosen = offered.find((m) => m.id === model);
+  const takes = new Set(chosen?.sampling ?? []);
+  const name = chosen?.name ?? model;
+  const runnable = !chosen || providers.find((p) => p.id === chosen.provider)?.runnable !== false;
+  const t = temperature.trim() === "" ? undefined : Number(temperature);
+  const sd = seed.trim() === "" ? undefined : Number(seed);
+  const badT = t !== undefined && (!Number.isFinite(t) || t < 0 || t > 1);
+  const badS = sd !== undefined && (!Number.isInteger(sd) || sd < 0 || sd > 2 ** 31 - 1);
+  const edits = rerun.dirtyKeys.length > 0 && Object.keys(rerun.invalid).length === 0 ? rerun.dirtyKeys.length : 0;
+  const options = offered.map((m) => ({ value: m.id, label: `${m.name} · ${m.label}` }));
+  const field = "h-7 w-full rounded-input border border-edge bg-elevated px-2 text-caption text-ink outline-none focus-visible:shadow-focusring disabled:cursor-not-allowed disabled:opacity-50";
+  return (
+    <div className="flex flex-col gap-2.5">
+      <div className={TYPE.sectionLabel}>Re-run from here with</div>
+      <label className="flex flex-col gap-1">
+        <span className="text-tiny text-muted">Model</span>
+        <Select value={model} options={options} onChange={setModel} ariaLabel="Model for the new run" />
+        {!runnable && <span className="text-tiny text-err">This needs {chosen?.label} connected in Secrets.</span>}
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="text-tiny text-muted">Temperature <span className="text-faint">· 0 to 1, blank for the model's own</span></span>
+        <input
+          type="number" inputMode="decimal" min={0} max={1} step={0.1}
+          value={temperature} onChange={(e) => setTemperature(e.target.value)}
+          disabled={!takes.has("temperature")} aria-invalid={badT || undefined}
+          placeholder={takes.has("temperature") ? "default" : "—"}
+          className={`${field} ${badT ? "border-err" : ""}`}
+        />
+        {!takes.has("temperature") && <span className="text-tiny text-faint">{name} doesn't take a temperature.</span>}
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="text-tiny text-muted">Seed <span className="text-faint">· a whole number, to repeat a run</span></span>
+        <input
+          type="number" inputMode="numeric" min={0} step={1}
+          value={seed} onChange={(e) => setSeed(e.target.value)}
+          disabled={!takes.has("seed")} aria-invalid={badS || undefined}
+          placeholder={takes.has("seed") ? "none" : "—"}
+          className={`${field} ${badS ? "border-err" : ""}`}
+        />
+        {!takes.has("seed") && <span className="text-tiny text-faint">{name} doesn't take a seed.</span>}
+      </label>
+      <button
+        type="button"
+        disabled={badT || badS || rerun.blocked !== null || rerun.starting}
+        onClick={() => {
+          rerun.branch(edits > 0, {
+            ...(model !== runModel ? { model } : {}),
+            ...(t !== undefined && takes.has("temperature") ? { temperature: t } : {}),
+            ...(sd !== undefined && takes.has("seed") ? { seed: sd } : {}),
+          });
+          onStart();
+        }}
+        className={`${primaryBtnSm} self-start focus-visible:outline-none focus-visible:shadow-focusring`}
+        title={rerun.blocked ?? "Start a new run from this step with these settings — this run stays as it is"}
+      >
+        {edits > 0 ? `Re-run with ${edits} ${edits === 1 ? "edit" : "edits"}` : "Re-run from here"}
+      </button>
+    </div>
+  );
+}
+
+/** The split button: Re-run from here, and beside it the settings it can be re-run with. */
+export function RerunSplit({ rerun }: { rerun: Rerun }) {
+  const [open, setOpen] = useState(false);
+  const model = useTraceStore((s) => (s.activeRunId ? s.runs[s.activeRunId]?.model : undefined)) ?? "";
+  const disabled = rerun.blocked !== null || rerun.starting;
+  return (
+    <span className="inline-flex items-stretch">
+      <button
+        type="button"
+        onClick={() => rerun.branch(false)}
+        disabled={disabled}
+        className={`${primaryBtnSm} rounded-r-none focus-visible:outline-none focus-visible:shadow-focusring`}
+        title={rerun.blocked ?? (rerun.starting ? "Starting the new run…" : "Start a new run from this step, as it was — this run stays as it is")}
+      >
+        {rerun.starting ? "Starting…" : "Re-run from here"}
+      </button>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            disabled={disabled}
+            aria-label="Re-run from here with another model, temperature or seed"
+            title="Re-run with another model, temperature or seed"
+            className={`${primaryBtnSm} rounded-l-none border-l border-bg/25 px-1.5 focus-visible:outline-none focus-visible:shadow-focusring`}
+          >
+            <ChevronDownIcon size={ICON.xs} />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent side="top" align="start" className="w-72 rounded-card border border-edge bg-elevated p-3 shadow-floating">
+          <RerunOptions rerun={rerun} model={model} onStart={() => setOpen(false)} />
+        </PopoverContent>
+      </Popover>
+    </span>
   );
 }

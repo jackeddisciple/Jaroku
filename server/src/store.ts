@@ -37,6 +37,8 @@ export type RunSummary = Run & { step_count: number; has_input: boolean };
 export const RUN_COLUMNS = [
   "id", "agent_id", "provider", "model", "status", "started_at", "ended_at",
   "cost", "tokens", "error", "parent_run_id", "branch_from_seq",
+  // What a branch was re-run with, when it was given one (migration 087); null is the default.
+  "temperature", "seed",
 ] as const;
 
 /** The same, for a Step. Again: no workspace_id. */
@@ -489,6 +491,11 @@ export class TraceStore {
     newRunId: string,
     uptoSeq: number,
     branchFromSeq: number,
+    /**
+     * What the branch runs on, when it is not its parent's: another model (and so its provider),
+     * a temperature, a seed (migration 087). Absent, the parent's model and the provider's defaults.
+     */
+    overrides: { provider?: string; model?: string; temperature?: number | null; seed?: number | null } = {},
   ): Promise<void> {
     await this.db.scoped(ctx.workspaceId, async (tx: Queryable) => {
       const parent = await tx.get<Record<string, unknown>>(
@@ -504,11 +511,13 @@ export class TraceStore {
       );
       await tx.run(
         `INSERT INTO runs (id, workspace_id, agent_id, provider, model, status, started_at,
-           ended_at, cost, tokens, error, parent_run_id, branch_from_seq, input)
-         VALUES (?, ?, ?, ?, ?, 'running', ?, NULL, 0, 0, NULL, ?, ?, ?)`,
+           ended_at, cost, tokens, error, parent_run_id, branch_from_seq, input, temperature, seed)
+         VALUES (?, ?, ?, ?, ?, 'running', ?, NULL, 0, 0, NULL, ?, ?, ?, ?, ?)`,
         [
-          newRunId, ctx.workspaceId, parent["agent_id"], parent["provider"], parent["model"],
+          newRunId, ctx.workspaceId, parent["agent_id"],
+          overrides.provider ?? parent["provider"], overrides.model ?? parent["model"],
           new Date().toISOString(), parentRunId, branchFromSeq, parentInput?.input ?? null,
+          overrides.temperature ?? null, overrides.seed ?? null,
         ],
       );
 

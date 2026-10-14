@@ -6,9 +6,11 @@ a regeneration: the same generated project runs on Claude, on GPT or on Muse Spa
 here at spawn time from ``JAROKU_PROVIDER`` / ``JAROKU_MODEL``. The scripted dry-run model is
 still reachable, but only as the test suites' stand-in — no product surface offers it.
 
-Note on sampling parameters: no ``temperature`` is passed. Current Claude models (Opus 4.7+,
-Sonnet 5, Fable 5) reject ``temperature``/``top_p``/``top_k`` with a 400, so passing it would
-break exactly the models a user is most likely to pick.
+Note on sampling parameters: a ``temperature`` or ``seed`` is passed only when the run was given one
+(``JAROKU_TEMPERATURE`` / ``JAROKU_SEED`` — "Re-run from here" with settings) AND the model's
+pricing.json entry lists it under ``sampling``. Current Claude models (Opus 4.7+, Sonnet 5, Fable 5)
+reject ``temperature``/``top_p``/``top_k`` with a 400, so a blanket default would break exactly the
+models a user is most likely to pick; the list is how that stays a fact about each model.
 """
 
 from __future__ import annotations
@@ -97,6 +99,33 @@ def _named_effort(model_name: str, level: str | None) -> str | None:
 META_BASE_URL = "https://api.meta.ai/v1"
 
 
+def _sampling(model_name: str, *, thinking: bool = False) -> dict[str, Any]:
+    """The temperature and seed this run was given, for a model that takes them — else nothing.
+
+    ONLY WHAT THE MODEL'S ENTRY LISTS (pricing.json ``sampling``), so a setting the server offered
+    for one model can never reach another that would answer it with a 400. A temperature with a
+    thinking budget on is dropped as well: Claude takes only 1 then.
+    """
+    price = price_for(model_name)
+    accepted = price.sampling if price else ()
+    out: dict[str, Any] = {}
+    raw_t = (os.environ.get("JAROKU_TEMPERATURE") or "").strip()
+    if raw_t and "temperature" in accepted and not thinking:
+        try:
+            t = float(raw_t)
+            if 0.0 <= t <= 1.0:
+                out["temperature"] = t
+        except ValueError:
+            pass
+    raw_s = (os.environ.get("JAROKU_SEED") or "").strip()
+    if raw_s and "seed" in accepted:
+        try:
+            out["seed"] = int(raw_s)
+        except ValueError:
+            pass
+    return out
+
+
 def _requested_effort() -> str | None:
     level = (os.environ.get("JAROKU_REASONING_EFFORT") or "").strip().lower()
     return level if level in _EFFORT_ORDER else None
@@ -149,7 +178,7 @@ def build_model(provider: str, model_name: str, tools: Sequence[Any]) -> tuple[A
                     provider,
                     model_name,
                 )
-            return ChatAnthropic(model=model_name), provider, model_name
+            return ChatAnthropic(model=model_name, **_sampling(model_name)), provider, model_name
 
         # THE MODERN SHAPE. Thinking is adaptive — the model decides how much to spend — and the
         # level is expressed as effort rather than as a token count: one of the names this model's
@@ -169,7 +198,7 @@ def build_model(provider: str, model_name: str, tools: Sequence[Any]) -> tuple[A
         # No level asked for: the provider's own defaults, which on a current model already means
         # adaptive thinking at the default effort. Byte-identical to a run started before any of
         # this existed.
-        return ChatAnthropic(model=model_name, max_tokens=_ADAPTIVE_MAX_TOKENS), provider, model_name
+        return ChatAnthropic(model=model_name, max_tokens=_ADAPTIVE_MAX_TOKENS, **_sampling(model_name)), provider, model_name
 
     effort = _named_effort(model_name, level)
     named = {"reasoning_effort": effort} if effort else {}
@@ -183,7 +212,7 @@ def build_model(provider: str, model_name: str, tools: Sequence[Any]) -> tuple[A
         # only for the `-pro` models, so it is asked for here, for every OpenAI model, rather than
         # left to a prefix list that has never heard of these names. `reasoning_effort` becomes
         # `reasoning.effort` on the way out.
-        return ChatOpenAI(model=model_name, use_responses_api=True, **named), provider, model_name
+        return ChatOpenAI(model=model_name, use_responses_api=True, **named, **_sampling(model_name)), provider, model_name
 
     if provider == "meta":
         from langchain_openai import ChatOpenAI
@@ -215,6 +244,7 @@ def build_model(provider: str, model_name: str, tools: Sequence[Any]) -> tuple[A
                 api_key=key,
                 use_responses_api=False,
                 disabled_params={"tool_choice": None},
+                **_sampling(model_name),
             ),
             provider,
             model_name,

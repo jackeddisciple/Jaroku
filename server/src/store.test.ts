@@ -202,6 +202,12 @@ console.log("\na model call's tokens, split");
   await store.copyRunPrefix(A, split, forked, 0, 0);
   const [copied] = await store.stepsForRun(A, forked);
   check(copied?.input_tokens === 120 && copied.output_tokens === 30, "a branch's inherited step keeps its split");
+  const retuned = randomUUID();
+  await store.copyRunPrefix(A, split, retuned, 0, 0, { provider: "anthropic", model: "claude-haiku-4-5", temperature: 0.2, seed: null });
+  const row = (await store.getRun(A, retuned)) as (Run & { temperature?: number | null; seed?: number | null }) | undefined;
+  check(row?.model === "claude-haiku-4-5" && row.provider === "anthropic" && row.temperature === 0.2 && row.seed === null, "a branch re-run with settings records them on its run");
+  const plain = (await store.getRun(A, forked)) as (Run & { temperature?: number | null }) | undefined;
+  check(plain?.model === "fake-scripted" && plain.temperature === null, "...and one without keeps its parent's model and no temperature");
 }
 
 console.log("\nthe storage column stays in storage");

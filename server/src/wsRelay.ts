@@ -449,6 +449,14 @@ export type BranchRunCommand = {
   atSeq: number;
   editNode?: string;
   editedState?: Record<string, unknown>;
+  /**
+   * What the branch runs on, when not its parent's (2026-10-14): another model from the catalogue,
+   * and a temperature or seed where that model takes one (pricing.json `sampling`). Checked by the
+   * server before anything is copied.
+   */
+  model?: string;
+  temperature?: number;
+  seed?: number;
 };
 // Eval Engine (Week 7): dataset CRUD. These are control-plane commands like pause/resume —
 // they mutate the eval tables and never touch the frozen trace stream. They're forwarded

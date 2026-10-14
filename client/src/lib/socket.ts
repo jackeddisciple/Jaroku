@@ -1644,8 +1644,10 @@ export function sendBranchRun(
   atSeq: number,
   editNode?: string,
   editedState?: Record<string, unknown>,
+  /** What the branch runs on, when not its parent's: another model, a temperature, a seed. */
+  settings: { model?: string; temperature?: number; seed?: number } = {},
 ): void {
-  send({ cmd: "branchRun", fromRunId, atSeq, editNode, editedState });
+  send({ cmd: "branchRun", fromRunId, atSeq, editNode, editedState, ...settings });
 }
 /**
  * §2's chat route: a conversational reply, on the "reply" channel like the other two.

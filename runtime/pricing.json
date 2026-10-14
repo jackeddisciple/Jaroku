@@ -21,7 +21,14 @@
     "none and the readers' own conservative default applies.",
     "",
     "`fake-dry-run` is the test suites' scripted stand-in, not a model anyone is offered. It is here so",
-    "a test run is priced — at $0, which is true of it — rather than as unknown."
+    "a test run is priced — at $0, which is true of it — rather than as unknown.",
+    "",
+    "`sampling` names the settings a model takes when a branch is re-run with them — \"temperature\",",
+    "\"seed\" — and is ABSENT for every model nobody has confirmed takes them. Current Claude models",
+    "answer a temperature with a 400; Haiku 4.5 takes one (with no thinking budget on). OpenAI's models",
+    "here run on the Responses API with reasoning, where langchain drops a temperature and a seed is",
+    "not confirmed, so neither is listed. Read by server/src/pricing.ts (what Re-run offers) and by",
+    "runtime/jaroku_runner/models.py (what a run is actually sent) — one list, two readers."
   ],
   "version": 1,
   "currency": "USD",
@@ -75,7 +82,10 @@
       "cache_write_mult": 1.25,
       "reasoning": null,
       "max_output_tokens": 64000,
-      "context_window": 200000
+      "context_window": 200000,
+      "sampling": [
+        "temperature"
+      ]
     },
     {
       "id": "claude-fable-5-1",

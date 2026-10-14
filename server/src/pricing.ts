@@ -148,6 +148,12 @@ export interface Capability {
    * every such API has taken — which is what makes XHigh clamp. models.py reads the same list.
    */
   effortLevels?: readonly string[];
+  /**
+   * The sampling settings this model takes — "temperature", "seed" — from `sampling`. Empty for a
+   * model that rejects them (current Claude models answer a temperature with a 400) or for which
+   * nobody has confirmed it takes them: a branch is never re-run with a setting its model refuses.
+   */
+  sampling?: readonly ("temperature" | "seed")[];
 }
 
 /** Jaroku's four levels, in tokens, for `thinking`-shaped providers. */
@@ -179,6 +185,9 @@ function loadCapabilities(): {
         ...(Array.isArray(m.effort_levels)
           ? { effortLevels: m.effort_levels.filter((l): l is string => typeof l === "string") }
           : {}),
+        sampling: Array.isArray(m.sampling)
+          ? m.sampling.filter((s): s is "temperature" | "seed" => s === "temperature" || s === "seed")
+          : [],
       });
     }
     const budgets: ReasoningBudgets = {};

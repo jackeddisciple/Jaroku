@@ -53,6 +53,9 @@ export type RunSummary = Run & {
   step_count?: number;
   parent_run_id?: string | null;
   branch_from_seq?: number | null;
+  /** What a branch was re-run with, when it was given one (migration 087); null is the default. */
+  temperature?: number | null;
+  seed?: number | null;
   /**
    * Whether the server kept what this run was started with (migration 084) — what "Run again" sends.
    * On history rows only; undefined on a run heard of from its live events, which the server has.
@@ -891,6 +894,11 @@ export interface ProviderModel {
   effort_levels: string[];
   /** Its provider's names for those levels — "Ultra", "Max effort". Null when it has none. */
   effort_labels: Record<string, string> | null;
+  /**
+   * The sampling settings "Re-run from here" may set on it — "temperature", "seed" — from the
+   * server's catalogue (pricing.json `sampling`). Absent from an older server: none offered.
+   */
+  sampling?: string[];
 }
 
 export interface ProviderStatus {
@@ -2485,7 +2493,7 @@ export type ClientCommand =
   // one", "stop it before branching") are instructions to send this, so a client that could not
   // send it left the user reading advice they had no way to take.
   | { cmd: "cancelRun"; runId: string }
-  | { cmd: "branchRun"; fromRunId: string; atSeq: number; editNode?: string; editedState?: Record<string, unknown> }
+  | { cmd: "branchRun"; fromRunId: string; atSeq: number; editNode?: string; editedState?: Record<string, unknown>; model?: string; temperature?: number; seed?: number }
   | { cmd: "explain"; subscription?: { provider: string; model?: string | null; effort?: string | null }; agentId: string; question: string; subject: ExplainSubject; github?: GithubAttachment[]; threadId?: string }
   // §2's chat route. `agentId` is OPTIONAL and every other command on the reply channel requires
   // one: §8.1's planning stage is a thread with no agent, and that is exactly when somebody types

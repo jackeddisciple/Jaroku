@@ -309,6 +309,7 @@ import {
   type ProviderId,
 } from "./providers.ts";
 import { allPrices, capabilityFor, costFor, effortLabelsFor, isPriced, priceFor } from "./pricing.ts";
+import { branchSettings } from "./branchSettings.ts";
 import { DeployStore, isInFlight as isDeployInFlight, type Deployment } from "./deployStore.ts";
 import { DeployOps } from "./deployOps.ts";
 import { DeployDispatcher } from "./deployDispatch.ts";
@@ -5466,7 +5467,9 @@ async function dispatchCommand(cmd: ForwardedCommand, ctx: TenantContext): Promi
     else if (cmd.cmd === "pauseRun") void pauseRun(ctx, cmd.runId);
     else if (cmd.cmd === "resumeRun") void resumeRun(ctx, cmd.runId);
     else if (cmd.cmd === "cancelRun") void cancelRun(ctx, cmd.runId);
-    else if (cmd.cmd === "branchRun") void branchRun(ctx, cmd.fromRunId, cmd.atSeq, cmd.editNode, cmd.editedState);
+    else if (cmd.cmd === "branchRun") void branchRun(ctx, cmd.fromRunId, cmd.atSeq, cmd.editNode, cmd.editedState, {
+      model: cmd.model, temperature: cmd.temperature, seed: cmd.seed,
+    });
     else if (cmd.cmd === "explain") explainAgent(ctx, cmd);
     else if (cmd.cmd === "askRecord") void answerFromRecord(ctx, cmd);
     else if (cmd.cmd === "chat") void chatWithJaroku(ctx, cmd);
@@ -6321,6 +6324,8 @@ async function providerSnapshot(ctx: TenantContext): Promise<ProviderSnapshot> {
         // actually be run at, and its provider's own names for them. See `offeredLevels`.
         effort_levels: offeredLevels(p.id),
         effort_labels: effortLabelsFor(p.provider),
+        // What "Re-run from here" may set on this model — temperature, seed — from the same file.
+        sampling: cap?.sampling ?? [],
       };
     }),
   };
@@ -13388,6 +13393,7 @@ async function branchRun(
   atSeq: number,
   editNode?: string,
   editedState?: Record<string, unknown>,
+  asked: { model?: unknown; temperature?: unknown; seed?: unknown } = {},
 ): Promise<void> {
   if (interactiveRunIn(ctx.workspaceId)) {
     relay.broadcastDebug(ctx, { type: "error", runId: fromRunId, message: "a run is active — stop it before branching" });
@@ -13401,6 +13407,13 @@ async function branchRun(
   const parent = await store.getRun(ctx, fromRunId);
   if (!parent) {
     relay.broadcastDebug(ctx, { type: "error", runId: fromRunId, message: "unknown run to branch from" });
+    return;
+  }
+  // WHAT IT RUNS ON, settled before anything is copied: the parent's model unless another was asked
+  // for, and a temperature or seed only where that model takes one.
+  const settings = branchSettings(parent, asked);
+  if ("refusal" in settings) {
+    relay.broadcastDebug(ctx, { type: "error", runId: fromRunId, message: settings.refusal });
     return;
   }
   // Resolve the node boundary containing `atSeq` — we fork at a whole-node boundary, never mid-node.
@@ -13420,14 +13433,14 @@ async function branchRun(
     // so the parent is never mutated and the branch is self-contained and independently
     // inspectable. What "copy the checkpoints" means is the store's business: a file copy
     // locally, a scoped row copy hosted, and the parent read-only in both.
-    await store.copyRunPrefix(ctx, fromRunId, branchId, seqHigh, seqHigh);
+    await store.copyRunPrefix(ctx, fromRunId, branchId, seqHigh, seqHigh, settings);
     if (!desktopExec) await checkpoints.fork(ctx, { fromRunId, toRunId: branchId, checkpointId });
   } catch (err) {
     relay.broadcastDebug(ctx, { type: "error", runId: fromRunId, message: `branch prep failed: ${(err as Error).message}` });
     return;
   }
 
-  const credentials = await continuationCredentials(ctx, branchId, parent.provider, parent.agent_id);
+  const credentials = await continuationCredentials(ctx, branchId, settings.provider, parent.agent_id);
   if (credentials.refusal) {
     relay.broadcastDebug(ctx, { type: "error", runId: fromRunId, message: credentials.refusal });
     return;
@@ -13447,8 +13460,11 @@ async function branchRun(
     ...(desktopExec ? { JAROKU_BRANCH_FROM_RUN_ID: fromRunId } : {}),
     JAROKU_BRANCH_CHECKPOINT_ID: checkpointId,
     JAROKU_SEQ_OFFSET: String(seqHigh + 1),
-    JAROKU_PROVIDER: parent.provider,
-    JAROKU_MODEL: parent.model,
+    JAROKU_PROVIDER: settings.provider,
+    JAROKU_MODEL: settings.model,
+    // Read by models.py, and sent to the model only where its pricing entry lists them.
+    ...(settings.temperature !== null ? { JAROKU_TEMPERATURE: String(settings.temperature) } : {}),
+    ...(settings.seed !== null ? { JAROKU_SEED: String(settings.seed) } : {}),
   };
   if (editedState && Object.keys(editedState).length) {
     const editFile = join(CHECKPOINT_DIR, `${branchId}.edit.json`);
