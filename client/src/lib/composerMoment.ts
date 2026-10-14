@@ -136,7 +136,9 @@ export function composerMoment(s: ComposerSituation): ComposerMoment {
     return {
       // Its details say why, and carry Explain, Fix it and Re-run beside the error.
       placeholder: `Ask why step #${s.failedStepSeq} failed, or open its details`,
-      status: `Step #${s.failedStepSeq} failed`,
+      // NOTHING ABOVE THE COMPOSER (the product owner's call, 2026-10-14): selecting a failed step is
+      // not news for this line — the trace's row already says "failed", and the details say why.
+      status: null,
     };
   }
   // Only when there is an agent. A trace step stays selected across an agent change, and with
