@@ -20,9 +20,9 @@
 
 import { useEffect, useRef } from "react";
 
-import { fmtCost, fmtDuration, fmtTokens, jsonPretty, shortCount } from "../lib/format.ts";
+import { fmtCost, fmtDuration, fmtTokens, shortCount } from "../lib/format.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
-import { CATEGORY_LABEL, stepCategory, stepProvider, type StepCategory, type VisibleRow } from "../lib/traceView.ts";
+import { CATEGORY_LABEL, stepCategory, stepOutputText, stepProvider, type StepCategory, type VisibleRow } from "../lib/traceView.ts";
 import { BRAND_COLOR, ProviderMark, hasProviderMark } from "../lib/icons.tsx";
 import type { StepMark } from "./traceMarks.ts";
 import { ICON, STATUS, STEP_TYPE, TEXT } from "../lib/tokens.ts";
@@ -121,11 +121,6 @@ export function StepTile({
       <Mark size={glyph} />
     </span>
   );
-}
-
-/** What "Copy output" puts on the clipboard: text as text, anything else as the JSON it is. */
-function outputText(step: Step): string {
-  return jsonPretty(step.output);
 }
 
 /**
@@ -311,7 +306,7 @@ export function StepRow({
   const show = columnsFor(tier);
   const tokens = step.tokens ?? fold?.tokens ?? null;
   const cost = step.cost ?? fold?.cost ?? null;
-  const output = outputText(step);
+  const output = stepOutputText(step);
   const failed = step.error != null;
 
   return (

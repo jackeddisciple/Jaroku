@@ -20,6 +20,7 @@
 //   npm run test:trace-view
 
 import type { Run, Step } from "../types.ts";
+import { textFromLlmOutput } from "./agentOutput.ts";
 
 // ── What kind of thing a step is ─────────────────────────────────────────────
 
@@ -62,6 +63,44 @@ export function stepProvider(step: Pick<Step, "type" | "name">, runProvider?: st
   if (/openai|gpt/.test(name)) return "openai";
   if (/meta|llama|muse/.test(name)) return "meta";
   return runProvider ? runProvider.toLowerCase() : null;
+}
+
+// ── What a step said ─────────────────────────────────────────────────────────
+
+/** The tool calls a model call asked for, out of the `[{ content, tool_calls? }]` the tracer records. */
+export function llmToolCalls(output: unknown): unknown[] {
+  if (!Array.isArray(output)) return [];
+  return output.flatMap((g) =>
+    typeof g === "object" && g !== null && Array.isArray((g as { tool_calls?: unknown }).tool_calls)
+      ? (g as { tool_calls: unknown[] }).tool_calls
+      : [],
+  );
+}
+
+/**
+ * A step's output as somebody reading it wants it copied.
+ *
+ * A MODEL CALL'S IS ITS REPLY — the text the drawer shows, or the tool calls it asked for when it
+ * said nothing. It was the captured envelope, `[{"content": "{\"requirement_results\": …}"}]`: a
+ * message list with the model's own JSON double-encoded inside it. The envelope is still in the
+ * drawer's Raw event, which copies the step exactly as it arrived. Anything else is text as text and
+ * the rest as the JSON it is.
+ */
+export function stepOutputText(step: Pick<Step, "type" | "output">): string {
+  if (step.type === "llm_call") {
+    const text = textFromLlmOutput(step.output);
+    if (text) return text;
+    const calls = llmToolCalls(step.output);
+    if (calls.length > 0) return JSON.stringify({ tool_calls: calls }, null, 2);
+  }
+  const v = step.output;
+  if (v == null) return "";
+  if (typeof v === "string") return v;
+  try {
+    return JSON.stringify(v, null, 2) ?? "";
+  } catch {
+    return String(v);
+  }
 }
 
 // ── The tree ─────────────────────────────────────────────────────────────────

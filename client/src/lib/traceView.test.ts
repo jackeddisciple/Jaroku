@@ -21,6 +21,7 @@ import {
   runWindow,
   stepCategory,
   stepProvider,
+  stepOutputText,
   stepWindow,
   traceTotals,
   visibleRows,
@@ -262,6 +263,20 @@ console.log("\nthe store's rules for selection and folding");
   });
   check("a run that starts and takes the screen starts unfiltered",
     useTraceStore.getState().stepFilter === "all" && useTraceStore.getState().stepQuery === "");
+}
+
+console.log("\nwhat Copy output copies");
+{
+  const reply = mk({ id: "c", seq: 9, type: "llm_call", output: [{ content: '{"requirement_results": {"5 years of Python": true}}' }] });
+  check("a model call's reply, not the envelope it came in",
+    stepOutputText(reply) === '{"requirement_results": {"5 years of Python": true}}', stepOutputText(reply));
+  const blocks = mk({ id: "c2", seq: 10, type: "llm_call", output: [{ content: [{ type: "text", text: "Hello" }, { type: "thinking", thinking: "hm" }] }] });
+  check("...its text blocks, without its thinking", stepOutputText(blocks) === "Hello", stepOutputText(blocks));
+  const asked = mk({ id: "c3", seq: 11, type: "llm_call", output: [{ content: "", tool_calls: [{ name: "get_time", args: {} }] }] });
+  check("...or the tool calls it asked for when it said nothing", stepOutputText(asked).includes('"get_time"') && !stepOutputText(asked).includes('"content"'));
+  check("a node's output is the JSON it is", stepOutputText(mk({ id: "n", seq: 12, output: { a: 1 } })) === '{\n  "a": 1\n}');
+  check("text is text", stepOutputText(parse) === "readings: none");
+  check("nothing is nothing", stepOutputText(agent) === "");
 }
 
 console.log("\none word for how a run went, on every surface");

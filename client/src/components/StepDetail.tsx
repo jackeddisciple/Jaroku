@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { RunStatus, Step } from "../types.ts";
 import { textFromLlmOutput } from "../lib/agentOutput.ts";
 import { jsonPretty } from "../lib/format.ts";
-import { errorParts } from "../lib/traceView.ts";
+import { errorParts, llmToolCalls, stepOutputText } from "../lib/traceView.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { StateDiff, canDiff } from "./StateDiff.tsx";
 import { TYPE } from "../lib/tokens.ts";
@@ -30,7 +30,13 @@ function Section({ label, value }: { label: string; value: unknown }) {
  * A payload section: its name, a copy of exactly what was captured, and the payload drawn for what it
  * is. Folds, so somebody after the output is not made to scroll a forty-message input to reach it.
  */
-function PayloadSection({ label, value, children }: { label: "Input" | "Output"; value: unknown; children: React.ReactNode }) {
+function PayloadSection({ label, value, copy, children }: {
+  label: "Input" | "Output";
+  value: unknown;
+  /** What the copy button takes, when it is not the payload as captured — a model's reply, as shown. */
+  copy?: { text: string; title: string };
+  children: React.ReactNode;
+}) {
   const [open, setOpen] = useState(true);
   const empty = value === null || value === undefined || value === "";
   return (
@@ -40,7 +46,13 @@ function PayloadSection({ label, value, children }: { label: "Input" | "Output";
         open={open}
         onToggle={() => setOpen((v) => !v)}
         chevron={Icon.trace.fold}
-        trailing={empty ? undefined : <CopyTurn source={jsonPretty(value)} label={`Copy ${label.toLowerCase()}`} title={`Copy this step's ${label.toLowerCase()} as captured`} />}
+        trailing={empty ? undefined : (
+          <CopyTurn
+            source={copy?.text ?? jsonPretty(value)}
+            label={`Copy ${label.toLowerCase()}`}
+            title={copy?.title ?? `Copy this step's ${label.toLowerCase()} as captured`}
+          />
+        )}
       >
         {empty ? (
           <p className="text-tiny text-faint">
@@ -67,11 +79,7 @@ function InputView({ step }: { step: Step }) {
 function OutputView({ step }: { step: Step }) {
   if (step.type === "llm_call") {
     const text = textFromLlmOutput(step.output);
-    const calls = Array.isArray(step.output)
-      ? step.output.flatMap((g) => (typeof g === "object" && g !== null && Array.isArray((g as { tool_calls?: unknown }).tool_calls)
-        ? ((g as { tool_calls: unknown[] }).tool_calls)
-        : []))
-      : [];
+    const calls = llmToolCalls(step.output);
     if (text || calls.length > 0) {
       return (
         <div className="flex flex-col gap-1.5">
@@ -201,7 +209,12 @@ export function StepDetail({ step }: { step: Step }) {
       <PayloadSection label="Input" value={step.input}>
         <InputView step={step} />
       </PayloadSection>
-      <PayloadSection label="Output" value={step.output}>
+      <PayloadSection
+        label="Output"
+        value={step.output}
+        // A model call's copy is its reply, as drawn below — the envelope is in Raw event.
+        copy={step.type === "llm_call" ? { text: stepOutputText(step), title: "Copy the reply as shown" } : undefined}
+      >
         <OutputView step={step} />
       </PayloadSection>
       {diffable ? (
