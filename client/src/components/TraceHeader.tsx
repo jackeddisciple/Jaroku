@@ -106,11 +106,11 @@ export function TraceHeader({ run }: { run: RunSummary | undefined }) {
     run ? (s.agents.find((a) => a.agent_id === run.agent_id)?.name ?? run.agent_id) : null,
   );
 
+  // The body says why there is nothing here, once; the header only names the panel.
   if (!run) {
     return (
       <div className="flex shrink-0 items-center gap-3 border-b border-hair px-6 py-3">
         <span className={TYPE.panelLabel}>Execution trace</span>
-        <span className="text-caption text-muted">no run selected</span>
       </div>
     );
   }

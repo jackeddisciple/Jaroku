@@ -318,13 +318,35 @@ function LiveTail({ run, steps, span, tier }: { run: RunSummary; steps: readonly
 }
 
 /**
+ * NOTHING TO SHOW YET, said the way the Runs tab says it — centred, and naming the agent — and
+ * pointing the right way: "Run the agent below" pointed at nothing, since the composer is to the left.
+ */
+function NoRun() {
+  const agentId = useBuildStore((s) => s.activeAgentId);
+  const name = useBuildStore((s) => s.agents.find((a) => a.agent_id === s.activeAgentId)?.name ?? null);
+  const hasRuns = useTraceStore((s) => agentId != null && Object.values(s.runs).some((r) => r.agent_id === agentId));
+  const what = "Each model call, tool call, state update and routing decision appears here, in order, as it finishes.";
+  return (
+    <EmptyState
+        icon={Icon.trace.empty}
+        title={!agentId ? "Choose an agent to see its runs" : hasRuns ? "No run open" : `${name ?? "This agent"} has not run yet`}
+        hint={!agentId ? what : hasRuns ? "Open one from the Runs tab, or run the agent from the composer on the left." : `Run it from the composer on the left. ${what}`}
+      />
+  );
+}
+
+/**
  * Room for the step list and Step details side by side: the panel's 380px and a list that keeps its
  * "medium" tier (404px) — below it, the details dock under the list instead.
  */
 const SIDE_BY_SIDE_FROM = 380 + 404;
 
-/** Whether the tab's body is wide enough for the details beside the list. Measured: the panel resizes. */
-function useSideBySide(ref: React.RefObject<HTMLDivElement | null>): boolean {
+/**
+ * Whether the tab's body is wide enough for the details beside the list. Measured: the panel resizes.
+ * `mounted` is whether the body is on screen at all — it is not while there is no run — so the
+ * measure starts again when it appears.
+ */
+function useSideBySide(ref: React.RefObject<HTMLDivElement | null>, mounted: boolean): boolean {
   const [side, setSide] = useState(false);
   useLayoutEffect(() => {
     const el = ref.current;
@@ -335,7 +357,7 @@ function useSideBySide(ref: React.RefObject<HTMLDivElement | null>): boolean {
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [ref]);
+  }, [ref, mounted]);
   return side;
 }
 
@@ -345,7 +367,7 @@ export function TraceTimeline() {
   const bucket = useTraceStore((s) => (activeRunId ? s.stepsByRun[activeRunId] : undefined));
   const detailsOpen = useTraceStore((s) => Boolean(s.expandedStepId && bucket?.[s.expandedStepId]));
   const body = useRef<HTMLDivElement>(null);
-  const side = useSideBySide(body);
+  const side = useSideBySide(body, run != null);
 
   const steps = useMemo(() => orderedSteps(bucket), [bucket]);
 
@@ -357,6 +379,7 @@ export function TraceTimeline() {
       {/* THE STEPS, AND THEIR DETAILS DOCKED BESIDE OR UNDER THEM (see StepDetailPanel): beside on a
           panel wide enough for both, and otherwise below, with the list keeping its top two-fifths so
           the selected row stays on screen while somebody reads about it. */}
+      {!run ? <div className="min-h-0 flex-1"><NoRun /></div> : (
       <div ref={body} className={`flex min-h-0 flex-1 ${detailsOpen && side ? "flex-row" : "flex-col"}`}>
       {/* timeline body */}
       {/* NO `scroll-fade` HERE: the filter row sticks to the top of this region, and a mask over the
@@ -377,12 +400,8 @@ export function TraceTimeline() {
               <EmptyState
                 size="line"
                 icon={Icon.trace.empty}
-                title={run ? "This run recorded no steps" : "No trace yet"}
-                hint={
-                  run
-                    ? "It ended before any step finished, so there is nothing to inspect. Its outcome is in the header."
-                    : "Run the agent below. Each model call, tool call, state update and routing decision appears here, in order, as it finishes."
-                }
+                title="This run recorded no steps"
+                hint="It ended before any step finished, so there is nothing to inspect. Its outcome is in the header."
               />
             )
           ) : (
@@ -395,6 +414,7 @@ export function TraceTimeline() {
       </div>
       {detailsOpen && <StepDetailPanel dock={side ? "side" : "bottom"} />}
       </div>
+      )}
     </div>
   );
 }
