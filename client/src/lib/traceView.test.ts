@@ -7,7 +7,7 @@
 //   npm run test:trace-view
 
 import { useTraceStore, visibleTraceRows } from "../store/traceStore.ts";
-import { traceMarks } from "../components/traceMarks.ts";
+import { graphLook, kindWord, traceMarks } from "../components/traceMarks.ts";
 import { outcomePhase, runOutcome } from "./runOutcome.ts";
 import { answerPreview } from "../components/TraceResult.tsx";
 import { STATUS, STEP_HUE } from "./tokens.ts";
@@ -385,6 +385,31 @@ console.log("\nwhat Copy output copies");
   check("a node's output is the JSON it is", stepOutputText(mk({ id: "n", seq: 12, output: { a: 1 } })) === '{\n  "a": 1\n}');
   check("text is text", stepOutputText(parse) === "readings: none");
   check("nothing is nothing", stepOutputText(agent) === "");
+}
+
+console.log("\na node looks the same in the trace as on the graph");
+{
+  const graph = {
+    agent_id: "x",
+    nodes: [
+      { id: "__start__", type: "start" }, { id: "agent", type: "step", calls_model: true },
+      { id: "tools", type: "tool" }, { id: "__end__", type: "end" },
+    ],
+    edges: [
+      { source: "__start__", target: "agent", conditional: false, label: null },
+      { source: "agent", target: "tools", conditional: false, label: null },
+      { source: "tools", target: "__end__", conditional: false, label: null },
+    ],
+  };
+  const look = graphLook(graph);
+  const marks = traceMarks(steps, [], look);
+  const node = look?.marks.get("agent");
+  check("a node step takes the graph's own mark", node !== undefined && marks.get("agent")?.Icon === node.Icon);
+  check("...and its colour", node?.kind === "glyph" && marks.get("agent")?.colour === node.hue);
+  check("...and its word", kindWord(agent, marks.get("agent")) === "Model call" && kindWord(tools, marks.get("tools")) === "Tool node");
+  check("a step the graph has no node for keeps the trace's own", kindWord(parse, marks.get("parse_readings")) === "Tool call" && marks.has("parse_readings"));
+  check("...and so does every step with no graph at hand", kindWord(agent, traceMarks(steps).get("agent")) === "State update");
+  check("no graph, no look", graphLook(undefined) === null && graphLook({ agent_id: "x", error: "boom" }) === null);
 }
 
 console.log("\none word for how a run went, on every surface");

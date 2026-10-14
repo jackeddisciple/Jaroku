@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CANCELLED_BY_USER, orderedSteps, useTraceStore } from "../store/traceStore.ts";
 import type { RunSummary, Step } from "../types.ts";
 import { useUiStore } from "../store/uiStore.ts";
@@ -10,10 +10,11 @@ import { TraceMetrics } from "./TraceMetrics.tsx";
 import { TraceFilters } from "./TraceFilters.tsx";
 import { TraceResult } from "./TraceResult.tsx";
 import { StepDetailPanel } from "./StepDetailPanel.tsx";
-import { traceMarks } from "./traceMarks.ts";
+import { graphLook, traceMarks } from "./traceMarks.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { useGraphStore } from "../store/graphStore.ts";
 import { START_ID } from "../lib/graphLayout.ts";
+import { sendLoadAgentGraph } from "../lib/socket.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { fmtDuration } from "../lib/format.ts";
 import { ICON } from "../lib/tokens.ts";
@@ -87,7 +88,9 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
 
   const tree = useMemo(() => buildTraceTree(steps), [steps]);
   const connectors = useBuildStore((s) => s.agents.find((a) => a.agent_id === run?.agent_id)?.connectors);
-  const marks = useMemo(() => traceMarks(steps, connectors ?? []), [steps, connectors]);
+  const graph = useGraphStore((s) => (run ? s.graphs[run.agent_id] : undefined));
+  const look = useMemo(() => graphLook(graph, connectors ?? []), [graph, connectors]);
+  const marks = useMemo(() => traceMarks(steps, connectors ?? [], look), [steps, connectors, look]);
   const rows = useMemo(() => visibleRows(tree, { collapsed, filter, query }), [tree, collapsed, filter, query]);
   const folds = useMemo(() => {
     const out: Record<string, FoldSummary> = {};
@@ -383,6 +386,15 @@ export function TraceTimeline() {
   const side = useSideBySide(body, run != null);
 
   const steps = useMemo(() => orderedSteps(bucket), [bucket]);
+
+  // THE AGENT'S GRAPH, SO A NODE LOOKS THE SAME ON BOTH TABS (traceMarks). Asked for here as GraphView
+  // asks for it — once, not for a draft, not while it is on its way — and the server keeps it cached.
+  const agentId = run?.agent_id;
+  const agentKnown = useBuildStore((s) => (agentId ? s.agents.some((a) => a.agent_id === agentId && a.draft !== true) : false));
+  const graphHere = useGraphStore((s) => (agentId ? Boolean(s.graphs[agentId] || s.loading[agentId]) : true));
+  useEffect(() => {
+    if (agentId && agentKnown && !graphHere) sendLoadAgentGraph(agentId);
+  }, [agentId, agentKnown, graphHere]);
 
   return (
     <div className="flex h-full flex-col bg-bg">

@@ -28,7 +28,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { useTraceStore, visibleTraceRows } from "../store/traceStore.ts";
 import { absTime, fmtCost, fmtDuration, fmtOffset } from "../lib/format.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
-import { CATEGORY_LABEL, buildTraceTree, descendantSteps, isInherited, stepCategory, stepWindow, traceTotals } from "../lib/traceView.ts";
+import { buildTraceTree, descendantSteps, isInherited, stepWindow, traceTotals } from "../lib/traceView.ts";
 import { ICON, STEP_TYPE, TYPE } from "../lib/tokens.ts";
 import { showStepOnGraph } from "../lib/runActions.ts";
 import { sendEdit, sendExplain } from "../lib/socket.ts";
@@ -42,7 +42,8 @@ import { StateBranchEditor } from "./StateBranchEditor.tsx";
 import { McpBadge } from "./McpBadge.tsx";
 import { StepTile } from "./StepRow.tsx";
 import { Metric } from "./TraceMetrics.tsx";
-import { traceMarks } from "./traceMarks.ts";
+import { graphLook, kindWord, traceMarks } from "./traceMarks.ts";
+import { useGraphStore } from "../store/graphStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { agentMcpToolNames } from "../store/mcpStore.ts";
 
@@ -117,8 +118,10 @@ function Figures({ step, inside }: { step: Step; inside: readonly Step[] }) {
   );
 }
 
-function Overview({ step, run, bucket, inside, onNavigate }: {
+function Overview({ step, run, bucket, inside, kind, onNavigate }: {
   step: Step;
+  /** The words for its kind — the Graph's, for a node it has (`kindWord`). */
+  kind: string;
   run: RunSummary | undefined;
   bucket: Record<string, Step>;
   inside: readonly Step[];
@@ -136,7 +139,7 @@ function Overview({ step, run, bucket, inside, onNavigate }: {
       <div className={`mb-1.5 ${TYPE.sectionLabel}`}>Overview</div>
       <div className="divide-y divide-hair rounded-card border border-hair bg-panel px-3">
         <Kv label="Kind">
-          {CATEGORY_LABEL[stepCategory(step)]}
+          {kind}
           {/* The schema's own word for it — the one place it is worth spelling out. */}
           <Chip mono size="sm" color={known?.fg} background={known?.bg}>{step.type}</Chip>
         </Kv>
@@ -212,7 +215,9 @@ export function StepDetailPanel({ dock }: { dock: StepDetailDock }) {
   const setExpandedStep = useTraceStore((s) => s.setExpandedStep);
   const open = Boolean(expandedStepId && step);
   const connectors = useBuildStore((s) => s.agents.find((a) => a.agent_id === run?.agent_id)?.connectors);
-  const marks = useMemo(() => traceMarks(Object.values(bucket ?? {}), connectors ?? []), [bucket, connectors]);
+  const graph = useGraphStore((s) => (run ? s.graphs[run.agent_id] : undefined));
+  const look = useMemo(() => graphLook(graph, connectors ?? []), [graph, connectors]);
+  const marks = useMemo(() => traceMarks(Object.values(bucket ?? {}), connectors ?? [], look), [bucket, connectors, look]);
   const inside = useMemo(
     () => (step && bucket ? descendantSteps(buildTraceTree(Object.values(bucket)), step.id) : []),
     [step, bucket],
@@ -325,7 +330,7 @@ export function StepDetailPanel({ dock }: { dock: StepDetailDock }) {
                   {step.type === "tool_call" && mcpNames.has(step.name) && <McpBadge />}
                 </div>
                 <div className="mt-0.5 flex items-center gap-1.5 text-caption text-muted">
-                  <span>{CATEGORY_LABEL[stepCategory(step)]}</span>
+                  <span>{kindWord(step, marks.get(step.name))}</span>
                   <span className="text-faint">·</span>
                   <span className="tabular-nums">#{step.seq}</span>
                   {isInherited(step, run) && (
@@ -359,7 +364,7 @@ export function StepDetailPanel({ dock }: { dock: StepDetailDock }) {
                 />
               </div>
             )}
-            <Overview step={step} run={run} bucket={bucket} inside={inside} onNavigate={keepFocus} />
+            <Overview step={step} run={run} bucket={bucket} inside={inside} kind={kindWord(step, marks.get(step.name))} onNavigate={keepFocus} />
             <div className="mt-4">
               <StepDetail step={step} />
             </div>

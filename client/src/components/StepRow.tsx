@@ -22,9 +22,9 @@ import { useEffect, useRef } from "react";
 
 import { fmtCost, fmtDuration, fmtOffset, shortCount } from "../lib/format.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
-import { CATEGORY_LABEL, matchPlaces, stepCategory, stepOutputText, stepProvider, type StepCategory, type VisibleRow } from "../lib/traceView.ts";
+import { matchPlaces, stepCategory, stepOutputText, stepProvider, type StepCategory, type VisibleRow } from "../lib/traceView.ts";
 import { BRAND_COLOR, ProviderMark, hasProviderMark } from "../lib/icons.tsx";
-import type { StepMark } from "./traceMarks.ts";
+import { kindWord, type StepMark } from "./traceMarks.ts";
 import { ICON, STATUS, STEP_TYPE, TEXT } from "../lib/tokens.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { agentMcpToolNames } from "../store/mcpStore.ts";
@@ -327,7 +327,8 @@ export function StepRow({
     useTraceStore.getState().setExpandedStep(expanded ? null : step.id);
   };
 
-  const category = stepCategory(step);
+  // What the Graph calls this node, when it is one the graph has — the two tabs say the same word.
+  const kind = kindWord(step, mark);
   // WHERE A SEARCH FOUND IT, for a row that matched (not one kept as context): its name is marked
   // where the words are, and anywhere else is said under it.
   const places = !row.context && query.trim() ? matchPlaces(step, query) : [];
@@ -345,7 +346,7 @@ export function StepRow({
       aria-level={row.depth + 1}
       aria-expanded={group ? !row.collapsed : undefined}
       aria-selected={selected}
-      aria-label={`#${step.seq} ${step.name}, ${CATEGORY_LABEL[category]}${inherited ? ", inherited" : ""}${failed ? ", failed" : ""}`}
+      aria-label={`#${step.seq} ${step.name}, ${kind}${inherited ? ", inherited" : ""}${failed ? ", failed" : ""}`}
       data-step-id={step.id}
       tabIndex={tabbable ? 0 : -1}
       onClick={select}
@@ -408,7 +409,7 @@ export function StepRow({
         </span>
         <span className="flex min-w-0 items-center gap-1.5 text-tiny text-faint">
           {/* The kind keeps its word; where a search matched gives way first. */}
-          <span className={elsewhere.length > 0 ? "shrink-0" : "truncate"}>{CATEGORY_LABEL[category]}</span>
+          <span className={elsewhere.length > 0 ? "shrink-0" : "truncate"}>{kind}</span>
           {elsewhere.length > 0 && (
             <span className="min-w-0 truncate text-muted" title={`The search matched this step's ${elsewhere.join(", ")}`}>
               · matched in {elsewhere.join(", ")}
