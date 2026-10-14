@@ -37,20 +37,26 @@ const KINDS: { value: StepFilter; text: string; noun: string }[] = [
   { value: "errors", text: "Errors", noun: "failed steps" },
 ];
 
-/** Below this width the counts give way, all but the red one — the words are what fit first. */
-const COUNTS_FROM = 460;
+/** The search mark beside the segments (a 32px hit target) and the gap before it. */
+const MARK_ROOM = 32 + 8;
 
 export function TraceFilters({ steps }: { steps: readonly Step[] }) {
+  // THE COUNTS SHOW WHENEVER THEY FIT, measured rather than guessed. A fixed 460px threshold hid them
+  // at the panel's default width, where they fit with room to spare; now an invisible copy of the
+  // segments WITH their counts says how wide they are, and the counts give way — all but the red
+  // one — only when that copy and the search mark would not fit on the row.
   const ref = useRef<HTMLDivElement>(null);
+  const counted = useRef<HTMLDivElement>(null);
   const [roomy, setRoomy] = useState(true);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const measure = (): void => setRoomy(el.clientWidth >= COUNTS_FROM);
+    const measure = (): void => setRoomy(el.clientWidth >= (counted.current?.offsetWidth ?? 0) + MARK_ROOM);
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(measure);
     ro.observe(el);
+    if (counted.current) ro.observe(counted.current);
     return () => ro.disconnect();
   }, []);
   const filter = useTraceStore((s) => s.stepFilter);
@@ -109,19 +115,24 @@ export function TraceFilters({ steps }: { steps: readonly Step[] }) {
       document.querySelector<HTMLElement>(`[role="treeitem"][data-step-id="${first.step.id}"]`)?.focus());
   };
 
-  const options: SegmentOption<StepFilter>[] = KINDS.map((k) => ({
+  const optionsWith = (showCounts: boolean): SegmentOption<StepFilter>[] => KINDS.map((k) => ({
     value: k.value,
     text: k.text,
-    count: roomy || (k.value === "errors" && counts.errors > 0) ? counts[k.value] : undefined,
+    count: showCounts || (k.value === "errors" && counts.errors > 0) ? counts[k.value] : undefined,
     countTone: k.value === "errors" ? "danger" : undefined,
     // Never disable the one that is chosen: it must stay pressable to read as chosen.
     disabled: counts[k.value] === 0 && k.value !== filter,
     label: counts[k.value] === 0 ? `Show ${k.noun} — this run has none` : `Show ${k.noun}`,
   }));
+  const options = optionsWith(roomy);
 
   return (
     // Sticky with the column names under it — StepList holds the two in one box.
-    <div ref={ref} className="flex flex-wrap items-center gap-2 py-2">
+    <div ref={ref} className="relative flex flex-wrap items-center gap-2 py-2">
+      {/* The measure: the segments with every count, laid out and never seen or reached. */}
+      <div ref={counted} aria-hidden className="pointer-events-none invisible absolute left-0 top-0 w-max">
+        <Segmented options={optionsWith(true)} value={filter} onChange={() => {}} ariaLabel="" />
+      </div>
       {/* At the pane's very narrowest the words alone do not fit; the strip scrolls in its own box
           rather than pushing the panel wide. */}
       <div className="max-w-full overflow-x-auto">
