@@ -176,7 +176,8 @@ export function TraceFilters({ steps }: { steps: readonly Step[] }) {
               }}
               title="Clear the search"
               aria-label="Clear the search"
-              className="shrink-0 rounded-xs text-faint transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+              // A 24px target around the 12px mark — it was the mark alone, twelve pixels to hit.
+              className="-mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-faint transition-colors hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
             >
               <Icon.global.clearSearch size={ICON.xs} />
             </button>
