@@ -12,7 +12,7 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { fmtCost, fmtDuration } from "../lib/format.ts";
-import { runElapsed, traceTotals } from "../lib/traceView.ts";
+import { isInherited, ownSteps, runElapsed, traceTotals } from "../lib/traceView.ts";
 import { useRunClock } from "../lib/useRunClock.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { ICON } from "../lib/tokens.ts";
@@ -67,19 +67,33 @@ export function TraceMetrics({ run, steps }: { run: RunSummary; steps: readonly 
   const live = run.status === "running" || run.status === "paused";
   // The live duration, on the run's own clock: see useRunClock for why not `Date.now()`.
   const now = useRunClock(run.id, run.status === "running", 200);
-  const totals = useMemo(() => traceTotals(steps), [steps]);
+  // A BRANCH'S OWN WORK, ONE SCOPE FOR EVERY FIGURE. Its tokens and cost summed the steps it copied
+  // from its parent — which that run spent — while its Duration covered only its own, so the strip
+  // mixed two scopes. The inherited figures are named in the tooltips instead (the product owner's
+  // call, 2026-10-14).
+  const own = useMemo(() => ownSteps(run, steps), [run, steps]);
+  const totals = useMemo(() => traceTotals(own), [own]);
+  const inheritedSteps = steps.length - own.length;
+  const parent = useMemo(
+    () => (inheritedSteps > 0 ? traceTotals(steps.filter((s) => isInherited(s, run))) : null),
+    [inheritedSteps, steps, run],
+  );
+  const fromParent = (what: string | null): string =>
+    parent && what ? ` · leaves out ${what} from the ${plural(inheritedSteps, "step")} inherited from its parent run` : "";
 
   const elapsed = runElapsed(run, steps, now);
 
   const calls = plural(totals.llmCalls, "model call");
-  const tokensTitle = totals.tokens == null
+  const tokensTitle = (totals.tokens == null
     ? totals.llmCalls === 0 ? "No model calls yet" : `None of the ${calls} reported tokens`
-    : `Across ${calls} · the input/output split isn't recorded`;
-  const costTitle = totals.cost == null
+    : `Across ${calls} · the input/output split isn't recorded`)
+    + fromParent(parent?.tokens != null ? `${parent.tokens.toLocaleString()} tokens` : null);
+  const costTitle = (totals.cost == null
     ? totals.llmCalls === 0 ? "No model calls yet" : "Not priced: the pricing table doesn't know this model"
     : totals.unpricedCalls > 0
       ? `${plural(totals.unpricedCalls, "model call")} had no price, so this total leaves them out`
-      : `Across ${calls}`;
+      : `Across ${calls}`)
+    + fromParent(parent?.cost != null ? fmtCost(parent.cost) : null);
 
   return (
     <div ref={ref} className="shrink-0 px-6 pt-3">
@@ -116,7 +130,12 @@ export function TraceMetrics({ run, steps }: { run: RunSummary; steps: readonly 
           title={costTitle}
         />
         {roomy && (
-          <Figure Mark={Icon.trace.metricSteps} label="Steps" value={steps.length.toLocaleString()} title="Every step this run recorded" />
+          <Figure
+            Mark={Icon.trace.metricSteps}
+            label="Steps"
+            value={own.length.toLocaleString()}
+            title={inheritedSteps > 0 ? `Every step this run ran · ${inheritedSteps} more inherited from its parent run` : "Every step this run recorded"}
+          />
         )}
         {roomy && (
           <Figure
