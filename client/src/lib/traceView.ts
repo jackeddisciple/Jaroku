@@ -262,6 +262,31 @@ export function matchesQuery(step: Step, query: string): boolean {
   return q === "" || searchText(step).includes(q);
 }
 
+/** Where in a step a search found its words. */
+export type MatchPlace = "name" | "id" | "kind" | "error" | "input" | "output";
+
+/**
+ * Where a step matched a search, in the order somebody would look: its name, its id or number, its
+ * kind, its error, then what went in and what came out.
+ *
+ * "PostgreSQL" MATCHED ALL NINE STEPS OF A RUN, because every node's state carries the job
+ * description — and nothing said that eight of them matched in their input and one in its name. The
+ * row says where (StepRow); this is the same text `searchText` reads, field by field.
+ */
+export function matchPlaces(step: Step, query: string): MatchPlace[] {
+  const q = query.trim().toLowerCase();
+  if (q === "" || !matchesQuery(step, q)) return [];
+  const has = (text: string): boolean => text.toLowerCase().includes(q);
+  const out: MatchPlace[] = [];
+  if (has(step.name)) out.push("name");
+  if (has(step.id) || has(`#${step.seq}`)) out.push("id");
+  if (has(step.type) || has(CATEGORY_LABEL[stepCategory(step)])) out.push("kind");
+  if (step.error && has(step.error)) out.push("error");
+  if (has(payloadText(step.input))) out.push("input");
+  if (has(payloadText(step.output))) out.push("output");
+  return out;
+}
+
 /**
  * The rows to draw.
  *

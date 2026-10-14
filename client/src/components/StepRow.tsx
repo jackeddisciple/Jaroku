@@ -22,7 +22,7 @@ import { useEffect, useRef } from "react";
 
 import { fmtCost, fmtDuration, fmtOffset, fmtTokens, shortCount } from "../lib/format.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
-import { CATEGORY_LABEL, stepCategory, stepOutputText, stepProvider, type StepCategory, type VisibleRow } from "../lib/traceView.ts";
+import { CATEGORY_LABEL, matchPlaces, stepCategory, stepOutputText, stepProvider, type StepCategory, type VisibleRow } from "../lib/traceView.ts";
 import { BRAND_COLOR, ProviderMark, hasProviderMark } from "../lib/icons.tsx";
 import type { StepMark } from "./traceMarks.ts";
 import { ICON, STATUS, STEP_TYPE, TEXT } from "../lib/tokens.ts";
@@ -264,6 +264,20 @@ function Connectors({ row }: { row: VisibleRow }) {
   return <>{lines}</>;
 }
 
+/** A name with the searched-for words marked — every place they occur, ignoring case. */
+function Marked({ text, query }: { text: string; query: string }) {
+  const q = query.trim().toLowerCase();
+  const parts: React.ReactNode[] = [];
+  let at = 0;
+  for (let i = text.toLowerCase().indexOf(q); q && i !== -1; i = text.toLowerCase().indexOf(q, at)) {
+    if (i > at) parts.push(text.slice(at, i));
+    parts.push(<mark key={i} className="rounded-xs bg-ink/10 text-inherit">{text.slice(i, i + q.length)}</mark>);
+    at = i + q.length;
+  }
+  if (at < text.length) parts.push(text.slice(at));
+  return <>{parts}</>;
+}
+
 export function StepRow({
   row,
   tabbable,
@@ -293,6 +307,7 @@ export function StepRow({
   const agent = useBuildStore((s) => s.agents.find((a) => a.agent_id === s.activeAgentId));
   const mcpNames = agentMcpToolNames(agent?.mcp_tools);
   const expanded = useTraceStore((s) => s.expandedStepId === step.id);
+  const query = useTraceStore((s) => s.stepQuery);
   const selected = useTraceStore((s) => s.selectedStepId === step.id);
   const rowRef = useRef<HTMLDivElement>(null);
 
@@ -312,6 +327,10 @@ export function StepRow({
   };
 
   const category = stepCategory(step);
+  // WHERE A SEARCH FOUND IT, for a row that matched (not one kept as context): its name is marked
+  // where the words are, and anywhere else is said under it.
+  const places = !row.context && query.trim() ? matchPlaces(step, query) : [];
+  const elsewhere = places.filter((p) => p !== "name");
   const show = columnsFor(tier);
   const tokens = step.tokens ?? fold?.tokens ?? null;
   const cost = step.cost ?? fold?.cost ?? null;
@@ -379,13 +398,21 @@ export function StepRow({
 
       <span className="relative min-w-[4.5rem] flex-1">
         <span className="flex min-w-0 items-center gap-1.5">
-          <span className="min-w-0 truncate text-caption font-medium text-ink" title={step.name}>{step.name}</span>
+          <span className="min-w-0 truncate text-caption font-medium text-ink" title={step.name}>
+            {places.includes("name") ? <Marked text={step.name} query={query} /> : step.name}
+          </span>
           {/* Derived from the AGENT's manifest, not from the step: the frozen Step schema has no
               provenance field and must not grow one. */}
           {step.type === "tool_call" && mcpNames.has(step.name) && <McpBadge variant="compact" />}
         </span>
         <span className="flex min-w-0 items-center gap-1.5 text-tiny text-faint">
-          <span className="truncate">{CATEGORY_LABEL[category]}</span>
+          {/* The kind keeps its word; where a search matched gives way first. */}
+          <span className={elsewhere.length > 0 ? "shrink-0" : "truncate"}>{CATEGORY_LABEL[category]}</span>
+          {elsewhere.length > 0 && (
+            <span className="min-w-0 truncate text-muted" title={`The search matched this step's ${elsewhere.join(", ")}`}>
+              · matched in {elsewhere.join(", ")}
+            </span>
+          )}
           {/* SAID, NOT ONLY SHOWN. A branch's copied prefix looked exactly like the steps it ran. */}
           {inherited && (
             <span className="shrink-0" title="Copied from the run this one branched from — it ran there, before this run began">

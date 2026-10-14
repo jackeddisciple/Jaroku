@@ -18,6 +18,7 @@ import {
   errorParts,
   filterCounts,
   isInherited,
+  matchPlaces,
   matchesQuery,
   ownSteps,
   runElapsed,
@@ -329,6 +330,17 @@ console.log("\na branch's inherited steps");
   const span = runWindow(branch, ownSteps(branch, all), Date.now());
   check("its track starts when IT started, not at its parent's first step",
     span?.start === Date.parse(branch.started_at), String(span && new Date(span.start).toISOString()));
+}
+
+console.log("\nwhere a search matched");
+{
+  check("in the name", matchPlaces(llm, "anthropic").join() === "name", matchPlaces(llm, "anthropic").join());
+  check("in what went in", matchPlaces(llm, "queue").join() === "input", matchPlaces(llm, "queue").join());
+  check("in the error and the output", matchPlaces(parse, "readings").join() === "name,error,output", matchPlaces(parse, "readings").join());
+  check("by number", matchPlaces(tools, "#3").includes("id"));
+  check("by kind", matchPlaces(route, "routing").includes("kind"));
+  check("nowhere, for a step that does not match", matchPlaces(agent, "zebra").length === 0);
+  check("nowhere, for no search", matchPlaces(agent, "  ").length === 0);
 }
 
 console.log("\nwhat Copy output copies");
