@@ -1105,9 +1105,11 @@ function ThreadListRow({ thread }: { thread: ThreadView }) {
         </Truncate>
       </button>
       {/* WHAT IS OUTSTANDING, THEN WHAT CAN BE DONE. The circle holds the left for every chat alike; a
-          chat that needs you, is running or has failed says so after its name, in the shared glyph —
-          and the two controls take the row's end, where this column puts controls on every other row. */}
-      {thread.status !== "idle" && thread.status !== "archived" && (
+          chat that needs you or is running says so after its name, in the shared glyph — and the two
+          controls take the row's end, where this column puts controls on every other row. A chat whose
+          last run failed shows NOTHING here (the product owner's call, 2026-10-14): the red mark stood
+          on a row long after anyone cared, and the failure is in that run's trace. */}
+      {(thread.status === "needs_you" || thread.status === "running") && (
         <span className="ml-2 shrink-0"><ThreadGlyph status={thread.status} /></span>
       )}
       <ThreadRowActions thread={thread} />
