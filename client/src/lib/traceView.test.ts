@@ -8,6 +8,7 @@
 
 import { failedStepIds, jumpToError, treeSteps, useTraceStore, visibleTraceRows } from "../store/traceStore.ts";
 import { graphLook, kindWord, traceMarks } from "../components/traceMarks.ts";
+import { nodeKind } from "../components/graphNodeIcons.ts";
 import { outcomePhase, runOutcome } from "./runOutcome.ts";
 import { answerPreview } from "../components/TraceResult.tsx";
 import { STATUS, STEP_HUE } from "./tokens.ts";
@@ -29,10 +30,12 @@ import {
   stepCategory,
   stepProvider,
   rerunBlocked,
+  hotSteps,
   stepHeat,
   stepOutputText,
   stepsTime,
   stepWindow,
+  traceSections,
   traceTotals,
   visibleRows,
 } from "./traceView.ts";
@@ -392,6 +395,29 @@ console.log("\nhow hot a step runs");
   check("half of either is half", stepHeat({ cost: 0.005, latency_ms: 100 }, scale) === 0.5);
   check("asked for cost alone, time does not count", stepHeat({ cost: null, latency_ms: 2000 }, scale, "cost") === 0);
   check("an empty run is cold", stepHeat({ cost: 1, latency_ms: 1 }, { cost: 0, time: 0 }) === 0);
+  const even = [1, 2, 3, 4, 5, 6].map((i) => mk({ id: `e${i}`, seq: i, latency_ms: 1000 + i }));
+  const hotOnes = hotSteps(even, { cost: 0, time: 1006 });
+  check("a run of even steps warms only its slowest three", hotOnes.size === 3 && hotOnes.has("e6") && !hotOnes.has("e1"), [...hotOnes.keys()].join());
+}
+
+console.log("\na long run in sections");
+{
+  // extract_jd, extract_resume, score_candidate, decline_note — each a node with a model call inside.
+  const names = ["extract_jd", "extract_resume", "score_candidate", "decline_note"];
+  const many: Step[] = [];
+  names.forEach((n, i) => {
+    many.push(mk({ id: `n${i}`, seq: i * 2, name: n }));
+    many.push(mk({ id: `c${i}`, seq: i * 2 + 1, type: "llm_call", name: "ChatAnthropic", parent_step_id: `n${i}` }));
+  });
+  const rows = visibleRows(buildTraceTree(many));
+  check("a short run has none", traceSections(rows, many.length, nodeKind) === null);
+  const secs = traceSections(rows, 40, nodeKind) ?? [];
+  check("runs of one kind make one section, in order", secs.map((x) => x.label).join() === "Extraction,Scoring,Writing", secs.map((x) => x.label).join());
+  check("...holding their nodes and what ran inside them", secs[0]?.steps === 4 && secs[0]?.rows.length === 4);
+  check("...keyed by their first node", secs[0]?.key === "n0" && secs[2]?.key === "n3");
+  // A loop does not regroup: agent, tools, agent is three sections, not two.
+  const loop = visibleRows(buildTraceTree([mk({ id: "x1", seq: 0, name: "agent" }), mk({ id: "x2", seq: 1, name: "tools" }), mk({ id: "x3", seq: 2, name: "agent" })]));
+  check("a loop keeps the order it ran in", (traceSections(loop, 40, nodeKind) ?? []).length === 3);
 }
 
 console.log("\nwhere a search matched");

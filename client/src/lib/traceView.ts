@@ -387,6 +387,54 @@ export function visibleRows(
   );
 }
 
+// ── Sections ────────────────────────────────────────────────────────────────
+
+/** A run long enough to read in sections — the product owner's "once you have 30+ steps". */
+export const SECTIONS_FROM = 30;
+
+export interface TraceSection {
+  /** The first node's step id: stable while the run grows, so a folded section stays folded. */
+  key: string;
+  /** The section's word ("Extraction") and its kind's hue, or null for nodes no kind claims. */
+  label: string;
+  hue: string | null;
+  rows: VisibleRow[];
+  /** Steps in it, nodes and everything inside them. */
+  steps: number;
+}
+
+/**
+ * The rows in sections: each a run of CONSECUTIVE top-level nodes of the same kind (`kindOf`), with
+ * the steps inside them. Consecutive, because grouping every node of a kind together would take a
+ * loop — agent, tools, agent, tools — out of the order it ran in. Null below `SECTIONS_FROM` steps.
+ */
+export function traceSections(
+  rows: readonly VisibleRow[],
+  totalSteps: number,
+  kindOf: (name: string) => { id: string; hue: string; section: string } | null,
+): TraceSection[] | null {
+  if (totalSteps < SECTIONS_FROM) return null;
+  const out: (TraceSection & { kind: string })[] = [];
+  for (const row of rows) {
+    if (row.depth === 0 || out.length === 0) {
+      const k = kindOf(row.step.name);
+      const kind = k?.id ?? "other";
+      const last = out[out.length - 1];
+      if (row.depth === 0 && last && last.kind === kind) {
+        last.rows.push(row);
+        last.steps++;
+        continue;
+      }
+      out.push({ key: row.step.id, kind, label: k?.section ?? "Other steps", hue: k?.hue ?? null, rows: [row], steps: 1 });
+      continue;
+    }
+    const last = out[out.length - 1]!;
+    last.rows.push(row);
+    last.steps++;
+  }
+  return out.map(({ kind: _kind, ...rest }) => rest);
+}
+
 /** Every step under a row, at any depth — what a folded node stands for. */
 export function descendantSteps(tree: readonly TraceRow[], id: string): Step[] {
   const at = tree.findIndex((r) => r.step.id === id);
@@ -608,6 +656,25 @@ export function stepHeat(
   const time = scale.time > 0 && Number.isFinite(step.latency_ms) ? step.latency_ms / scale.time : 0;
   const heat = by === "cost" ? cost : by === "time" ? time : Math.max(cost, time);
   return Math.min(1, Math.max(0, heat));
+}
+
+/**
+ * The hot steps: the three costliest and the three slowest of a run's own steps, each with its heat
+ * (`stepHeat`, by the one metric that put it there; the larger when both did) — and only at half the
+ * heaviest or more. A run whose steps all take about as long has a heaviest few, not a warm list.
+ */
+export function hotSteps(steps: readonly Step[], scale: { cost: number; time: number }, top = 3): Map<string, number> {
+  const out = new Map<string, number>();
+  const take = (by: "cost" | "time", value: (s: Step) => number | null): void => {
+    const ranked = steps.filter((s) => (value(s) ?? 0) > 0).sort((a, b) => (value(b) ?? 0) - (value(a) ?? 0)).slice(0, top);
+    for (const s of ranked) {
+      const h = stepHeat(s, scale, by);
+      if (h >= 0.5) out.set(s.id, Math.max(out.get(s.id) ?? 0, h));
+    }
+  };
+  take("cost", (s) => s.cost);
+  take("time", (s) => (Number.isFinite(s.latency_ms) ? s.latency_ms : null));
+  return out;
 }
 
 // ── Errors ───────────────────────────────────────────────────────────────────

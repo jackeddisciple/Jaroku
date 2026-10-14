@@ -8,7 +8,8 @@
 
 import { create } from "zustand";
 import type { Run, RunStatus, RunSummary, Step, TraceEvent } from "../types.ts";
-import { ancestorIds, awaitingNode, buildTraceTree, visibleRows, type StepFilter, type VisibleRow } from "../lib/traceView.ts";
+import { ancestorIds, awaitingNode, buildTraceTree, traceSections, visibleRows, type StepFilter, type VisibleRow } from "../lib/traceView.ts";
+import { nodeKind } from "../components/graphNodeIcons.ts";
 
 export type ConnectionState = "connecting" | "open" | "closed";
 export type StepView = "list" | "waterfall" | "graph";
@@ -88,6 +89,8 @@ interface TraceState {
    * (waterfall), or the agent's graph. One choice for the session, kept across runs.
    */
   stepView: StepView;
+  /** Sections of a long run folded away, by their first node's step id (`traceSections`). Session-only. */
+  collapsedSections: Record<string, true>;
   /**
    * The latest refusal from the run controls — a pause, a resume or a re-run the server turned down —
    * and the run it was about, when it named one. Read by the controls that asked, so a refusal is said
@@ -128,6 +131,7 @@ interface TraceState {
   setStepQuery: (query: string) => void;
   requestGraphStep: (stepId: string | null) => void;
   setStepView: (view: StepView) => void;
+  toggleSection: (key: string) => void;
   setControlError: (error: { runId: string | null; message: string } | null) => void;
 }
 
@@ -200,6 +204,7 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   stepQuery: "",
   graphStepRequest: null,
   stepView: "list",
+  collapsedSections: {},
   controlError: null,
 
   applyHistory: (runs, meta) =>
@@ -335,6 +340,14 @@ export const useTraceStore = create<TraceState>((set, get) => ({
 
   setStepView: (stepView) => set({ stepView }),
 
+  toggleSection: (key) =>
+    set((state) => {
+      const collapsedSections = { ...state.collapsedSections };
+      if (collapsedSections[key]) delete collapsedSections[key];
+      else collapsedSections[key] = true;
+      return { collapsedSections };
+    }),
+
   setControlError: (error) => set({ controlError: error ? { ...error, at: Date.now() } : null }),
 
   setAllCollapsed: (collapsed) =>
@@ -379,16 +392,21 @@ export function orderedSteps(bucket: Record<string, Step> | undefined): Step[] {
  * keyboard can never land on a step the screen is not showing.
  */
 export function visibleTraceRows(
-  state: Pick<TraceState, "activeRunId" | "stepsByRun" | "collapsedStepIds" | "stepFilter" | "stepQuery"> & Partial<Pick<TraceState, "runs">>,
+  state: Pick<TraceState, "activeRunId" | "stepsByRun" | "collapsedStepIds" | "stepFilter" | "stepQuery"> & Partial<Pick<TraceState, "runs" | "collapsedSections">>,
 ): VisibleRow[] {
   if (!state.activeRunId) return [];
   const bucket = state.stepsByRun[state.activeRunId];
   if (!bucket) return [];
-  return visibleRows(buildTraceTree(treeSteps(Object.values(bucket), state.runs?.[state.activeRunId])), {
+  const rows = visibleRows(buildTraceTree(treeSteps(Object.values(bucket), state.runs?.[state.activeRunId])), {
     collapsed: state.collapsedStepIds,
     filter: state.stepFilter,
     query: state.stepQuery,
   });
+  // A FOLDED SECTION'S ROWS ARE NOT ON SCREEN, so the keyboard does not walk them either.
+  const folded = state.collapsedSections ?? {};
+  if (Object.keys(folded).length === 0) return rows;
+  const sections = traceSections(rows, Object.keys(bucket).length, nodeKind);
+  return sections ? sections.flatMap((sec) => (folded[sec.key] ? [] : sec.rows)) : rows;
 }
 
 /**

@@ -3,7 +3,8 @@ import { CANCELLED_BY_USER, jumpToError, orderedSteps, treeSteps, useTraceStore 
 import type { RunSummary, Step } from "../types.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { COL, StepRow, columnsFor, tileCentre, type BarPlace, type FoldSummary, type MetricScale, type RowTier } from "./StepRow.tsx";
-import { buildTraceTree, descendantSteps, isInherited, ownSteps, runWindow, stepHeat, stepWindow, traceTotals, visibleRows, type TimeWindow, type VisibleRow } from "../lib/traceView.ts";
+import { buildTraceTree, descendantSteps, isInherited, ownSteps, runWindow, hotSteps, stepWindow, traceSections, traceTotals, visibleRows, type TimeWindow, type TraceSection, type VisibleRow } from "../lib/traceView.ts";
+import { nodeKind } from "./graphNodeIcons.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { TraceHeader } from "./TraceHeader.tsx";
 import { TraceMetrics } from "./TraceMetrics.tsx";
@@ -18,7 +19,7 @@ import { START_ID } from "../lib/graphLayout.ts";
 import { sendLoadAgentGraph } from "../lib/socket.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { fmtDuration } from "../lib/format.ts";
-import { ICON } from "../lib/tokens.ts";
+import { ICON, TYPE } from "../lib/tokens.ts";
 import { useRunClock } from "../lib/useRunClock.ts";
 
 /**
@@ -127,16 +128,13 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
       time: Math.max(0, ...own.map((st) => (Number.isFinite(st.latency_ms) ? st.latency_ms : 0))),
     };
   }, [run, steps]);
+  const hot = useMemo(() => hotSteps(ownSteps(run, steps), scale), [run, steps, scale]);
   const tabbableId = rows.some((r) => r.step.id === selectedStepId) ? selectedStepId : (rows[0]?.step.id ?? null);
   // A top-level row starts a card and takes every row after it until the next top-level one.
-  const groups = useMemo(() => {
-    const out: VisibleRow[][] = [];
-    for (const r of rows) {
-      if (r.depth === 0 || out.length === 0) out.push([r]);
-      else out[out.length - 1]!.push(r);
-    }
-    return out;
-  }, [rows]);
+  // A LONG RUN IN SECTIONS (2026-10-14): runs of consecutive nodes of one kind under a header that
+  // folds — "Extraction", "Scoring", "Writing" — from SECTIONS_FROM steps up.
+  const sections = useMemo(() => traceSections(rows, steps.length, nodeKind), [rows, steps.length]);
+  const foldedSections = useTraceStore((s) => s.collapsedSections);
 
   const focusRow = (id: string): void => {
     useTraceStore.getState().selectStep(id);
@@ -186,6 +184,30 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
     }
   };
 
+  // ONE CARD PER NODE — the product owner's call on 2026-10-12: a node and the steps that ran inside it
+  // read as one block, and the run as a stack of them. Presentation only (`role="none"`): the rows are
+  // still the tree's items, and every line is drawn inside its own row.
+  const card = (group: VisibleRow[]) => (
+    <div key={group[0]!.step.id} role="none" className="rounded-card border border-hair bg-panel p-1">
+      {group.map((r) => (
+        <StepRow
+          key={r.step.id}
+          row={r}
+          tabbable={r.step.id === tabbableId}
+          tier={tier}
+          fold={folds[r.step.id]}
+          bar={barFor(r.step, span, isInherited(r.step, run))}
+          inherited={isInherited(r.step, run)}
+          provider={run?.provider}
+          mark={marks.get(r.step.name)}
+          scale={scale}
+          heat={hot.get(r.step.id) ?? 0}
+          waterfall={view === "waterfall"}
+        />
+      ))}
+    </div>
+  );
+
   // THE FILTERS STICK, so they stay in reach however far down somebody has scrolled — and so does the
   // error banner under them while anything failed.
   const failedCount = useMemo(() => steps.filter((st) => st.error != null).length, [steps]);
@@ -226,30 +248,14 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
     <div ref={frame}>
     {header}
     <div ref={ref} role="tree" aria-label="Steps" className="flex flex-col gap-1.5" onKeyDown={onKeyDown}>
-      {/* ONE CARD PER NODE — the product owner's call on 2026-10-12: a node and the steps that ran
-          inside it read as one block, and the run as a stack of them. The cards are presentation
-          only (`role="none"`): the rows are still the tree's items, and every line is drawn inside
-          its own row, so a card's padding moves a row without moving anything relative to it. */}
-      {groups.map((group) => (
-        <div key={group[0]!.step.id} role="none" className="rounded-card border border-hair bg-panel p-1">
-          {group.map((r) => (
-            <StepRow
-              key={r.step.id}
-              row={r}
-              tabbable={r.step.id === tabbableId}
-              tier={tier}
-              fold={folds[r.step.id]}
-              bar={barFor(r.step, span, isInherited(r.step, run))}
-              inherited={isInherited(r.step, run)}
-              provider={run?.provider}
-              mark={marks.get(r.step.name)}
-              scale={scale}
-              heat={isInherited(r.step, run) ? 0 : stepHeat(r.step, scale)}
-              waterfall={view === "waterfall"}
-            />
-          ))}
-        </div>
-      ))}
+      {sections
+        ? sections.map((sec) => (
+            <div key={sec.key} role="none" className="flex flex-col gap-1.5">
+              <KindSectionHeader section={sec} folded={Boolean(foldedSections[sec.key])} />
+              {!foldedSections[sec.key] && cardsOf(sec.rows).map(card)}
+            </div>
+          ))
+        : cardsOf(rows).map(card)}
     </div>
     {run && (
       <div className="mt-1.5">
@@ -257,6 +263,38 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
       </div>
     )}
     </div>
+  );
+}
+
+/** Rows as node cards: a top-level row starts a card and takes every row after it until the next. */
+function cardsOf(rows: readonly VisibleRow[]): VisibleRow[][] {
+  const out: VisibleRow[][] = [];
+  for (const r of rows) {
+    if (r.depth === 0 || out.length === 0) out.push([r]);
+    else out[out.length - 1]!.push(r);
+  }
+  return out;
+}
+
+/**
+ * A section's header: its word in the section-label grey, a dot in its kind's graph colour, how many
+ * steps it holds — and a press folds it (the product owner's colours, 2026-10-14).
+ */
+function KindSectionHeader({ section, folded }: { section: TraceSection; folded: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={() => useTraceStore.getState().toggleSection(section.key)}
+      aria-expanded={!folded}
+      className="-mx-1 mt-1 flex items-center gap-2 rounded-control px-1 py-0.5 text-left focus-visible:outline-none focus-visible:shadow-focusring"
+    >
+      <span aria-hidden className={`text-faint transition-transform duration-fast ${folded ? "-rotate-90" : ""}`}>
+        <Icon.trace.fold size={ICON.xs} />
+      </span>
+      {section.hue && <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: section.hue }} />}
+      <span className={TYPE.sectionLabel}>{section.label}</span>
+      <span className="text-tiny tabular-nums text-faint">{section.steps === 1 ? "1 step" : `${section.steps} steps`}</span>
+    </button>
   );
 }
 

@@ -239,5 +239,25 @@ export function marksFor(
   return out;
 }
 
+/**
+ * The kind a node's name says it is — the first of its words a kind claims, as `marksFor` reads it —
+ * with that kind's hue and the word a trace section of such nodes is headed with. Null for a name no
+ * kind claims.
+ */
+export function nodeKind(id: string): { id: string; hue: string; section: string } | null {
+  for (const w of wordsOf(id)) {
+    const k = KINDS.find((x) => x.words.test(w));
+    if (k) return { id: k.id, hue: k.hue, section: SECTION[k.id] ?? k.id };
+  }
+  return null;
+}
+
+/** What a run of nodes of each kind is called, heading its section of the trace. */
+const SECTION: Record<string, string> = {
+  extract: "Extraction", person: "People", judge: "Scoring", sort: "Decision", send: "Delivery",
+  write: "Writing", lookup: "Lookup", think: "Reasoning", check: "Checks", reshape: "Shaping",
+  time: "Scheduling", money: "Money", talk: "Conversation", code: "Tools",
+};
+
 /** Every hue a mark can be drawn in, for the suite that holds them clear of the status colours. */
 export const MARK_HUES: readonly string[] = [...new Set([...KINDS.map((k) => k.hue), ...GENERIC_HUES, NODE_HUE.green, TEXT.ink])];
