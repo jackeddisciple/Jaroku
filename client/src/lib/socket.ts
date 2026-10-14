@@ -325,9 +325,12 @@ function dispatch(msg: ServerMessage): void {
       else if (msg.type === "paused") s.setRunStatus(msg.runId, "paused");
       else if (msg.type === "resumed") s.setRunStatus(msg.runId, "running");
       else if (msg.type === "branched") {
-        // The new branch run is in the refreshed history; focus it and load its (copied) prefix.
+        // The new branch run is in the refreshed history; focus it and load its (copied) prefix — and
+        // open it on Changes, so a re-run's result is read beside its parent's, with what it cost more
+        // or less (the product owner's list, 2026-10-14).
         s.selectRun(msg.branchId);
         sendLoadRun(msg.branchId);
+        s.setRunTab("changes");
       } else if (msg.type === "cancelled") {
         // The row stops saying `running` now rather than when the next history snapshot lands.
         // `error` is the status the server stores for it ("cancelled by user" is the reason on the

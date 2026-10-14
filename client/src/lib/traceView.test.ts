@@ -10,6 +10,7 @@ import { failedStepIds, jumpToError, treeSteps, useTraceStore, visibleTraceRows 
 import { graphLook, kindWord, traceMarks } from "../components/traceMarks.ts";
 import { nodeKind } from "../components/graphNodeIcons.ts";
 import { outcomePhase, runOutcome } from "./runOutcome.ts";
+import { compareRuns, finalState, runArtifacts } from "./traceCompare.ts";
 import { answerPreview } from "../components/TraceResult.tsx";
 import { STATUS, STEP_HUE } from "./tokens.ts";
 import type { Step } from "../types.ts";
@@ -418,6 +419,30 @@ console.log("\na long run in sections");
   // A loop does not regroup: agent, tools, agent is three sections, not two.
   const loop = visibleRows(buildTraceTree([mk({ id: "x1", seq: 0, name: "agent" }), mk({ id: "x2", seq: 1, name: "tools" }), mk({ id: "x3", seq: 2, name: "agent" })]));
   check("a loop keeps the order it ran in", (traceSections(loop, 40, nodeKind) ?? []).length === 3);
+}
+
+console.log("\na branch against its parent, and what a run made");
+{
+  const p0 = mk({ id: "p0", seq: 0, name: "extract_jd", output: { a: 1 }, latency_ms: 1000 });
+  const p1 = mk({ id: "p1", seq: 1, type: "llm_call", name: "ChatAnthropic", parent_step_id: "p0", cost: 0.002, output: [{ content: '{"must_haves": ["Python"]}' }] });
+  const p2 = mk({ id: "p2", seq: 2, name: "score", output: { score: 70 }, state_after: { score: 70, jd: { must: ["Python"] } } });
+  const b0 = { ...p0, id: "b0", run_id: "b" };
+  const b1 = { ...p1, id: "b1", run_id: "b", parent_step_id: "b0" };
+  const b2 = mk({ id: "b2", seq: 2, name: "score", output: { score: 92 }, latency_ms: 400, state_after: { score: 92, jd: { must: ["Python"] } } });
+  const pairs = compareRuns([p0, p1, p2], [b0, b1, b2]);
+  check("steps pair by kind, name and position", pairs.length === 3 && pairs[2]?.parent?.id === "p2" && pairs[2]?.own?.id === "b2");
+  check("an inherited step is the same", !pairs[0]?.inputChanged && !pairs[0]?.outputChanged);
+  check("a re-run step says its output changed", pairs[2]?.outputChanged === true);
+  check("...and how its time moved (this run less the parent)", pairs[2]?.latencyDelta === 400);
+  const extra = compareRuns([p0], [b0, mk({ id: "x", seq: 1, name: "extra" })]);
+  check("a step only one run has is listed on its side", extra.some((x) => x.own?.id === "x" && !x.parent));
+  check("the final state is the last node's update on what it started from", JSON.stringify(finalState([b0, b1, b2])) === JSON.stringify(b2.state_after));
+  const appended = finalState([mk({ id: "z", seq: 0, state_before: { messages: [1], readings: [1] }, state_after: { messages: [2], readings: [9] } })]);
+  check("...its messages appended, its other fields replaced", JSON.stringify(appended) === '{"messages":[1,2],"readings":[9]}', JSON.stringify(appended));
+  const arts = runArtifacts([p0, p1, p2]);
+  check("a JSON reply is an artifact, named for its node", arts[0]?.title === "extract_jd" && JSON.stringify(arts[0]?.value) === '{"must_haves":["Python"]}');
+  check("...and so is a structured state field", arts.some((a) => a.title === "jd"));
+  check("...but not a scalar one", !arts.some((a) => a.title === "score"));
 }
 
 console.log("\nwhere a search matched");

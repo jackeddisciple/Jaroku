@@ -10,6 +10,7 @@ import { TraceHeader } from "./TraceHeader.tsx";
 import { TraceMetrics } from "./TraceMetrics.tsx";
 import { TraceFilters, ViewSwitcher } from "./TraceFilters.tsx";
 import { GraphView } from "./GraphView.tsx";
+import { ArtifactsTab, ChangesView, RawTab, RunTabs, StateTab } from "./TraceRunTabs.tsx";
 import { TraceResult } from "./TraceResult.tsx";
 import { StepDetailPanel } from "./StepDetailPanel.tsx";
 import { graphLook, traceMarks, type StepMark } from "./traceMarks.ts";
@@ -507,6 +508,9 @@ export function TraceTimeline() {
   const bucket = useTraceStore((s) => (activeRunId ? s.stepsByRun[activeRunId] : undefined));
   const detailsOpen = useTraceStore((s) => Boolean(s.expandedStepId && bucket?.[s.expandedStepId]));
   const stepView = useTraceStore((s) => s.stepView);
+  // Changes is a branch's alone; on a run that is not one, the steps are what is open.
+  const chosenTab = useTraceStore((s) => s.runTab);
+  const tab = chosenTab === "changes" && !run?.parent_run_id ? "steps" : chosenTab;
   const body = useRef<HTMLDivElement>(null);
   const side = useSideBySide(body, run != null);
 
@@ -525,11 +529,19 @@ export function TraceTimeline() {
     <div className="flex h-full flex-col bg-bg">
       <TraceHeader run={run} />
       {run && <TraceMetrics run={run} steps={steps} />}
+      {run && <div className="mt-2"><RunTabs run={run} /></div>}
 
       {/* THE STEPS, AND THEIR DETAILS DOCKED BESIDE OR UNDER THEM (see StepDetailPanel): beside on a
           panel wide enough for both, and otherwise below, with the list keeping its top two-fifths so
           the selected row stays on screen while somebody reads about it. */}
-      {!run ? <div className="min-h-0 flex-1"><NoRun /></div> : stepView === "graph" ? (
+      {!run ? <div className="min-h-0 flex-1"><NoRun /></div> : tab !== "steps" ? (
+        <div className="min-h-0 flex-1 overflow-auto pb-4">
+          {tab === "changes" ? <ChangesView run={run} steps={steps} />
+            : tab === "state" ? <StateTab steps={steps} />
+              : tab === "artifacts" ? <ArtifactsTab steps={steps} />
+                : <RawTab run={run} steps={steps} />}
+        </div>
+      ) : stepView === "graph" ? (
         // THE GRAPH VIEW: the agent's graph with this run on it, in place of the list — the switcher
         // stays above it, so the list is one press away.
         <div className="flex min-h-0 flex-1 flex-col">

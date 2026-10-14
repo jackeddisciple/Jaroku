@@ -13,6 +13,7 @@ import { nodeKind } from "../components/graphNodeIcons.ts";
 
 export type ConnectionState = "connecting" | "open" | "closed";
 export type StepView = "list" | "waterfall" | "graph";
+export type RunTab = "steps" | "changes" | "state" | "artifacts" | "raw";
 export type LogLine = { level: "stderr" | "parseError"; text: string };
 
 interface TraceState {
@@ -89,6 +90,8 @@ interface TraceState {
    * (waterfall), or the agent's graph. One choice for the session, kept across runs.
    */
   stepView: StepView;
+  /** Which of the run's views is open: its steps, or Changes, State, Artifacts or Raw. Session-only. */
+  runTab: RunTab;
   /** Sections of a long run folded away, by their first node's step id (`traceSections`). Session-only. */
   collapsedSections: Record<string, true>;
   /**
@@ -132,6 +135,7 @@ interface TraceState {
   requestGraphStep: (stepId: string | null) => void;
   setStepView: (view: StepView) => void;
   toggleSection: (key: string) => void;
+  setRunTab: (tab: RunTab) => void;
   setControlError: (error: { runId: string | null; message: string } | null) => void;
 }
 
@@ -205,6 +209,7 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   graphStepRequest: null,
   stepView: "list",
   collapsedSections: {},
+  runTab: "steps",
   controlError: null,
 
   applyHistory: (runs, meta) =>
@@ -339,6 +344,8 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   requestGraphStep: (graphStepRequest) => set({ graphStepRequest }),
 
   setStepView: (stepView) => set({ stepView }),
+
+  setRunTab: (runTab) => set({ runTab }),
 
   toggleSection: (key) =>
     set((state) => {
