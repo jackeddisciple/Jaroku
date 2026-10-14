@@ -181,6 +181,37 @@ export function buildTraceTree(steps: readonly Step[]): TraceRow[] {
   return rows;
 }
 
+/**
+ * The steps still waiting for the node they ran inside: their parent chain reaches a
+ * `parent_step_id` the trace does not have yet.
+ *
+ * A STEP IS EMITTED WHEN IT ENDS, so in a live run a model call lands before the node it ran in — and
+ * drawn as a root until then, it sat flat at the top level and jumped in under its node a moment
+ * later, every row below it shifting. While a run is live these are drawn where their node will land
+ * instead (the live tail). In a finished run a missing parent is really missing, and the step is a
+ * root, as `buildTraceTree` has it.
+ */
+export function awaitingNode(steps: readonly Step[]): Set<string> {
+  const byId = new Map(steps.map((s) => [s.id, s]));
+  const memo = new Map<string, boolean>();
+  const waits = (s: Step, seen: Set<string>): boolean => {
+    const known = memo.get(s.id);
+    if (known !== undefined) return known;
+    const p = s.parent_step_id;
+    let out = false;
+    if (p && p !== s.id && !seen.has(p)) {
+      const parent = byId.get(p);
+      seen.add(p);
+      out = parent ? waits(parent, seen) : true;
+    }
+    memo.set(s.id, out);
+    return out;
+  };
+  const out = new Set<string>();
+  for (const s of steps) if (waits(s, new Set([s.id]))) out.add(s.id);
+  return out;
+}
+
 // ── What is on screen ────────────────────────────────────────────────────────
 
 export type StepFilter = "all" | "llm" | "tool" | "state" | "route" | "errors";

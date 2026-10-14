@@ -8,7 +8,7 @@
 
 import { create } from "zustand";
 import type { Run, RunStatus, RunSummary, Step, TraceEvent } from "../types.ts";
-import { ancestorIds, buildTraceTree, visibleRows, type StepFilter, type VisibleRow } from "../lib/traceView.ts";
+import { ancestorIds, awaitingNode, buildTraceTree, visibleRows, type StepFilter, type VisibleRow } from "../lib/traceView.ts";
 
 export type ConnectionState = "connecting" | "open" | "closed";
 export type LogLine = { level: "stderr" | "parseError"; text: string };
@@ -336,16 +336,26 @@ export function orderedSteps(bucket: Record<string, Step> | undefined): Step[] {
  * keyboard can never land on a step the screen is not showing.
  */
 export function visibleTraceRows(
-  state: Pick<TraceState, "activeRunId" | "stepsByRun" | "collapsedStepIds" | "stepFilter" | "stepQuery">,
+  state: Pick<TraceState, "activeRunId" | "stepsByRun" | "collapsedStepIds" | "stepFilter" | "stepQuery"> & Partial<Pick<TraceState, "runs">>,
 ): VisibleRow[] {
   if (!state.activeRunId) return [];
   const bucket = state.stepsByRun[state.activeRunId];
   if (!bucket) return [];
-  return visibleRows(buildTraceTree(Object.values(bucket)), {
+  return visibleRows(buildTraceTree(treeSteps(Object.values(bucket), state.runs?.[state.activeRunId])), {
     collapsed: state.collapsedStepIds,
     filter: state.stepFilter,
     query: state.stepQuery,
   });
+}
+
+/**
+ * The steps the timeline's tree is built from: all of them, except — while the run is live — those
+ * still waiting for their node, which the live tail holds where that node will land (`awaitingNode`).
+ */
+export function treeSteps(steps: readonly Step[], run: Pick<RunSummary, "status"> | undefined): Step[] {
+  if (run?.status !== "running") return [...steps];
+  const waiting = awaitingNode(steps);
+  return waiting.size === 0 ? [...steps] : steps.filter((s) => !waiting.has(s.id));
 }
 
 /** Runs for the sidebar, newest first. */

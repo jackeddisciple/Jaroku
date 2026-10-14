@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { CANCELLED_BY_USER, orderedSteps, useTraceStore } from "../store/traceStore.ts";
+import { CANCELLED_BY_USER, orderedSteps, treeSteps, useTraceStore } from "../store/traceStore.ts";
 import type { RunSummary, Step } from "../types.ts";
 import { useUiStore } from "../store/uiStore.ts";
-import { COL, StepRow, columnsFor, type BarPlace, type FoldSummary, type RowTier } from "./StepRow.tsx";
+import { COL, StepRow, columnsFor, tileCentre, type BarPlace, type FoldSummary, type RowTier } from "./StepRow.tsx";
 import { buildTraceTree, descendantSteps, isInherited, ownSteps, runWindow, stepWindow, traceTotals, visibleRows, type TimeWindow, type VisibleRow } from "../lib/traceView.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { TraceHeader } from "./TraceHeader.tsx";
@@ -10,7 +10,7 @@ import { TraceMetrics } from "./TraceMetrics.tsx";
 import { TraceFilters } from "./TraceFilters.tsx";
 import { TraceResult } from "./TraceResult.tsx";
 import { StepDetailPanel } from "./StepDetailPanel.tsx";
-import { graphLook, traceMarks } from "./traceMarks.ts";
+import { graphLook, traceMarks, type StepMark } from "./traceMarks.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { useGraphStore } from "../store/graphStore.ts";
 import { START_ID } from "../lib/graphLayout.ts";
@@ -86,7 +86,15 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
   const ref = useRef<HTMLDivElement>(null);
   const tier = useRowTier(frame);
 
-  const tree = useMemo(() => buildTraceTree(steps), [steps]);
+  // WHILE IT RUNS, a step whose node has not landed is held by the live tail, under the node it ran
+  // in, rather than drawn as a root that jumps in under its node a moment later (`treeSteps`).
+  const placed = useMemo(() => treeSteps(steps, run), [steps, run]);
+  const waiting = useMemo(() => {
+    if (placed.length === steps.length) return [];
+    const ids = new Set(placed.map((s) => s.id));
+    return steps.filter((s) => !ids.has(s.id));
+  }, [placed, steps]);
+  const tree = useMemo(() => buildTraceTree(placed), [placed]);
   const connectors = useBuildStore((s) => s.agents.find((a) => a.agent_id === run?.agent_id)?.connectors);
   const graph = useGraphStore((s) => (run ? s.graphs[run.agent_id] : undefined));
   const look = useMemo(() => graphLook(graph, connectors ?? []), [graph, connectors]);
@@ -173,7 +181,8 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
     </div>
   );
 
-  if (rows.length === 0) {
+  // Nothing to draw because nothing matches — not because every step so far is waiting for its node.
+  if (rows.length === 0 && (filter !== "all" || query.trim() !== "" || waiting.length === 0)) {
     return (
       <div ref={frame}>
       {header}
@@ -226,7 +235,7 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
     </div>
     {run && (
       <div className="mt-1.5">
-        <LiveTail run={run} steps={steps} span={span} tier={tier} />
+        <LiveTail run={run} steps={steps} span={span} tier={tier} waiting={waiting} marks={marks} />
       </div>
     )}
     </div>
@@ -241,7 +250,15 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
  * says which nodes run next (`nextByRun`, the same word the graph's live mark uses); this row says it
  * here too. Paused, it is where the run will continue; stopped, where it stood.
  */
-function LiveTail({ run, steps, span, tier }: { run: RunSummary; steps: readonly Step[]; span: TimeWindow | null; tier: RowTier }) {
+function LiveTail({ run, steps, span, tier, waiting = [], marks }: {
+  run: RunSummary;
+  steps: readonly Step[];
+  span: TimeWindow | null;
+  tier: RowTier;
+  /** Steps that finished inside the node running now, before it did — drawn under it, here. */
+  waiting?: readonly Step[];
+  marks?: Map<string, StepMark>;
+}) {
   const next = useTraceStore((s) => s.nextByRun[run.id]);
   // ITS OWN CLOCK, FIVE TIMES A SECOND. The time it shows is in tenths, and it was read off the
   // list's once-a-second span — so it changed once a second and always ended in the same tenth.
@@ -251,6 +268,15 @@ function LiveTail({ run, steps, span, tier }: { run: RunSummary; steps: readonly
   // one. "The next step" stood there while extract_jd was the step running.
   const edges = useGraphStore((s) => s.graphs[run.agent_id]?.edges);
   const firstNodes = useMemo(() => edges?.filter((e) => e.source === START_ID).map((e) => e.target), [edges]);
+  // The waiting steps as the rows they will be once their node lands: one level in, under the tile
+  // below, each line meeting it as a nested row's line meets its node's.
+  const inside = useMemo(() => {
+    let rootLast = true;
+    return visibleRows(buildTraceTree(waiting)).map((r) => {
+      if (r.depth === 0) rootLast = r.lastChild;
+      return { ...r, depth: r.depth + 1, lastPath: [rootLast, ...r.lastPath] };
+    });
+  }, [waiting]);
   const state = run.status === "running" ? "running" : run.status === "paused" ? "paused" : stopped && next?.length ? "stopped" : null;
   if (!state) return null;
 
@@ -285,7 +311,11 @@ function LiveTail({ run, steps, span, tier }: { run: RunSummary; steps: readonly
       className={`rounded-card border border-dashed p-1 ${state === "running" ? "border-run/50 bg-run/[0.04]" : "border-edge bg-panel"}`}
       aria-live="polite"
     >
-    <div className="flex items-center gap-2 rounded-control py-1.5 pl-2 pr-1">
+    <div className="relative flex items-center gap-2 rounded-control py-1.5 pl-2 pr-1">
+      {/* Down out of the tile to the steps already finished inside it. */}
+      {inside.length > 0 && (
+        <span aria-hidden className="absolute bottom-0 w-0.5 bg-grip" style={{ left: tileCentre(0) - 1, top: "calc(50% + 11px)" }} />
+      )}
       <span className="w-7 shrink-0" />
       <span className="flex shrink-0 items-center" style={{ paddingLeft: 20 }}>
         <span
@@ -329,6 +359,21 @@ function LiveTail({ run, steps, span, tier }: { run: RunSummary; steps: readonly
       </span>
       {show.actions && <span className={`${COL.actions} shrink-0`} />}
     </div>
+    {inside.length > 0 && (
+      <div role="tree" aria-label="Finished inside the running step">
+        {inside.map((r) => (
+          <StepRow
+            key={r.step.id}
+            row={r}
+            tabbable={false}
+            tier={tier}
+            bar={barFor(r.step, span, false)}
+            provider={run.provider}
+            mark={marks?.get(r.step.name)}
+          />
+        ))}
+      </div>
+    )}
     </div>
   );
 }

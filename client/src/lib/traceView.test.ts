@@ -6,7 +6,7 @@
 //
 //   npm run test:trace-view
 
-import { useTraceStore, visibleTraceRows } from "../store/traceStore.ts";
+import { treeSteps, useTraceStore, visibleTraceRows } from "../store/traceStore.ts";
 import { graphLook, kindWord, traceMarks } from "../components/traceMarks.ts";
 import { outcomePhase, runOutcome } from "./runOutcome.ts";
 import { answerPreview } from "../components/TraceResult.tsx";
@@ -14,6 +14,7 @@ import { STATUS, STEP_HUE } from "./tokens.ts";
 import type { Step } from "../types.ts";
 import {
   ancestorIds,
+  awaitingNode,
   buildTraceTree,
   descendantSteps,
   errorParts,
@@ -410,6 +411,22 @@ console.log("\na node looks the same in the trace as on the graph");
   check("a step the graph has no node for keeps the trace's own", kindWord(parse, marks.get("parse_readings")) === "Tool call" && marks.has("parse_readings"));
   check("...and so does every step with no graph at hand", kindWord(agent, traceMarks(steps).get("agent")) === "State update");
   check("no graph, no look", graphLook(undefined) === null && graphLook({ agent_id: "x", error: "boom" }) === null);
+}
+
+console.log("\na live step whose node has not landed");
+{
+  // The model call and router of the node running now (#0, not here yet), and a tool call under that call.
+  const early = mk({ id: "e1", seq: 1, type: "llm_call", parent_step_id: "running-node" });
+  const underEarly = mk({ id: "e2", seq: 2, type: "tool_call", parent_step_id: "e1" });
+  const landed = [tools, parse];
+  const waiting = awaitingNode([...landed, early, underEarly]);
+  check("it waits, and so does a step inside it", waiting.has("e1") && waiting.has("e2"));
+  check("...and nothing whose node is here", !waiting.has("t") && !waiting.has("p"));
+  check("while the run runs, the tree leaves it to the live tail",
+    treeSteps([...landed, early, underEarly], { status: "running" }).map((x) => x.id).join() === "t,p");
+  check("once it is over, a missing parent is missing, and the step is a root",
+    treeSteps([...landed, early, underEarly], { status: "completed" }).length === 4);
+  check("a step naming itself does not wait", awaitingNode([mk({ id: "self", seq: 0, parent_step_id: "self" })]).size === 0);
 }
 
 console.log("\none word for how a run went, on every surface");
