@@ -12,7 +12,8 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { fmtCost, fmtDuration } from "../lib/format.ts";
-import { isInherited, ownSteps, runElapsed, traceTotals } from "../lib/traceView.ts";
+import { isInherited, ownSteps, runElapsed, stepsTime, traceTotals } from "../lib/traceView.ts";
+import { runOutcome } from "../lib/runOutcome.ts";
 import { useRunClock } from "../lib/useRunClock.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { ICON } from "../lib/tokens.ts";
@@ -125,7 +126,9 @@ export function TraceMetrics({ run, steps }: { run: RunSummary; steps: readonly 
           ? "How long the agent's graph ran before it paused"
           : live
             ? "The agent's graph alone, from its start until now"
-            : "The agent's graph alone, from its start to its end — any time it sat paused included",
+            : runOutcome(run) === "stopped"
+              ? `From its start until it was stopped — its steps themselves took ${fmtDuration(stepsTime(own))}`
+              : "The agent's graph alone, from its start to its end — any time it sat paused included",
       tone: run.status === "running" ? "text-run" : "text-ink",
     },
     { Mark: Icon.trace.tokens, label: "Tokens", value: totals.tokens == null ? "—" : totals.tokens.toLocaleString(), title: tokensTitle },

@@ -515,6 +515,22 @@ export function runElapsed(
   return Number.isFinite(end) ? Math.max(0, end - start) : null;
 }
 
+/**
+ * How long a run's steps themselves took: the top-level steps' durations added up — a node's own
+ * time already includes the model calls and tools inside it, so those are never added again.
+ *
+ * WHAT A RUN'S DURATION IS MADE OF, when somebody asks why it is long. A stopped run read 1m 09s over
+ * two steps that took 2.2s together, and nothing said the other minute was the run sitting paused or
+ * waiting until it was stopped.
+ */
+export function stepsTime(steps: readonly Step[]): number {
+  let ms = 0;
+  for (const row of buildTraceTree(steps)) {
+    if (row.depth === 0 && Number.isFinite(row.step.latency_ms) && row.step.latency_ms > 0) ms += row.step.latency_ms;
+  }
+  return ms;
+}
+
 // ── Errors ───────────────────────────────────────────────────────────────────
 
 export interface ErrorParts {

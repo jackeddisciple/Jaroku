@@ -18,7 +18,8 @@ import { useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { extractAgentOutput } from "../lib/agentOutput.ts";
 import { Icon } from "../lib/icons/registry.ts";
-import { errorParts } from "../lib/traceView.ts";
+import { errorParts, ownSteps, runElapsed, stepsTime } from "../lib/traceView.ts";
+import { fmtDuration } from "../lib/format.ts";
 import { TYPE } from "../lib/tokens.ts";
 import { CANCELLED_BY_USER, useTraceStore } from "../store/traceStore.ts";
 import type { RunSummary, Step } from "../types.ts";
@@ -159,6 +160,29 @@ function Note({ children }: { children: React.ReactNode }) {
   return <p className={`${SURFACE} py-2.5 text-caption text-muted`}>{children}</p>;
 }
 
+/**
+ * A run somebody stopped, said as such — the trace never said "cancelled", only the Runs list did —
+ * and, when its duration is mostly not its steps, where the rest of the time went: it sat paused or
+ * waiting until the stop came.
+ */
+function Stopped({ run, steps }: { run: RunSummary; steps: readonly Step[] }) {
+  const own = ownSteps(run, steps);
+  const total = runElapsed(run, own, Date.now());
+  const busy = stepsTime(own);
+  const idle = total == null ? 0 : total - busy;
+  const explain = total != null && own.length > 0 && idle > Math.max(2000, total / 4);
+  return (
+    <Note>
+      Cancelled by a user before it finished, so there is no final answer.
+      {explain && (
+        <>
+          {" "}Its steps ran for {fmtDuration(busy)}; the rest of its {fmtDuration(total!)} it was paused or waiting until it was stopped.
+        </>
+      )}
+    </Note>
+  );
+}
+
 export function TraceResult({ run, steps }: { run: RunSummary; steps: readonly Step[] }) {
   const answer = useMemo(() => (run.status === "completed" ? extractAgentOutput(steps) : ""), [run.status, steps]);
   const failedStep = useMemo(() => steps.find((s) => s.error != null), [steps]);
@@ -166,7 +190,7 @@ export function TraceResult({ run, steps }: { run: RunSummary; steps: readonly S
   if (run.status === "running") return <Note>The final answer appears here when the run finishes.</Note>;
   if (run.status === "paused") return <Note>Paused. The final answer appears here once the run is resumed and finishes.</Note>;
   if (run.status === "error") {
-    if (run.error === CANCELLED_BY_USER) return <Note>Stopped before it finished, so there is no final answer.</Note>;
+    if (run.error === CANCELLED_BY_USER) return <Stopped run={run} steps={steps} />;
     const error = run.error ?? failedStep?.error ?? null;
     return error ? <RunFailure error={error} failedStep={failedStep} /> : <Note>The run failed without saying why.</Note>;
   }

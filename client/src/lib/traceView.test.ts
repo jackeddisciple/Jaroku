@@ -28,6 +28,7 @@ import {
   stepCategory,
   stepProvider,
   stepOutputText,
+  stepsTime,
   stepWindow,
   traceTotals,
   visibleRows,
@@ -352,6 +353,13 @@ console.log("\na folded answer's one line");
   check("past a code fence's opening", answerPreview("```json\n{\"a\":1}\n```") === '{"a":1}');
   check("an identifier keeps its underscores", answerPreview("Use route_after_extract next") === "Use route_after_extract next");
   check("emphasis taken off", answerPreview("This is *really* _good_.") === "This is really good.");
+}
+
+console.log("\nhow long the steps themselves took");
+{
+  // agent (2486ms, its model call inside it) and tools (4.3ms, its tool call inside it).
+  check("the top-level steps, their insides not counted again", Math.abs(stepsTime(steps) - (2486 + 4.3)) < 1e-9, String(stepsTime(steps)));
+  check("no steps, no time", stepsTime([]) === 0);
 }
 
 console.log("\nwhere a search matched");
