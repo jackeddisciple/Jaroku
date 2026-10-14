@@ -93,7 +93,7 @@ import { compareGraphs, segmentMark, type DiffMark, type GraphDiff } from "../li
 import { marksFor, type NodeMark } from "./graphNodeIcons.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { fmtCost, fmtLatency } from "../lib/format.ts";
-import { nodeOutcome, nodeTimings, replayFrames, stepsUpTo, type NodeTiming } from "../lib/graphReplay.ts";
+import { frameForStep, nodeOutcome, nodeTimings, replayFrames, stepsUpTo, type NodeTiming } from "../lib/graphReplay.ts";
 import { GraphRunStrip, GraphRunStripFolded } from "./GraphRunStrip.tsx";
 
 // The node inspector, an overlay over the canvas's right edge. Kept in step with its `w-64`.
@@ -1203,6 +1203,23 @@ export function GraphView() {
   const stripAvailable = frames.length > 0 && !!run && run.status !== "running" && run.status !== "paused";
   const stripShown = stripAvailable && stripClosed !== activeRunId;
   const stripFolded = stripAvailable && stripClosed === activeRunId;
+
+  // "SHOW THIS STEP ON THE GRAPH" SHOWS THE RUN AT THAT STEP. The replay opened at its last frame, so
+  // the step asked about was on a faded node while the run's later nodes were lit. Taken once, after
+  // the reset above: the replay moves to the frame where the step's node finished, its strip opens,
+  // and the selection lights the node. A live or paused run has no replay; the selection alone does.
+  const graphStepRequest = useTraceStore((s) => s.graphStepRequest);
+  useEffect(() => {
+    if (!graphStepRequest) return;
+    if (!bucket?.[graphStepRequest]) return; // its steps have not loaded yet — keep the request
+    const at = stripAvailable ? frameForStep(frames, bucket, graphStepRequest) : null;
+    if (at !== null) {
+      setReplayAt(at);
+      setPlaying(false);
+      setStripClosed(null);
+    }
+    useTraceStore.getState().requestGraphStep(null);
+  }, [graphStepRequest, bucket, frames, stripAvailable]);
 
   // Read by the ResizeObserver below, which is registered once and must frame against what is
   // true when it fires rather than when it was created.

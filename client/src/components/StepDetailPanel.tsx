@@ -30,7 +30,7 @@ import { absTime, fmtCost, fmtDuration, fmtOffset } from "../lib/format.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { CATEGORY_LABEL, buildTraceTree, descendantSteps, isInherited, stepCategory, stepWindow, traceTotals } from "../lib/traceView.ts";
 import { ICON, STEP_TYPE, TYPE } from "../lib/tokens.ts";
-import { useUiStore } from "../store/uiStore.ts";
+import { showStepOnGraph } from "../lib/runActions.ts";
 import type { RunSummary, Step } from "../types.ts";
 import { Chip } from "./Chip.tsx";
 import { CopyTurn } from "./composer/CopyTurn.tsx";
@@ -307,7 +307,7 @@ export function StepDetailPanel({ dock }: { dock: StepDetailDock }) {
                 <IconButton
                   icon={Icon.panel.graph}
                   label="Show this step on the graph"
-                  onClick={() => useUiStore.getState().setRightTab("graph")}
+                  onClick={() => showStepOnGraph(step.id)}
                 />
                 <IconButton icon={Icon.trace.closeDetails} label="Close step details" onClick={close} />
               </span>

@@ -30,3 +30,16 @@ export function openRun(runId: string): void {
   selectRun(runId);
   useUiStore.getState().setRightTab("trace");
 }
+
+/**
+ * "Show this step on the graph", from a trace row or from its details: the step becomes the selection
+ * (and what the composer is about), and the Graph tab opens on the run as it stood when that step's
+ * node finished — see `traceStore.graphStepRequest`.
+ */
+export function showStepOnGraph(stepId: string): void {
+  const trace = useTraceStore.getState();
+  trace.selectStep(stepId);
+  trace.requestGraphStep(stepId);
+  useUiStore.getState().setSelectedNodeId(null);
+  useUiStore.getState().setRightTab("graph");
+}

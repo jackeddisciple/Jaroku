@@ -75,6 +75,18 @@ export function stepsUpTo(byId: ById, frame: ReplayFrame): ById {
   return out;
 }
 
+/**
+ * The frame that shows a step: the one where the node it ran inside finished — or the step's own, for
+ * a node step. Null for a step that belongs to no node (a model call made outside the graph).
+ */
+export function frameForStep(frames: readonly ReplayFrame[], byId: ById, stepId: string): number | null {
+  const step = byId[stepId];
+  const owner = step ? nodeStepOf(step, byId) : undefined;
+  if (!owner) return null;
+  const at = frames.findIndex((f) => f.step.id === owner.id);
+  return at === -1 ? null : at;
+}
+
 /** The node step a step was taken inside — itself, for a node step — walking its parents. */
 function nodeStepOf(step: Step, byId: ById): Step | undefined {
   const seen = new Set<string>();

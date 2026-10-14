@@ -70,6 +70,12 @@ interface TraceState {
    */
   stepFilter: StepFilter;
   stepQuery: string;
+  /**
+   * A step somebody asked to see ON THE GRAPH ("Show this step on the graph"), for the Graph tab to
+   * take once: it moves the run's replay to the frame where that step's node finished, rather than
+   * leaving it at the run's end with the step's own node the faded one. Cleared when taken.
+   */
+  graphStepRequest: string | null;
 
   /**
    * The run history, merged by id.
@@ -99,6 +105,7 @@ interface TraceState {
   setCollapsed: (stepId: string, collapsed: boolean) => void;
   setStepFilter: (filter: StepFilter) => void;
   setStepQuery: (query: string) => void;
+  requestGraphStep: (stepId: string | null) => void;
 }
 
 const LOG_CAP = 200;
@@ -167,6 +174,7 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   collapsedStepIds: {},
   stepFilter: "all",
   stepQuery: "",
+  graphStepRequest: null,
 
   applyHistory: (runs, meta) =>
     set((state) => {
@@ -289,6 +297,8 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   setStepFilter: (stepFilter) => set({ stepFilter }),
 
   setStepQuery: (stepQuery) => set({ stepQuery }),
+
+  requestGraphStep: (graphStepRequest) => set({ graphStepRequest }),
 
   setCollapsed: (stepId, collapsed) =>
     set((state) => {

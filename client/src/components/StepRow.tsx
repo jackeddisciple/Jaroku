@@ -30,6 +30,7 @@ import { useBuildStore } from "../store/buildStore.ts";
 import { agentMcpToolNames } from "../store/mcpStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
+import { showStepOnGraph } from "../lib/runActions.ts";
 import type { Step } from "../types.ts";
 import { CopyTurn } from "./composer/CopyTurn.tsx";
 import { IconButton } from "./IconButton.tsx";
@@ -448,10 +449,7 @@ export function StepRow({
                   label="Show this step on the graph"
                   tabIndex={-1}
                   stopPropagation
-                  onClick={() => {
-                    select();
-                    useUiStore.getState().setRightTab("graph");
-                  }}
+                  onClick={() => showStepOnGraph(step.id)}
                 />
                 {output && <CopyTurn source={output} label="Copy output" title="Copy this step's output" tabIndex={-1} />}
               </span>

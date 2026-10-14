@@ -6,7 +6,7 @@
 //
 //   npm run test:graph-replay
 
-import { nodeOutcome, nodeTimings, replayFrames, stepsUpTo } from "./graphReplay.ts";
+import { frameForStep, nodeOutcome, nodeTimings, replayFrames, stepsUpTo } from "./graphReplay.ts";
 import type { Step } from "../types.ts";
 
 let fail = 0;
@@ -99,6 +99,16 @@ console.log("\n§3 a node's inspector reads the node, not its last model call");
   const twiceFailedOnce = nodeOutcome("score", loop);
   check("a loop that failed on an earlier pass says so, with the latest pass's time",
     twiceFailedOnce?.error === "first pass failed" && twiceFailedOnce.ms === 200 && twiceFailedOnce.passes === 2, JSON.stringify(twiceFailedOnce));
+}
+
+console.log("\n§3b showing one step on the graph opens the replay at it");
+{
+  const frames = replayFrames(byId);
+  check("a node step shows at its own frame", frameForStep(frames, byId, "n2") === 1, String(frameForStep(frames, byId, "n2")));
+  check("a model call shows at the frame its node finished", frameForStep(frames, byId, "l1") === 0);
+  check("...in the pass it ran in, for a node that ran twice", frameForStep(frames, byId, "l3") === 2);
+  check("a router inside a node shows at that node's frame", frameForStep(frames, byId, "r1") === 3);
+  check("a step that is not there shows nowhere", frameForStep(frames, byId, "nope") === null);
 }
 
 console.log("\n§4 what each run will run next, kept for the runs somebody could be looking at");
