@@ -12,7 +12,7 @@ import { ancestorIds, awaitingNode, buildTraceTree, traceSections, visibleRows, 
 import { nodeKind } from "../components/graphNodeIcons.ts";
 
 export type ConnectionState = "connecting" | "open" | "closed";
-export type StepView = "list" | "waterfall" | "graph";
+export type StepView = "list" | "graph";
 export type RunTab = "steps" | "changes" | "state" | "artifacts" | "raw";
 /** One step's marks, for the person reading. */
 export interface StepMarkState {
@@ -106,8 +106,8 @@ interface TraceState {
    */
   graphStepRequest: string | null;
   /**
-   * How the Steps tab draws the run: the list, the list with each step's time drawn behind its row
-   * (waterfall), or the agent's graph. One choice for the session, kept across runs.
+   * How the Steps tab draws the run: the list, or the agent's graph. One choice for the session, kept
+   * across runs.
    */
   stepView: StepView;
   /** Which of the run's views is open: its steps, or Changes, State, Artifacts or Raw. Session-only. */

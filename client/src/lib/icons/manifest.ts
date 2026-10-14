@@ -403,7 +403,6 @@ export const MANIFEST = {
     expandAll: "UnfoldMoreIcon",
     inherited: "Link01Icon",
     viewList: "ListViewIcon",
-    viewWaterfall: "WaterfallDown01Icon",
     viewGraph: "ArtboardIcon",
     resetField: "Undo03Icon",
     pinStep: "PinIcon",

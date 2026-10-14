@@ -46,19 +46,19 @@ const KIND_DOT: Partial<Record<StepFilter, string>> = {
   errors: STATUS.error,
 };
 
-/** What sits beside the segments: the fold mark, the view switcher's three, the search mark (32px each), and their gaps. */
-const MARK_ROOM = 8 + 32 + 4 + 32 * 3 + 4 + 32;
+/** What sits beside the segments: the fold mark, the view switcher's two, the search mark (32px each), and their gaps. */
+const MARK_ROOM = 8 + 32 + 4 + 32 * 2 + 4 + 32;
 
 /**
- * LIST, WATERFALL OR GRAPH (2026-10-14), beside the search: the steps as a list, the same list with each
- * step's time drawn behind its row, or the agent's graph with this run on it.
+ * LIST OR GRAPH (2026-10-14), beside the search: the steps as a list, or the agent's graph with this
+ * run on it. A third view, Waterfall — each step's time drawn behind its row — came out the same day:
+ * the product owner had no use for it, and the timeline column already draws the same thing.
  */
 export function ViewSwitcher() {
   const view = useTraceStore((s) => s.stepView);
   const setView = useTraceStore((s) => s.setStepView);
   const options: SegmentOption<StepView>[] = [
     { value: "list", label: "List", icon: Icon.trace.viewList },
-    { value: "waterfall", label: "Waterfall — each step's time behind its row", icon: Icon.trace.viewWaterfall },
     { value: "graph", label: "Graph — the agent's nodes with this run on them", icon: Icon.trace.viewGraph },
   ];
   return <Segmented options={options} value={view} onChange={setView} ariaLabel="Show the steps as" />;

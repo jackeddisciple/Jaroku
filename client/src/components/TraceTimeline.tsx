@@ -83,7 +83,6 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
   const own = useMemo(() => ownSteps(run, steps), [run, steps]);
   const span = useMemo(() => (run ? runWindow(run, own, now) : null), [run, own, now]);
   const collapsed = useTraceStore((s) => s.collapsedStepIds);
-  const view = useTraceStore((s) => s.stepView);
   // MEASURED ON A BOX THAT IS ALWAYS THERE. The tree unmounts while "No steps match" shows, and an
   // observer left on it would keep reading the detached element after the filter is cleared.
   const frame = useRef<HTMLDivElement>(null);
@@ -201,7 +200,6 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
           provider={run?.provider}
           mark={marks.get(r.step.name)}
           scale={scale}
-          waterfall={view === "waterfall"}
         />
       ))}
     </div>
