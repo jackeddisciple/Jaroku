@@ -9,6 +9,7 @@ import { TraceHeader } from "./TraceHeader.tsx";
 import { TraceMetrics } from "./TraceMetrics.tsx";
 import { TraceFilters } from "./TraceFilters.tsx";
 import { TraceResult } from "./TraceResult.tsx";
+import { StepDetailPanel } from "./StepDetailPanel.tsx";
 import { traceMarks } from "./traceMarks.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { Icon } from "../lib/icons/registry.ts";
@@ -297,10 +298,35 @@ function LiveTail({ run, steps, span, tier }: { run: RunSummary; steps: readonly
   );
 }
 
+/**
+ * Room for the step list and Step details side by side: the panel's 380px and a list that keeps its
+ * "medium" tier (404px) — below it, the details dock under the list instead.
+ */
+const SIDE_BY_SIDE_FROM = 380 + 404;
+
+/** Whether the tab's body is wide enough for the details beside the list. Measured: the panel resizes. */
+function useSideBySide(ref: React.RefObject<HTMLDivElement | null>): boolean {
+  const [side, setSide] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = (): void => setSide(el.clientWidth >= SIDE_BY_SIDE_FROM);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref]);
+  return side;
+}
+
 export function TraceTimeline() {
   const activeRunId = useTraceStore((s) => s.activeRunId);
   const run = useTraceStore((s) => (activeRunId ? s.runs[activeRunId] : undefined));
   const bucket = useTraceStore((s) => (activeRunId ? s.stepsByRun[activeRunId] : undefined));
+  const detailsOpen = useTraceStore((s) => Boolean(s.expandedStepId && bucket?.[s.expandedStepId]));
+  const body = useRef<HTMLDivElement>(null);
+  const side = useSideBySide(body);
 
   const steps = useMemo(() => orderedSteps(bucket), [bucket]);
 
@@ -309,12 +335,16 @@ export function TraceTimeline() {
       <TraceHeader run={run} />
       {run && <TraceMetrics run={run} steps={steps} />}
 
+      {/* THE STEPS, AND THEIR DETAILS DOCKED BESIDE OR UNDER THEM (see StepDetailPanel): beside on a
+          panel wide enough for both, and otherwise below, with the list keeping its top two-fifths so
+          the selected row stays on screen while somebody reads about it. */}
+      <div ref={body} className={`flex min-h-0 flex-1 ${detailsOpen && side ? "flex-row" : "flex-col"}`}>
       {/* timeline body */}
       {/* NO `scroll-fade` HERE: the filter row sticks to the top of this region, and a mask over the
           first 16px would dim the controls it is meant to keep in reach. */}
       {/* The padding is on the INNER box: a sticky child sticks to the scroller's padding edge, so
           top padding here would leave a strip above the filter row for steps to scroll through. */}
-      <div className="flex-1 overflow-auto px-6 pb-4">
+      <div className={`overflow-auto px-6 pb-4 ${!detailsOpen ? "flex-1" : side ? "min-w-0 flex-1" : "h-2/5 min-h-36 shrink-0"}`}>
         <div className="pt-3">
           {steps.length === 0 ? (
             run?.status === "running" || run?.status === "paused" ? (
@@ -343,6 +373,8 @@ export function TraceTimeline() {
             </>
           )}
         </div>
+      </div>
+      {detailsOpen && <StepDetailPanel dock={side ? "side" : "bottom"} />}
       </div>
     </div>
   );

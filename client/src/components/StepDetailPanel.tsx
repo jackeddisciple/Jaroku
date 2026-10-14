@@ -1,5 +1,12 @@
-// Step details — the slide-in drawer from the right (doc §4.1, not a permanent column). Opens from a
-// row's Details button or Enter, then follows the selection while it stays open.
+// Step details — docked in the Trace tab beside its steps, or under them (doc §4.1, not a permanent
+// column). Opens from a row's Details button or Enter, then follows the selection while it stays open.
+//
+// DOCKED, NOT DRAWN OVER. It was a 380px drawer over the whole right panel: at the panel's default
+// width it covered all but a "#N" sliver of the trace it described, it stayed over the Runs, Evals and
+// Secrets tabs, and "Show this step on the graph" put the graph behind it. Now it is part of the Trace
+// tab's own layout (the product owner's call, 2026-10-14): beside the list when the tab is wide enough
+// for both, below it when not — the list keeps its top part with the selected row in view — and on no
+// other tab. The graph has its own node inspector.
 //
 // ORGANISED AS THE QUESTIONS SOMEBODY BRINGS TO A STEP, in the order they bring them:
 //
@@ -173,7 +180,10 @@ function Overview({ step, run, bucket, inside }: { step: Step; run: RunSummary |
   );
 }
 
-export function StepDetailPanel() {
+/** Where the panel sits in the Trace tab: beside the steps, or below them on a narrow panel. */
+export type StepDetailDock = "side" | "bottom";
+
+export function StepDetailPanel({ dock }: { dock: StepDetailDock }) {
   // Same join as the timeline row: a step carries a tool NAME, and whether that name came
   // from MCP is a fact about the AGENT, recorded in its manifest.
   const agent = useBuildStore((s) => s.agents.find((a) => a.agent_id === s.activeAgentId));
@@ -226,13 +236,14 @@ export function StepDetailPanel() {
     if (next) useTraceStore.getState().selectStep(next.id);
   };
 
-  // Keep the element mounted for the slide-out transition; just translate it off-screen.
+  if (!open) return null;
   return (
     <div
-      className={`absolute top-0 right-0 bottom-0 w-[380px] max-w-[85%] bg-elevated z-20 flex flex-col
-        border-l border-edge shadow-floating transition-transform duration-base ease-state
-        ${open ? "translate-x-0" : "translate-x-full pointer-events-none"}`}
-      aria-hidden={!open}
+      role="region"
+      aria-label="Step details"
+      className={`flex min-h-0 flex-col bg-elevated ${
+        dock === "side" ? "w-[380px] shrink-0 border-l border-edge" : "min-w-0 flex-1 border-t border-edge"
+      }`}
     >
       {step && bucket && (
         <>

@@ -2,8 +2,8 @@
 // time, never
 // stacked.
 // Trace is the hero and the default. Code is NOT a tab here; it opens as an on-demand overlay
-// (CodeOverlay) from a diff-card row or Cmd+P. Clicking a trace step slides in Step Details
-// over this panel.
+// (CodeOverlay) from a diff-card row or Cmd+P. Step Details belongs to the Trace tab, docked
+// beside or under its steps (TraceTimeline) — never over another tab.
 //
 // CLOSED UNTIL THERE IS SOMETHING IN IT. Every launch starts with the panel collapsed and the rail
 // left at the window's edge, so the composer has the width; `useRightPanelFollow` is what opens it.
@@ -27,7 +27,6 @@ import { badgeFor, useGithubStore } from "../store/githubStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { fetchHealth } from "../lib/secrets.ts";
 import { isDeployInFlight } from "../types.ts";
-import { StepDetailPanel } from "./StepDetailPanel.tsx";
 import { AgentDetail } from "./AgentDetail.tsx";
 import { useAgentGridStore } from "../store/agentGridStore.ts";
 import { ICON } from "../lib/tokens.ts";
@@ -222,13 +221,11 @@ function BackToAgent({ tab }: { tab: RightTab }) {
 export function RightPanel() {
   const tab = useShownTab();
 
-  // overflow-CLIP, not hidden. Step Details parks itself off the right edge when it is closed
-  // (`translate-x-full`), so 340px of this element's content sits past its right edge. `hidden`
-  // clips that from view but still makes this a scroll container — and a scroll container with
-  // no scrollbar is a trap. StepRow calls scrollIntoView when a step is selected; the browser
-  // found the phantom 340px scrollable and slid the whole column — tabs, header, trace — to the
-  // left, where it stayed, with nothing to scroll it back. `clip` renders identically and
-  // creates no scroll container at all, so there is nothing to scroll.
+  // overflow-CLIP, not hidden. `hidden` clips but still makes this a scroll container — and a
+  // scroll container with no scrollbar is a trap. When Step Details parked itself off the right
+  // edge here, StepRow's scrollIntoView found the phantom width scrollable and slid the whole
+  // column — tabs, header, trace — to the left, where it stayed. `clip` renders identically and
+  // creates no scroll container at all, so nothing that overflows can strand the panel again.
   return (
     <div className="relative flex h-full min-w-0 flex-col overflow-clip bg-bg">
       <BackToAgent tab={tab} />
@@ -246,8 +243,6 @@ export function RightPanel() {
           : <TraceTimeline />}
       </div>
 
-      {/* Step Details slides in over this panel when a step is expanded. */}
-      <StepDetailPanel />
     </div>
   );
 }

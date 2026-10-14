@@ -296,10 +296,11 @@ export function StepRow({
   const selected = useTraceStore((s) => s.selectedStepId === step.id);
   const rowRef = useRef<HTMLDivElement>(null);
 
-  // When selected from elsewhere (a graph-node click, J/K), bring the row into view.
+  // When selected from elsewhere (a graph-node click, J/K), bring the row into view — and again when
+  // its details open, which docks them under a narrow list and can push the row out of it.
   useEffect(() => {
     if (selected) rowRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }, [selected]);
+  }, [selected, expanded]);
 
   const select = (): void => {
     useTraceStore.getState().selectStep(step.id);

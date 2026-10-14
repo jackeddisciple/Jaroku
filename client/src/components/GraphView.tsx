@@ -96,11 +96,8 @@ import { fmtCost, fmtLatency } from "../lib/format.ts";
 import { nodeOutcome, nodeTimings, replayFrames, stepsUpTo, type NodeTiming } from "../lib/graphReplay.ts";
 import { GraphRunStrip, GraphRunStripFolded } from "./GraphRunStrip.tsx";
 
-// How much of this canvas the Step Details overlay covers when it is open. It is drawn over
-// the graph rather than beside it, so this is the one number that tells the framing the right
-// edge is not really the right edge. Kept in step with StepDetailPanel's `w-[380px]`.
-const STEP_PANEL_W = 380;
-// The node inspector, which is an overlay for the same reason. Kept in step with its `w-64`.
+// The node inspector, an overlay over the canvas's right edge. Kept in step with its `w-64`.
+// (Step Details used to cover the canvas as well; it lives in the Trace tab now, beside its steps.)
 const INSPECTOR_W = 256;
 // How much of the canvas's top the toolbar takes: its height and the gap above it.
 const TOOLBAR_H = 44;
@@ -1180,16 +1177,7 @@ export function GraphView() {
   const [view, setView] = useState<{ x: number; y: number; zoom: number } | null>(null);
   const [frame, setFrame] = useState({ width: 0, height: 0 });
 
-  // Kept in a ref as well as in render, so the ResizeObserver below — registered once — fits
-  // against the panel state at the time it fires rather than at the time it was created.
-  const detailOpen = useTraceStore((s) => Boolean(s.expandedStepId));
   const inspectorOpen = selected !== null;
-  // Mirrors StepDetailPanel's `w-[380px] max-w-[85%]` and the inspector's `w-64`, plus a gutter
-  // so the nearest node does not sit flush against the panel's edge.
-  const covered = useMemo(() => {
-    const width = canvasRef.current?.clientWidth ?? 0;
-    return Math.round(detailOpen ? Math.min(STEP_PANEL_W, width * 0.85) + 24 : 0);
-  }, [detailOpen]);
 
   // ── replaying a finished run ────────────────────────────────────────────────
   // While a frame is on screen it decides which node is lit, which edge is hot and which statuses
@@ -1219,8 +1207,8 @@ export function GraphView() {
   // Read by the ResizeObserver below, which is registered once and must frame against what is
   // true when it fires rather than when it was created.
   // `top` is what floats over the canvas's top edge: the toolbar, and the version pill when there is one.
-  const live = useRef<{ covered: number; flow: FlowLayout | null; positions: Positions; strip: boolean; top: number }>({ covered, flow, positions, strip: false, top: TOOLBAR_H });
-  live.current = { covered, flow, positions, strip: stripAvailable, top: TOOLBAR_H + barExtra + pillH };
+  const live = useRef<{ flow: FlowLayout | null; positions: Positions; strip: boolean; top: number }>({ flow, positions, strip: false, top: TOOLBAR_H });
+  live.current = { flow, positions, strip: stripAvailable, top: TOOLBAR_H + barExtra + pillH };
 
   // NOT SHOWN UNTIL IT IS FRAMED. React Flow paints its first frame at 100% from the origin, and
   // the framing lands a frame later — so the graph appeared in the corner and jumped to the middle.
@@ -1230,7 +1218,7 @@ export function GraphView() {
   const frameGraph = () => {
     const el = canvasRef.current;
     const inst = rf.current;
-    const { covered: hidden, flow: laid, positions: at, strip, top } = live.current;
+    const { flow: laid, positions: at, strip, top } = live.current;
     if (!el || !inst || !laid || el.clientWidth === 0) return;
     // A moved arrangement is framed by where its nodes now are, not by the layout's own box.
     const placed = laid.nodes.map((n) => ({ ...n, ...(at[n.id] ?? {}) }));
@@ -1247,7 +1235,6 @@ export function GraphView() {
     const f = frameFor(
       { width: box.maxX - box.minX, height: box.maxY - box.minY },
       { width: el.clientWidth, height: el.clientHeight - top - (strip ? TOOLBAR_H : 0) },
-      hidden,
     );
     inst.setViewport({ x: f.x - box.minX * f.zoom, y: top + f.y - box.minY * f.zoom, zoom: f.zoom });
     setFramed(true);
@@ -1285,7 +1272,7 @@ export function GraphView() {
     if (userMoved.current) return;
     frameGraph();
   // ...and when the version pill comes or goes, or the toolbar wraps, which change how much of the top is covered.
-  }, [topologyKey, covered, pillH, barExtra]);
+  }, [topologyKey, pillH, barExtra]);
 
   useEffect(() => {
     const el = canvasRef.current;
@@ -1325,8 +1312,8 @@ export function GraphView() {
     const top = Math.min(...placed.map((n) => n.y)) * view.zoom + view.y;
     const bottom = Math.max(...placed.map((n) => n.y + n.h)) * view.zoom + view.y;
     const slack = 8;
-    return left < -slack || top < -slack || right > frame.width - covered + slack || bottom > frame.height + slack;
-  }, [flow, view, frame, positions, covered]);
+    return left < -slack || top < -slack || right > frame.width + slack || bottom > frame.height + slack;
+  }, [flow, view, frame, positions]);
   const showMinimap = !!flow && !inspectorOpen && offCanvas;
 
   // THE LAST FRAME IS THE RUN AS IT ENDED, not one more step of it: the last node done rather than
