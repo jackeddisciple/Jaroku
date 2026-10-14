@@ -124,6 +124,27 @@ await store.copyRunPrefix(A, runA, branchId, 1, 1);
 check((await store.stepsForRun(A, branchId)).length === 2, "a branch inside the workspace still works");
 check((await store.listRuns(B)).length === 0, "...and is not visible from the other workspace");
 
+console.log("\na continued run ends as the whole run");
+{
+  // Paused after two steps, resumed for a third: the resumed process's run_end is its own.
+  const resumed = randomUUID();
+  const firstStart = "2026-10-12T15:40:16.000Z";
+  await store.upsertRun(A, { ...run(resumed), started_at: firstStart });
+  for (const seq of [0, 1, 2]) await store.insertStep(A, step(resumed, seq));
+  const whole = await store.wholeRun(A, resumed);
+  check(whole?.started_at === firstStart, `its start is the first one written (${whole?.started_at})`);
+  check(whole?.tokens === 30 && Math.abs((whole?.cost ?? 0) - 0.003) < 1e-9, `its totals are every segment's (${whole?.tokens}, ${whole?.cost})`);
+  // A branch copied seq 0..1 from runA, which runA paid for; its own step is seq 2.
+  await store.insertStep(A, step(branchId, 2));
+  const branch = await store.wholeRun(A, branchId);
+  check(branch?.tokens === 10, `a branch counts only what it ran, not its parent's prefix (${branch?.tokens})`);
+  check((await store.wholeRun(B, resumed)) === undefined, "...and another workspace reads nothing");
+  const bare = randomUUID();
+  await store.upsertRun(A, run(bare));
+  const none = await store.wholeRun(A, bare);
+  check(none?.tokens === 0 && none?.cost === 0, "a run with no steps yet totals zero, not null");
+}
+
 console.log("\nthe storage column stays in storage");
 
 // The one documented exception to the frozen schema. `SELECT *` would put it into the object

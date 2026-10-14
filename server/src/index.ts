@@ -18,7 +18,7 @@ import { RunPool, type RunPoolEvents } from "./runPool.ts";
 import { TraceStore } from "./store.ts";
 // The one answer to "which run does this event claim to be about" — see the ingest boundary's
 // reconciliation of the body's id against the slot that produced it.
-import { runIdOf } from "./types.ts";
+import { runIdOf, type TraceEvent } from "./types.ts";
 import { migrate } from "./db/migrate.ts";
 import { ActivityStore, type MemberPulse, type PersonalSummary } from "./activity/activityStore.ts";
 import { ActivityCache, activityKey } from "./activity/cache.ts";
@@ -11491,6 +11491,26 @@ async function stampLateStep(ctx: TenantContext, runId: string, seq: number): Pr
   const checkpoint = runBoundaries.checkpointFor(runId, seq);
   if (checkpoint) await store.stampStep(ctx, runId, seq, checkpoint);
 }
+/**
+ * The runs whose next `run_end` comes from a CONTINUATION — a resumed run's new process, or a branch's
+ * — and so speaks for one segment rather than the run. Added when the process starts (`resumeRun`,
+ * `branchRun`), taken when its `run_end` lands.
+ */
+const continuedRuns = new Set<string>();
+/**
+ * Write a run's row from its event — and a continuation's `run_end` as the WHOLE run, first.
+ *
+ * The event is corrected in place, so what the relay broadcasts after it is what was stored: the
+ * app merged the segment's own `started_at` over the run's, and a run paused once said it began at
+ * its resume. See `TraceStore.wholeRun` for the totals.
+ */
+async function upsertRunWhole(ctx: TenantContext, runId: string, event: Extract<TraceEvent, { run: unknown }>): Promise<void> {
+  if (event.kind === "run_end" && continuedRuns.delete(runId)) {
+    const whole = await store.wholeRun(ctx, runId);
+    if (whole) Object.assign(event.run, whole);
+  }
+  await store.upsertRun(ctx, event.run);
+}
 function ingest(work: () => Promise<void>): void {
   ingestChain = ingestChain.then(work, work).catch((err) => {
     console.error("[store] failed to persist event:", (err as Error)?.message ?? String(err));
@@ -11566,7 +11586,7 @@ onBothPools("event", ({ runId, event }) => {
     // better than the client showing nothing and no one knowing why.
     try {
       if (event.kind === "run_start" || event.kind === "run_end") {
-        await store.upsertRun(runCtx, event.run);
+        await upsertRunWhole(runCtx, runId, event);
         // AND THE COCKPIT'S ROW, AFTER THE RUN ROW AND ON THE SAME CHAIN. §6.5: from the 202
         // onwards the trace drives the state. After, because the lifecycle reads the run's steps
         // to find what the agent actually said, and a read that overtook the write would find
@@ -13275,6 +13295,7 @@ async function resumeRun(ctx: TenantContext, runId: string): Promise<void> {
     return;
   }
   pausedRuns.delete(runId);
+  continuedRuns.add(runId);
   // Announced only once the process is genuinely going — a "resumed" for a run that never
   // restarted leaves the UI showing a live run against a dead id.
   relay.broadcastDebug(ctx, { type: "resumed", runId, seqOffset });
@@ -13410,6 +13431,7 @@ async function branchRun(
     });
     return;
   }
+  continuedRuns.add(branchId);
   console.log(`[debug] branching ${fromRunId} @seq ${seqHigh} -> ${branchId} (agent ${parent.agent_id})`);
   void relay.broadcastHistory(); // surface the new branch run in history immediately
   relay.broadcastDebug(ctx, { type: "branched", parentRunId: fromRunId, branchId, fromSeq: seqHigh });

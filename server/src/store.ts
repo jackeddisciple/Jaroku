@@ -265,6 +265,30 @@ export class TraceStore {
     )) as Run | undefined;
   }
 
+  /**
+   * A continued run's start and its own totals, for the `run_end` its latest process sends.
+   *
+   * A RESUMED RUN IS SEVERAL PROCESSES AND ONE RUN. Each segment's runner builds a fresh `Run`, so its
+   * `run_end` carried the moment THAT process started and only THAT segment's tokens and cost — and
+   * `upsertRun` wrote the segment's figures over the run's, so a run paused once reported half of
+   * what it spent. The start comes from the row (the first one written), and the totals from the
+   * run's own steps: every segment's, and for a branch none of the prefix it copied from its parent,
+   * which that run already paid for (seq ≤ `branch_from_seq`).
+   */
+  async wholeRun(ctx: TenantContext, runId: string): Promise<Pick<Run, "started_at" | "tokens" | "cost"> | undefined> {
+    const row = await this.q(ctx).get<{ started_at: string; branch_from_seq: unknown }>(
+      `SELECT started_at, branch_from_seq FROM runs WHERE id = ? AND workspace_id = ?`,
+      [runId, ctx.workspaceId],
+    );
+    if (!row) return undefined;
+    const sums = await this.q(ctx).get<{ tokens: unknown; cost: unknown }>(
+      `SELECT SUM(tokens) AS tokens, SUM(cost) AS cost FROM steps
+        WHERE run_id = ? AND workspace_id = ? AND seq > ?`,
+      [runId, ctx.workspaceId, asIntOrNull(row.branch_from_seq) ?? -1],
+    );
+    return { started_at: row.started_at, tokens: asIntOrNull(sums?.tokens) ?? 0, cost: Number(sums?.cost ?? 0) || 0 };
+  }
+
   // Store-only status flip (e.g. 'running' -> 'paused' when a run halts at a boundary, or back to
   // 'running' on resume). NOT a frozen-event change — no run_end/run_start is emitted for a pause.
   async setRunStatus(ctx: TenantContext, runId: string, status: string): Promise<void> {
