@@ -297,6 +297,21 @@ console.log("\nhow long a run has taken");
   check("unreadable times say nothing", runElapsed({ ...paused, started_at: "nope" }, steps, later) === null);
 }
 
+console.log("\na live run's delay, measured from its events");
+{
+  const t = useTraceStore.getState();
+  const base = { id: "lagged", agent_id: "x", provider: "fake", model: "m", cost: 0, tokens: 0, error: null, status: "running" as const, ended_at: null };
+  // Its start arrived 3s late (it sat in the runner's batch), its first step 0.7s late.
+  t.applyEvent({ kind: "run_start", schema_version: 1, run: { ...base, started_at: new Date(Date.now() - 3000).toISOString() } });
+  t.applyEvent({ kind: "step", schema_version: 1, step: mk({ id: "lag1", seq: 0, run_id: "lagged", started_at: new Date(Date.now() - 700).toISOString() }) });
+  const lag = useTraceStore.getState().lagByRun["lagged"] ?? NaN;
+  check("the smallest delay is kept, not the latest", lag >= 690 && lag < 1500, String(lag));
+  t.applyEvent({ kind: "step", schema_version: 1, step: mk({ id: "lag2", seq: 1, run_id: "lagged", started_at: new Date(Date.now() - 5000).toISOString() }) });
+  check("...so a step that waited in a batch does not raise it", (useTraceStore.getState().lagByRun["lagged"] ?? NaN) === lag);
+  for (let i = 0; i < 80; i++) t.applyEvent({ kind: "run_start", schema_version: 1, run: { ...base, id: `many-${i}`, started_at: new Date().toISOString() } });
+  check("it is bounded", Object.keys(useTraceStore.getState().lagByRun).length === 50);
+}
+
 console.log("\nwhat Copy output copies");
 {
   const reply = mk({ id: "c", seq: 9, type: "llm_call", output: [{ content: '{"requirement_results": {"5 years of Python": true}}' }] });

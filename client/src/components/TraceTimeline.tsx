@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CANCELLED_BY_USER, orderedSteps, useTraceStore } from "../store/traceStore.ts";
 import type { RunSummary, Step } from "../types.ts";
 import { useUiStore } from "../store/uiStore.ts";
@@ -14,17 +14,7 @@ import { useBuildStore } from "../store/buildStore.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { fmtDuration } from "../lib/format.ts";
 import { ICON } from "../lib/tokens.ts";
-
-/** Re-render on an interval while `active`. */
-function useTick(active: boolean, ms: number): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!active) return;
-    const id = setInterval(() => setNow(Date.now()), ms);
-    return () => clearInterval(id);
-  }, [active, ms]);
-  return now;
-}
+import { useRunClock } from "../lib/useRunClock.ts";
 
 /** A step's place in the run's span, or null when either has no readable times. */
 function barFor(step: Step, span: TimeWindow | null): BarPlace | null {
@@ -75,7 +65,8 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
   const filter = useTraceStore((s) => s.stepFilter);
   const query = useTraceStore((s) => s.stepQuery);
   // A live run's span grows, so its bars are re-placed once a second; a finished one never moves.
-  const now = useTick(run?.status === "running", 1000);
+  // On the run's own clock (useRunClock), so the span ends where the run has got to.
+  const now = useRunClock(run?.id, run?.status === "running", 1000);
   const span = useMemo(() => (run ? runWindow(run, steps, now) : null), [run, steps, now]);
   const collapsed = useTraceStore((s) => s.collapsedStepIds);
   // MEASURED ON A BOX THAT IS ALWAYS THERE. The tree unmounts while "No steps match" shows, and an

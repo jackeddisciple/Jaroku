@@ -48,6 +48,12 @@ interface TraceState {
    */
   nextByRun: Record<string, string[]>;
   /**
+   * Per live run, the smallest delay any of its events has arrived with: when it reached this app,
+   * less when the runner stamped it. What `useRunClock` takes off `now` so a live run's figures count
+   * on its own clock. Live events only — a run loaded from history has nothing to measure.
+   */
+  lagByRun: Record<string, number>;
+  /**
    * Whether the trace's Final answer section is open. One choice for every run, kept for the session
    * and never written to storage: somebody who folded it away to read steps wants the next run's
    * answer folded too, and a reload is a fair moment to show it again.
@@ -96,8 +102,22 @@ interface TraceState {
 }
 
 const LOG_CAP = 200;
-/** How many runs' next nodes are kept — see `setNext`. */
+/** How many runs' next nodes are kept — see `setNext`. The same bound holds `lagByRun`. */
 const NEXT_KEPT = 50;
+
+/**
+ * `lagByRun` with an event's delay folded in: the smaller of what it was and this one's. Bounded like
+ * `nextByRun` — the latest run is kept at the end, and the oldest go.
+ */
+function withLag(lagByRun: Record<string, number>, runId: string, stampedAt: string): Record<string, number> {
+  const at = Date.parse(stampedAt);
+  if (!Number.isFinite(at)) return lagByRun;
+  const lag = Date.now() - at;
+  const known = lagByRun[runId];
+  if (known !== undefined && known <= lag) return lagByRun;
+  const others = Object.entries(lagByRun).filter(([id]) => id !== runId).slice(-(NEXT_KEPT - 1));
+  return { ...Object.fromEntries(others), [runId]: lag };
+}
 
 /**
  * The reason the server writes on a run somebody stopped — its `TraceStore.CANCELLED_BY_USER`, held to
@@ -142,6 +162,7 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   connection: "connecting",
   logs: [],
   nextByRun: {},
+  lagByRun: {},
   answerOpen: true,
   collapsedStepIds: {},
   stepFilter: "all",
@@ -170,6 +191,7 @@ export const useTraceStore = create<TraceState>((set, get) => ({
           // A new run's steps don't exist yet — drop the stale selection, filter and search.
           ...aboutAnotherRun(state, run.id),
           activeRunId: run.id, // auto-focus the run that just started
+          lagByRun: withLag(state.lagByRun, run.id, run.started_at),
         };
       }
       if (event.kind === "run_end") {
@@ -191,7 +213,9 @@ export const useTraceStore = create<TraceState>((set, get) => ({
       const runs = summary
         ? { ...state.runs, [step.run_id]: { ...summary, step_count: Object.keys(nextBucket).length } }
         : state.runs;
-      return { stepsByRun: { ...state.stepsByRun, [step.run_id]: nextBucket }, runs };
+      // A step is stamped as it ends (`started_at` is its end — see traceView), so that is the
+      // moment its delay is measured from.
+      return { stepsByRun: { ...state.stepsByRun, [step.run_id]: nextBucket }, runs, lagByRun: withLag(state.lagByRun, step.run_id, step.started_at) };
     }),
 
   applyRunSteps: (runId, steps) =>

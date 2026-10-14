@@ -9,24 +9,14 @@
 // carry, so nothing is counted twice and the figure moves as the run does. What changed is that an
 // unmeasured figure says so: a run whose calls were never priced shows "—", not `$0.00`.
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { fmtCost, fmtDuration } from "../lib/format.ts";
 import { runElapsed, traceTotals } from "../lib/traceView.ts";
+import { useRunClock } from "../lib/useRunClock.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { ICON } from "../lib/tokens.ts";
 import type { RunSummary, Step } from "../types.ts";
-
-/** Re-render on an interval while `active` (drives the live duration). */
-function useTick(active: boolean, ms = 200): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!active) return;
-    const id = setInterval(() => setNow(Date.now()), ms);
-    return () => clearInterval(id);
-  }, [active, ms]);
-  return now;
-}
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
@@ -75,7 +65,8 @@ export function TraceMetrics({ run, steps }: { run: RunSummary; steps: readonly 
     return () => ro.disconnect();
   }, []);
   const live = run.status === "running" || run.status === "paused";
-  const now = useTick(run.status === "running");
+  // The live duration, on the run's own clock: see useRunClock for why not `Date.now()`.
+  const now = useRunClock(run.id, run.status === "running", 200);
   const totals = useMemo(() => traceTotals(steps), [steps]);
 
   const elapsed = runElapsed(run, steps, now);
