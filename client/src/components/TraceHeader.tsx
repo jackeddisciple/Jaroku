@@ -129,11 +129,14 @@ export function TraceHeader({ run }: { run: RunSummary | undefined }) {
       {/* WHOSE RUN AND WHEN — one line that gives up its tail before it wraps. The model is not
           here (the product owner's call): it is in a step's details, beside the figures it explains. */}
       <div className="mt-1 flex min-w-0 items-baseline gap-1.5 text-tiny text-muted">
+        {/* THE NAME GIVES WAY LAST. Both it and the branch note could shrink, equally, so at 330px
+            the name read "Liv…" while "branch of bec57d6c fro…" kept its room. The note now shrinks
+            a thousand times faster — down to its mark — before the name loses a letter. */}
         <span className="min-w-0 shrink truncate text-label text-ink" title={agentName ?? run.agent_id}>{agentName}</span>
         <span className="shrink-0" title={run.id}>· {shortId(run.id)}</span>
         <span className="shrink-0" title={absTime(run.started_at)}>· {relTime(run.started_at)}</span>
         {run.parent_run_id && (
-          <span className="flex min-w-0 shrink items-center gap-1 truncate" title={`Branched from run ${run.parent_run_id}`}>
+          <span className="flex min-w-[1.75rem] shrink-[1000] items-center gap-1 truncate" title={`Branched from run ${run.parent_run_id}`}>
             {/* The branch mark in green, the product owner's call on 2026-10-12; its words stay muted. */}
             · <span aria-hidden className="shrink-0 text-ok"><Icon.agents.fork size={ICON.xs} /></span>
             <span className="truncate">
