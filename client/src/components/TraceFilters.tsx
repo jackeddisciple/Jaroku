@@ -20,7 +20,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { filterCounts, type StepFilter } from "../lib/traceView.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { ICON } from "../lib/tokens.ts";
-import { useTraceStore } from "../store/traceStore.ts";
+import { useTraceStore, visibleTraceRows } from "../store/traceStore.ts";
+import { useUiStore } from "../store/uiStore.ts";
+import { insideKeyOwner, paneOwnsBareKey } from "../lib/bareKeys.ts";
+import { keyHint } from "../lib/modKey.ts";
 import type { Step } from "../types.ts";
 import { IconButton } from "./IconButton.tsx";
 import { Segmented, type SegmentOption } from "./Segmented.tsx";
@@ -71,6 +74,41 @@ export function TraceFilters({ steps }: { steps: readonly Step[] }) {
     if (refocus) requestAnimationFrame(() => mark.current?.querySelector("button")?.focus());
   };
 
+  // ⌘F AND `/` OPEN IT, FROM ANYWHERE ON THE THREE-PANE VIEW while the steps are on screen — the two
+  // keys a list's search answers to elsewhere. `/` only when it is not being typed (the composer, a
+  // field), and neither while a full-screen view or the palette owns the keys, or inside a region that
+  // owns its own (the graph canvas has its own ⌘F, and is not on screen with this).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      const ui = useUiStore.getState();
+      if (ui.navView !== null || ui.paletteOpen || insideKeyOwner(e.target)) return;
+      const find = (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "f";
+      const slash = e.key === "/" && paneOwnsBareKey(e, { navView: ui.navView, paletteOpen: ui.paletteOpen });
+      if (!find && !slash) return;
+      e.preventDefault();
+      setOpen(true);
+      requestAnimationFrame(() => {
+        input.current?.focus();
+        input.current?.select();
+      });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  /**
+   * Enter or ↓ in the field goes to the first step that matched — not a row kept only as context —
+   * selected and focused, so the arrows carry on through the results from there.
+   */
+  const toFirstMatch = (): void => {
+    const first = visibleTraceRows(useTraceStore.getState()).find((r) => !r.context);
+    if (!first) return;
+    useTraceStore.getState().selectStep(first.step.id);
+    useUiStore.getState().setSelectedNodeId(null);
+    requestAnimationFrame(() =>
+      document.querySelector<HTMLElement>(`[role="treeitem"][data-step-id="${first.step.id}"]`)?.focus());
+  };
+
   const options: SegmentOption<StepFilter>[] = KINDS.map((k) => ({
     value: k.value,
     text: k.text,
@@ -106,6 +144,10 @@ export function TraceFilters({ steps }: { steps: readonly Step[] }) {
               // The input's keys are its own: Escape clears the search rather than closing the drawer.
               e.stopPropagation();
               if (e.key === "Escape") fold(true);
+              else if (e.key === "Enter" || e.key === "ArrowDown") {
+                e.preventDefault();
+                toFirstMatch();
+              }
             }}
             placeholder="Search steps…"
             aria-label="Search steps by name, id, error or payload"
@@ -131,7 +173,7 @@ export function TraceFilters({ steps }: { steps: readonly Step[] }) {
         </div>
       ) : (
         <span ref={mark} className="ml-auto shrink-0">
-          <IconButton icon={Icon.trace.search} label="Search steps" onClick={() => setOpen(true)} />
+          <IconButton icon={Icon.trace.search} label={`Search steps (${keyHint("⌘F")} or /)`} onClick={() => setOpen(true)} />
         </span>
       )}
     </div>
