@@ -25,7 +25,7 @@ import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { matchPlaces, stepCategory, stepOutputText, stepProvider, type StepCategory, type VisibleRow } from "../lib/traceView.ts";
 import { BRAND_COLOR, ProviderMark, hasProviderMark } from "../lib/icons.tsx";
 import { kindWord, type StepMark } from "./traceMarks.ts";
-import { ICON, STATUS, STEP_TYPE, SURFACE, TEXT } from "../lib/tokens.ts";
+import { ICON, METRIC, STATUS, STEP_TYPE, SURFACE, TEXT } from "../lib/tokens.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { agentMcpToolNames } from "../store/mcpStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
@@ -130,6 +130,33 @@ export function StepTile({
  * in the details), then tokens; the duration stays, and Details floats instead of holding a slot.
  */
 export type RowTier = "full" | "wide" | "medium" | "narrow";
+
+/** The heaviest step's figures in the run — what each row's mini bars are a share of. */
+export interface MetricScale {
+  tokens: number;
+  cost: number;
+  time: number;
+}
+
+/**
+ * A FIGURE'S SHARE, DRAWN (2026-10-14): a hairline bar under the number, as long as this step's share of
+ * the run's heaviest, in the figure's own colour (METRIC) — so the heavy steps stand out down the column
+ * before a digit is read. Right-aligned under the right-aligned number; nothing for an unknown figure.
+ */
+function MiniBar({ value, max, colour }: { value: number | null; max: number; colour: string }) {
+  // Nothing for an unknown figure or a zero: a stub under "0ms" would say there was something.
+  if (value == null || !(value > 0) || !(max > 0)) return null;
+  const share = Math.min(1, Math.max(0, value / max));
+  // Under a hundredth of the heaviest is nothing worth drawing — a 0.05ms router would be a stub.
+  if (share < 0.01) return null;
+  return (
+    <span
+      aria-hidden
+      className="pointer-events-none absolute -bottom-1 right-0 h-0.5 rounded-full"
+      style={{ width: `max(2px, ${share * 100}%)`, background: colour, opacity: 0.75 }}
+    />
+  );
+}
 
 /** Where a step's bar sits in the waterfall, as fractions of the run's span. */
 export interface BarPlace {
@@ -288,6 +315,7 @@ export function StepRow({
   provider,
   mark,
   inherited = false,
+  scale,
 }: {
   row: VisibleRow;
   tabbable: boolean;
@@ -302,6 +330,8 @@ export function StepRow({
   mark?: StepMark;
   /** Copied into this branch from the run it branched from, not run by it (`isInherited`). */
   inherited?: boolean;
+  /** The run's heaviest figures, for the mini bars under this row's own. */
+  scale?: MetricScale;
 }) {
   const { step } = row;
   const group = row.childIds.length > 0;
@@ -470,7 +500,7 @@ export function StepRow({
             empty cell keeps its width, so the columns stay columns. The token mark says what it is. */}
         {show.tokens && (
           <span
-            className={`${COL.tokens} flex items-center justify-end gap-1`}
+            className={`${COL.tokens} relative flex items-center justify-end gap-1`}
             // THE UNIT, IN WORDS, wherever the mark beside the figure is not read: "1,572 tokens" on
             // hover and to a screen reader, never a bare number beside a duration.
             title={tokens == null ? undefined : `${tokens.toLocaleString()} tokens${fold ? ` across the ${fold.steps} steps inside` : ""}`}
@@ -482,16 +512,19 @@ export function StepRow({
                 <span className="sr-only"> tokens</span>
               </>
             )}
+            {scale && <MiniBar value={tokens} max={scale.tokens} colour={METRIC.tokens} />}
           </span>
         )}
         {show.cost && (
-          <span className={`${COL.cost} truncate text-right`} title={cost != null && fold ? `Across the ${fold.steps} steps inside` : undefined}>
-            {cost == null ? "" : fmtCost(cost)}
+          <span className={`${COL.cost} relative text-right`} title={cost != null && fold ? `Across the ${fold.steps} steps inside` : undefined}>
+            <span className="block truncate">{cost == null ? "" : fmtCost(cost)}</span>
+            {scale && <MiniBar value={cost} max={scale.cost} colour={METRIC.cost} />}
           </span>
         )}
-        <span className={`${COL.time} flex items-center justify-end gap-1`} title={`Took ${fmtDuration(step.latency_ms)}`}>
+        <span className={`${COL.time} relative flex items-center justify-end gap-1`} title={`Took ${fmtDuration(step.latency_ms)}`}>
           <span aria-hidden className="shrink-0 text-faint"><Icon.trace.time size={ICON.xs} /></span>
           <span className="truncate">{fmtDuration(step.latency_ms)}</span>
+          {scale && <MiniBar value={Number.isFinite(step.latency_ms) ? step.latency_ms : null} max={scale.time} colour={METRIC.time} />}
         </span>
         {show.timeline && <Waterfall step={step} bar={bar} colour={stepColour(step, provider, mark)} inherited={inherited} />}
       </span>

@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CANCELLED_BY_USER, jumpToError, orderedSteps, treeSteps, useTraceStore } from "../store/traceStore.ts";
 import type { RunSummary, Step } from "../types.ts";
 import { useUiStore } from "../store/uiStore.ts";
-import { COL, StepRow, columnsFor, tileCentre, type BarPlace, type FoldSummary, type RowTier } from "./StepRow.tsx";
+import { COL, StepRow, columnsFor, tileCentre, type BarPlace, type FoldSummary, type MetricScale, type RowTier } from "./StepRow.tsx";
 import { buildTraceTree, descendantSteps, isInherited, ownSteps, runWindow, stepWindow, traceTotals, visibleRows, type TimeWindow, type VisibleRow } from "../lib/traceView.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { TraceHeader } from "./TraceHeader.tsx";
@@ -115,6 +115,16 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
     }
     return out;
   }, [rows, tree]);
+  // THE RUN'S HEAVIEST FIGURES, which every row's mini bars are a share of (a run's own steps only: a
+  // branch's inherited ones were its parent's work).
+  const scale = useMemo<MetricScale>(() => {
+    const own = ownSteps(run, steps);
+    return {
+      tokens: Math.max(0, ...own.map((st) => st.tokens ?? 0)),
+      cost: Math.max(0, ...own.map((st) => st.cost ?? 0)),
+      time: Math.max(0, ...own.map((st) => (Number.isFinite(st.latency_ms) ? st.latency_ms : 0))),
+    };
+  }, [run, steps]);
   const tabbableId = rows.some((r) => r.step.id === selectedStepId) ? selectedStepId : (rows[0]?.step.id ?? null);
   // A top-level row starts a card and takes every row after it until the next top-level one.
   const groups = useMemo(() => {
@@ -231,6 +241,7 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
               inherited={isInherited(r.step, run)}
               provider={run?.provider}
               mark={marks.get(r.step.name)}
+              scale={scale}
             />
           ))}
         </div>

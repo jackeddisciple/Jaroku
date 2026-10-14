@@ -435,6 +435,17 @@ export const CODE = {
   comment: "#517541",
 } as const;
 
+/**
+ * METRIC — the trace's three figures as colours, for the mini bars that show each step's share of
+ * the run's heaviest (the product owner's call, 2026-10-14): tokens in the info blue, cost in the
+ * success green, time in the violet. Values the palette already has, given a second job.
+ */
+export const METRIC = {
+  tokens: SEMANTIC.info,
+  cost: SEMANTIC.success,
+  time: ACCENT.bespoke,
+} as const;
+
 /** Tailwind class equivalents, for the common case where a class is what's wanted. */
 export const SPACE_CLASS = {
   tight: "mt-2",
