@@ -544,6 +544,9 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   renewSession: "agent:read",
   // reads
   loadRun: "agent:read",
+  // A PERSON'S OWN MARK ON A STEP THEY CAN READ — viewed, pinned (migration 085). It changes nothing
+  // anybody else sees, so it needs no more than reading the trace does.
+  setStepMark: "agent:read",
   // A bigger window on the same list the connect snapshot already sends. See LoadHistoryCommand.
   loadHistory: "agent:read",
   listAgents: "agent:read",

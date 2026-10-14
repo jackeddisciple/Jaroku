@@ -31,7 +31,7 @@ import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { buildTraceTree, descendantSteps, isInherited, stepWindow, traceTotals } from "../lib/traceView.ts";
 import { ICON, STEP_TYPE, TYPE } from "../lib/tokens.ts";
 import { showStepOnGraph } from "../lib/runActions.ts";
-import { sendEdit, sendExplain } from "../lib/socket.ts";
+import { markTraceStep, sendEdit, sendExplain } from "../lib/socket.ts";
 import { fixPrompt } from "../lib/intent.ts";
 import type { RunSummary, Step } from "../types.ts";
 import { Chip } from "./Chip.tsx";
@@ -41,7 +41,7 @@ import { ErrorView, InputTab, OutputTab, PromptTab, RawTab, StateTabBody, hasSta
 import { tabBtn } from "./buttons.ts";
 import { RerunFields, RerunFooter, useRerun } from "./StateBranchEditor.tsx";
 import { McpBadge } from "./McpBadge.tsx";
-import { StepTile } from "./StepRow.tsx";
+import { StepTile, ViewedToggle } from "./StepRow.tsx";
 import { Metric } from "./TraceMetrics.tsx";
 import { graphLook, kindWord, traceMarks } from "./traceMarks.ts";
 import { useGraphStore } from "../store/graphStore.ts";
@@ -365,6 +365,8 @@ export function StepDetailPanel({ dock }: { dock: StepDetailDock }) {
   // THE RE-RUN, for the editor in Overview and the buttons pinned under every tab: one set of drafts,
   // this step's (`useRerun` starts them again when the drawer moves to another step).
   const rerun = useRerun(step);
+  // The reader's own marks on this step (migration 085): pinned, viewed.
+  const mark = useTraceStore((s) => (s.activeRunId && step ? s.marksByRun[s.activeRunId]?.[step.id] : undefined));
   // The tabs this step has something for: Prompt only where a model was asked, State diff only where
   // state was recorded. A tab chosen on another step that this one lacks shows Overview, and the
   // choice is kept for the next step that has it.
@@ -394,9 +396,11 @@ export function StepDetailPanel({ dock }: { dock: StepDetailDock }) {
           {/* THE HEADER STAYS PUT (it sits outside the scroller): the step's name, where it is among
               the steps — "3 of 9" between the arrows — and the tabs, while its payload scrolls. */}
           <div className={`shrink-0 border-b border-hair px-4 ${dock === "bottom" ? "pt-0" : "pt-2"}`}>
-            <div className="flex h-9 items-center">
-              <span className={TYPE.panelLabel}>Step details</span>
-              <span className="ml-auto flex items-center">
+            <div className="flex h-9 min-w-0 items-center gap-2">
+              {/* BESIDE THE STEPS THERE IS NO ROOM FOR THE WORDS as well as the step's controls, and the
+                  step's own name heads the panel a line below; under them, there is. */}
+              {dock === "bottom" && <span className={`${TYPE.panelLabel} min-w-0 truncate`}>Step details</span>}
+              <span className="ml-auto flex shrink-0 items-center">
                 <IconButton
                   icon={Icon.trace.prevStep}
                   label="Previous step"
@@ -404,7 +408,7 @@ export function StepDetailPanel({ dock }: { dock: StepDetailDock }) {
                   onClick={() => go(-1)}
                 />
                 {position >= 0 && (
-                  <span className="px-0.5 text-tiny tabular-nums text-faint" title="This step's place among the steps shown">
+                  <span className="whitespace-nowrap px-0.5 text-tiny tabular-nums text-faint" title="This step's place among the steps shown">
                     {position + 1} of {rows.length}
                   </span>
                 )}
@@ -419,6 +423,15 @@ export function StepDetailPanel({ dock }: { dock: StepDetailDock }) {
                   label="Show this step on the graph"
                   onClick={() => showStepOnGraph(step.id)}
                 />
+                {run && (
+                  <IconButton
+                    icon={Icon.trace.pinStep}
+                    label={mark?.pinned ? "Unpin this step" : "Pin this step"}
+                    active={mark?.pinned === true}
+                    onClick={() => markTraceStep(run.id, step.id, "pinned", !mark?.pinned)}
+                  />
+                )}
+                {run && <ViewedToggle runId={run.id} step={step} viewed={mark?.viewed === true} />}
                 <IconButton icon={Icon.trace.closeDetails} label="Close step details" onClick={close} />
               </span>
             </div>

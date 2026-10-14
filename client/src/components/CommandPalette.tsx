@@ -8,7 +8,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Command } from "cmdk";
-import { jumpToError, useTraceStore, visibleTraceRows } from "../store/traceStore.ts";
+import { jumpToError, jumpToPinned, useTraceStore, visibleTraceRows } from "../store/traceStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { isRunnable, runProviders, useProviderStore } from "../store/providerStore.ts";
@@ -17,7 +17,7 @@ import { Truncate } from "./Truncate.tsx";
 import { chipClass } from "./Chip.tsx";
 import {
   sendCreateThread, sendListAgentGrid, sendListAgents, sendListProviders, sendListThreads,
-  sendListWork, sendRun,
+  markTraceStep, sendListWork, sendRun,
 } from "../lib/socket.ts";
 import { useThreadStore } from "../store/threadStore.ts";
 import { useAgentGridStore } from "../store/agentGridStore.ts";
@@ -187,6 +187,19 @@ export function CommandPalette() {
       // E AND SHIFT+E WALK THE FAILURES (2026-10-14), as J and K walk every step.
       if (e.key === "e" || e.key === "E") {
         if (jumpToError(e.shiftKey ? -1 : 1)) e.preventDefault();
+        return;
+      }
+      // P AND SHIFT+P WALK THE PINNED STEPS, and V marks the selected one viewed, or not (2026-10-14).
+      if (e.key === "p" || e.key === "P") {
+        if (jumpToPinned(e.shiftKey ? -1 : 1)) e.preventDefault();
+        return;
+      }
+      if (e.key === "v" || e.key === "V") {
+        const st = useTraceStore.getState();
+        if (st.activeRunId && st.selectedStepId) {
+          e.preventDefault();
+          markTraceStep(st.activeRunId, st.selectedStepId, "viewed", !st.marksByRun[st.activeRunId]?.[st.selectedStepId]?.viewed);
+        }
         return;
       }
       if (e.key === "j" || e.key === "J") { e.preventDefault(); moveStep(1); }

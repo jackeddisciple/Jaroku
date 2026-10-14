@@ -411,6 +411,7 @@ function LiveTail({ run, steps, span, tier, waiting = [], marks }: {
           </span>
         )}
       </span>
+      <span className={`${COL.viewed} shrink-0`} />
       {show.actions && <span className={`${COL.actions} shrink-0`} />}
     </div>
     {inside.length > 0 && (

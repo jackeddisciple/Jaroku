@@ -50,7 +50,7 @@ import {
 import type {
   ClientCommand, EvalTarget, ExplainSubject, GithubAttachment, GithubHunkSelection,
   GithubProviderPolicy, GithubRestackStep, InboxAction, McpConfirmVerdict, McpImpact,
-  RubricCriterion, ServerMessage, SnoozeDuration,
+  RubricCriterion, ServerMessage, SnoozeDuration, StepMarkKind,
 } from "../types.ts";
 
 const RECONNECT_MS = 1000;
@@ -211,6 +211,10 @@ function dispatch(msg: ServerMessage): void {
       break;
     case "runSteps":
       s.applyRunSteps(msg.runId, msg.steps, msg.eval);
+      if (msg.marks) s.applyStepMarks(msg.runId, msg.marks);
+      break;
+    case "stepMarks":
+      s.applyStepMarks(msg.runId, msg.marks);
       break;
     case "log":
       s.addLog({ level: msg.level, text: msg.text });
@@ -1306,6 +1310,15 @@ export function sendRunAgain(runId: string, agentId: string): void {
  */
 export function sendLoadHistory(limit: number): void {
   send({ cmd: "loadHistory", limit });
+}
+
+/**
+ * Mark a step viewed or pinned, or clear it, for the person signed in: at once in the store, then on
+ * the server, whose answer replaces it (`stepMarks`).
+ */
+export function markTraceStep(runId: string, stepId: string, mark: StepMarkKind, on: boolean): void {
+  useTraceStore.getState().markStep(runId, stepId, mark, on);
+  send({ cmd: "setStepMark", runId, stepId, mark, on });
 }
 
 export function sendLoadRun(runId: string): void {

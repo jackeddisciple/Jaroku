@@ -193,6 +193,9 @@ export const EXPORTED_TABLES = [
   "turn_notes",
   "turn_pins",
   "turn_feedback",
+  // A person's viewed and pinned steps (migration 085) — per-user, like pins, and for the same
+  // reason: a team leaving with their traces leaves with their own review of them.
+  "trace_step_marks",
   // WHAT NEEDED SOMEBODY, AND WHEN IT STOPPED. An inbox item is the workspace's own operational
   // record — which credential was missing, which deploy failed, which agent was drifting, and how
   // long each of those was true before it was fixed. It answers "when did this start going wrong"

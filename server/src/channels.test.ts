@@ -76,6 +76,7 @@ const ALL_CHANNELS = [...new Set([...emitted, ...answered])].sort();
 const TENANT_CHANNELS = new Set([
   "history",    // run rows
   "runSteps",   // step payloads — email bodies, database output, Slack messages
+  "stepMarks",  // one person's viewed and pinned steps on a run — which steps they have read
   "trace",      // the same, live
   "agents",     // the workspace's agent list
   "agentFiles", // generated source
@@ -727,7 +728,9 @@ console.log("\nfired live, in A, and B receives none of it");
 
   // Every tenant channel actually fired, or the assertion below proves nothing.
   const firedChannels = new Set(gotA.map((m: any) => m.channel));
-  const notFired = [...TENANT_CHANNELS].filter((c) => !firedChannels.has(c) && c !== "runSteps");
+  // `runSteps` and `stepMarks` are answers to the asking socket, never broadcast, so a broadcast
+  // round has nothing of theirs to carry.
+  const notFired = [...TENANT_CHANNELS].filter((c) => !firedChannels.has(c) && c !== "runSteps" && c !== "stepMarks");
   check(
     notFired.length === 0,
     `every tenant channel was actually exercised (${firedChannels.size})`,

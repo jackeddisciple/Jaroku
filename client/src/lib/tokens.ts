@@ -461,6 +461,14 @@ export const SPARK = {
  */
 export const EDITED = "#EA580C";
 
+/**
+ * A trace step's two personal marks (the product owner's colours, 2026-10-14): VIEWED, the filled box
+ * of a step somebody has read — a deep green with a white tick — and PINNED, the violet of a step kept
+ * a press away (the palette's bespoke violet, given a second job).
+ */
+export const VIEWED = "#2E6B45";
+export const PINNED = ACCENT.bespoke;
+
 /** Tailwind class equivalents, for the common case where a class is what's wanted. */
 export const SPACE_CLASS = {
   tight: "mt-2",

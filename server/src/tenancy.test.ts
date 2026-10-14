@@ -38,6 +38,7 @@ import { IdentityRepository } from "./db/repositories/identity.ts";
 import { AgentRepository } from "./db/repositories/agents.ts";
 import { TraceStore } from "./store.ts";
 import { EvalStore } from "./evalStore.ts";
+import { TraceMarkStore } from "./traceMarks.ts";
 import { McpStore } from "./mcpStore.ts";
 import { DeployStore } from "./deployStore.ts";
 import { InboxStore } from "./inbox/inboxStore.ts";
@@ -93,6 +94,8 @@ interface Fixture {
   /** One open Inbox item, and the person whose dismissal of it is theirs alone. */
   inboxItemId: string;
   userId: string;
+  /** The run's one step, which `userId` has marked viewed (migration 085). */
+  stepId: string;
   /**
    * One dispatched job, its agent's uuid, and a context that names the person who dispatched it.
    *
@@ -194,6 +197,9 @@ async function populate(db: Db, label: string): Promise<Fixture> {
   });
   await inbox.setUserState(ctx, item.id, member.user.id, { dismissed_at: new Date().toISOString() });
 
+  // THE SAME PERSON HAS READ THE RUN'S STEP — a mark that is theirs, in their workspace, on their run.
+  await new TraceMarkStore(db).setMark(ctx, runId, step.id, member.user.id, "viewed", true);
+
   // ONE DISPATCHED JOB, on this workspace's own deployment, attributed to this workspace's own
   // person. It is left `running` rather than finished, because the transitions are what an
   // operator in the wrong workspace would reach for — `finish` and `markWaiting` are asserted
@@ -213,7 +219,7 @@ async function populate(db: Db, label: string): Promise<Fixture> {
   return {
     ctx, runId, datasetId: dataset.id, exampleId: example.id, evalId: evalRun.id,
     jobId: job!.id, serverId: "mock", deploymentId: deployment.id, agentSlug: "support_bot",
-    inboxItemId: item.id, userId: member.user.id,
+    inboxItemId: item.id, userId: member.user.id, stepId: step.id,
     workCtx, workAgentId: agentRow.id, workItemId: workItem.id, workRunId,
   };
 }
@@ -323,6 +329,18 @@ async function suite(label: string, db: Db): Promise<void> {
   check((await evals.jobForRun(A.ctx, B.runId)) === undefined, "...and so does a lookup by its run");
   check((await evals.scoresForEval(A.ctx, B.evalId)).length === 0, "scores from B resolve to nothing");
   check((await evals.scoreForRun(A.ctx, B.runId)) === undefined, "...and so does B's verdict, asked for by its run");
+  const stepMarks = new TraceMarkStore(db);
+  check((await stepMarks.marksFor(A.ctx, B.runId, B.userId)).length === 0, "B's step marks are unreadable from A, even naming B's person");
+  check((await stepMarks.setMark(A.ctx, B.runId, B.stepId, A.userId, "pinned", true)) === null, "...and A cannot mark B's run");
+  const myMarks = await stepMarks.marksFor(A.ctx, A.runId, A.userId);
+  check(myMarks.length === 1 && myMarks[0]!.viewed && !myMarks[0]!.pinned, "A's person reads their own mark");
+  check((await stepMarks.marksFor(A.ctx, A.runId, B.userId)).length === 0, "...and nobody else in A does: a mark is one person's");
+  const pinnedMarks = await stepMarks.setMark(A.ctx, A.runId, A.stepId, A.userId, "pinned", true);
+  check(pinnedMarks?.[0]?.viewed === true && pinnedMarks[0].pinned, "pinning keeps the view mark beside it");
+  await stepMarks.setMark(A.ctx, A.runId, A.stepId, A.userId, "pinned", false);
+  const clearedMarks = await stepMarks.setMark(A.ctx, A.runId, A.stepId, A.userId, "viewed", false);
+  check(clearedMarks?.length === 0, "...and a step with neither mark has no row");
+  await stepMarks.setMark(A.ctx, A.runId, A.stepId, A.userId, "viewed", true);
   const own = await evals.scoreForRun(A.ctx, A.runId);
   check(own?.score === 0.9 && own.criteria[0]?.label === "Correct" && own.criteria[0]?.score === 3, "A's own run's verdict, its criterion named");
   check((await deploys.get(A.ctx, B.deploymentId)) === null, "a deployment id from B resolves to nothing");
@@ -596,6 +614,8 @@ const SCOPED_API: Record<string, string[]> = {
     // The trace's summary card: the judge's verdict on a run, looked up by the run.
     "scoreForRun",
   ],
+  // A person's viewed and pinned steps (migration 085).
+  TraceMarkStore: ["marksFor", "setMark"],
   McpStore: [
     "listServers", "getServer", "upsertServer", "setServerStatus", "setServerAuthEnvKey",
     "deleteServer", "listTools", "getTool", "resolveTools", "replaceTools",

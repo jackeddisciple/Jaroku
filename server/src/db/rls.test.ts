@@ -295,6 +295,9 @@ try {
     // the deployment id that `cancelWork` and `retryWork` act on, so a readable row in the wrong
     // workspace is a job somebody else's operator can stop or re-spend money on.
     "work_items",
+    // A person's marks on a trace's steps (migration 085). Personal by the store's WHERE and the
+    // key; workspace-scoped by this.
+    "trace_step_marks",
   ];
   // `'p'` AS WELL AS `'r'`, because a partitioned table is not an ordinary one.
   //

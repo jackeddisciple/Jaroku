@@ -22,15 +22,16 @@ import { useEffect, useRef } from "react";
 
 import { fmtCost, fmtDuration, fmtOffset, tokenCount } from "../lib/format.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
-import { matchPlaces, stepCategory, stepOutputText, stepProvider, type StepCategory, type VisibleRow } from "../lib/traceView.ts";
+import { matchPlaces, rerunBlocked, stepCategory, stepProvider, type StepCategory, type VisibleRow } from "../lib/traceView.ts";
 import { BRAND_COLOR, ProviderMark, hasProviderMark } from "../lib/icons.tsx";
 import { kindWord, type StepMark } from "./traceMarks.ts";
-import { ICON, METRIC, STATUS, STEP_TYPE, SURFACE, TEXT } from "../lib/tokens.ts";
+import { ICON, METRIC, PINNED, STATUS, STEP_TYPE, SURFACE, TEXT, VIEWED } from "../lib/tokens.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { agentMcpToolNames } from "../store/mcpStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
-import { showStepOnGraph } from "../lib/runActions.ts";
+import { markTraceStep, sendBranchRun } from "../lib/socket.ts";
+import { stepNodeId } from "../lib/traceGraphMap.ts";
 import type { Step } from "../types.ts";
 import { CopyTurn } from "./composer/CopyTurn.tsx";
 import { IconButton } from "./IconButton.tsx";
@@ -231,6 +232,8 @@ export const COL = {
   cost: "w-14",
   time: "w-14",
   timeline: "w-16",
+  /** The Viewed box (2026-10-14), held on every row so the figures stay one column. */
+  viewed: "w-6",
   /** The Details slot, held empty when the row is not hovered or selected. */
   actions: "w-16",
 } as const;
@@ -315,6 +318,79 @@ function rowBackground(inherited: boolean): React.CSSProperties | undefined {
   return inherited ? { backgroundImage: `repeating-linear-gradient(135deg, transparent 0 6px, ${SURFACE.hair} 6px 7px)` } : undefined;
 }
 
+/**
+ * "VIEWED", AS A CODE REVIEW TICKS OFF A FILE (2026-10-14): a box at the end of every row, filled green
+ * with a white tick once somebody has read the step — theirs alone, kept on the server. Empty, it shows
+ * only under the pointer or on the selected row, so a run nobody has reviewed is not a column of boxes.
+ * V marks the selected step from the keyboard.
+ */
+/** The box itself: green with a white tick when viewed, an empty grey square when not. */
+function ViewedMark({ viewed }: { viewed: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-xs border ${viewed ? "" : "border-grip"}`}
+      style={viewed ? { backgroundColor: VIEWED, borderColor: VIEWED, color: SURFACE.elevated } : undefined}
+    >
+      {viewed && <Icon.trace.viewedTick size={ICON.badge} />}
+    </span>
+  );
+}
+
+function ViewedBox({ runId, step, viewed, selected }: { runId: string; step: Step; viewed: boolean; selected: boolean }) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={viewed}
+      // Out of the Tab order, like Details beside it: the keyboard has V.
+      tabIndex={-1}
+      aria-label={`Viewed: #${step.seq} ${step.name}`}
+      title={viewed ? "Viewed — press to unmark (V)" : "Mark as viewed (V)"}
+      onClick={(e) => {
+        e.stopPropagation();
+        markTraceStep(runId, step.id, "viewed", !viewed);
+      }}
+      className={`flex h-7 ${COL.viewed} shrink-0 items-center justify-center rounded-control transition-opacity duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+        viewed || selected ? "opacity-100" : "opacity-0 group-hover/step:opacity-100"
+      }`}
+    >
+      <ViewedMark viewed={viewed} />
+    </button>
+  );
+}
+
+/** The same box with its word, for the step details' header — in the Tab order there. */
+export function ViewedToggle({ runId, step, viewed }: { runId: string; step: Step; viewed: boolean }) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={viewed}
+      title={viewed ? "Viewed — press to unmark (V)" : "Mark this step as viewed (V)"}
+      onClick={() => markTraceStep(runId, step.id, "viewed", !viewed)}
+      className="mx-1 flex h-7 items-center gap-1.5 rounded-control px-1.5 text-tiny text-muted transition-colors duration-fast hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+    >
+      <ViewedMark viewed={viewed} />
+      Viewed
+    </button>
+  );
+}
+
+/** Re-run from this step as it was — the drawer's first button, from the row. Why not, when it can't. */
+function rerunFromRow(step: Step): void {
+  const st = useTraceStore.getState();
+  const runId = st.activeRunId;
+  const bucket = runId ? st.stepsByRun[runId] : undefined;
+  if (!runId || !bucket) return;
+  const blocked = rerunBlocked(step as Step & { checkpoint_id?: string | null }, Object.values(st.runs), st.boundaryByRun[runId]);
+  if (blocked) {
+    useUiStore.getState().showToast(`Can't re-run from #${step.seq}: ${blocked.charAt(0).toLowerCase()}${blocked.slice(1)}`);
+    return;
+  }
+  sendBranchRun(runId, step.seq, stepNodeId(step, bucket) ?? undefined);
+}
+
 export function StepRow({
   row,
   tabbable,
@@ -352,6 +428,9 @@ export function StepRow({
   const expanded = useTraceStore((s) => s.expandedStepId === step.id);
   const query = useTraceStore((s) => s.stepQuery);
   const selected = useTraceStore((s) => s.selectedStepId === step.id);
+  const runId = useTraceStore((s) => s.activeRunId);
+  const viewed = useTraceStore((s) => (s.activeRunId ? s.marksByRun[s.activeRunId]?.[step.id]?.viewed === true : false));
+  const pinned = useTraceStore((s) => (s.activeRunId ? s.marksByRun[s.activeRunId]?.[step.id]?.pinned === true : false));
   const rowRef = useRef<HTMLDivElement>(null);
 
   // When selected from elsewhere (a graph-node click, J/K), bring the row into view — and again when
@@ -378,7 +457,6 @@ export function StepRow({
   const show = columnsFor(tier);
   const tokens = step.tokens ?? fold?.tokens ?? null;
   const cost = step.cost ?? fold?.cost ?? null;
-  const output = stepOutputText(step);
   const failed = step.error != null;
 
   return (
@@ -467,6 +545,13 @@ export function StepRow({
           {/* Derived from the AGENT's manifest, not from the step: the frozen Step schema has no
               provenance field and must not grow one. */}
           {step.type === "tool_call" && mcpNames.has(step.name) && <McpBadge variant="compact" />}
+          {/* PINNED, IN VIOLET (2026-10-14): one of the steps somebody keeps coming back to. P walks them. */}
+          {pinned && (
+            <span className="shrink-0" style={{ color: PINNED }} title="Pinned — P and Shift+P go from pin to pin">
+              <Icon.trace.pinStep size={ICON.xs} />
+              <span className="sr-only">pinned</span>
+            </span>
+          )}
         </span>
         <span className="flex min-w-0 items-center gap-1.5 text-tiny text-faint">
           {/* The kind keeps its word; where a search matched gives way first. */}
@@ -502,19 +587,31 @@ export function StepRow({
             owner's call, 2026-10-14). They floated over the figures and stayed up while the row had
             focus, so the selected row never showed its own time and its tokens lost a digit. The
             name is truncated anyway and whole in its tooltip; the figures are not, so they stay
-            visible. Out of the Tab order: the keyboard opens the details (Enter), which carry both. */}
+            visible. Out of the Tab order: the keyboard opens the details (Enter), which carry them.
+            COPY ID, PIN AND RE-RUN (the product owner's list, 2026-10-14) — the graph and the output
+            are a tab and a header button away in the details. */}
         {tier !== "narrow" && (
           <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center opacity-0 transition-opacity duration-fast group-hover/step:pointer-events-auto group-hover/step:opacity-100">
             <span className="flex items-center rounded-control bg-panel">
               <span className={`flex items-center rounded-control ${selected ? "bg-active" : "bg-active/40"}`}>
+                <CopyTurn source={step.id} label="Copy step ID" title={`Copy this step's ID (${step.id.slice(0, 8)}…)`} tabIndex={-1} />
+                {runId && (
+                  <IconButton
+                    icon={Icon.trace.pinStep}
+                    label={pinned ? "Unpin this step" : "Pin this step"}
+                    active={pinned}
+                    tabIndex={-1}
+                    stopPropagation
+                    onClick={() => markTraceStep(runId, step.id, "pinned", !pinned)}
+                  />
+                )}
                 <IconButton
-                  icon={Icon.panel.graph}
-                  label="Show this step on the graph"
+                  icon={Icon.trace.rerunStep}
+                  label="Re-run from here — a new run from this step, as it was"
                   tabIndex={-1}
                   stopPropagation
-                  onClick={() => showStepOnGraph(step.id)}
+                  onClick={() => rerunFromRow(step)}
                 />
-                {output && <CopyTurn source={output} label="Copy output" title="Copy this step's output" tabIndex={-1} />}
               </span>
             </span>
           </span>
@@ -556,6 +653,8 @@ export function StepRow({
         </span>
         {show.timeline && !waterfall && <Waterfall step={step} bar={bar} colour={stepColour(step, provider, mark)} inherited={inherited} />}
       </span>
+
+      {runId && <ViewedBox runId={runId} step={step} viewed={viewed} selected={selected} />}
 
       {/* DETAILS HOLDS ITS OWN PLACE, so the figures never move when it appears. Too narrow for a
           slot, it floats over the duration instead, and the two shortcuts stay in the details. */}

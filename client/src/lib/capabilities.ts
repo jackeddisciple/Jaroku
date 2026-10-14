@@ -118,6 +118,7 @@ export function can(role: string | null | undefined, capability: string): boolea
 export const COMMAND_CAPABILITY: Record<string, string> = {
   // reads
   loadRun: "agent:read",
+  setStepMark: "agent:read",
   loadHistory: "agent:read",
   listAgents: "agent:read",
   loadAgentFiles: "agent:read",

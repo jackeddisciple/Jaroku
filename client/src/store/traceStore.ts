@@ -7,13 +7,19 @@
 // All updates are immutable so React/zustand see changed references exactly when data changes.
 
 import { create } from "zustand";
-import type { Run, RunEvalScore, RunStatus, RunSummary, Step, TraceEvent } from "../types.ts";
+import type { Run, RunEvalScore, RunStatus, RunSummary, Step, StepMark, StepMarkKind, TraceEvent } from "../types.ts";
 import { ancestorIds, awaitingNode, buildTraceTree, traceSections, visibleRows, type StepFilter, type VisibleRow } from "../lib/traceView.ts";
 import { nodeKind } from "../components/graphNodeIcons.ts";
 
 export type ConnectionState = "connecting" | "open" | "closed";
 export type StepView = "list" | "waterfall" | "graph";
 export type RunTab = "steps" | "changes" | "state" | "artifacts" | "raw";
+/** One step's marks, for the person reading. */
+export interface StepMarkState {
+  viewed: boolean;
+  pinned: boolean;
+}
+
 /** The step drawer's tabs. */
 export type DrawerTab = "overview" | "input" | "output" | "prompt" | "state" | "raw";
 /** Where the drawer docked under the steps rests: a peek at its header, half the tab, or all of it. */
@@ -43,6 +49,12 @@ interface TraceState {
   loaded: Record<string, true>; // runIds whose steps are fully in memory
   /** The judge's verdict on a run an eval ran and scored, as it came with the run's steps. */
   evalByRun: Record<string, RunEvalScore>;
+  /**
+   * The signed-in person's marks on each run's steps — viewed, pinned — by run, then step. Set here
+   * the moment they are pressed and replaced by the server's answer, so a mark never waits on the
+   * round trip (and still works, for this session, against a server that does not keep them yet).
+   */
+  marksByRun: Record<string, Record<string, StepMarkState>>;
   activeRunId: string | null;
   // The step the user is focused on — drives trace↔graph sync (a clicked step lights its
   // graph node, and clicking a node selects a step here). Cleared when the active run changes.
@@ -126,6 +138,8 @@ interface TraceState {
   applyHistory: (runs: RunSummary[], meta?: { complete?: boolean; window?: number }) => void;
   applyEvent: (event: TraceEvent) => void;
   applyRunSteps: (runId: string, steps: Step[], evalScore?: RunEvalScore) => void;
+  applyStepMarks: (runId: string, marks: StepMark[]) => void;
+  markStep: (runId: string, stepId: string, mark: StepMarkKind, on: boolean) => void;
   selectRun: (id: string) => void;
   /** Drop the run and step selection entirely — used when the run on screen no longer
    *  belongs to the selected agent. See lib/selection.ts for the invariant. */
@@ -211,6 +225,7 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   stepsByRun: {},
   loaded: {},
   evalByRun: {},
+  marksByRun: {},
   activeRunId: null,
   selectedStepId: null,
   expandedStepId: null,
@@ -281,6 +296,24 @@ export const useTraceStore = create<TraceState>((set, get) => ({
       // moment its delay is measured from.
       return { stepsByRun: { ...state.stepsByRun, [step.run_id]: nextBucket }, runs, lagByRun: withLag(state.lagByRun, step.run_id, step.started_at) };
     }),
+
+  applyStepMarks: (runId, marks) =>
+    set((state) => ({
+      marksByRun: {
+        ...state.marksByRun,
+        [runId]: Object.fromEntries(marks.map((m) => [m.step_id, { viewed: m.viewed, pinned: m.pinned }])),
+      },
+    })),
+
+  markStep: (runId, stepId, mark, on) => {
+    set((state) => {
+      const run = { ...(state.marksByRun[runId] ?? {}) };
+      const next = { ...(run[stepId] ?? { viewed: false, pinned: false }), [mark]: on };
+      if (next.viewed || next.pinned) run[stepId] = next;
+      else delete run[stepId];
+      return { marksByRun: { ...state.marksByRun, [runId]: run } };
+    });
+  },
 
   applyRunSteps: (runId, steps, evalScore) =>
     set((state) => ({
@@ -461,10 +494,27 @@ export function failedStepIds(state: Pick<TraceState, "activeRunId" | "stepsByRu
   return buildTraceTree(Object.values(bucket)).filter((r) => r.step.error != null).map((r) => r.step.id);
 }
 
+/** The steps the reader has pinned in the open run, in tree order — what P and Shift+P walk. */
+export function pinnedStepIds(state: Pick<TraceState, "activeRunId" | "stepsByRun" | "marksByRun">): string[] {
+  const bucket = state.activeRunId ? state.stepsByRun[state.activeRunId] : undefined;
+  const marks = state.activeRunId ? state.marksByRun[state.activeRunId] : undefined;
+  if (!bucket || !marks) return [];
+  return buildTraceTree(Object.values(bucket)).filter((r) => marks[r.step.id]?.pinned).map((r) => r.step.id);
+}
+
+/** Select the next (or previous) pinned step after the selection, wrapping round. False when none is pinned. */
+export function jumpToPinned(delta: 1 | -1): boolean {
+  return jumpAmong(pinnedStepIds(useTraceStore.getState()), delta);
+}
+
 /** Select the next (or previous) failed step after the selection, wrapping round. False when none failed. */
 export function jumpToError(delta: 1 | -1): boolean {
+  return jumpAmong(failedStepIds(useTraceStore.getState()), delta);
+}
+
+/** Select the next (or previous) of these steps after the selection, in tree order, wrapping round. */
+function jumpAmong(failed: readonly string[], delta: 1 | -1): boolean {
   const st = useTraceStore.getState();
-  const failed = failedStepIds(st);
   if (failed.length === 0) return false;
   const bucket = st.activeRunId ? st.stepsByRun[st.activeRunId] : undefined;
   const order = bucket ? buildTraceTree(Object.values(bucket)).map((r) => r.step.id) : [];

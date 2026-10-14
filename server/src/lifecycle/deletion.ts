@@ -95,6 +95,8 @@ const DELETION_ORDER = [
   "rubrics",
   "dataset_examples",
   "datasets",
+  // Before `runs`, which they reference; the cascade would take them, and naming them counts them.
+  "trace_step_marks",
   "steps",
   "runs",
   "mcp_tools",

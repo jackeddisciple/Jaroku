@@ -87,6 +87,7 @@ import { ConversationSettingsStore, DEFAULT_PERMISSION_MODE, type PermissionMode
 import { offeredLevels, planEffort, type EffortPlan, isEffort} from "./effort.ts";
 import { ConversationConnectorStore } from "./conversationConnectors.ts";
 import { TurnInteractionStore } from "./turnInteraction.ts";
+import { TraceMarkStore } from "./traceMarks.ts";
 import { subscriptionAvailable } from "./providerAuth/capability.ts";
 import { SubscriptionTurns, type OpenTurn } from "./subscriptionTurns.ts";
 import { NO_SUBSCRIPTION, type AskModel, type AskResult } from "./askModel.ts";
@@ -3971,6 +3972,7 @@ mountSecretsRoutes(router, {
 const conversationSettings = new ConversationSettingsStore(store.database());
 const conversationConnectors = new ConversationConnectorStore(store.database());
 const turnInteraction = new TurnInteractionStore(store.database());
+const traceMarks = new TraceMarkStore(store.database());
 
 /**
  * §5.4's variants, instantiated for the first time outside a test.
@@ -5216,6 +5218,11 @@ const relay = new WsRelay({
     noteInbox("that a trace was opened", noteTraceOpened(inboxDeps, ctx, runId)),
   // The judge's verdict, when an eval ran this run: the trace's summary card shows it.
   evalForRun: (ctx, runId) => evalStore.scoreForRun(ctx, runId),
+  // A person's viewed and pinned steps (migration 085).
+  stepMarks: {
+    forRun: (ctx, runId, userId) => traceMarks.marksFor(ctx, runId, userId),
+    set: (ctx, runId, stepId, userId, kind, on) => traceMarks.setMark(ctx, runId, stepId, userId, kind, on),
+  },
   // Scoped, so another workspace's thread id is indistinguishable from one that does not exist.
   // The items come back with the row, because opening a thread that renders somebody else's
   // conversation is the failure §4.5 exists to prevent — see ThreadEvent's `thread` member.

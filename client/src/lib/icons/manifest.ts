@@ -406,6 +406,9 @@ export const MANIFEST = {
     viewWaterfall: "WaterfallDown01Icon",
     viewGraph: "ArtboardIcon",
     resetField: "Undo03Icon",
+    pinStep: "PinIcon",
+    viewedTick: "Tick02Icon",
+    rerunStep: "GitForkIcon",
   },
 
   // ── §5 Global ─────────────────────────────────────────────────────────────

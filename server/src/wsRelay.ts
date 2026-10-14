@@ -10,6 +10,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { LOOPBACK } from "./auth/bindHost.ts";
 import type { TraceStore } from "./store.ts";
 import type { RunEvalScore } from "./evalStore.ts";
+import type { StepMark, StepMarkKind } from "./traceMarks.ts";
 import type { ThreadStatus } from "./threadStore.ts";
 import type { HostObservation, SubscriptionStatus } from "./providerAuth/status.ts";
 import { subscriptionStatuses } from "./providerAuth/status.ts";
@@ -54,6 +55,12 @@ export type RunCommand = {
   threadId?: string;
 };
 export type LoadRunCommand = { cmd: "loadRun"; runId: string };
+/**
+ * Mark one step of a run as viewed, or pin it — or clear either — for the person asking (migration
+ * 085). Answered on `stepMarks` with all their marks on the run, to the asking socket only: a mark is
+ * one person's, so there is nobody else to tell.
+ */
+export type SetStepMarkCommand = { cmd: "setStepMark"; runId: string; stepId: string; mark: StepMarkKind; on: boolean };
 
 /**
  * A LARGER WINDOW ON THE RUN HISTORY — the paging this product had none of.
@@ -1838,6 +1845,7 @@ export type ExplainCommand = {
 export type ClientCommand =
   | RunCommand
   | LoadRunCommand
+  | SetStepMarkCommand
   | LoadHistoryCommand
   | GenerateCommand
   | PlanAgentCommand
@@ -3930,6 +3938,9 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   // must not look the same.
   run: "log", loadRun: "log", loadHistory: "log", listAgents: "log", loadAgentFiles: "log",
   loadAgentGraph: "log",
+  // A step's marks answer on `stepMarks`, whose payload is the marks themselves — so a refusal goes
+  // to `log`, for the reason the five above it do.
+  setStepMark: "log",
   // The three lifecycle commands answer on `log` for the same reason `listAgents` does, and it is
   // the same decision rather than the same oversight: their success IS the refreshed agent snapshot,
   // which every client already applies, and the `agents` channel has no error shape a store would
@@ -4423,6 +4434,14 @@ export interface RelayOptions {
    * Never allowed to cost the reader the steps — a failed lookup is no verdict.
    */
   evalForRun?: (ctx: TenantContext, runId: string) => Promise<RunEvalScore | undefined>;
+  /**
+   * A person's marks on a run's steps (migration 085): read with the run's steps, written by
+   * `setStepMark`. Null from `set` when the run is not this workspace's.
+   */
+  stepMarks?: {
+    forRun: (ctx: TenantContext, runId: string, userId: string) => Promise<StepMark[]>;
+    set: (ctx: TenantContext, runId: string, stepId: string, userId: string, kind: StepMarkKind, on: boolean) => Promise<StepMark[] | null>;
+  };
 }
 
 export class WsRelay {
@@ -5417,6 +5436,20 @@ export class WsRelay {
             }), live, (message) => ({
               channel: "log", level: "stderr", text: `could not load run history: ${message}`,
             }));
+          } else if (msg.cmd === "setStepMark") {
+            const cmd = msg as SetStepMarkCommand;
+            const marks = this.opts.stepMarks;
+            void this.answer(ws, async (ctx) => {
+              // A mark is filed against a person, so a connection without one has nowhere to put it.
+              if (!ctx.actorUserId) return { channel: "log", level: "stderr", text: "a step mark is filed against a person, and this connection has none" };
+              if (!marks || typeof cmd.runId !== "string" || typeof cmd.stepId !== "string" || (cmd.mark !== "viewed" && cmd.mark !== "pinned")) {
+                return { channel: "log", level: "stderr", text: "could not mark that step" };
+              }
+              const after = await marks.set(ctx, cmd.runId, cmd.stepId, ctx.actorUserId, cmd.mark, cmd.on === true);
+              return after
+                ? { channel: "stepMarks", runId: cmd.runId, marks: after }
+                : { channel: "log", level: "stderr", text: "could not mark that step: no such run" };
+            }, live, (message) => ({ channel: "log", level: "stderr", text: `could not mark that step: ${message}` }));
           } else if (msg.cmd === "loadRun" && typeof msg.runId === "string") {
             // Answer only the requesting client with that run's steps (ordered by seq).
             const runId = msg.runId;
@@ -5432,7 +5465,12 @@ export class WsRelay {
               const verdict = steps.length > 0 && this.opts.evalForRun
                 ? await this.opts.evalForRun(ctx, runId).catch(() => undefined)
                 : undefined;
-              return { channel: "runSteps", runId, steps, ...(verdict ? { eval: verdict } : {}) };
+              // THE ASKER'S OWN MARKS, with the steps they mark. None for a connection with no
+              // person behind it, and never at the cost of the steps.
+              const marks = steps.length > 0 && this.opts.stepMarks && ctx.actorUserId
+                ? await this.opts.stepMarks.forRun(ctx, runId, ctx.actorUserId).catch(() => undefined)
+                : undefined;
+              return { channel: "runSteps", runId, steps, ...(verdict ? { eval: verdict } : {}), ...(marks ? { marks } : {}) };
             }, live, (message) => ({
               // `runSteps` carries one run's steps and nothing else; the diagnostics rail is
               // where this one says so, for the same reason `loadHistory` above does.

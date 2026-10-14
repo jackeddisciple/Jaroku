@@ -545,6 +545,14 @@ export interface EvalTotals {
   budgetUsd: number | null;
 }
 
+/** One step's marks for the person reading the trace — viewed, pinned (server migration 085). */
+export interface StepMark {
+  step_id: string;
+  viewed: boolean;
+  pinned: boolean;
+}
+export type StepMarkKind = "viewed" | "pinned";
+
 /**
  * The judge's verdict on one trace run, when an eval ran it and scored it — sent with the run's steps
  * for the trace's summary card (server/src/evalStore.ts's RunEvalScore).
@@ -2186,7 +2194,8 @@ export type ServerMessage =
   // merging by run id. A broadcast that carries neither leaves the flags alone.
   | { channel: "history"; runs: RunSummary[]; complete?: boolean; window?: number }
   | { channel: "trace"; event: TraceEvent }
-  | { channel: "runSteps"; runId: string; steps: Step[]; eval?: RunEvalScore }
+  | { channel: "runSteps"; runId: string; steps: Step[]; eval?: RunEvalScore; marks?: StepMark[] }
+  | { channel: "stepMarks"; runId: string; marks: StepMark[] }
   | { channel: "log"; level: "stderr" | "parseError"; text: string }
   | AgentMessage
   // TWO SHAPES, BECAUSE A READ HAS TWO OUTCOMES AND THE DIFFERENCE IS LOAD-BEARING HERE. An agent
@@ -2380,6 +2389,7 @@ export type ClientCommand =
   // which is the continuity the backfill established.
   | { cmd: "run"; input?: string; provider?: string; model?: string; agentId?: string; threadId?: string; rerunOf?: string }
   | { cmd: "loadRun"; runId: string }
+  | { cmd: "setStepMark"; runId: string; stepId: string; mark: StepMarkKind; on: boolean }
   /**
    * A LARGER WINDOW ON THE RUN HISTORY — the paging this product had none of.
    *
