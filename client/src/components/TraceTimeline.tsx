@@ -121,8 +121,19 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
   };
 
   const onKeyDown = (e: React.KeyboardEvent): void => {
-    if (!["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
     if (e.target instanceof HTMLElement && e.target.getAttribute("role") !== "treeitem") return;
+    // ESCAPE LETS GO OF THE STEP — the keyboard's way to clear what the composer is asking about,
+    // which was the pill's × alone. Open details close first (StepDetailPanel's own Escape), so it
+    // is the second press that clears; focus stays on the row.
+    if (e.key === "Escape") {
+      const st = useTraceStore.getState();
+      if (st.expandedStepId || !st.selectedStepId) return;
+      e.preventDefault();
+      st.selectStep(null);
+      useUiStore.getState().setSelectedNodeId(null);
+      return;
+    }
+    if (!["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
     e.preventDefault();
     // FIRST AND LAST, as the ARIA tree pattern has them — of the rows on screen, folds and filters
     // respected, like every other key here.
