@@ -545,6 +545,21 @@ export interface EvalTotals {
   budgetUsd: number | null;
 }
 
+/**
+ * The judge's verdict on one trace run, when an eval ran it and scored it — sent with the run's steps
+ * for the trace's summary card (server/src/evalStore.ts's RunEvalScore).
+ */
+export interface RunEvalScore {
+  eval_id: string;
+  /** 0..1 weighted overall, or null when the judge failed. */
+  score: number | null;
+  /** Each criterion's score, 0..`scale_max`, in the rubric's order. */
+  criteria: { id: string; label: string; score: number }[];
+  scale_max: number;
+  rationale: string | null;
+  error: string | null;
+}
+
 /** One cell of the grid: what one provider did with one example. */
 export interface ExampleCell {
   jobId: string;
@@ -2171,7 +2186,7 @@ export type ServerMessage =
   // merging by run id. A broadcast that carries neither leaves the flags alone.
   | { channel: "history"; runs: RunSummary[]; complete?: boolean; window?: number }
   | { channel: "trace"; event: TraceEvent }
-  | { channel: "runSteps"; runId: string; steps: Step[] }
+  | { channel: "runSteps"; runId: string; steps: Step[]; eval?: RunEvalScore }
   | { channel: "log"; level: "stderr" | "parseError"; text: string }
   | AgentMessage
   // TWO SHAPES, BECAUSE A READ HAS TWO OUTCOMES AND THE DIFFERENCE IS LOAD-BEARING HERE. An agent

@@ -5214,6 +5214,8 @@ const relay = new WsRelay({
   // work was done rather than because the card was pressed, which is Law 2 in one wire.
   onTraceOpened: (ctx, runId) =>
     noteInbox("that a trace was opened", noteTraceOpened(inboxDeps, ctx, runId)),
+  // The judge's verdict, when an eval ran this run: the trace's summary card shows it.
+  evalForRun: (ctx, runId) => evalStore.scoreForRun(ctx, runId),
   // Scoped, so another workspace's thread id is indistinguishable from one that does not exist.
   // The items come back with the row, because opening a thread that renders somebody else's
   // conversation is the failure §4.5 exists to prevent — see ThreadEvent's `thread` member.

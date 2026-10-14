@@ -210,7 +210,7 @@ function dispatch(msg: ServerMessage): void {
       }
       break;
     case "runSteps":
-      s.applyRunSteps(msg.runId, msg.steps);
+      s.applyRunSteps(msg.runId, msg.steps, msg.eval);
       break;
     case "log":
       s.addLog({ level: msg.level, text: msg.text });

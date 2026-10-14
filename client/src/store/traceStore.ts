@@ -7,7 +7,7 @@
 // All updates are immutable so React/zustand see changed references exactly when data changes.
 
 import { create } from "zustand";
-import type { Run, RunStatus, RunSummary, Step, TraceEvent } from "../types.ts";
+import type { Run, RunEvalScore, RunStatus, RunSummary, Step, TraceEvent } from "../types.ts";
 import { ancestorIds, awaitingNode, buildTraceTree, traceSections, visibleRows, type StepFilter, type VisibleRow } from "../lib/traceView.ts";
 import { nodeKind } from "../components/graphNodeIcons.ts";
 
@@ -37,6 +37,8 @@ interface TraceState {
   historyComplete: boolean;
   stepsByRun: Record<string, Record<string, Step>>; // runId -> (stepId -> Step)
   loaded: Record<string, true>; // runIds whose steps are fully in memory
+  /** The judge's verdict on a run an eval ran and scored, as it came with the run's steps. */
+  evalByRun: Record<string, RunEvalScore>;
   activeRunId: string | null;
   // The step the user is focused on — drives trace↔graph sync (a clicked step lights its
   // graph node, and clicking a node selects a step here). Cleared when the active run changes.
@@ -116,7 +118,7 @@ interface TraceState {
    */
   applyHistory: (runs: RunSummary[], meta?: { complete?: boolean; window?: number }) => void;
   applyEvent: (event: TraceEvent) => void;
-  applyRunSteps: (runId: string, steps: Step[]) => void;
+  applyRunSteps: (runId: string, steps: Step[], evalScore?: RunEvalScore) => void;
   selectRun: (id: string) => void;
   /** Drop the run and step selection entirely — used when the run on screen no longer
    *  belongs to the selected agent. See lib/selection.ts for the invariant. */
@@ -199,6 +201,7 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   historyComplete: true,
   stepsByRun: {},
   loaded: {},
+  evalByRun: {},
   activeRunId: null,
   selectedStepId: null,
   expandedStepId: null,
@@ -268,10 +271,11 @@ export const useTraceStore = create<TraceState>((set, get) => ({
       return { stepsByRun: { ...state.stepsByRun, [step.run_id]: nextBucket }, runs, lagByRun: withLag(state.lagByRun, step.run_id, step.started_at) };
     }),
 
-  applyRunSteps: (runId, steps) =>
+  applyRunSteps: (runId, steps, evalScore) =>
     set((state) => ({
       stepsByRun: { ...state.stepsByRun, [runId]: bucketFrom(steps) },
       loaded: { ...state.loaded, [runId]: true },
+      ...(evalScore ? { evalByRun: { ...state.evalByRun, [runId]: evalScore } } : {}),
     })),
 
   selectRun: (id) => set((state) => ({ ...aboutAnotherRun(state, id), activeRunId: id })),

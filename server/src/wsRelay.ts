@@ -9,6 +9,7 @@ import { readFile } from "node:fs/promises";
 import { WebSocketServer, WebSocket } from "ws";
 import { LOOPBACK } from "./auth/bindHost.ts";
 import type { TraceStore } from "./store.ts";
+import type { RunEvalScore } from "./evalStore.ts";
 import type { ThreadStatus } from "./threadStore.ts";
 import type { HostObservation, SubscriptionStatus } from "./providerAuth/status.ts";
 import { subscriptionStatuses } from "./providerAuth/status.ts";
@@ -4416,6 +4417,12 @@ export interface RelayOptions {
    * get them whatever happens to a card.
    */
   onTraceOpened?: (ctx: TenantContext, runId: string) => void;
+  /**
+   * The judge's verdict on a run an eval ran and scored, sent with its steps for the trace's summary
+   * card. A callback for the reason `onTraceOpened` is one: this file knows nothing about evals.
+   * Never allowed to cost the reader the steps — a failed lookup is no verdict.
+   */
+  evalForRun?: (ctx: TenantContext, runId: string) => Promise<RunEvalScore | undefined>;
 }
 
 export class WsRelay {
@@ -5422,7 +5429,10 @@ export class WsRelay {
               // far as the client is concerned, but it is also what another workspace's run id
               // answers with — so the notice is only sent for a run this workspace really has.
               if (steps.length > 0) this.opts.onTraceOpened?.(ctx, runId);
-              return { channel: "runSteps", runId, steps };
+              const verdict = steps.length > 0 && this.opts.evalForRun
+                ? await this.opts.evalForRun(ctx, runId).catch(() => undefined)
+                : undefined;
+              return { channel: "runSteps", runId, steps, ...(verdict ? { eval: verdict } : {}) };
             }, live, (message) => ({
               // `runSteps` carries one run's steps and nothing else; the diagnostics rail is
               // where this one says so, for the same reason `loadHistory` above does.

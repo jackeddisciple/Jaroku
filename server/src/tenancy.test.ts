@@ -146,8 +146,10 @@ async function populate(db: Db, label: string): Promise<Fixture> {
   const [job] = await evals.createJobs(ctx, evalRun.id, [
     { example_id: example.id, provider: "fake", model: "fake-scripted" },
   ]);
+  // Attempt 0, as the job was made: the cross-tenant check below reads a 1 as A having reached it.
+  await evals.markJobRunning(ctx, job!.id, runId, 0);
   await evals.finishJob(ctx, job!.id, "succeeded", { cost_usd: 0.01, tokens: 10 });
-  await evals.putScore(ctx, { job_id: job!.id, score: 0.9 });
+  await evals.putScore(ctx, { job_id: job!.id, score: 0.9, per_criterion: { correct: 3 } });
 
   // The same server id in both workspaces, on purpose: a slug like "mock" is what two tenants
   // connecting the same service actually produce.
@@ -320,6 +322,9 @@ async function suite(label: string, db: Db): Promise<void> {
   check((await evals.getJob(A.ctx, B.jobId)) === undefined, "a job id from B resolves to nothing");
   check((await evals.jobForRun(A.ctx, B.runId)) === undefined, "...and so does a lookup by its run");
   check((await evals.scoresForEval(A.ctx, B.evalId)).length === 0, "scores from B resolve to nothing");
+  check((await evals.scoreForRun(A.ctx, B.runId)) === undefined, "...and so does B's verdict, asked for by its run");
+  const own = await evals.scoreForRun(A.ctx, A.runId);
+  check(own?.score === 0.9 && own.criteria[0]?.label === "Correct" && own.criteria[0]?.score === 3, "A's own run's verdict, its criterion named");
   check((await deploys.get(A.ctx, B.deploymentId)) === null, "a deployment id from B resolves to nothing");
   check((await deploys.logs(A.ctx, B.deploymentId)).length === 0, "...and its build log to nothing");
 
@@ -588,6 +593,8 @@ const SCOPED_API: Record<string, string[]> = {
     "listEvalRuns", "listEvalRunsForAgent", "createJobs", "markJobRunning", "finishJob", "requeueJob", "retryJob",
     "cancelQueuedJobs", "jobsForEval", "getJob", "jobForRun", "trueSpend", "putScore",
     "scoresForEval",
+    // The trace's summary card: the judge's verdict on a run, looked up by the run.
+    "scoreForRun",
   ],
   McpStore: [
     "listServers", "getServer", "upsertServer", "setServerStatus", "setServerAuthEnvKey",

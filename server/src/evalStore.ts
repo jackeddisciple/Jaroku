@@ -26,6 +26,7 @@
 import { randomUUID } from "node:crypto";
 import { asInt, jsonFromColumn, type Db, type Queryable } from "./db/db.ts";
 import type { TenantContext } from "./db/tenant.ts";
+import { SCALE_MAX } from "./judge/rubric.ts";
 
 // --- row shapes --------------------------------------------------------------
 
@@ -148,6 +149,21 @@ export interface EvalScore {
   judge_cost_usd: number | null;
   error: string | null;
   created_at: string;
+}
+
+/**
+ * The judge's verdict on one trace run, as the trace's summary card shows it: the run was an eval's,
+ * and the eval scored it. Each criterion carries its label, so the card names what it scored.
+ */
+export interface RunEvalScore {
+  eval_id: string;
+  /** 0..1 weighted overall, or null when the judge failed. */
+  score: number | null;
+  /** Each criterion's score, 0..`scale_max`, in the rubric's order. */
+  criteria: { id: string; label: string; score: number }[];
+  scale_max: number;
+  rationale: string | null;
+  error: string | null;
 }
 
 // --- store -------------------------------------------------------------------
@@ -804,6 +820,37 @@ export class EvalStore {
         s.error ?? null, nowIso(), ctx.workspaceId,
       ],
     );
+  }
+
+  /** The judge's verdict on a trace run, when an eval ran it and scored it (see RunEvalScore). */
+  async scoreForRun(ctx: TenantContext, runId: string): Promise<RunEvalScore | undefined> {
+    const job = await this.jobForRun(ctx, runId);
+    if (!job) return undefined;
+    const row = await this.q(ctx).get<Record<string, unknown>>(
+      `SELECT score, per_criterion, rationale, error FROM eval_scores
+        WHERE job_id = ? AND workspace_id = ? ORDER BY created_at DESC LIMIT 1`,
+      [job.id, ctx.workspaceId],
+    );
+    if (!row) return undefined;
+    const evalRun = await this.getEvalRun(ctx, job.eval_id);
+    const rubric = evalRun ? await this.getRubric(ctx, evalRun.rubric_id) : undefined;
+    const scores = this.parseJson<Record<string, number> | null>(row["per_criterion"], null) ?? {};
+    const labelled = (rubric?.criteria ?? []).filter((c) => typeof scores[c.id] === "number");
+    const known = new Set(labelled.map((c) => c.id));
+    const criteria = [
+      ...labelled.map((c) => ({ id: c.id, label: c.label, score: scores[c.id]! })),
+      // A criterion the rubric no longer has still scored: named by its id.
+      ...Object.entries(scores).filter(([id, v]) => !known.has(id) && typeof v === "number").map(([id, v]) => ({ id, label: id, score: v })),
+    ];
+    const score = row["score"];
+    return {
+      eval_id: job.eval_id,
+      score: typeof score === "number" ? score : score == null ? null : Number(score),
+      criteria,
+      scale_max: SCALE_MAX,
+      rationale: (row["rationale"] as string | null) ?? null,
+      error: (row["error"] as string | null) ?? null,
+    };
   }
 
   async scoresForEval(ctx: TenantContext, evalId: string): Promise<EvalScore[]> {
