@@ -104,6 +104,11 @@ export function TraceHeader({ run }: { run: RunSummary | undefined }) {
   const agentName = useBuildStore((s) =>
     run ? (s.agents.find((a) => a.agent_id === run.agent_id)?.name ?? run.agent_id) : null,
   );
+  // The agent whose run of record this is, when it is one (server migration 088).
+  const recordOf = useBuildStore((s) => {
+    const a = run ? s.agents.find((x) => x.agent_id === run.agent_id) : undefined;
+    return a && run && a.record_run_id === run.id ? a.name : null;
+  });
 
   // The body says why there is nothing here, once; the header only names the panel.
   if (!run) {
@@ -156,6 +161,12 @@ export function TraceHeader({ run }: { run: RunSummary | undefined }) {
                 {run.branch_from_seq != null && ` from #${run.branch_from_seq}`}
               </span>
             </button>
+          </Tip>
+        )}
+        {/* THE AGENT'S RUN OF RECORD (2026-10-14): the run "Apply" made stand for how it runs now. */}
+        {recordOf && (
+          <Tip label={`${recordOf}'s run of record — its defaults were applied from this run`}>
+            <span className={`${CHIP} shrink-0 cursor-default`} tabIndex={0}>run of record</span>
           </Tip>
         )}
         {/* WHAT A BRANCH WAS RE-RUN WITH (2026-10-14), when it was given a temperature or a seed —

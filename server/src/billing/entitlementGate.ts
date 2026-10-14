@@ -149,6 +149,7 @@ export const COMMAND_ENTITLEMENT: Record<string, EntitlementKind | typeof NO_ENT
   // unlimited on every tier with nothing saying so.
   loadRun: NO_ENTITLEMENT,
   setStepMark: NO_ENTITLEMENT,
+  applyRun: NO_ENTITLEMENT,
   loadHistory: NO_ENTITLEMENT,
   listAgents: NO_ENTITLEMENT,
   listAgentGrid: NO_ENTITLEMENT,

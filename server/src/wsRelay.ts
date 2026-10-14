@@ -61,6 +61,11 @@ export type LoadRunCommand = { cmd: "loadRun"; runId: string };
  * one person's, so there is nobody else to tell.
  */
 export type SetStepMarkCommand = { cmd: "setStepMark"; runId: string; stepId: string; mark: StepMarkKind; on: boolean };
+/**
+ * "Apply" a run to its agent (migration 088): the agent adopts the run's model, temperature and seed
+ * as its defaults, and the run becomes its run of record. Answered by the agent snapshot.
+ */
+export type ApplyRunCommand = { cmd: "applyRun"; agentId: string; runId: string };
 
 /**
  * A LARGER WINDOW ON THE RUN HISTORY — the paging this product had none of.
@@ -1854,6 +1859,7 @@ export type ClientCommand =
   | RunCommand
   | LoadRunCommand
   | SetStepMarkCommand
+  | ApplyRunCommand
   | LoadHistoryCommand
   | GenerateCommand
   | PlanAgentCommand
@@ -1942,6 +1948,7 @@ const EVAL_COMMANDS = new Set([
 /** Commands the relay forwards to the app rather than answering locally. */
 export type ForwardedCommand =
   | RunCommand
+  | ApplyRunCommand
   | ReportExecHostCommand
   | ExecLogCommand
   | ExecResultCommand
@@ -3949,6 +3956,8 @@ export const COMMAND_CHANNEL: Record<string, string> = {
   // A step's marks answer on `stepMarks`, whose payload is the marks themselves — so a refusal goes
   // to `log`, for the reason the five above it do.
   setStepMark: "log",
+  // Apply's success is the re-broadcast agent snapshot, like a rename's; a refusal is a line on `log`.
+  applyRun: "log",
   // The three lifecycle commands answer on `log` for the same reason `listAgents` does, and it is
   // the same decision rather than the same oversight: their success IS the refreshed agent snapshot,
   // which every client already applies, and the `agents` channel has no error shape a store would
@@ -5050,6 +5059,8 @@ export class WsRelay {
           } else if (msg.cmd === "cancelRun" && typeof msg.runId === "string") {
             void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "branchRun" && typeof msg.fromRunId === "string" && typeof msg.atSeq === "number") {
+            void withContext((ctx) => this.onCommand?.(msg, ctx));
+          } else if (msg.cmd === "applyRun" && typeof msg.agentId === "string" && typeof msg.runId === "string") {
             void withContext((ctx) => this.onCommand?.(msg, ctx));
           } else if (msg.cmd === "explain" && typeof msg.agentId === "string" && typeof msg.question === "string" && validSubscription(msg.subscription)) {
             void withContext((ctx) => this.onCommand?.(msg, ctx));

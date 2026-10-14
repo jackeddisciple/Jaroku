@@ -18,7 +18,7 @@ import { RunPool, type RunPoolEvents } from "./runPool.ts";
 import { TraceStore } from "./store.ts";
 // The one answer to "which run does this event claim to be about" — see the ingest boundary's
 // reconciliation of the body's id against the slot that produced it.
-import { runIdOf, type TraceEvent } from "./types.ts";
+import { runIdOf, type Run, type TraceEvent } from "./types.ts";
 import { migrate } from "./db/migrate.ts";
 import { ActivityStore, type MemberPulse, type PersonalSummary } from "./activity/activityStore.ts";
 import { ActivityCache, activityKey } from "./activity/cache.ts";
@@ -4863,6 +4863,12 @@ const relay = new WsRelay({
         mcp_tools: a.mcp_tools,
         required_env: a.required_env,
         default_provider: a.default_provider,
+        // WHAT "APPLY" SET (migration 088): the model it runs on by default, the sampling beside it,
+        // and its run of record. Null for an agent nobody has applied a run to.
+        default_model: a.default_model,
+        default_temperature: a.default_temperature,
+        default_seed: a.default_seed,
+        record_run_id: a.record_run_id,
         created_at: a.created_at,
         hand_written: a.hand_written,
         runnable: published.has(a.slug) || (onDisk.get(a.slug)?.runnable ?? false),
@@ -5467,6 +5473,7 @@ async function dispatchCommand(cmd: ForwardedCommand, ctx: TenantContext): Promi
     else if (cmd.cmd === "pauseRun") void pauseRun(ctx, cmd.runId);
     else if (cmd.cmd === "resumeRun") void resumeRun(ctx, cmd.runId);
     else if (cmd.cmd === "cancelRun") void cancelRun(ctx, cmd.runId);
+    else if (cmd.cmd === "applyRun") void applyRun(ctx, cmd.agentId, cmd.runId);
     else if (cmd.cmd === "branchRun") void branchRun(ctx, cmd.fromRunId, cmd.atSeq, cmd.editNode, cmd.editedState, {
       model: cmd.model, temperature: cmd.temperature, seed: cmd.seed,
     });
@@ -12775,6 +12782,16 @@ async function runAgent(
   if (shadow) env.JAROKU_AGENT_DIR = shadow.projectDir;
   if (provider) env.JAROKU_PROVIDER = provider;
   if (model) env.JAROKU_MODEL = model;
+  // THE AGENT'S APPLIED SAMPLING (migration 088), on the model it was applied with: a run of an agent
+  // whose branch at temperature 0.2 was applied runs at 0.2 again — and on another model, at that
+  // model's default. models.py sends either only where the model's pricing entry lists it.
+  if (agentId && model) {
+    const applied = await agentRepo.bySlug(ctx, agentId).catch(() => undefined);
+    if (applied?.default_model === model) {
+      if (applied.default_temperature != null) env.JAROKU_TEMPERATURE = String(applied.default_temperature);
+      if (applied.default_seed != null) env.JAROKU_SEED = String(applied.default_seed);
+    }
+  }
 
   // THE PERMISSION MODE, DOWN TO THE RUNTIME, AND ONLY SO IT KNOWS WHEN TO ASK.
   //
@@ -13387,6 +13404,36 @@ async function cancelRun(ctx: TenantContext, runId: string): Promise<void> {
 // Fork a NEW run from a parent run's checkpoint at a step's node boundary, optionally with a
 // validated domain-field edit. The parent is only read: its checkpoint db is copied (never
 // written), and its step rows are copied verbatim into the branch — both stay fully inspectable.
+/**
+ * "APPLY" (the trace panel's feature list, 2026-10-14): the agent adopts a finished run's model,
+ * temperature and seed as its defaults, and the run becomes its run of record (migration 088). Said
+ * back to the trace on `debug`, as a branch's refusals are; the agent snapshot carries the result.
+ */
+async function applyRun(ctx: TenantContext, agentId: string, runId: string): Promise<void> {
+  const refuse = (message: string): void => relay.broadcastDebug(ctx, { type: "error", runId, message });
+  const run = (await store.getRun(ctx, runId)) as (Run & { temperature?: number | null; seed?: number | null }) | undefined;
+  if (!run || run.agent_id !== agentId) {
+    refuse("that run is not one of this agent's");
+    return;
+  }
+  if (run.status !== "completed") {
+    refuse("only a run that finished can be applied");
+    return;
+  }
+  const applied = await agentRepo.adoptRun(ctx, agentId, {
+    id: run.id,
+    model: run.model,
+    temperature: run.temperature ?? null,
+    seed: run.seed ?? null,
+  });
+  if (!applied) {
+    refuse(`no agent called ${agentId} in this workspace`);
+    return;
+  }
+  console.log(`[agents] ${agentId} applied run ${run.id} (${run.model})`);
+  await relay.broadcastAgents();
+}
+
 async function branchRun(
   ctx: TenantContext,
   fromRunId: string,

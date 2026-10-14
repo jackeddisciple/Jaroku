@@ -662,6 +662,9 @@ export const COMMAND_CAPABILITY: Record<string, Capability> = {
   discardPlan: "agent:write",
   generate: "agent:write",
   edit: "agent:write",
+  // "Apply" a run (migration 088): the agent's default model and sampling, and its run of record —
+  // a change to the agent, at the authority every other change to it takes.
+  applyRun: "agent:write",
   applyEdit: "agent:write",
   undoEdit: "agent:write",
   discardEdit: "agent:write",
@@ -1170,6 +1173,8 @@ export const COMMAND_AGENT_CAPABILITY: Record<string, AgentCapability> = {
   archiveAgent: "edit",
   restoreAgent: "edit",
   renameAgent: "edit",
+  // Apply moves the agent's defaults, which is configuring it: the same rung as renaming it.
+  applyRun: "edit",
   // ...and deleting is not editing. `admin` is the top of this vocabulary and the only rung that
   // fits an act with nothing on the other side of it — see the workspace table, which gates the
   // same command at `workspace:manage`. Both apply: the relay checks the workspace capability and

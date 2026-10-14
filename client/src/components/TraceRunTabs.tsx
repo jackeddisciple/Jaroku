@@ -10,12 +10,14 @@ import { useEffect, useMemo, useState } from "react";
 import { extractAgentOutput } from "../lib/agentOutput.ts";
 import { fmtCost, fmtDuration, tokenCount } from "../lib/format.ts";
 import { Icon } from "../lib/icons/registry.ts";
-import { sendLoadRun } from "../lib/socket.ts";
+import { sendApplyRun, sendLoadRun } from "../lib/socket.ts";
 import { branchFigures, compareRuns, finalState, runArtifacts, type StepPair } from "../lib/traceCompare.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { orderedSteps, useTraceStore, type RunTab } from "../store/traceStore.ts";
 import type { RunSummary, Step } from "../types.ts";
-import { tabBtn } from "./buttons.ts";
+import { primaryBtnSm, tabBtn } from "./buttons.ts";
+import { useBuildStore } from "../store/buildStore.ts";
+import { useProviderStore } from "../store/providerStore.ts";
 import { CopyTurn } from "./composer/CopyTurn.tsx";
 import { JsonTree, PayloadText } from "./JsonTree.tsx";
 
@@ -130,6 +132,56 @@ function PairRow({ pair }: { pair: StepPair }) {
   );
 }
 
+/**
+ * "APPLY" — THE BRANCH BECOMES HOW THE AGENT RUNS (the product owner's list and call, 2026-10-14):
+ * the agent adopts its model, temperature and seed as defaults, and it becomes the run of record.
+ * Said in full before the press, because it changes the agent and not only this trace.
+ */
+function ApplyBranch({ run }: { run: RunSummary }) {
+  const agent = useBuildStore((s) => s.agents.find((a) => a.agent_id === run.agent_id));
+  const modelName = useProviderStore((s) => s.models.find((m) => m.id === run.model)?.name) ?? run.model;
+  const [pressedAt, setPressedAt] = useState<number | null>(null);
+  const refusal = useTraceStore((s) =>
+    pressedAt !== null && s.controlError && s.controlError.runId === run.id && s.controlError.at >= pressedAt ? s.controlError.message : null);
+  if (!agent || run.status !== "completed") return null;
+  const applied = agent.record_run_id === run.id;
+  const settings = [modelName, run.temperature != null ? `temperature ${run.temperature}` : null, run.seed != null ? `seed ${run.seed}` : null]
+    .filter(Boolean).join(" · ");
+  const waiting = pressedAt !== null && !refusal && !applied;
+  return (
+    <section aria-label="Apply this branch" className="flex items-start gap-3 rounded-card border border-hair bg-panel px-3 py-2.5">
+      <div className="min-w-0 flex-1">
+        <div className="text-caption font-medium text-ink">{applied ? "Applied" : "Apply this branch"}</div>
+        <p className="mt-0.5 text-tiny text-muted">
+          {applied
+            ? <>{agent.name} runs on {settings} by default, and this is its run of record.</>
+            : <>{agent.name} will run on {settings} by default, and this run becomes its run of record.</>}
+        </p>
+        {refusal && <p role="alert" className="mt-1 text-tiny text-err">Couldn't apply it: {refusal}.</p>}
+      </div>
+      {applied ? (
+        <span className="flex shrink-0 items-center gap-1 text-tiny text-ok">
+          <Icon.trace.finished size={ICON.xs} />
+          Run of record
+        </span>
+      ) : (
+        <button
+          type="button"
+          disabled={waiting}
+          onClick={() => {
+            setPressedAt(Date.now());
+            sendApplyRun(agent.agent_id, run.id);
+          }}
+          className={`${primaryBtnSm} shrink-0 focus-visible:outline-none focus-visible:shadow-focusring`}
+          title={`Make ${settings} ${agent.name}'s defaults, and this its run of record`}
+        >
+          {waiting ? "Applying…" : "Apply"}
+        </button>
+      )}
+    </section>
+  );
+}
+
 export function ChangesView({ run, steps }: { run: RunSummary; steps: readonly Step[] }) {
   const parentId = run.parent_run_id ?? null;
   const parentRun = useTraceStore((s) => (parentId ? s.runs[parentId] : undefined));
@@ -160,6 +212,7 @@ export function ChangesView({ run, steps }: { run: RunSummary; steps: readonly S
 
   return (
     <div className="flex flex-col gap-3 px-6 py-3">
+      <ApplyBranch run={run} />
       <div
         className="grid grid-cols-3 divide-x divide-hair rounded-card border border-hair bg-panel"
         title={`The parent from the fork on — after #${run.branch_from_seq ?? "?"}, the steps this branch ran again — against this branch`}

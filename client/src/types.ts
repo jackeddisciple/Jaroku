@@ -87,6 +87,14 @@ export interface AgentSummary {
   mcp_tools?: string[];
   required_env: string[];
   default_provider: string;
+  /**
+   * What "Apply" set (server migration 088): the model this agent runs on by default, the sampling
+   * beside it, and its run of record. Absent from an older server; null for an agent never applied.
+   */
+  default_model?: string | null;
+  default_temperature?: number | null;
+  default_seed?: number | null;
+  record_run_id?: string | null;
   created_at: string | null;
   hand_written: boolean;
   runnable: boolean;
@@ -2435,6 +2443,7 @@ export type ClientCommand =
   | { cmd: "archiveAgent"; agentId: string }
   | { cmd: "restoreAgent"; agentId: string }
   | { cmd: "renameAgent"; agentId: string; name: string }
+  | { cmd: "applyRun"; agentId: string; runId: string }
   /**
    * Remove an agent for good. `confirm` is the slug, echoed back — the server refuses unless it
    * matches the agent it is about to delete, so a command built against a row this tab has since

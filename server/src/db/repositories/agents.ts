@@ -152,6 +152,14 @@ export interface Agent {
    */
   picture: string | null;
   created_at: string;
+  /**
+   * What "Apply" set (migration 088): the model this agent runs on by default, the temperature and
+   * seed beside it, and its run of record. Null for an agent nobody has applied a run to.
+   */
+  default_model: string | null;
+  default_temperature: number | null;
+  default_seed: number | null;
+  record_run_id: string | null;
 }
 
 /** What a version contains: every file, by path, with enough to verify it without fetching it. */
@@ -230,7 +238,8 @@ export interface AgentOnDisk {
 const COLUMNS = `id, slug, display_name, display_name_is_custom, description, connectors,
                  mcp_tools, required_env, default_provider, hand_written, current_version,
                  creation_cost, created_by, forked_from, category, picture,
-                 archived_at, created_at`;
+                 archived_at, created_at,
+                 default_model, default_temperature, default_seed, record_run_id`;
 
 export class AgentRepository {
   constructor(private db: Db) {}
@@ -287,7 +296,28 @@ export class AgentRepository {
       category: (row["category"] as string | null) ?? UNCATEGORIZED,
       picture: (row["picture"] as string | null) ?? null,
       archived_at: (row["archived_at"] as string | null) ?? null,
+      default_model: (row["default_model"] as string | null) ?? null,
+      default_temperature: row["default_temperature"] == null ? null : Number(row["default_temperature"]),
+      default_seed: row["default_seed"] == null ? null : Number(row["default_seed"]),
+      record_run_id: (row["record_run_id"] as string | null) ?? null,
     };
+  }
+
+  /**
+   * "APPLY" (migration 088): the agent adopts a run's model, temperature and seed as its defaults,
+   * and that run becomes its run of record. False when there is no such live agent here.
+   */
+  async adoptRun(
+    ctx: TenantContext,
+    slug: string,
+    run: { id: string; model: string; temperature: number | null; seed: number | null },
+  ): Promise<boolean> {
+    const res = await this.q(ctx).run(
+      `UPDATE agents SET default_model = ?, default_temperature = ?, default_seed = ?, record_run_id = ?
+        WHERE workspace_id = ? AND slug = ? AND deleted_at IS NULL`,
+      [run.model, run.temperature, run.seed, run.id, ctx.workspaceId, slug],
+    );
+    return res.changes > 0;
   }
 
   /**

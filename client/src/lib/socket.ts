@@ -43,6 +43,8 @@ import { onExecHostChange, readExecHost, runningExecs, startExec, stopExec } fro
 // sides only reach each other from inside a function, never at module scope.
 import { openThread } from "./threadNav.ts";
 import { forget as forgetAvatar } from "./avatar.ts";
+// An agent's applied model follows it into the composer — a subscription, wired once at startup.
+import "./agentRunDefaults.ts";
 import {
   fetchSession, fetchTicket, signedOutReason, socketUrl, storeToken, storeWorkspace, storedToken, storedWorkspace,
   type AuthFailure,
@@ -1509,6 +1511,11 @@ export function sendSetAgentTools(agentId: string, mcpTools: readonly string[]):
 export function sendRestoreAgent(agentId: string): void {
   send({ cmd: "restoreAgent", agentId });
 }
+/** "Apply" a finished run to its agent: its model and sampling become the agent's defaults (088). */
+export function sendApplyRun(agentId: string, runId: string): void {
+  send({ cmd: "applyRun", agentId, runId });
+}
+
 export function sendRenameAgent(agentId: string, name: string): void {
   send({ cmd: "renameAgent", agentId, name });
 }

@@ -433,6 +433,13 @@ async function suite(label: string, db: Db): Promise<void> {
     "nor rewriting B's agent of the same slug",
   );
 
+  // APPLY (migration 088) moves one workspace's agent, never another's of the same slug.
+  await agents.adoptRun(A.ctx, "support_bot", { id: A.runId, model: "claude-haiku-4-5", temperature: 0.2, seed: null });
+  const appliedA = await agents.bySlug(A.ctx, "support_bot");
+  const appliedB = await agents.bySlug(B.ctx, "support_bot");
+  check(appliedA?.default_model === "claude-haiku-4-5" && appliedA.default_temperature === 0.2 && appliedA.record_run_id === A.runId, "A applies a run to its own agent");
+  check(appliedB?.default_model === null && appliedB.record_run_id === null, "...and B's agent of the same slug is untouched");
+
   // §6.3'S SECOND SENTENCE, IN BOTH DIRECTIONS. "A reconciler pass for A cannot resolve an item in
   // B" is the one that matters most in this feature: the sweep is the only path that legitimately
   // walks many workspaces, and the failure it must not have is a settle that reached across.
@@ -638,6 +645,8 @@ const SCOPED_API: Record<string, string[]> = {
     "versionSummaries",
     // Session 6 — what a storage bill is computed from.
     "storedBytes",
+    // "Apply" — a run's model and sampling as the agent's defaults (migration 088).
+    "adoptRun",
   ],
   // Session 2. These decide who can see a workspace AT ALL, so a cross-tenant bug in any of
   // them is worse than one in the stores above — it does not leak a row, it hands over the

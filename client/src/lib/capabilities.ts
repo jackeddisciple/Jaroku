@@ -168,6 +168,7 @@ export const COMMAND_CAPABILITY: Record<string, string> = {
   discardPlan: "agent:write",
   generate: "agent:write",
   edit: "agent:write",
+  applyRun: "agent:write",
   applyEdit: "agent:write",
   undoEdit: "agent:write",
   discardEdit: "agent:write",
@@ -565,6 +566,7 @@ export const COMMAND_AGENT_CAPABILITY: Record<string, AgentCapability> = {
   archiveAgent: "edit",
   restoreAgent: "edit",
   renameAgent: "edit",
+  applyRun: "edit",
   // `admin`, the top of this vocabulary — the only rung that fits an act with nothing on the other
   // side of it. Both gates apply on the server, so this is a floor rather than an alternative.
   deleteAgent: "admin",
