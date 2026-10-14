@@ -25,7 +25,7 @@
 // `started_at − latency_ms`, because `started_at` is stamped when the step finishes (see traceView).
 
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { useTraceStore, visibleTraceRows } from "../store/traceStore.ts";
+import { DRAWER_SNAP, useTraceStore, visibleTraceRows, type DrawerSnap, type DrawerTab } from "../store/traceStore.ts";
 import { absTime, fmtCost, fmtDuration, fmtOffset, tokenCount } from "../lib/format.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { buildTraceTree, descendantSteps, isInherited, stepWindow, traceTotals } from "../lib/traceView.ts";
@@ -37,7 +37,8 @@ import type { RunSummary, Step } from "../types.ts";
 import { Chip } from "./Chip.tsx";
 import { CopyTurn } from "./composer/CopyTurn.tsx";
 import { IconButton } from "./IconButton.tsx";
-import { ErrorView, StepDetail } from "./StepDetail.tsx";
+import { ErrorView, InputTab, OutputTab, PromptTab, RawTab, StateTabBody, hasState, promptCalls } from "./StepDetail.tsx";
+import { tabBtn } from "./buttons.ts";
 import { StateBranchEditor } from "./StateBranchEditor.tsx";
 import { McpBadge } from "./McpBadge.tsx";
 import { StepTile } from "./StepRow.tsx";
@@ -198,6 +199,84 @@ function Overview({ step, run, bucket, inside, kind, onNavigate }: {
 /** Where the panel sits in the Trace tab: beside the steps, or below them on a narrow panel. */
 export type StepDetailDock = "side" | "bottom";
 
+const TABS: { id: DrawerTab; label: string }[] = [
+  { id: "overview", label: "Overview" },
+  { id: "input", label: "Input" },
+  { id: "output", label: "Output" },
+  { id: "prompt", label: "Prompt" },
+  { id: "state", label: "State diff" },
+  { id: "raw", label: "Raw" },
+];
+
+const SNAPS: DrawerSnap[] = ["peek", "half", "full"];
+
+/**
+ * THE DRAWER UNDER THE STEPS HAS A HANDLE (2026-10-14): drag it, and it comes to rest at the nearest
+ * of three heights — a peek at its header, half the tab, the whole tab — or press it, or use ↑/↓ on
+ * it. Neutral greys: a handle is furniture, not a signal.
+ */
+function DrawerHandle({ panel }: { panel: React.RefObject<HTMLDivElement | null> }) {
+  const snap = useTraceStore((s) => s.drawerSnap);
+  const setSnap = useTraceStore((s) => s.setDrawerSnap);
+  const setDrag = useTraceStore((s) => s.setDrawerDrag);
+  const moved = useRef(false);
+  const shareAt = (clientY: number): number | null => {
+    const box = panel.current?.parentElement?.getBoundingClientRect();
+    if (!box || box.height <= 0) return null;
+    return Math.min(1, Math.max(0.15, (box.bottom - clientY) / box.height));
+  };
+  const nearest = (share: number): DrawerSnap =>
+    SNAPS.reduce((best, s) => (Math.abs(DRAWER_SNAP[s] - share) < Math.abs(DRAWER_SNAP[best] - share) ? s : best), "half" as DrawerSnap);
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>): void => {
+    if (e.button !== 0) return;
+    moved.current = false;
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>): void => {
+    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+    const share = shareAt(e.clientY);
+    if (share == null) return;
+    moved.current = true;
+    setDrag(share);
+  };
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>): void => {
+    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    const share = shareAt(e.clientY);
+    if (moved.current && share != null) setSnap(nearest(share));
+    // A press without a drag steps through the rests: peek → half → full → peek.
+    else setSnap(SNAPS[(SNAPS.indexOf(snap) + 1) % SNAPS.length]!);
+  };
+  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+    const at = SNAPS.indexOf(snap);
+    if (e.key === "ArrowUp" && at < SNAPS.length - 1) setSnap(SNAPS[at + 1]!);
+    else if (e.key === "ArrowDown" && at > 0) setSnap(SNAPS[at - 1]!);
+    else if (e.key === "Enter" || e.key === " ") setSnap(SNAPS[(at + 1) % SNAPS.length]!);
+    else return;
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  const word = snap === "peek" ? "a peek" : snap === "half" ? "half the tab" : "the whole tab";
+  return (
+    <div
+      role="separator"
+      aria-orientation="horizontal"
+      aria-label="Resize step details"
+      aria-valuetext={word}
+      tabIndex={0}
+      title={`Drag to resize — it rests at a peek, half or the whole tab (now ${word}). ↑/↓ or press to step.`}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={() => setDrag(null)}
+      onKeyDown={onKeyDown}
+      className="group flex h-3 shrink-0 cursor-row-resize touch-none items-center justify-center outline-none focus-visible:shadow-focusring"
+    >
+      <span aria-hidden className="h-1 w-8 rounded-full bg-edge transition-colors group-hover:bg-grip" />
+    </div>
+  );
+}
+
 export function StepDetailPanel({ dock }: { dock: StepDetailDock }) {
   // Same join as the timeline row: a step carries a tool NAME, and whether that name came
   // from MCP is a fact about the AGENT, recorded in its manifest.
@@ -227,9 +306,10 @@ export function StepDetailPanel({ dock }: { dock: StepDetailDock }) {
   // place, so stepping from #1 (scrolled down to Raw event) to #8 opened #8 mid-way, its figures and
   // Overview above the fold. Before paint, so the old offset is never drawn on the new step.
   const body = useRef<HTMLDivElement>(null);
+  const drawerTab = useTraceStore((s) => s.drawerTab);
   useLayoutEffect(() => {
     body.current?.scrollTo({ top: 0 });
-  }, [expandedStepId]);
+  }, [expandedStepId, drawerTab]);
 
   // THE KEYBOARD IS NEVER DROPPED. Closing the panel from inside it unmounted whatever had focus, and
   // focus fell to <body>, where the arrows do nothing — so it goes back to the step's row, where ↑/↓
@@ -282,6 +362,17 @@ export function StepDetailPanel({ dock }: { dock: StepDetailDock }) {
     keepFocus();
   };
 
+  // The tabs this step has something for: Prompt only where a model was asked, State diff only where
+  // state was recorded. A tab chosen on another step that this one lacks shows Overview, and the
+  // choice is kept for the next step that has it.
+  const chosenTab = useTraceStore((s) => s.drawerTab);
+  const setTab = useTraceStore((s) => s.setDrawerTab);
+  const tabs = step ? TABS.filter((t) => (t.id === "prompt" ? promptCalls(step, inside).length > 0 : t.id === "state" ? hasState(step) : true)) : TABS;
+  const tab = tabs.some((t) => t.id === chosenTab) ? chosenTab : "overview";
+  // "3 of 9": where this step is among the rows the timeline shows, J/K's order.
+  const rows = step ? visibleTraceRows(useTraceStore.getState()) : [];
+  const position = step ? rows.findIndex((r) => r.step.id === step.id) : -1;
+
   if (!open) return null;
   return (
     <div
@@ -294,9 +385,12 @@ export function StepDetailPanel({ dock }: { dock: StepDetailDock }) {
         dock === "side" ? "w-[380px] shrink-0 border-l border-edge" : "min-w-0 flex-1 border-t border-edge"
       }`}
     >
+      {dock === "bottom" && <DrawerHandle panel={panel} />}
       {step && bucket && (
         <>
-          <div className="shrink-0 border-b border-hair px-4 pb-4 pt-2">
+          {/* THE HEADER STAYS PUT (it sits outside the scroller): the step's name, where it is among
+              the steps — "3 of 9" between the arrows — and the tabs, while its payload scrolls. */}
+          <div className={`shrink-0 border-b border-hair px-4 ${dock === "bottom" ? "pt-0" : "pt-2"}`}>
             <div className="flex h-9 items-center">
               <span className={TYPE.panelLabel}>Step details</span>
               <span className="ml-auto flex items-center">
@@ -306,6 +400,11 @@ export function StepDetailPanel({ dock }: { dock: StepDetailDock }) {
                   disabledReason={neighbour(-1) ? null : "This is the first step shown"}
                   onClick={() => go(-1)}
                 />
+                {position >= 0 && (
+                  <span className="px-0.5 text-tiny tabular-nums text-faint" title="This step's place among the steps shown">
+                    {position + 1} of {rows.length}
+                  </span>
+                )}
                 <IconButton
                   icon={Icon.trace.nextStep}
                   label="Next step"
@@ -345,9 +444,30 @@ export function StepDetailPanel({ dock }: { dock: StepDetailDock }) {
               </div>
               <StepStatus failed={step.error != null} />
             </div>
+            <div role="tablist" aria-label="Step views" className="-mx-1 mt-3 flex items-center gap-0.5 overflow-x-auto">
+              {tabs.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === t.id}
+                  onClick={() => setTab(t.id)}
+                  className={`${tabBtn(tab === t.id, "sm")} shrink-0`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div ref={body} className="flex-1 overflow-auto px-4 pb-6 pt-4">
+            {tab === "input" ? <InputTab step={step} />
+              : tab === "output" ? <OutputTab step={step} />
+                : tab === "prompt" ? <PromptTab step={step} inside={inside} />
+                  : tab === "state" ? <StateTabBody step={step} />
+                    : tab === "raw" ? <RawTab step={step} />
+                      : (
+            <>
             <Figures step={step} inside={inside} />
             {/* A failure next: it is what somebody opening a red step came for. */}
             {step.error && (
@@ -367,12 +487,11 @@ export function StepDetailPanel({ dock }: { dock: StepDetailDock }) {
               </div>
             )}
             <Overview step={step} run={run} bucket={bucket} inside={inside} kind={kindWord(step, marks.get(step.name))} onNavigate={keepFocus} />
-            <div className="mt-4">
-              <StepDetail step={step} />
-            </div>
             {/* KEYED BY STEP: its drafts are this step's fields. Without the key, prev/next kept the
                 last step's edits and offered to re-run the new step with them. */}
             <StateBranchEditor key={step.id} step={step} />
+            </>
+                      )}
           </div>
         </>
       )}

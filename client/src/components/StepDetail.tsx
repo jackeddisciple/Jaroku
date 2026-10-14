@@ -3,12 +3,10 @@ import type { RunStatus, Step } from "../types.ts";
 import { textFromLlmOutput } from "../lib/agentOutput.ts";
 import { jsonPretty } from "../lib/format.ts";
 import { errorParts, jsonReply, llmToolCalls, stepOutputText } from "../lib/traceView.ts";
-import { Icon } from "../lib/icons/registry.ts";
 import { StateDiff, canDiff } from "./StateDiff.tsx";
 import { TYPE } from "../lib/tokens.ts";
-import { CollapsibleRegion } from "./CollapsibleRegion.tsx";
 import { CopyTurn } from "./composer/CopyTurn.tsx";
-import { JsonTree, MessageList, PayloadText, asMessages } from "./JsonTree.tsx";
+import { JsonTree, MessageList, PayloadText, asMessages, contentText, type Message } from "./JsonTree.tsx";
 
 function Section({ label, value }: { label: string; value: unknown }) {
   const text = jsonPretty(value);
@@ -22,46 +20,6 @@ function Section({ label, value }: { label: string; value: unknown }) {
       <pre className="whitespace-pre-wrap break-words rounded-control border border-hair bg-void p-2 text-caption leading-relaxed text-muted">
         {text}
       </pre>
-    </div>
-  );
-}
-
-/**
- * A payload section: its name, a copy of exactly what was captured, and the payload drawn for what it
- * is. Folds, so somebody after the output is not made to scroll a forty-message input to reach it.
- */
-function PayloadSection({ label, value, copy, children }: {
-  label: "Input" | "Output";
-  value: unknown;
-  /** What the copy button takes, when it is not the payload as captured — a model's reply, as shown. */
-  copy?: { text: string; title: string };
-  children: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(true);
-  const empty = value === null || value === undefined || value === "";
-  return (
-    <div className="mt-3 first:mt-0">
-      <CollapsibleRegion
-        label={label}
-        open={open}
-        onToggle={() => setOpen((v) => !v)}
-        chevron={Icon.trace.fold}
-        trailing={empty ? undefined : (
-          <CopyTurn
-            source={copy?.text ?? jsonPretty(value)}
-            label={`Copy ${label.toLowerCase()}`}
-            title={copy?.title ?? `Copy this step's ${label.toLowerCase()} as captured`}
-          />
-        )}
-      >
-        {empty ? (
-          <p className="text-tiny text-faint">
-            {value === "" ? `The ${label.toLowerCase()} was an empty string.` : `No ${label.toLowerCase()} was recorded for this step.`}
-          </p>
-        ) : (
-          children
-        )}
-      </CollapsibleRegion>
     </div>
   );
 }
@@ -130,7 +88,7 @@ function StateView({ step }: { step: Step }) {
   const [raw, setRaw] = useState(false);
 
   return (
-    <div className="mt-3">
+    <div>
       <div className="flex items-baseline gap-3 mb-1">
         <span className={TYPE.sectionLabel}>state</span>
         <button
@@ -228,55 +186,153 @@ export function ErrorView({ error, runStatus, actions }: {
   );
 }
 
-/**
- * The step exactly as it arrived, for anybody who needs a field this drawer does not lay out. Folded
- * by default, and nothing new: every value in it is one the sections above already show.
- */
-function RawEvent({ step }: { step: Step }) {
-  const [open, setOpen] = useState(false);
+// ── The drawer's tabs (2026-10-14): Input · Output · Prompt · State diff · Raw ─────────────────
+//
+// ONE QUESTION PER TAB. The drawer was one long scroll — input, output, state, raw event, the re-run
+// editor — and the part somebody came for was below the fold of the part they did not. Each payload
+// is now a tab of its own, with its copy button beside its name.
+
+/** A tab's payload: its name and its copy, then the payload drawn for what it is — or why there is none. */
+function PayloadTab({ label, value, copy, children }: {
+  label: "Input" | "Output";
+  value: unknown;
+  copy?: { text: string; title: string };
+  children: React.ReactNode;
+}) {
+  const empty = value === null || value === undefined || value === "";
   return (
-    <div className="mt-3">
-      <CollapsibleRegion
-        label="Raw event"
-        open={open}
-        onToggle={() => setOpen((v) => !v)}
-        chevron={Icon.trace.fold}
-        trailing={<CopyTurn source={JSON.stringify(step, null, 2)} label="Copy raw event" title="Copy the step as JSON" />}
-      >
-        <JsonTree value={step} openDepth={1} />
-      </CollapsibleRegion>
+    <div>
+      <div className="mb-1.5 flex min-h-8 items-center">
+        <span className={TYPE.sectionLabel}>{label}</span>
+        {!empty && (
+          <CopyTurn
+            source={copy?.text ?? jsonPretty(value)}
+            label={`Copy ${label.toLowerCase()}`}
+            title={copy?.title ?? `Copy this step's ${label.toLowerCase()} as captured`}
+            className="ml-auto"
+          />
+        )}
+      </div>
+      {empty ? (
+        <p className="text-tiny text-faint">
+          {value === "" ? `The ${label.toLowerCase()} was an empty string.` : `No ${label.toLowerCase()} was recorded for this step.`}
+        </p>
+      ) : (
+        children
+      )}
     </div>
   );
 }
 
-export function StepDetail({ step }: { step: Step }) {
-  const diffable = canDiff(step.state_before, step.state_after);
-  const hasState = step.state_before != null || step.state_after != null;
-
+export function InputTab({ step }: { step: Step }) {
   return (
-    <div className="pb-1">
-      <PayloadSection label="Input" value={step.input}>
-        <InputView step={step} />
-      </PayloadSection>
-      <PayloadSection
-        label="Output"
-        value={step.output}
-        // A model call's copy is its reply, as drawn below — the envelope is in Raw event.
-        copy={step.type === "llm_call" ? { text: stepOutputText(step), title: "Copy the reply as shown" } : undefined}
-      >
-        <OutputView step={step} />
-      </PayloadSection>
-      {diffable ? (
-        <StateView step={step} />
-      ) : (
-        hasState && (
-          <>
-            <Section label="state before" value={step.state_before} />
-            <Section label="state after" value={step.state_after} />
-          </>
-        )
+    <PayloadTab label="Input" value={step.input}>
+      <InputView step={step} />
+    </PayloadTab>
+  );
+}
+
+export function OutputTab({ step }: { step: Step }) {
+  return (
+    <PayloadTab
+      label="Output"
+      value={step.output}
+      // A model call's copy is its reply, as drawn below — the envelope is in Raw.
+      copy={step.type === "llm_call" ? { text: stepOutputText(step), title: "Copy the reply as shown" } : undefined}
+    >
+      <OutputView step={step} />
+    </PayloadTab>
+  );
+}
+
+/** The model calls whose prompts a step's Prompt tab shows: the step itself, or the calls inside it. */
+export function promptCalls(step: Step, inside: readonly Step[]): Step[] {
+  const calls = step.type === "llm_call" ? [step] : inside.filter((s) => s.type === "llm_call");
+  return calls.filter((c) => asMessages(c.input) != null);
+}
+
+const roleOf = (m: Message): string => String(m.type ?? m.role ?? "message");
+
+/** A prompt as one text, the way it would be pasted: each message under its role. */
+function promptText(messages: readonly Message[]): string {
+  return messages.map((m) => `${roleOf(m)}:\n${contentText(m.content) ?? JSON.stringify(m.content)}`).join("\n\n");
+}
+
+/**
+ * WHAT THE MODEL WAS TOLD AND ASKED. A node's input is the whole state, and the prompt its model call
+ * was sent was two clicks away inside it; a model call's prompt was forty messages to scroll. Here it
+ * is the system prompt, then the last thing it was asked, with the whole conversation one press away.
+ */
+function PromptOf({ call, many }: { call: Step; many: boolean }) {
+  const messages = asMessages(call.input) ?? [];
+  const [all, setAll] = useState(false);
+  const system = messages.find((m) => /^system$/i.test(roleOf(m)));
+  const asked = [...messages].reverse().find((m) => /^(human|user)$/i.test(roleOf(m)));
+  const systemText = system ? contentText(system.content) : null;
+  const askedText = asked ? contentText(asked.content) : null;
+  return (
+    <section className="mt-4 first:mt-0" aria-label={`Prompt of #${call.seq}`}>
+      <div className="mb-1.5 flex min-h-8 items-center gap-2">
+        <span className={TYPE.sectionLabel}>{many ? `#${call.seq} ${call.name}` : "Prompt"}</span>
+        <span className="text-tiny text-faint">{messages.length} {messages.length === 1 ? "message" : "messages"}</span>
+        <CopyTurn source={promptText(messages)} label="Copy prompt" title="Copy the whole prompt as text, each message under its role" className="ml-auto" />
+      </div>
+      {systemText && (
+        <div className="mb-2">
+          <div className="mb-0.5 text-tiny uppercase tracking-wider text-faint">System</div>
+          <PayloadText text={systemText} prose />
+        </div>
       )}
-      <RawEvent step={step} />
+      {askedText && (
+        <div className="mb-2">
+          <div className="mb-0.5 text-tiny uppercase tracking-wider text-faint">Asked</div>
+          <PayloadText text={askedText} prose />
+        </div>
+      )}
+      {messages.length > (system ? 1 : 0) + (asked ? 1 : 0) && (
+        <button
+          type="button"
+          onClick={() => setAll((v) => !v)}
+          aria-expanded={all}
+          className="rounded-xs text-tiny text-muted underline decoration-hair underline-offset-2 transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+        >
+          {all ? "Hide the conversation" : `Show the whole conversation (${messages.length})`}
+        </button>
+      )}
+      {all && <div className="mt-2"><MessageList messages={messages} /></div>}
+    </section>
+  );
+}
+
+export function PromptTab({ step, inside }: { step: Step; inside: readonly Step[] }) {
+  const calls = promptCalls(step, inside);
+  if (calls.length === 0) return <p className="text-tiny text-faint">This step sent no prompt to a model.</p>;
+  return <>{calls.map((c) => <PromptOf key={c.id} call={c} many={calls.length > 1 || c.id !== step.id} />)}</>;
+}
+
+/** Whether a step has any state to show. */
+export const hasState = (step: Step): boolean => step.state_before != null || step.state_after != null;
+
+export function StateTabBody({ step }: { step: Step }) {
+  if (!hasState(step)) return <p className="text-tiny text-faint">This step recorded no state.</p>;
+  if (canDiff(step.state_before, step.state_after)) return <StateView step={step} />;
+  return (
+    <>
+      <Section label="state before" value={step.state_before} />
+      <Section label="state after" value={step.state_after} />
+    </>
+  );
+}
+
+/** The step exactly as it arrived, for a field no other tab lays out. */
+export function RawTab({ step }: { step: Step }) {
+  return (
+    <div>
+      <div className="mb-1.5 flex min-h-8 items-center">
+        <span className={TYPE.sectionLabel}>Raw event</span>
+        <CopyTurn source={JSON.stringify(step, null, 2)} label="Copy raw event" title="Copy the step as JSON" className="ml-auto" />
+      </div>
+      <JsonTree value={step} openDepth={1} />
     </div>
   );
 }

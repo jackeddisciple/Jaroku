@@ -14,6 +14,12 @@ import { nodeKind } from "../components/graphNodeIcons.ts";
 export type ConnectionState = "connecting" | "open" | "closed";
 export type StepView = "list" | "waterfall" | "graph";
 export type RunTab = "steps" | "changes" | "state" | "artifacts" | "raw";
+/** The step drawer's tabs. */
+export type DrawerTab = "overview" | "input" | "output" | "prompt" | "state" | "raw";
+/** Where the drawer docked under the steps rests: a peek at its header, half the tab, or all of it. */
+export type DrawerSnap = "peek" | "half" | "full";
+/** The share of the tab the drawer takes at each rest. */
+export const DRAWER_SNAP: Record<DrawerSnap, number> = { peek: 0.3, half: 0.6, full: 1 };
 /** The metric the steps are warmed by, when the reader has pressed Cost or Duration in the strip. */
 export type HeatBy = "cost" | "time" | null;
 export type LogLine = { level: "stderr" | "parseError"; text: string };
@@ -98,6 +104,11 @@ interface TraceState {
   runTab: RunTab;
   /** Pressed in the metrics strip: warm every step by its share of this metric. Null: the heaviest few. */
   heatBy: HeatBy;
+  /** The step drawer's open tab, kept as the drawer moves from step to step. Session-only. */
+  drawerTab: DrawerTab;
+  /** Where the drawer docked under the steps rests, and — while its handle is dragged — where it is. */
+  drawerSnap: DrawerSnap;
+  drawerDrag: number | null;
   /** Sections of a long run folded away, by their first node's step id (`traceSections`). Session-only. */
   collapsedSections: Record<string, true>;
   /**
@@ -143,6 +154,9 @@ interface TraceState {
   toggleSection: (key: string) => void;
   setRunTab: (tab: RunTab) => void;
   setHeatBy: (by: HeatBy) => void;
+  setDrawerTab: (tab: DrawerTab) => void;
+  setDrawerSnap: (snap: DrawerSnap) => void;
+  setDrawerDrag: (share: number | null) => void;
   setControlError: (error: { runId: string | null; message: string } | null) => void;
 }
 
@@ -219,6 +233,9 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   collapsedSections: {},
   runTab: "steps",
   heatBy: null,
+  drawerTab: "overview",
+  drawerSnap: "half",
+  drawerDrag: null,
   controlError: null,
 
   applyHistory: (runs, meta) =>
@@ -357,6 +374,9 @@ export const useTraceStore = create<TraceState>((set, get) => ({
 
   setRunTab: (runTab) => set({ runTab }),
   setHeatBy: (heatBy) => set({ heatBy }),
+  setDrawerTab: (drawerTab) => set({ drawerTab }),
+  setDrawerSnap: (drawerSnap) => set({ drawerSnap, drawerDrag: null }),
+  setDrawerDrag: (drawerDrag) => set({ drawerDrag }),
 
   toggleSection: (key) =>
     set((state) => {

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { CANCELLED_BY_USER, jumpToError, orderedSteps, treeSteps, useTraceStore } from "../store/traceStore.ts";
+import { CANCELLED_BY_USER, DRAWER_SNAP, jumpToError, orderedSteps, treeSteps, useTraceStore } from "../store/traceStore.ts";
 import type { RunSummary, Step } from "../types.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { COL, StepRow, columnsFor, tileCentre, type BarPlace, type FoldSummary, type MetricScale, type RowTier } from "./StepRow.tsx";
@@ -516,6 +516,11 @@ export function TraceTimeline() {
   const side = useSideBySide(body, run != null);
 
   const steps = useMemo(() => orderedSteps(bucket), [bucket]);
+  // THE DRAWER UNDER THE STEPS RESTS AT A PEEK, HALF OR ALL OF THE TAB (`DRAWER_SNAP`), or wherever its
+  // handle is being dragged; the steps keep the rest. At "full" they give it all.
+  const snapShare = useTraceStore((s) => DRAWER_SNAP[s.drawerSnap]);
+  const dragShare = useTraceStore((s) => s.drawerDrag);
+  const listShare = Math.max(0, 1 - (dragShare ?? snapShare));
 
   // THE AGENT'S GRAPH, SO A NODE LOOKS THE SAME ON BOTH TABS (traceMarks). Asked for here as GraphView
   // asks for it — once, not for a draft, not while it is on its way — and the server keeps it cached.
@@ -556,7 +561,10 @@ export function TraceTimeline() {
           first 16px would dim the controls it is meant to keep in reach. */}
       {/* The padding is on the INNER box: a sticky child sticks to the scroller's padding edge, so
           top padding here would leave a strip above the filter row for steps to scroll through. */}
-      <div className={`overflow-auto px-6 pb-4 ${!detailsOpen ? "flex-1" : side ? "min-w-0 flex-1" : "h-2/5 min-h-36 shrink-0"}`}>
+      <div
+        className={`overflow-auto px-6 ${!detailsOpen ? "flex-1 pb-4" : side ? "min-w-0 flex-1 pb-4" : `shrink-0 ${listShare > 0 ? "pb-4" : "hidden"}`}`}
+        style={detailsOpen && !side ? { height: `${listShare * 100}%` } : undefined}
+      >
         <div className="pt-3">
           {steps.length === 0 ? (
             run?.status === "running" || run?.status === "paused" ? (

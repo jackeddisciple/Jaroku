@@ -183,7 +183,7 @@ export function PayloadText({ text, prose = false, limit = TEXT_SHOWN }: { text:
 const MESSAGE_SHOWN = 600;
 
 /** A message the way LangChain serialises one: a `type` (or `role`) and a `content`. */
-interface Message {
+export interface Message {
   type?: unknown;
   role?: unknown;
   content?: unknown;
@@ -205,7 +205,7 @@ export function asMessages(input: unknown): Message[] | null {
 }
 
 /** What a message's content says, as text: a string, or the text blocks of a content list. */
-function contentText(content: unknown): string | null {
+export function contentText(content: unknown): string | null {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return null;
   const parts = content
