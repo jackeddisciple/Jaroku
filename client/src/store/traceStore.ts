@@ -58,7 +58,10 @@ interface TraceState {
    * every trace; kept for the session and never written to storage.
    */
   collapsedStepIds: Record<string, true>;
-  /** Which kind of step the timeline shows, and the words it is searched for — both session-only. */
+  /**
+   * Which kind of step the timeline shows, and the words it is searched for — both session-only, and
+   * both about THE RUN ON SCREEN: opening another run sets them back (see `aboutAnotherRun`).
+   */
   stepFilter: StepFilter;
   stepQuery: string;
 
@@ -101,6 +104,23 @@ const NEXT_KEPT = 50;
  * it by `test:trace`. A stopped run and a failed one are both `error`; this is what tells them apart.
  */
 export const CANCELLED_BY_USER = "cancelled by user";
+
+/**
+ * What changes when the trace turns to a different run.
+ *
+ * THE FILTER AND THE SEARCH GO WITH THE SELECTION. They were kept, so a run opened after "LLM" and
+ * "Chat" on another one arrived already narrowed, and a stale query made a healthy run read "No steps
+ * match". Folds stay: they are keyed by step id, so they never touch another run's rows, and going back
+ * to a run finds it folded the way it was left.
+ */
+function aboutAnotherRun(state: Pick<TraceState, "activeRunId">, id: string | null): Partial<TraceState> {
+  const reset: Partial<TraceState> = { selectedStepId: null, expandedStepId: null };
+  if (id !== state.activeRunId) {
+    reset.stepFilter = "all";
+    reset.stepQuery = "";
+  }
+  return reset;
+}
 
 function bucketFrom(steps: Step[]): Record<string, Step> {
   const out: Record<string, Step> = {};
@@ -147,9 +167,9 @@ export const useTraceStore = create<TraceState>((set, get) => ({
           // Open a fresh bucket; a live run streams from seq 0, so it is "loaded".
           stepsByRun: { ...state.stepsByRun, [run.id]: state.stepsByRun[run.id] ?? {} },
           loaded: { ...state.loaded, [run.id]: true },
+          // A new run's steps don't exist yet — drop the stale selection, filter and search.
+          ...aboutAnotherRun(state, run.id),
           activeRunId: run.id, // auto-focus the run that just started
-          selectedStepId: null, // a new run's steps don't exist yet — drop stale selection
-          expandedStepId: null,
         };
       }
       if (event.kind === "run_end") {
@@ -175,9 +195,9 @@ export const useTraceStore = create<TraceState>((set, get) => ({
       loaded: { ...state.loaded, [runId]: true },
     })),
 
-  selectRun: (id) => set({ activeRunId: id, selectedStepId: null, expandedStepId: null }),
+  selectRun: (id) => set((state) => ({ ...aboutAnotherRun(state, id), activeRunId: id })),
 
-  clearRunSelection: () => set({ activeRunId: null, selectedStepId: null, expandedStepId: null }),
+  clearRunSelection: () => set((state) => ({ ...aboutAnotherRun(state, null), activeRunId: null })),
 
   // Debug depth: reflect a control-plane status flip (paused / resumed) on the run row. Only the
   // status changes — steps and seq ordering are untouched; a resumed run's new steps still arrive

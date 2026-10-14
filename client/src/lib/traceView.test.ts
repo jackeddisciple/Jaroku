@@ -243,6 +243,24 @@ console.log("\nthe store's rules for selection and folding");
   useTraceStore.setState({ stepFilter: "all", stepQuery: "no such words" });
   useTraceStore.getState().selectStep("t");
   check("...and the search too", useTraceStore.getState().stepQuery === "");
+
+  reset();
+  useTraceStore.setState({ stepFilter: "llm", stepQuery: "Chat" });
+  useTraceStore.getState().selectRun(run);
+  check("opening the run already on screen keeps its filter and search",
+    useTraceStore.getState().stepFilter === "llm" && useTraceStore.getState().stepQuery === "Chat");
+  useTraceStore.getState().setCollapsed("a", true);
+  useTraceStore.getState().selectRun("another");
+  check("opening another run sets the filter and search back",
+    useTraceStore.getState().stepFilter === "all" && useTraceStore.getState().stepQuery === "");
+  check("...and keeps the folds, which are this run's steps' own", useTraceStore.getState().collapsedStepIds.a === true);
+  useTraceStore.setState({ stepFilter: "errors", stepQuery: "boom" });
+  useTraceStore.getState().applyEvent({
+    kind: "run_start", schema_version: 1,
+    run: { id: "fresh", agent_id: "x", provider: "fake", model: "m", status: "running", started_at: new Date().toISOString(), ended_at: null, cost: 0, tokens: 0, error: null },
+  });
+  check("a run that starts and takes the screen starts unfiltered",
+    useTraceStore.getState().stepFilter === "all" && useTraceStore.getState().stepQuery === "");
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
