@@ -7,10 +7,11 @@
 // field must parse before a re-run is allowed; an invalid edit is refused client-side and the
 // original checkpoint is never touched.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Step } from "../types.ts";
 import { useTraceStore } from "../store/traceStore.ts";
 import { stepNodeId } from "../lib/traceGraphMap.ts";
+import { rerunBlocked } from "../lib/traceView.ts";
 import { sendBranchRun } from "../lib/socket.ts";
 import { TYPE } from "../lib/tokens.ts";
 import { primaryBtn } from "./buttons.ts";
@@ -49,6 +50,26 @@ export function StateBranchEditor({ step }: { step: Step }) {
   );
   const [error, setError] = useState<string | null>(null);
 
+  // WHETHER IT CAN WORK, BEFORE IT IS PRESSED (`rerunBlocked`): another run holding the workspace, or
+  // no checkpoint after this step. Said under the buttons, which wait, rather than learnt from a
+  // two-second toast after a press that made nothing.
+  const runs = useTraceStore((s) => s.runs);
+  const boundarySeq = useTraceStore((s) => (activeRunId ? s.boundaryByRun[activeRunId] : undefined));
+  const blocked = rerunBlocked(step as Step & { checkpoint_id?: string | null }, Object.values(runs), boundarySeq);
+  // AND AFTER: pressed, the buttons wait until the new run opens (this panel goes with the old run)
+  // or the server refuses — which is then said here, in its own words, until something changes.
+  const [pressedAt, setPressedAt] = useState<number | null>(null);
+  const refusal = useTraceStore((s) =>
+    pressedAt !== null && s.controlError && s.controlError.runId === activeRunId && s.controlError.at >= pressedAt
+      ? s.controlError.message
+      : null);
+  useEffect(() => {
+    if (pressedAt === null || refusal) return;
+    const id = setTimeout(() => setPressedAt(null), 15_000);
+    return () => clearTimeout(id);
+  }, [pressedAt, refusal]);
+  const starting = pressedAt !== null && !refusal;
+
   if (!activeRunId) return null;
 
   const dirtyKeys = fieldKeys.filter((k) => draft[k] !== draftOf(fields[k]));
@@ -71,8 +92,10 @@ export function StateBranchEditor({ step }: { step: Step }) {
         }
       }
     }
+    setPressedAt(Date.now());
     sendBranchRun(activeRunId, step.seq, node ?? undefined, editedState);
   };
+  const said = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
 
   return (
     <section aria-label="Re-run from this step" className="mt-5">
@@ -120,6 +143,11 @@ export function StateBranchEditor({ step }: { step: Step }) {
       )}
 
       {error && <p className="text-tiny text-err mb-2">{error}</p>}
+      {refusal && (
+        <p role="alert" className="mb-2 text-tiny text-err">
+          Couldn't re-run from here: {said(refusal)}.
+        </p>
+      )}
 
       {/* THE DRAWER'S TWO DECISIONS, BOTH BLACK — the product owner's call on 2026-10-12, that every
           major button there is the app's ink-filled primary. Re-run leads because it always works;
@@ -128,21 +156,23 @@ export function StateBranchEditor({ step }: { step: Step }) {
         <button
           type="button"
           onClick={() => branch(false)}
+          disabled={blocked !== null || starting}
           className={`${primaryBtn} flex-1 justify-center focus-visible:outline-none focus-visible:shadow-focusring`}
-          title="Start a new run from this step, as it was — this run stays as it is"
+          title={blocked ?? (starting ? "Starting the new run…" : "Start a new run from this step, as it was — this run stays as it is")}
         >
-          Re-run from here
+          {starting ? "Starting…" : "Re-run from here"}
         </button>
         <button
           type="button"
           onClick={() => branch(true)}
-          disabled={dirtyKeys.length === 0}
+          disabled={dirtyKeys.length === 0 || blocked !== null || starting}
           className={`${primaryBtn} flex-1 justify-center focus-visible:outline-none focus-visible:shadow-focusring`}
-          title={dirtyKeys.length === 0 ? "Edit a field above to re-run with changes" : "Start a new run from this step with these edits — this run stays as it is"}
+          title={blocked ?? (dirtyKeys.length === 0 ? "Edit a field above to re-run with changes" : "Start a new run from this step with these edits — this run stays as it is")}
         >
           Re-run with edits{dirtyKeys.length ? ` (${dirtyKeys.length})` : ""}
         </button>
       </div>
+      {blocked && <p className="mt-2 text-tiny text-muted">{blocked}.</p>}
       </div>
     </section>
   );

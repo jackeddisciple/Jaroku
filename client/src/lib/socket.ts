@@ -318,7 +318,10 @@ function dispatch(msg: ServerMessage): void {
       // Debug depth control plane: reflect pause/resume on the run's status. The run's steps
       // still arrive as normal "trace" events. A "boundary" says which nodes run next, which is how
       // the graph shows the node a live run is in rather than the last one it finished.
-      if (msg.type === "boundary") s.setNext(msg.runId, Array.isArray(msg.next) ? msg.next : []);
+      if (msg.type === "boundary") {
+        s.setNext(msg.runId, Array.isArray(msg.next) ? msg.next : []);
+        if (typeof msg.seq === "number") s.noteBoundary(msg.runId, msg.seq);
+      }
       else if (msg.type === "paused") s.setRunStatus(msg.runId, "paused");
       else if (msg.type === "resumed") s.setRunStatus(msg.runId, "running");
       else if (msg.type === "branched") {

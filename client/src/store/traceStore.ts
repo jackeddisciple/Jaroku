@@ -54,6 +54,12 @@ interface TraceState {
    */
   lagByRun: Record<string, number>;
   /**
+   * Per run, the highest seq a node boundary has covered while this app was listening — the steps
+   * at or below it have a checkpoint to re-run from even when the copy of them here, loaded before
+   * the boundary, says otherwise (`rerunBlocked`). Bounded like `nextByRun`.
+   */
+  boundaryByRun: Record<string, number>;
+  /**
    * Whether the trace's Final answer section is open. One choice for every run, kept for the session
    * and never written to storage: somebody who folded it away to read steps wants the next run's
    * answer folded too, and a reload is a fair moment to show it again.
@@ -107,6 +113,7 @@ interface TraceState {
   addLog: (line: LogLine) => void;
   setConnection: (c: ConnectionState) => void;
   setNext: (runId: string, next: string[]) => void;
+  noteBoundary: (runId: string, seq: number) => void;
   setAnswerOpen: (open: boolean) => void;
   setCollapsed: (stepId: string, collapsed: boolean) => void;
   setStepFilter: (filter: StepFilter) => void;
@@ -177,6 +184,7 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   logs: [],
   nextByRun: {},
   lagByRun: {},
+  boundaryByRun: {},
   answerOpen: true,
   collapsedStepIds: {},
   stepFilter: "all",
@@ -298,6 +306,13 @@ export const useTraceStore = create<TraceState>((set, get) => ({
     set((state) => {
       const others = Object.entries(state.nextByRun).filter(([id]) => id !== runId).slice(-(NEXT_KEPT - 1));
       return { nextByRun: { ...Object.fromEntries(others), [runId]: next } };
+    }),
+
+  noteBoundary: (runId, seq) =>
+    set((state) => {
+      if ((state.boundaryByRun[runId] ?? -1) >= seq) return {};
+      const others = Object.entries(state.boundaryByRun).filter(([id]) => id !== runId).slice(-(NEXT_KEPT - 1));
+      return { boundaryByRun: { ...Object.fromEntries(others), [runId]: seq } };
     }),
 
   setAnswerOpen: (answerOpen) => set({ answerOpen }),

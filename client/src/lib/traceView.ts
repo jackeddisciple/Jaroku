@@ -473,6 +473,38 @@ export function ownSteps(
   return steps.filter((s) => !isInherited(s, run));
 }
 
+// ── Re-running from a step ──────────────────────────────────────────────────
+
+/**
+ * Whether "Re-run from here" can work for a step, as far as this app can tell — and why not.
+ *
+ * IT WAS A BLACK BUTTON THAT COULD FAIL WITH A FLASH OF TEXT. The server forks a re-run at the
+ * checkpoint saved after the step's node, and refuses when there is none, or while another run holds
+ * the workspace. Both are knowable here first:
+ *
+ *   another run going   — any run in the workspace still `running` (the server allows one at a time);
+ *   no checkpoint       — a step loaded from history carries `checkpoint_id`, null when none was
+ *                         saved; one that streamed in live carries no field at all, and counts as
+ *                         stamped once a node boundary at or after it has been seen (`boundarySeq`).
+ *
+ * Anything else — a checkpoint file that is on another machine — only the server can say, and the
+ * details say it beside the buttons when it does.
+ */
+export function rerunBlocked(
+  step: Pick<Step, "seq"> & { checkpoint_id?: string | null },
+  runs: readonly Pick<Run, "status">[],
+  boundarySeq?: number,
+): string | null {
+  if (runs.some((r) => r.status === "running")) {
+    return "A run is going — wait for it to finish, or pause or stop it, then re-run from here";
+  }
+  const covered = boundarySeq !== undefined && step.seq <= boundarySeq;
+  if (step.checkpoint_id === null && !covered) {
+    return "No checkpoint was saved after this step, so there is nothing to re-run from";
+  }
+  return null;
+}
+
 // ── Time ─────────────────────────────────────────────────────────────────────
 
 export interface TimeWindow {

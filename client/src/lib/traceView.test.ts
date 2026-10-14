@@ -28,6 +28,7 @@ import {
   runWindow,
   stepCategory,
   stepProvider,
+  rerunBlocked,
   stepOutputText,
   stepsTime,
   stepWindow,
@@ -427,6 +428,16 @@ console.log("\na live step whose node has not landed");
   check("once it is over, a missing parent is missing, and the step is a root",
     treeSteps([...landed, early, underEarly], { status: "completed" }).length === 4);
   check("a step naming itself does not wait", awaitingNode([mk({ id: "self", seq: 0, parent_step_id: "self" })]).size === 0);
+}
+
+console.log("\nwhether a step can be re-run from");
+{
+  const idle = [{ status: "completed" as const }, { status: "paused" as const }];
+  check("a stamped step can", rerunBlocked({ seq: 3, checkpoint_id: "c1" }, idle) === null);
+  check("one that streamed in live is left to the server", rerunBlocked({ seq: 3 }, idle) === null);
+  check("one loaded with no checkpoint cannot, and says why", (rerunBlocked({ seq: 7, checkpoint_id: null }, idle) ?? "").includes("No checkpoint"));
+  check("...unless a boundary at or after it has been seen since", rerunBlocked({ seq: 7, checkpoint_id: null }, idle, 7) === null);
+  check("nothing can while a run is going", (rerunBlocked({ seq: 3, checkpoint_id: "c1" }, [...idle, { status: "running" as const }]) ?? "").includes("A run is going"));
 }
 
 console.log("\none word for how a run went, on every surface");
