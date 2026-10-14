@@ -38,6 +38,10 @@ export interface SegmentOption<T extends string> {
   count?: number;
   /** The count's colour when it is news rather than a size — `danger` for failures. */
   countTone?: "danger";
+  /** A small dot before a text segment's word, in the colour of the thing it stands for. */
+  dot?: string;
+  /** The whole segment says there is something wrong in it — its word in the danger colour. */
+  alert?: boolean;
   /**
    * Nothing to choose right now. The segment STAYS, greyed, rather than leaving the group: a filter
    * whose options come and go as a live run streams in is a row whose buttons move under the pointer.
@@ -97,12 +101,14 @@ export function Segmented<T extends string>({
             // fill, and an unchosen segment is a step darker than one with nothing to show.
             className={`px-2.5 text-tiny tabular-nums transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
               o.value === value
-                ? "bg-active text-ink"
+                ? `bg-active ${o.alert ? "text-err" : "text-ink"}`
                 : o.disabled
-                  ? "cursor-default text-disabled"
-                  : "text-muted hover:bg-active/40 hover:text-ink"
+                  // QUIETER THAN AN EMPTY ONE USED TO BE: nothing to choose here, and it says so.
+                  ? "cursor-default text-disabled opacity-60"
+                  : `${o.alert ? "text-err" : "text-muted"} hover:bg-active/40 ${o.alert ? "" : "hover:text-ink"}`
             }`}
           >
+            {o.dot && <span aria-hidden className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle" style={{ background: o.dot }} />}
             {o.text ?? o.label}
             {o.count !== undefined && (
               <span className={`ml-1 ${o.countTone === "danger" && o.count > 0 ? "text-err" : o.disabled ? "" : "text-faint"}`}>

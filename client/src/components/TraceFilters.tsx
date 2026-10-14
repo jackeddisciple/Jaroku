@@ -19,7 +19,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { filterCounts, type StepFilter } from "../lib/traceView.ts";
 import { Icon } from "../lib/icons/registry.ts";
-import { ICON } from "../lib/tokens.ts";
+import { ICON, STATUS, STEP_TYPE } from "../lib/tokens.ts";
 import { useTraceStore, visibleTraceRows } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { insideKeyOwner, paneOwnsBareKey } from "../lib/bareKeys.ts";
@@ -36,6 +36,15 @@ const KINDS: { value: StepFilter; text: string; noun: string }[] = [
   { value: "route", text: "Routing", noun: "routing decisions" },
   { value: "errors", text: "Errors", noun: "failed steps" },
 ];
+
+/** Each kind's dot: its STEP_TYPE colour, the one its fallback tile is drawn in; red for Errors. */
+const KIND_DOT: Partial<Record<StepFilter, string>> = {
+  llm: STEP_TYPE.llm_call.fg,
+  tool: STEP_TYPE.tool_call.fg,
+  state: STEP_TYPE.state_update.fg,
+  route: STEP_TYPE.router.fg,
+  errors: STATUS.error,
+};
 
 /** The search mark beside the segments (a 32px hit target) and the gap before it. */
 const MARK_ROOM = 32 + 8;
@@ -123,6 +132,10 @@ export function TraceFilters({ steps }: { steps: readonly Step[] }) {
     text: k.text,
     count: showCounts || (k.value === "errors" && counts.errors > 0) ? counts[k.value] : undefined,
     countTone: k.value === "errors" ? "danger" : undefined,
+    // EACH KIND'S DOT IN ITS TILE COLOUR, so a tab points at the rows it shows; Errors' is red, and
+    // its word turns red the moment there is one (2026-10-14).
+    dot: KIND_DOT[k.value],
+    alert: k.value === "errors" && counts.errors > 0,
     // Never disable the one that is chosen: it must stay pressable to read as chosen.
     disabled: counts[k.value] === 0 && k.value !== filter,
     label: counts[k.value] === 0 ? `Show ${k.noun} — this run has none` : `Show ${k.noun}`,
