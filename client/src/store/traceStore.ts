@@ -116,6 +116,8 @@ interface TraceState {
   noteBoundary: (runId: string, seq: number) => void;
   setAnswerOpen: (open: boolean) => void;
   setCollapsed: (stepId: string, collapsed: boolean) => void;
+  /** Fold or unfold every node of the run on screen at once — Collapse all / Expand all. */
+  setAllCollapsed: (collapsed: boolean) => void;
   setStepFilter: (filter: StepFilter) => void;
   setStepQuery: (query: string) => void;
   requestGraphStep: (stepId: string | null) => void;
@@ -324,6 +326,22 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   requestGraphStep: (graphStepRequest) => set({ graphStepRequest }),
 
   setControlError: (error) => set({ controlError: error ? { ...error, at: Date.now() } : null }),
+
+  setAllCollapsed: (collapsed) =>
+    set((state) => {
+      const bucket = state.activeRunId ? state.stepsByRun[state.activeRunId] : undefined;
+      if (!bucket) return {};
+      const nodes = buildTraceTree(Object.values(bucket)).filter((r) => r.childIds.length > 0).map((r) => r.step.id);
+      const collapsedStepIds = { ...state.collapsedStepIds };
+      for (const id of nodes) {
+        if (collapsed) collapsedStepIds[id] = true;
+        else delete collapsedStepIds[id];
+      }
+      // A selection folded out of sight moves up to its top-level node, as a single fold moves it.
+      const sel = state.selectedStepId;
+      const top = collapsed && sel && bucket[sel] ? [sel, ...ancestorIds(bucket, sel)].pop() : undefined;
+      return top && top !== sel ? { collapsedStepIds, selectedStepId: top } : { collapsedStepIds };
+    }),
 
   setCollapsed: (stepId, collapsed) =>
     set((state) => {

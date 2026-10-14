@@ -256,6 +256,14 @@ console.log("\nthe store's rules for selection and folding");
   check("...and the search too", useTraceStore.getState().stepQuery === "");
 
   reset();
+  useTraceStore.getState().selectStep("p");
+  useTraceStore.getState().setAllCollapsed(true);
+  check("collapse all folds every node", useTraceStore.getState().collapsedStepIds.a === true && useTraceStore.getState().collapsedStepIds.t === true);
+  check("...and moves a hidden selection up to its node", useTraceStore.getState().selectedStepId === "t");
+  useTraceStore.getState().setAllCollapsed(false);
+  check("expand all unfolds them", Object.keys(useTraceStore.getState().collapsedStepIds).length === 0);
+
+  reset();
   useTraceStore.setState({ stepFilter: "llm", stepQuery: "Chat" });
   useTraceStore.getState().selectRun(run);
   check("opening the run already on screen keeps its filter and search",

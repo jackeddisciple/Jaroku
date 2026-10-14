@@ -399,6 +399,8 @@ export const MANIFEST = {
     metricCost: "Coins01Icon",
     metricSteps: "Layers01Icon",
     metricCalls: "AiBrain02Icon",
+    collapseAll: "UnfoldLessIcon",
+    expandAll: "UnfoldMoreIcon",
   },
 
   // ── §5 Global ─────────────────────────────────────────────────────────────
