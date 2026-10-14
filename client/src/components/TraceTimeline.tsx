@@ -3,7 +3,7 @@ import { CANCELLED_BY_USER, orderedSteps, useTraceStore } from "../store/traceSt
 import type { RunSummary, Step } from "../types.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { COL, StepRow, columnsFor, type BarPlace, type FoldSummary, type RowTier } from "./StepRow.tsx";
-import { buildTraceTree, descendantSteps, runWindow, stepWindow, traceTotals, visibleRows, type TimeWindow, type VisibleRow } from "../lib/traceView.ts";
+import { buildTraceTree, descendantSteps, isInherited, ownSteps, runWindow, stepWindow, traceTotals, visibleRows, type TimeWindow, type VisibleRow } from "../lib/traceView.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { TraceHeader } from "./TraceHeader.tsx";
 import { TraceMetrics } from "./TraceMetrics.tsx";
@@ -16,15 +16,18 @@ import { fmtDuration } from "../lib/format.ts";
 import { ICON } from "../lib/tokens.ts";
 import { useRunClock } from "../lib/useRunClock.ts";
 
-/** A step's place in the run's span, or null when either has no readable times. */
-function barFor(step: Step, span: TimeWindow | null): BarPlace | null {
+/**
+ * A step's place in the run's span, or null when either has no readable times — or when the step was
+ * inherited by a branch, which ran it before the branch existed.
+ */
+function barFor(step: Step, span: TimeWindow | null, inherited: boolean): BarPlace | null {
   const w = stepWindow(step);
-  if (!w || !span) return null;
+  if (!w || !span || inherited) return null;
   const total = span.end - span.start;
   return {
     left: Math.min(1, Math.max(0, (w.start - span.start) / total)),
     width: Math.min(1, Math.max(0, (w.end - w.start) / total)),
-    offsetMs: Math.max(0, w.start - span.start),
+    offsetMs: w.start - span.start,
   };
 }
 
@@ -67,7 +70,10 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
   // A live run's span grows, so its bars are re-placed once a second; a finished one never moves.
   // On the run's own clock (useRunClock), so the span ends where the run has got to.
   const now = useRunClock(run?.id, run?.status === "running", 1000);
-  const span = useMemo(() => (run ? runWindow(run, steps, now) : null), [run, steps, now]);
+  // THE RUN'S OWN SPAN: a branch's inherited steps ran in its parent, before it began, and have no
+  // place on its track (see `ownSteps`).
+  const own = useMemo(() => ownSteps(run, steps), [run, steps]);
+  const span = useMemo(() => (run ? runWindow(run, own, now) : null), [run, own, now]);
   const collapsed = useTraceStore((s) => s.collapsedStepIds);
   // MEASURED ON A BOX THAT IS ALWAYS THERE. The tree unmounts while "No steps match" shows, and an
   // observer left on it would keep reading the detached element after the filter is cleared.
@@ -184,7 +190,8 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
               tabbable={r.step.id === tabbableId}
               tier={tier}
               fold={folds[r.step.id]}
-              bar={barFor(r.step, span)}
+              bar={barFor(r.step, span, isInherited(r.step, run))}
+              inherited={isInherited(r.step, run)}
               provider={run?.provider}
               mark={marks.get(r.step.name)}
             />

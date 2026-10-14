@@ -20,7 +20,7 @@
 
 import { useEffect, useRef } from "react";
 
-import { fmtCost, fmtDuration, fmtTokens, shortCount } from "../lib/format.ts";
+import { fmtCost, fmtDuration, fmtOffset, fmtTokens, shortCount } from "../lib/format.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { CATEGORY_LABEL, stepCategory, stepOutputText, stepProvider, type StepCategory, type VisibleRow } from "../lib/traceView.ts";
 import { BRAND_COLOR, ProviderMark, hasProviderMark } from "../lib/icons.tsx";
@@ -134,7 +134,7 @@ export type RowTier = "full" | "wide" | "medium" | "narrow";
 export interface BarPlace {
   left: number;
   width: number;
-  /** When it began, relative to the run's start, for the tooltip. */
+  /** When it began, relative to the run's start, for the tooltip — signed: a clock can be a little off. */
   offsetMs: number;
 }
 
@@ -144,11 +144,16 @@ export interface BarPlace {
  * so a node's bar spans its model call's, steps that overlapped are drawn overlapping, and the gaps
  * between nodes are visible as gaps rather than invented away.
  */
-function Waterfall({ step, bar, colour }: { step: Step; bar: BarPlace | null; colour: string }) {
+function Waterfall({ step, bar, colour, inherited }: { step: Step; bar: BarPlace | null; colour: string; inherited: boolean }) {
   return (
     <span
       className={`relative h-1.5 shrink-0 rounded-full bg-void ${COL.timeline}`}
-      title={bar ? `Started +${fmtDuration(bar.offsetMs)} · took ${fmtDuration(step.latency_ms)}` : "No timing recorded"}
+      title={
+        bar ? `Started ${fmtOffset(bar.offsetMs)} · took ${fmtDuration(step.latency_ms)}`
+          // AN INHERITED STEP HAS NO BAR: it ran in the parent, before this run began.
+          : inherited ? "Ran in the run this one branched from, before this run began"
+            : "No timing recorded"
+      }
     >
       {bar && (
         <span
@@ -267,6 +272,7 @@ export function StepRow({
   bar,
   provider,
   mark,
+  inherited = false,
 }: {
   row: VisibleRow;
   tabbable: boolean;
@@ -279,6 +285,8 @@ export function StepRow({
   provider?: string | null;
   /** This step's own mark and colour (traceMarks). */
   mark?: StepMark;
+  /** Copied into this branch from the run it branched from, not run by it (`isInherited`). */
+  inherited?: boolean;
 }) {
   const { step } = row;
   const group = row.childIds.length > 0;
@@ -417,7 +425,7 @@ export function StepRow({
           <span aria-hidden className="shrink-0 text-faint"><Icon.trace.time size={ICON.xs} /></span>
           <span className="truncate">{fmtDuration(step.latency_ms)}</span>
         </span>
-        {show.timeline && <Waterfall step={step} bar={bar} colour={stepColour(step, provider, mark)} />}
+        {show.timeline && <Waterfall step={step} bar={bar} colour={stepColour(step, provider, mark)} inherited={inherited} />}
       </span>
 
       {/* THE ROW'S ACTIONS. Details holds its own place, so the figures never move when it appears;

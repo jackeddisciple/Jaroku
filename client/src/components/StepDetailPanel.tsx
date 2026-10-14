@@ -19,9 +19,9 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { useTraceStore, visibleTraceRows } from "../store/traceStore.ts";
-import { absTime, fmtCost, fmtDuration } from "../lib/format.ts";
+import { absTime, fmtCost, fmtDuration, fmtOffset } from "../lib/format.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
-import { CATEGORY_LABEL, buildTraceTree, descendantSteps, stepCategory, stepWindow, traceTotals } from "../lib/traceView.ts";
+import { CATEGORY_LABEL, buildTraceTree, descendantSteps, isInherited, stepCategory, stepWindow, traceTotals } from "../lib/traceView.ts";
 import { ICON, STEP_TYPE, TYPE } from "../lib/tokens.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import type { RunSummary, Step } from "../types.ts";
@@ -113,6 +113,7 @@ function Overview({ step, run, bucket, inside }: { step: Step; run: RunSummary |
   const runStart = run ? Date.parse(run.started_at) : NaN;
   const parent = step.parent_step_id ? bucket[step.parent_step_id] : undefined;
   const known = STEP_TYPE[step.type as keyof typeof STEP_TYPE] as { fg: string; bg: string } | undefined;
+  const inherited = isInherited(step, run);
 
   return (
     <section aria-label="Overview" className="mt-4">
@@ -148,8 +149,13 @@ function Overview({ step, run, bucket, inside }: { step: Step; run: RunSummary |
           <>
             <Kv label="Started" title={`${absTime(new Date(window.start).toISOString())} — when it finished, less how long it took`}>
               {clock(window.start)}
-              {Number.isFinite(runStart) && (
-                <span className="text-faint">+{fmtDuration(Math.max(0, window.start - runStart))}</span>
+              {/* AN INHERITED STEP RAN IN THE PARENT, before this run began: its offset from this run's
+                  start is a negative nobody asked for, so it says where it ran instead. Every other
+                  offset is signed rather than clamped — a "+0ms" hid a step forty seconds early. */}
+              {inherited && run?.parent_run_id ? (
+                <span className="text-faint" title={`Copied from run ${run.parent_run_id}`}>in run {run.parent_run_id.slice(0, 8)}</span>
+              ) : Number.isFinite(runStart) && (
+                <span className="text-faint">{fmtOffset(window.start - runStart)}</span>
               )}
             </Kv>
             <Kv label="Finished" title={absTime(step.started_at)}>{clock(window.end)}</Kv>

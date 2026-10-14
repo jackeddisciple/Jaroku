@@ -19,7 +19,7 @@
 //
 //   npm run test:trace-view
 
-import type { Run, Step } from "../types.ts";
+import type { Run, RunSummary, Step } from "../types.ts";
 import { textFromLlmOutput } from "./agentOutput.ts";
 
 // ── What kind of thing a step is ─────────────────────────────────────────────
@@ -375,6 +375,31 @@ export function traceTotals(steps: readonly Step[]): TraceTotals {
   return { tokens, cost, llmCalls, unpricedCalls };
 }
 
+// ── A branch's own steps ─────────────────────────────────────────────────────
+
+/**
+ * Whether a step was copied into a branch from the run it branched from, rather than run by it.
+ *
+ * A BRANCH STARTS WITH ITS PARENT'S STEPS UP TO THE FORK, copied verbatim (`copyRunPrefix`) — their
+ * timestamps, their tokens, their cost — and `branch_from_seq` is the last of them: the server forks
+ * at a whole node boundary and records that boundary's highest seq. Everything after it is the
+ * branch's own.
+ */
+export function isInherited(
+  step: Pick<Step, "seq">,
+  run: Pick<RunSummary, "parent_run_id" | "branch_from_seq"> | undefined,
+): boolean {
+  return run?.parent_run_id != null && run.branch_from_seq != null && step.seq <= run.branch_from_seq;
+}
+
+/** The steps a run actually ran — a branch's without the prefix it copied from its parent. */
+export function ownSteps(
+  run: Pick<RunSummary, "parent_run_id" | "branch_from_seq"> | undefined,
+  steps: readonly Step[],
+): Step[] {
+  return steps.filter((s) => !isInherited(s, run));
+}
+
 // ── Time ─────────────────────────────────────────────────────────────────────
 
 export interface TimeWindow {
@@ -401,6 +426,8 @@ export function stepWindow(step: Pick<Step, "started_at" | "latency_ms">): TimeW
  *
  * WIDENED TO COVER EVERY STEP, because the run and its steps are stamped by different writers and a
  * step a few milliseconds outside its own run would otherwise draw a bar off the end of the track.
+ * Pass a branch its OWN steps (`ownSteps`): the ones it inherited ran in its parent, before it began,
+ * and widening to them squeezed the branch's own bars into the last quarter of the track.
  */
 export function runWindow(
   run: Pick<Run, "started_at" | "ended_at">,

@@ -17,7 +17,9 @@ import {
   descendantSteps,
   errorParts,
   filterCounts,
+  isInherited,
   matchesQuery,
+  ownSteps,
   runElapsed,
   runWindow,
   stepCategory,
@@ -310,6 +312,23 @@ console.log("\na live run's delay, measured from its events");
   check("...so a step that waited in a batch does not raise it", (useTraceStore.getState().lagByRun["lagged"] ?? NaN) === lag);
   for (let i = 0; i < 80; i++) t.applyEvent({ kind: "run_start", schema_version: 1, run: { ...base, id: `many-${i}`, started_at: new Date().toISOString() } });
   check("it is bounded", Object.keys(useTraceStore.getState().lagByRun).length === 50);
+}
+
+console.log("\na branch's inherited steps");
+{
+  // Branched at #1's boundary: #0 and #1 were copied from the parent, 40s before the branch began.
+  const branch = { parent_run_id: "bec57d6c", branch_from_seq: 1, started_at: "2026-10-12T14:11:02.000Z", ended_at: "2026-10-12T14:11:17.200Z" };
+  const old0 = mk({ id: "i0", seq: 0, latency_ms: 2000, started_at: "2026-10-12T14:10:22.860Z" });
+  const old1 = mk({ id: "i1", seq: 1, type: "llm_call", parent_step_id: "i0", latency_ms: 1900, tokens: 545, cost: 0.00144, started_at: "2026-10-12T14:10:22.800Z" });
+  const own2 = mk({ id: "o2", seq: 2, latency_ms: 3000, started_at: "2026-10-12T14:11:06.000Z" });
+  const all = [old0, old1, own2];
+  check("its copied prefix is inherited", isInherited(old0, branch) && isInherited(old1, branch));
+  check("...and what it ran is not", !isInherited(own2, branch));
+  check("a run that is not a branch inherits nothing", !isInherited(old0, { parent_run_id: null, branch_from_seq: null }) && !isInherited(old0, undefined));
+  check("its own steps leave the prefix out", ownSteps(branch, all).map((x) => x.id).join() === "o2");
+  const span = runWindow(branch, ownSteps(branch, all), Date.now());
+  check("its track starts when IT started, not at its parent's first step",
+    span?.start === Date.parse(branch.started_at), String(span && new Date(span.start).toISOString()));
 }
 
 console.log("\nwhat Copy output copies");

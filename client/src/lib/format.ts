@@ -137,6 +137,17 @@ export function fmtDuration(ms: number): string {
 }
 
 /**
+ * When something happened relative to a moment, signed: `+1.2s`, `−40ms`.
+ *
+ * SIGNED RATHER THAN CLAMPED. The trace's offsets were `Math.max(0, …)`, so a step that began before
+ * its run did — a clock a few milliseconds off, or a step copied from another run — read "+0ms", the
+ * one answer that was certainly wrong. The minus sign is U+2212, the width of the plus beside it.
+ */
+export function fmtOffset(ms: number): string {
+  return `${ms < 0 ? "\u2212" : "+"}${fmtDuration(Math.abs(ms))}`;
+}
+
+/**
  * HOW ZERO MONEY IS WRITTEN, ONCE.
  *
  * There were two money formatters with different zero handling — `fmtCost` returned `"$0"` and

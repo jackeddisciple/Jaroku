@@ -22,7 +22,7 @@
 //
 //   npm run test:format
 
-import { ZERO_COST, fmtCost, fmtDuration } from "./format.ts";
+import { ZERO_COST, fmtCost, fmtDuration, fmtOffset } from "./format.ts";
 import { formatMetric } from "./activityMetrics.ts";
 import { fmtCostPerRun } from "./agentFormat.ts";
 
@@ -141,6 +141,13 @@ console.log("\nnon-zero costs keep the precision each surface needs");
   check("Activity still shortens six figures", formatMetric("usd", 123_456) === "$123k",
     formatMetric("usd", 123_456));
   check("...and still keeps four decimals under a cent", formatMetric("usd", 0.0031) === "$0.0031");
+}
+
+console.log("\noffsets are signed, never clamped");
+{
+  check("after: +1.2s", fmtOffset(1200) === "+1.2s", fmtOffset(1200));
+  check("before: \u221240.0s, not +0ms", fmtOffset(-40000) === "\u221240.0s", fmtOffset(-40000));
+  check("at: +0ms", fmtOffset(0) === "+0ms", fmtOffset(0));
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
