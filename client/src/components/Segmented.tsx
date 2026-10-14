@@ -91,12 +91,16 @@ export function Segmented<T extends string>({
             // THE SAME 32px FLOOR AS A MARK'S. A text segment is still a hit target, and three
             // durations set in `text-tiny` would otherwise be a 16px-tall row of things to miss.
             style={{ minHeight: HIT_TARGET }}
+            // THREE STATES THAT READ AS THREE. Hover filled a segment exactly as choosing it does, so
+            // pointing at "Routing" with "All" chosen showed two chosen segments; and an unchosen one
+            // (`faint`) sat a shade from a disabled one. Now hover is a lighter wash than the held-down
+            // fill, and an unchosen segment is a step darker than one with nothing to show.
             className={`px-2.5 text-tiny tabular-nums transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
               o.value === value
                 ? "bg-active text-ink"
                 : o.disabled
                   ? "cursor-default text-disabled"
-                  : "text-faint hover:bg-active hover:text-ink"
+                  : "text-muted hover:bg-active/40 hover:text-ink"
             }`}
           >
             {o.text ?? o.label}

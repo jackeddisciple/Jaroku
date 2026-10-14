@@ -119,7 +119,8 @@ export function IconButton({
     : checked === true
       ? "bg-active text-ink"
       : checked === false
-        ? "text-faint hover:text-ink hover:bg-active"
+        // A segment not chosen: hover is a lighter wash than the chosen one's fill (see Segmented).
+        ? "text-muted hover:text-ink hover:bg-active/40"
         : active
           ? "text-accent hover:bg-active"
           : "text-muted hover:text-ink hover:bg-active";
