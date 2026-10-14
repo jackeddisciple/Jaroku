@@ -324,7 +324,7 @@ export function StepRow({
       aria-level={row.depth + 1}
       aria-expanded={group ? !row.collapsed : undefined}
       aria-selected={selected}
-      aria-label={`#${step.seq} ${step.name}, ${CATEGORY_LABEL[category]}${failed ? ", failed" : ""}`}
+      aria-label={`#${step.seq} ${step.name}, ${CATEGORY_LABEL[category]}${inherited ? ", inherited" : ""}${failed ? ", failed" : ""}`}
       data-step-id={step.id}
       tabIndex={tabbable ? 0 : -1}
       onClick={select}
@@ -385,6 +385,12 @@ export function StepRow({
         </span>
         <span className="flex min-w-0 items-center gap-1.5 text-tiny text-faint">
           <span className="truncate">{CATEGORY_LABEL[category]}</span>
+          {/* SAID, NOT ONLY SHOWN. A branch's copied prefix looked exactly like the steps it ran. */}
+          {inherited && (
+            <span className="shrink-0" title="Copied from the run this one branched from — it ran there, before this run began">
+              · inherited
+            </span>
+          )}
           {fold && <span className="shrink-0">· {fold.steps} {fold.steps === 1 ? "step" : "steps"}</span>}
           {/* A FAILURE INSIDE A FOLD IS STILL SAID. Folding a node must never be how an error disappears. */}
           {fold && fold.failed > 0 && !failed && (
@@ -402,8 +408,9 @@ export function StepRow({
         </span>
       </span>
 
-      {/* Figures, tabular, and only the ones this step has: a node has no tokens of its own. */}
-      <span className="flex shrink-0 items-center gap-2 text-tiny tabular-nums text-muted">
+      {/* Figures, tabular, and only the ones this step has: a node has no tokens of its own. An
+          inherited step's are quieter: its parent spent them, and the run's totals leave them out. */}
+      <span className={`flex shrink-0 items-center gap-2 text-tiny tabular-nums ${inherited ? "text-faint" : "text-muted"}`}>
         {/* A folded node shows what its steps add up to, said as such — the node itself has none. An
             empty cell keeps its width, so the columns stay columns. The token mark says what it is. */}
         {show.tokens && (

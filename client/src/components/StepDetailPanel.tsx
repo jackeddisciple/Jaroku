@@ -273,6 +273,12 @@ export function StepDetailPanel() {
                   <span>{CATEGORY_LABEL[stepCategory(step)]}</span>
                   <span className="text-faint">·</span>
                   <span className="tabular-nums">#{step.seq}</span>
+                  {isInherited(step, run) && (
+                    <>
+                      <span className="text-faint">·</span>
+                      <span title="Copied from the run this one branched from — it ran there, before this run began">inherited</span>
+                    </>
+                  )}
                 </div>
               </div>
               <StepStatus failed={step.error != null} />
