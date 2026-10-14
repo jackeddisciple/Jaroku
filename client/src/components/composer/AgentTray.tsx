@@ -65,8 +65,8 @@ function StepPill({ step, onClear }: { step: { seq: number; name: string }; onCl
     <button
       type="button"
       onClick={onClear}
-      aria-label={`Remove step ${step.seq} from the composer`}
-      title={`Asking about step ${step.seq}, ${step.name} — press to remove it`}
+      aria-label={`Remove step #${step.seq} from the composer`}
+      title={`Asking about step #${step.seq}, ${step.name} — press to remove it`}
       data-step-pill
       className="group/step inline-flex h-5 shrink-0 items-center gap-1 rounded-pill bg-bespoke/15 px-1.5 text-tiny font-medium tabular-nums text-bespoke
         transition-colors duration-fast hover:bg-bespoke/20 focus-visible:outline-none focus-visible:shadow-focusring"
@@ -79,7 +79,8 @@ function StepPill({ step, onClear }: { step: { seq: number; name: string }; onCl
           <Icon.composer.clearStep size={ICON.xs} />
         </span>
       </span>
-      {step.seq}
+      {/* "#3", as the composer's own words say it ("Ask about step #3") and the trace numbers it. */}
+      #{step.seq}
     </button>
   );
 }
