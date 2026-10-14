@@ -188,6 +188,21 @@ export function shortCount(value: number): string {
 }
 
 /**
+ * A token count as people say one: 842, 2.3k, 5k, 20.6k, 150k, 1.2M — the product owner's call on
+ * 2026-10-14, "don't write tokens in full numbers". One decimal below a hundred thousand, and none
+ * when it is a zero; a whole number of thousands from there; millions the same way.
+ */
+export function tokenCount(value: number): string {
+  const abs = Math.abs(value);
+  const tidy = (n: number, digits: number): string => n.toFixed(digits).replace(/\.0$/, "");
+  if (abs >= 1_000_000) return `${tidy(value / 1_000_000, abs >= 100_000_000 ? 0 : 1)}M`;
+  // A count that rounds up to a thousand thousands is said on the next rung: 999,960 is "1M", not "1000k".
+  if (abs >= 100_000) return Math.round(abs / 1_000) >= 1_000 ? `${Math.sign(value) < 0 ? "-" : ""}1M` : `${Math.round(value / 1_000)}k`;
+  if (abs >= 1_000) return `${tidy(value / 1_000, 1)}k`;
+  return String(Math.round(value));
+}
+
+/**
  * A token count, with the unit where the unit goes: after the number, once.
  *
  * TWO FORMS, THE SAME SPLIT COST AND PERCENT USE. `exact` is for an itemised row somebody is
@@ -200,7 +215,10 @@ export function fmtTokens(
   form: "exact" | "short" = "exact",
 ): string {
   if (tokens == null) return "—";
-  return `${form === "short" ? shortCount(tokens) : tokens.toLocaleString()} tok`;
+  // BOTH FORMS ARE SHORT NOW: tokens are never written in full (`tokenCount`). `form` stays for the
+  // call sites that name it, and for the day an exact form is wanted back.
+  void form;
+  return `${tokenCount(tokens)} tok`;
 }
 
 /** Latency in ms, or an em dash when there isn't one. Null is "no measurement", not 0. */

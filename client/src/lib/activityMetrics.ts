@@ -22,7 +22,7 @@
 // previous window of zero, a percentage of a percentage, a token count that has to stay legible at
 // four digits and at nine.
 
-import { ZERO_COST, shortCount } from "./format.ts";
+import { ZERO_COST, tokenCount } from "./format.ts";
 
 /** What a figure is measured in. The unit decides the formatter, never the component. */
 export type MetricUnit = "usd" | "tokens" | "count" | "percent" | "ms";
@@ -175,7 +175,8 @@ function usd(value: number): string {
  * surface wants the short form and no unit suffix — the caption under each figure names the unit.
  */
 function tokens(value: number): string {
-  return shortCount(value);
+  // The same short form every token figure takes (`tokenCount`: 2.3k, 5k, 150k), not `shortCount`'s.
+  return tokenCount(value);
 }
 
 /** Milliseconds, in the unit a person would say out loud. */

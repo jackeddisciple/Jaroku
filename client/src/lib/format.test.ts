@@ -22,7 +22,7 @@
 //
 //   npm run test:format
 
-import { ZERO_COST, fmtCost, fmtDuration, fmtOffset } from "./format.ts";
+import { ZERO_COST, fmtCost, fmtDuration, fmtOffset, fmtTokens, tokenCount } from "./format.ts";
 import { formatMetric } from "./activityMetrics.ts";
 import { fmtCostPerRun } from "./agentFormat.ts";
 
@@ -148,6 +148,17 @@ console.log("\noffsets are signed, never clamped");
   check("after: +1.2s", fmtOffset(1200) === "+1.2s", fmtOffset(1200));
   check("before: \u221240.0s, not +0ms", fmtOffset(-40000) === "\u221240.0s", fmtOffset(-40000));
   check("at: +0ms", fmtOffset(0) === "+0ms", fmtOffset(0));
+}
+
+console.log("\ntokens are never written in full");
+{
+  const cases: [number, string][] = [
+    [842, "842"], [1000, "1k"], [2300, "2.3k"], [2349, "2.3k"], [5000, "5k"], [20_600, "20.6k"],
+    [99_950, "100k"], [150_000, "150k"], [150_400, "150k"], [999_960, "1M"], [1_200_000, "1.2M"], [0, "0"],
+  ];
+  for (const [n, want] of cases) check(`${n} → ${want}`, tokenCount(n) === want, tokenCount(n));
+  check("with its unit, exact or short alike", fmtTokens(1572) === "1.6k tok" && fmtTokens(1572, "short") === "1.6k tok");
+  check("unknown is a dash", fmtTokens(null) === "—");
 }
 
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);

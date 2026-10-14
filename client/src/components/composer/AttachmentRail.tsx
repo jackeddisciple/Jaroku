@@ -24,6 +24,7 @@ import { Icon, type IconComponent } from "../../lib/icons/registry.ts";
 import { truncatePath } from "../../lib/truncatePath.ts";
 import { XIcon } from "../panelIcons.tsx";
 import { ICON } from "../../lib/tokens.ts";
+import { tokenCount } from "../../lib/format.ts";
 import type { AttachKind } from "./AttachPicker.tsx";
 
 export interface DraftAttachment {
@@ -81,7 +82,7 @@ export function AttachmentRail({
           title={
             a.protected
               ? `${a.label} — read-only. Attaching it never implies write access.`
-              : `${a.label} · about ${a.tokenEstimate.toLocaleString()} tokens`
+              : `${a.label} · about ${tokenCount(a.tokenEstimate)} tokens`
           }
           icon={
             <span className="text-faint">

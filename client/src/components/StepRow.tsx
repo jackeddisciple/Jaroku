@@ -20,7 +20,7 @@
 
 import { useEffect, useRef } from "react";
 
-import { fmtCost, fmtDuration, fmtOffset, shortCount } from "../lib/format.ts";
+import { fmtCost, fmtDuration, fmtOffset, tokenCount } from "../lib/format.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { matchPlaces, stepCategory, stepOutputText, stepProvider, type StepCategory, type VisibleRow } from "../lib/traceView.ts";
 import { BRAND_COLOR, ProviderMark, hasProviderMark } from "../lib/icons.tsx";
@@ -474,7 +474,7 @@ export function StepRow({
             {tokens != null && (
               <>
                 <span aria-hidden className="shrink-0 text-faint"><Icon.trace.tokens size={ICON.xs} /></span>
-                <span className="truncate">{tier === "medium" ? shortCount(tokens) : tokens.toLocaleString()}</span>
+                <span className="truncate">{tokenCount(tokens)}</span>
                 <span className="sr-only"> tokens</span>
               </>
             )}

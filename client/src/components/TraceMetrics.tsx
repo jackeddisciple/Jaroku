@@ -11,7 +11,7 @@
 
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { fmtCost, fmtDuration } from "../lib/format.ts";
+import { fmtCost, fmtDuration, tokenCount } from "../lib/format.ts";
 import { isInherited, ownSteps, runElapsed, stepsTime, traceTotals } from "../lib/traceView.ts";
 import { runOutcome } from "../lib/runOutcome.ts";
 import { useRunClock } from "../lib/useRunClock.ts";
@@ -105,7 +105,7 @@ export function TraceMetrics({ run, steps }: { run: RunSummary; steps: readonly 
   const tokensTitle = (totals.tokens == null
     ? totals.llmCalls === 0 ? "No model calls yet" : `None of the ${calls} reported tokens`
     : `Across ${calls} · the input/output split isn't recorded`)
-    + fromParent(parent?.tokens != null ? `${parent.tokens.toLocaleString()} tokens` : null);
+    + fromParent(parent?.tokens != null ? `${tokenCount(parent.tokens)} tokens` : null);
   const costTitle = (totals.cost == null
     ? totals.llmCalls === 0 ? "No model calls yet" : "Not priced: the pricing table doesn't know this model"
     : totals.unpricedCalls > 0
@@ -131,7 +131,7 @@ export function TraceMetrics({ run, steps }: { run: RunSummary; steps: readonly 
               : "The agent's graph alone, from its start to its end — any time it sat paused included",
       tone: run.status === "running" ? "text-run" : "text-ink",
     },
-    { Mark: Icon.trace.tokens, label: "Tokens", value: totals.tokens == null ? "—" : totals.tokens.toLocaleString(), title: tokensTitle },
+    { Mark: Icon.trace.tokens, label: "Tokens", value: totals.tokens == null ? "—" : tokenCount(totals.tokens), title: totals.tokens == null ? tokensTitle : `${totals.tokens.toLocaleString()} tokens · ${tokensTitle}` },
     {
       Mark: Icon.trace.metricCost,
       label: totals.unpricedCalls > 0 && totals.cost != null ? "Cost (partial)" : "Cost",

@@ -26,7 +26,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { useTraceStore, visibleTraceRows } from "../store/traceStore.ts";
-import { absTime, fmtCost, fmtDuration, fmtOffset } from "../lib/format.ts";
+import { absTime, fmtCost, fmtDuration, fmtOffset, tokenCount } from "../lib/format.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { buildTraceTree, descendantSteps, isInherited, stepWindow, traceTotals } from "../lib/traceView.ts";
 import { ICON, STEP_TYPE, TYPE } from "../lib/tokens.ts";
@@ -98,13 +98,13 @@ function Figures({ step, inside }: { step: Step; inside: readonly Step[] }) {
   ];
   if (llm) {
     cells.push(
-      { label: "Tokens", value: step.tokens == null ? "—" : step.tokens.toLocaleString(), title: "Every token the call consumed; the input/output split isn't recorded", Mark: Icon.trace.tokens },
+      { label: "Tokens", value: step.tokens == null ? "—" : tokenCount(step.tokens), title: step.tokens == null ? "Every token the call consumed" : `${step.tokens.toLocaleString()} tokens — every one the call consumed`, Mark: Icon.trace.tokens },
       { label: "Cost", value: step.cost == null ? "—" : fmtCost(step.cost), title: step.cost == null ? "Not priced" : "What this call cost" },
     );
   } else if (totals.llmCalls > 0) {
     const calls = `${totals.llmCalls} model call${totals.llmCalls === 1 ? "" : "s"} inside this step`;
     cells.push(
-      { label: "Tokens inside", value: totals.tokens == null ? "—" : totals.tokens.toLocaleString(), title: `Summed from the ${calls}`, Mark: Icon.trace.tokens },
+      { label: "Tokens inside", value: totals.tokens == null ? "—" : tokenCount(totals.tokens), title: totals.tokens == null ? `Summed from the ${calls}` : `${totals.tokens.toLocaleString()} tokens, summed from the ${calls}`, Mark: Icon.trace.tokens },
       { label: "Cost inside", value: fmtCost(totals.cost), title: `Summed from the ${calls}` },
     );
   }
