@@ -20,8 +20,6 @@ export type DrawerTab = "overview" | "input" | "output" | "prompt" | "state" | "
 export type DrawerSnap = "peek" | "half" | "full";
 /** The share of the tab the drawer takes at each rest. */
 export const DRAWER_SNAP: Record<DrawerSnap, number> = { peek: 0.3, half: 0.6, full: 1 };
-/** The metric the steps are warmed by, when the reader has pressed Cost or Duration in the strip. */
-export type HeatBy = "cost" | "time" | null;
 export type LogLine = { level: "stderr" | "parseError"; text: string };
 
 interface TraceState {
@@ -102,8 +100,6 @@ interface TraceState {
   stepView: StepView;
   /** Which of the run's views is open: its steps, or Changes, State, Artifacts or Raw. Session-only. */
   runTab: RunTab;
-  /** Pressed in the metrics strip: warm every step by its share of this metric. Null: the heaviest few. */
-  heatBy: HeatBy;
   /** The step drawer's open tab, kept as the drawer moves from step to step. Session-only. */
   drawerTab: DrawerTab;
   /** Where the drawer docked under the steps rests, and — while its handle is dragged — where it is. */
@@ -153,7 +149,6 @@ interface TraceState {
   setStepView: (view: StepView) => void;
   toggleSection: (key: string) => void;
   setRunTab: (tab: RunTab) => void;
-  setHeatBy: (by: HeatBy) => void;
   setDrawerTab: (tab: DrawerTab) => void;
   setDrawerSnap: (snap: DrawerSnap) => void;
   setDrawerDrag: (share: number | null) => void;
@@ -232,7 +227,6 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   stepView: "list",
   collapsedSections: {},
   runTab: "steps",
-  heatBy: null,
   drawerTab: "overview",
   drawerSnap: "half",
   drawerDrag: null,
@@ -373,7 +367,6 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   setStepView: (stepView) => set({ stepView }),
 
   setRunTab: (runTab) => set({ runTab }),
-  setHeatBy: (heatBy) => set({ heatBy }),
   setDrawerTab: (drawerTab) => set({ drawerTab }),
   setDrawerSnap: (drawerSnap) => set({ drawerSnap, drawerDrag: null }),
   setDrawerDrag: (drawerDrag) => set({ drawerDrag }),

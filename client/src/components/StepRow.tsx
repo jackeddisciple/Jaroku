@@ -307,19 +307,12 @@ function Marked({ text, query }: { text: string; query: string }) {
 }
 
 /**
- * THE HEAVY STEPS ARE WARM (2026-10-14): a red wash behind a step that is among the run's costliest or
- * slowest — 8% at the heaviest, fading with its share, nothing below half of it — so the expensive part
- * of a run is found before a figure is read. Layered with an inherited step's hatch. Which steps are
- * warm is `hotSteps`'s to say: the heaviest few, or every step when one metric was pressed.
+ * A STEP'S ROW HAS NO WASH OF ITS OWN. A red one warmed the costliest and slowest steps (2026-10-14)
+ * and read as a failure — the product owner took it out the same day; the mini bars show the heavy
+ * steps. What is left is an inherited step's hatch.
  */
-function rowBackground(inherited: boolean, heat: number): React.CSSProperties | undefined {
-  const layers: string[] = [];
-  if (heat > 0) {
-    const tint = `color-mix(in srgb, ${STATUS.error} ${(heat * 8).toFixed(1)}%, transparent)`;
-    layers.push(`linear-gradient(${tint}, ${tint})`);
-  }
-  if (inherited) layers.push(`repeating-linear-gradient(135deg, transparent 0 6px, ${SURFACE.hair} 6px 7px)`);
-  return layers.length ? { backgroundImage: layers.join(", ") } : undefined;
+function rowBackground(inherited: boolean): React.CSSProperties | undefined {
+  return inherited ? { backgroundImage: `repeating-linear-gradient(135deg, transparent 0 6px, ${SURFACE.hair} 6px 7px)` } : undefined;
 }
 
 export function StepRow({
@@ -332,7 +325,6 @@ export function StepRow({
   mark,
   inherited = false,
   scale,
-  heat = 0,
   waterfall = false,
 }: {
   row: VisibleRow;
@@ -350,8 +342,6 @@ export function StepRow({
   inherited?: boolean;
   /** The run's heaviest figures, for the mini bars under this row's own. */
   scale?: MetricScale;
-  /** How hot this step runs, 0–1: its share of the run's costliest or slowest (`stepHeat`). */
-  heat?: number;
   /** The waterfall view: this step's time drawn behind the whole row rather than in a column. */
   waterfall?: boolean;
 }) {
@@ -417,7 +407,7 @@ export function StepRow({
       } ${row.context || inherited ? "text-muted [&_.text-ink]:text-muted" : ""}`}
       // AN INHERITED STEP IS HATCHED (2026-10-14): a faint diagonal in the hairline grey behind a
       // dimmed row, so "this was not re-executed" reads before a word of it does.
-      style={rowBackground(inherited, heat)}
+      style={rowBackground(inherited)}
       // A row kept only so a match keeps its place in the tree reads quieter than the matches.
       title={row.context ? "Shown because a step inside it matches" : undefined}
     >

@@ -642,55 +642,6 @@ export function stepsTime(steps: readonly Step[]): number {
   return ms;
 }
 
-/**
- * How hot a step runs, 0–1: the larger of its share of the run's costliest step and of its slowest —
- * or of just one of them, when the reader has asked for that one (`by`). Steps a branch inherited are
- * the parent's work and run cold.
- */
-export function stepHeat(
-  step: Pick<Step, "cost" | "latency_ms">,
-  scale: { cost: number; time: number },
-  by: "both" | "cost" | "time" = "both",
-): number {
-  const cost = scale.cost > 0 && step.cost != null ? step.cost / scale.cost : 0;
-  const time = scale.time > 0 && Number.isFinite(step.latency_ms) ? step.latency_ms / scale.time : 0;
-  const heat = by === "cost" ? cost : by === "time" ? time : Math.max(cost, time);
-  return Math.min(1, Math.max(0, heat));
-}
-
-/**
- * The hot steps: the three costliest and the three slowest of a run's own steps, each with its heat
- * (`stepHeat`, by the one metric that put it there; the larger when both did) — and only at half the
- * heaviest or more. A run whose steps all take about as long has a heaviest few, not a warm list.
- */
-export function hotSteps(
-  steps: readonly Step[],
-  scale: { cost: number; time: number },
-  top = 3,
-  by: "cost" | "time" | null = null,
-): Map<string, number> {
-  const out = new Map<string, number>();
-  // THE READER ASKED FOR ONE METRIC (a press on Cost or Duration in the strip): every step that has
-  // any of it, warm by its share — the list read as that metric, not just its heaviest three.
-  if (by) {
-    for (const s of steps) {
-      const h = stepHeat(s, scale, by);
-      if (h > 0) out.set(s.id, h);
-    }
-    return out;
-  }
-  const take = (by: "cost" | "time", value: (s: Step) => number | null): void => {
-    const ranked = steps.filter((s) => (value(s) ?? 0) > 0).sort((a, b) => (value(b) ?? 0) - (value(a) ?? 0)).slice(0, top);
-    for (const s of ranked) {
-      const h = stepHeat(s, scale, by);
-      if (h >= 0.5) out.set(s.id, Math.max(out.get(s.id) ?? 0, h));
-    }
-  };
-  take("cost", (s) => s.cost);
-  take("time", (s) => (Number.isFinite(s.latency_ms) ? s.latency_ms : null));
-  return out;
-}
-
 // ── Errors ───────────────────────────────────────────────────────────────────
 
 export interface ErrorParts {

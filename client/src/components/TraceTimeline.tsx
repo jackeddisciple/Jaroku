@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { CANCELLED_BY_USER, DRAWER_SNAP, jumpToError, orderedSteps, treeSteps, useTraceStore } from "../store/traceStore.ts";
+import { CANCELLED_BY_USER, DRAWER_SNAP, orderedSteps, treeSteps, useTraceStore } from "../store/traceStore.ts";
 import type { RunSummary, Step } from "../types.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { COL, StepRow, columnsFor, tileCentre, type BarPlace, type FoldSummary, type MetricScale, type RowTier } from "./StepRow.tsx";
-import { buildTraceTree, descendantSteps, isInherited, ownSteps, runWindow, hotSteps, stepWindow, traceSections, traceTotals, visibleRows, type TimeWindow, type TraceSection, type VisibleRow } from "../lib/traceView.ts";
+import { buildTraceTree, descendantSteps, isInherited, ownSteps, runWindow, stepWindow, traceSections, traceTotals, visibleRows, type TimeWindow, type TraceSection, type VisibleRow } from "../lib/traceView.ts";
 import { nodeKind } from "./graphNodeIcons.ts";
 import { EmptyState } from "./EmptyState.tsx";
 import { TraceHeader } from "./TraceHeader.tsx";
@@ -129,8 +129,6 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
       time: Math.max(0, ...own.map((st) => (Number.isFinite(st.latency_ms) ? st.latency_ms : 0))),
     };
   }, [run, steps]);
-  const heatBy = useTraceStore((s) => s.heatBy);
-  const hot = useMemo(() => hotSteps(ownSteps(run, steps), scale, 3, heatBy), [run, steps, scale, heatBy]);
   const tabbableId = rows.some((r) => r.step.id === selectedStepId) ? selectedStepId : (rows[0]?.step.id ?? null);
   // A top-level row starts a card and takes every row after it until the next top-level one.
   // A LONG RUN IN SECTIONS (2026-10-14): runs of consecutive nodes of one kind under a header that
@@ -203,20 +201,18 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
           provider={run?.provider}
           mark={marks.get(r.step.name)}
           scale={scale}
-          heat={hot.get(r.step.id) ?? 0}
           waterfall={view === "waterfall"}
         />
       ))}
     </div>
   );
 
-  // THE FILTERS STICK, so they stay in reach however far down somebody has scrolled — and so does the
-  // error banner under them while anything failed.
-  const failedCount = useMemo(() => steps.filter((st) => st.error != null).length, [steps]);
+  // THE FILTERS STICK, so they stay in reach however far down somebody has scrolled. No failure banner
+  // under them (the product owner's call, 2026-10-14: it looked cheap): the Errors tab counts the
+  // failures, and E / Shift+E still go to the next and previous one.
   const header = (
     <div className="sticky top-0 z-10 -mx-1 mb-1 bg-bg px-1">
       <TraceFilters steps={steps} />
-      {failedCount > 0 && <ErrorBanner count={failedCount} />}
     </div>
   );
 
@@ -297,29 +293,6 @@ function KindSectionHeader({ section, folded }: { section: TraceSection; folded:
       <span className={TYPE.sectionLabel}>{section.label}</span>
       <span className="text-tiny tabular-nums text-faint">{section.steps === 1 ? "1 step" : `${section.steps} steps`}</span>
     </button>
-  );
-}
-
-/**
- * SOMETHING FAILED, SAID WHERE IT CAN'T SCROLL AWAY (2026-10-14): a red wash under the filters, with the
- * way to the next failure — the same as pressing E (Shift+E goes back). Only while there is a failure;
- * at none, the Errors tab's tooltip teaches the key instead.
- */
-function ErrorBanner({ count }: { count: number }) {
-  return (
-    <div role="status" className="mb-1.5 flex min-h-8 items-center gap-2 rounded-control border-l-2 border-err bg-err/[0.08] py-1 pl-2.5 pr-1 text-caption text-err">
-      <span aria-hidden className="shrink-0"><Icon.trace.failed size={ICON.xs} /></span>
-      <span className="min-w-0 flex-1 truncate">{count === 1 ? "1 step failed" : `${count} steps failed`}</span>
-      <button
-        type="button"
-        onClick={() => jumpToError(1)}
-        title="Select the next failed step (E · Shift+E for the previous)"
-        className="flex h-6 shrink-0 items-center gap-1.5 rounded-control px-2 text-tiny font-medium transition-colors hover:bg-err/10 focus-visible:outline-none focus-visible:shadow-focusring"
-      >
-        Jump to next
-        <kbd className="rounded-xs border border-err/30 px-1 font-sans text-tiny leading-none">E</kbd>
-      </button>
-    </div>
   );
 }
 

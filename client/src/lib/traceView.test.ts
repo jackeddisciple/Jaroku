@@ -32,8 +32,6 @@ import {
   stepCategory,
   stepProvider,
   rerunBlocked,
-  hotSteps,
-  stepHeat,
   stepOutputText,
   stepsTime,
   stepWindow,
@@ -387,22 +385,6 @@ console.log("\nhow long the steps themselves took");
   // agent (2486ms, its model call inside it) and tools (4.3ms, its tool call inside it).
   check("the top-level steps, their insides not counted again", Math.abs(stepsTime(steps) - (2486 + 4.3)) < 1e-9, String(stepsTime(steps)));
   check("no steps, no time", stepsTime([]) === 0);
-}
-
-console.log("\nhow hot a step runs");
-{
-  const scale = { cost: 0.01, time: 2000 };
-  check("the costliest is fully hot", stepHeat({ cost: 0.01, latency_ms: 10 }, scale) === 1);
-  check("the slowest too", stepHeat({ cost: null, latency_ms: 2000 }, scale) === 1);
-  check("half of either is half", stepHeat({ cost: 0.005, latency_ms: 100 }, scale) === 0.5);
-  check("asked for cost alone, time does not count", stepHeat({ cost: null, latency_ms: 2000 }, scale, "cost") === 0);
-  check("an empty run is cold", stepHeat({ cost: 1, latency_ms: 1 }, { cost: 0, time: 0 }) === 0);
-  const even = [1, 2, 3, 4, 5, 6].map((i) => mk({ id: `e${i}`, seq: i, latency_ms: 1000 + i }));
-  const hotOnes = hotSteps(even, { cost: 0, time: 1006 });
-  check("a run of even steps warms only its slowest three", hotOnes.size === 3 && hotOnes.has("e6") && !hotOnes.has("e1"), [...hotOnes.keys()].join());
-  const byTime = hotSteps(even, { cost: 0, time: 1006 }, 3, "time");
-  check("pressed by one metric, every step with any of it is warm", byTime.size === 6 && (byTime.get("e1") ?? 0) > 0.99, [...byTime.keys()].join());
-  check("...and a metric no step has warms none", hotSteps(even, { cost: 0, time: 1006 }, 3, "cost").size === 0);
 }
 
 console.log("\na long run in sections");

@@ -19,7 +19,7 @@ import { runOutcome } from "../lib/runOutcome.ts";
 import { useRunClock } from "../lib/useRunClock.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { ICON, SPARK } from "../lib/tokens.ts";
-import { orderedSteps, useTraceStore, type HeatBy } from "../store/traceStore.ts";
+import { orderedSteps, useTraceStore } from "../store/traceStore.ts";
 import type { RunSummary, Step } from "../types.ts";
 import { Delta } from "./TraceRunTabs.tsx";
 
@@ -76,8 +76,7 @@ const TREND_FROM = 3;
  * somebody opens a trace to read (the product owner's call on 2026-10-12, "richer metrics").
  *
  * EACH ONE SAYS HOW IT COMPARES (2026-10-14): a branch's figure against its parent's, as a delta beside
- * the number; any other run's against the agent's recent runs, as a sparkline beside its word. Duration
- * and Cost press: the steps are then warmed by that metric alone (`hotSteps`), every one by its share.
+ * the number; any other run's against the agent's recent runs, as a sparkline beside its word.
  */
 interface FigureProps {
   Mark: IconComponent;
@@ -88,37 +87,21 @@ interface FigureProps {
   delta?: React.ReactNode;
   trend?: readonly TrendPoint[];
   runId?: string;
-  /** The metric a press warms the steps by; absent, the figure is not a control. */
-  heat?: Exclude<HeatBy, null>;
-  pressed?: boolean;
-  onPress?: () => void;
 }
 
-function Figure({ Mark, label, value, title, tone = "text-ink", delta, trend, runId, heat, pressed, onPress }: FigureProps) {
-  const inner = (
-    <>
+function Figure({ Mark, label, value, title, tone = "text-ink", delta, trend, runId }: FigureProps) {
+  return (
+    <div className="min-w-0 px-3 py-2.5" title={title}>
       <div className="flex min-w-0 items-center gap-1.5 text-tiny text-faint">
         <span aria-hidden className="shrink-0"><Mark size={ICON.xs} /></span>
-        <span className={`min-w-0 flex-1 truncate ${pressed ? "text-ink" : ""}`}>{label}</span>
+        <span className="min-w-0 flex-1 truncate">{label}</span>
         {trend && trend.length >= TREND_FROM && runId && <Sparkline points={trend} runId={runId} />}
       </div>
       <div className="mt-0.5 flex min-w-0 items-baseline gap-1.5">
         <span className={`truncate text-section tabular-nums ${tone}`}>{value}</span>
         {delta && <span className="shrink-0 text-tiny tabular-nums">{delta}</span>}
       </div>
-    </>
-  );
-  if (!heat || !onPress) return <div className="min-w-0 px-3 py-2.5" title={title}>{inner}</div>;
-  return (
-    <button
-      type="button"
-      aria-pressed={pressed}
-      onClick={onPress}
-      title={`${title}\n${pressed ? "Press again to warm only the heaviest steps" : `Press to warm every step by its ${heat === "cost" ? "cost" : "time"}`}`}
-      className={`block w-full min-w-0 px-3 py-2.5 text-left transition-colors duration-fast first:rounded-l-card last:rounded-r-card focus-visible:outline-none focus-visible:shadow-focusring ${pressed ? "bg-chrome" : "hover:bg-active"}`}
-    >
-      {inner}
-    </button>
+    </div>
   );
 }
 
@@ -206,10 +189,6 @@ export function TraceMetrics({ run, steps }: { run: RunSummary; steps: readonly 
     return n >= TREND_FROM ? ` · the line: this agent's last ${n} finished runs, this one the dot` : "";
   };
 
-  const heatBy = useTraceStore((s) => s.heatBy);
-  const setHeatBy = useTraceStore((s) => s.setHeatBy);
-  const press = (by: Exclude<HeatBy, null>) => () => setHeatBy(heatBy === by ? null : by);
-
   const calls = plural(totals.llmCalls, "model call");
   const tokensTitle = (totals.tokens == null
     ? totals.llmCalls === 0 ? "No model calls yet" : `None of the ${calls} reported tokens`
@@ -243,9 +222,6 @@ export function TraceMetrics({ run, steps }: { run: RunSummary; steps: readonly 
       delta: deltaOf("time", fmtDuration),
       trend: trends?.time,
       runId: run.id,
-      heat: "time",
-      pressed: heatBy === "time",
-      onPress: press("time"),
     },
     {
       Mark: Icon.trace.tokens,
@@ -264,9 +240,6 @@ export function TraceMetrics({ run, steps }: { run: RunSummary; steps: readonly 
       delta: deltaOf("cost", (n) => fmtCost(n), true),
       trend: trends?.cost,
       runId: run.id,
-      heat: "cost",
-      pressed: heatBy === "cost",
-      onPress: press("cost"),
     },
     {
       Mark: Icon.trace.metricSteps,
@@ -287,7 +260,7 @@ export function TraceMetrics({ run, steps }: { run: RunSummary; steps: readonly 
     <div ref={ref} className="relative shrink-0 px-6 pt-3">
       {/* The measure: each figure at its natural width, laid out and never seen. */}
       <div ref={natural} aria-hidden className="pointer-events-none invisible absolute left-0 top-0 flex w-max">
-        {figures.map((f) => <Figure key={f.label} {...f} onPress={undefined} />)}
+        {figures.map((f) => <Figure key={f.label} {...f} />)}
       </div>
       <div
         className="grid divide-x divide-hair rounded-card border border-hair bg-panel"
