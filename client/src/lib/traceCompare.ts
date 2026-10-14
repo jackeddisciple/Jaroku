@@ -3,9 +3,9 @@
 //
 //   npm run test:trace-view
 
-import type { Step } from "../types.ts";
+import type { RunSummary, Step } from "../types.ts";
 import { textFromLlmOutput } from "./agentOutput.ts";
-import { jsonReply } from "./traceView.ts";
+import { isInherited, jsonReply, ownSteps, runElapsed, stepWindow, traceTotals } from "./traceView.ts";
 
 // ── Changes: a branch against the run it branched from ───────────────────────
 
@@ -70,6 +70,76 @@ export function compareRuns(parentSteps: readonly Step[], ownSteps: readonly Ste
       latencyDelta: num(o?.latency_ms, p?.latency_ms),
     };
   });
+}
+
+/** A run's three figures: its wall time, its tokens and its cost — null where it has none. */
+export interface RunFigures {
+  time: number | null;
+  tokens: number | null;
+  cost: number | null;
+}
+
+/**
+ * A branch's figures against its parent's, LIKE FOR LIKE: the branch's own steps against the parent's
+ * steps from the same fork on — the stretch the branch ran again. The parent's whole run against the
+ * branch's own work compared a run with a part of one, and every branch read as cheaper.
+ *
+ * The parent's time is its wall time from the end of its last step before the fork to its end, as the
+ * branch's is from its start to its end. Null while either run is still going.
+ */
+export function branchFigures(
+  run: RunSummary,
+  steps: readonly Step[],
+  parentRun: RunSummary,
+  parentSteps: readonly Step[],
+): { mine: RunFigures; theirs: RunFigures } | null {
+  if (run.parent_run_id == null || run.branch_from_seq == null) return null;
+  const own = ownSteps(run, steps);
+  const stretch = parentSteps.filter((s) => !isInherited(s, run));
+  const mineTotals = traceTotals(own);
+  const theirTotals = traceTotals(stretch);
+  let forkEnd: number | null = null;
+  for (const s of parentSteps) {
+    if (!isInherited(s, run)) continue;
+    const w = stepWindow(s);
+    if (w && (forkEnd == null || w.end > forkEnd)) forkEnd = w.end;
+  }
+  const parentEnd = parentRun.ended_at ? Date.parse(parentRun.ended_at) : NaN;
+  const theirTime = forkEnd != null && Number.isFinite(parentEnd) ? Math.max(0, parentEnd - forkEnd) : null;
+  const mineTime = run.ended_at ? runElapsed(run, own, Date.now()) : null;
+  return {
+    mine: { time: mineTime, tokens: mineTotals.tokens, cost: mineTotals.cost },
+    theirs: { time: theirTime, tokens: theirTotals.tokens, cost: theirTotals.cost },
+  };
+}
+
+/** One of the agent's runs, as a sparkline draws it. */
+export interface TrendPoint {
+  runId: string;
+  value: number;
+}
+
+/**
+ * The agent's recent finished runs up to and including this one, oldest first — at most `n` — with
+ * one figure of each: its wall time, its tokens or its cost, as the run list records them.
+ */
+export function agentTrend(
+  runs: Readonly<Record<string, RunSummary>>,
+  run: RunSummary,
+  metric: keyof RunFigures,
+  n = 12,
+): TrendPoint[] {
+  const at = Date.parse(run.started_at);
+  const mine = Object.values(runs)
+    .filter((r) => r.agent_id === run.agent_id && r.ended_at != null && (r.id === run.id || Date.parse(r.started_at) <= at))
+    .sort((a, b) => Date.parse(a.started_at) - Date.parse(b.started_at))
+    .slice(-n);
+  const out: TrendPoint[] = [];
+  for (const r of mine) {
+    const value = metric === "time" ? Date.parse(r.ended_at!) - Date.parse(r.started_at) : metric === "tokens" ? r.tokens : r.cost;
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) out.push({ runId: r.id, value });
+  }
+  return out;
 }
 
 // ── State: where the run left its state ─────────────────────────────────────

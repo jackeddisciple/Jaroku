@@ -9,15 +9,19 @@
 // carry, so nothing is counted twice and the figure moves as the run does. What changed is that an
 // unmeasured figure says so: a run whose calls were never priced shows "—", not `$0.00`.
 
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { fmtCost, fmtDuration, tokenCount } from "../lib/format.ts";
+import { sendLoadRun } from "../lib/socket.ts";
+import { agentTrend, branchFigures, type RunFigures, type TrendPoint } from "../lib/traceCompare.ts";
 import { isInherited, ownSteps, runElapsed, stepsTime, traceTotals } from "../lib/traceView.ts";
 import { runOutcome } from "../lib/runOutcome.ts";
 import { useRunClock } from "../lib/useRunClock.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
-import { ICON } from "../lib/tokens.ts";
+import { ICON, SPARK } from "../lib/tokens.ts";
+import { orderedSteps, useTraceStore, type HeatBy } from "../store/traceStore.ts";
 import type { RunSummary, Step } from "../types.ts";
+import { Delta } from "./TraceRunTabs.tsx";
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
@@ -34,8 +38,46 @@ export function Metric({ label, value, title, tone = "text-ink", Mark }: { label
 }
 
 /**
+ * The agent's recent runs as a line, this one a dot on it — whether this run was a heavy one is read
+ * against the runs before it (the product owner's list, 2026-10-14: grey line, ink dot).
+ */
+function Sparkline({ points, runId }: { points: readonly TrendPoint[]; runId: string }) {
+  const W = 44;
+  const H = 14;
+  const max = Math.max(...points.map((p) => p.value));
+  const min = Math.min(...points.map((p) => p.value));
+  const span = max - min || 1;
+  const xy = points.map((p, i) => ({
+    id: p.runId,
+    x: 1 + (i * (W - 2)) / Math.max(1, points.length - 1),
+    y: H - 2 - ((p.value - min) / span) * (H - 4),
+  }));
+  const me = xy.find((p) => p.id === runId);
+  return (
+    <svg aria-hidden width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="shrink-0 overflow-visible">
+      <polyline
+        points={xy.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")}
+        fill="none"
+        stroke={SPARK.line}
+        strokeWidth={1.25}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+      {me && <circle cx={me.x} cy={me.y} r={2} fill={SPARK.dot} />}
+    </svg>
+  );
+}
+
+/** The fewest runs a sparkline is drawn over: two points are a slope, not a trend. */
+const TREND_FROM = 3;
+
+/**
  * One of the strip's figures: its mark and its word, then the number, large — the number is what
  * somebody opens a trace to read (the product owner's call on 2026-10-12, "richer metrics").
+ *
+ * EACH ONE SAYS HOW IT COMPARES (2026-10-14): a branch's figure against its parent's, as a delta beside
+ * the number; any other run's against the agent's recent runs, as a sparkline beside its word. Duration
+ * and Cost press: the steps are then warmed by that metric alone (`hotSteps`), every one by its share.
  */
 interface FigureProps {
   Mark: IconComponent;
@@ -43,17 +85,40 @@ interface FigureProps {
   value: string;
   title: string;
   tone?: string;
+  delta?: React.ReactNode;
+  trend?: readonly TrendPoint[];
+  runId?: string;
+  /** The metric a press warms the steps by; absent, the figure is not a control. */
+  heat?: Exclude<HeatBy, null>;
+  pressed?: boolean;
+  onPress?: () => void;
 }
 
-function Figure({ Mark, label, value, title, tone = "text-ink" }: FigureProps) {
-  return (
-    <div className="min-w-0 px-3 py-2.5" title={title}>
+function Figure({ Mark, label, value, title, tone = "text-ink", delta, trend, runId, heat, pressed, onPress }: FigureProps) {
+  const inner = (
+    <>
       <div className="flex min-w-0 items-center gap-1.5 text-tiny text-faint">
         <span aria-hidden className="shrink-0"><Mark size={ICON.xs} /></span>
-        <span className="truncate">{label}</span>
+        <span className={`min-w-0 flex-1 truncate ${pressed ? "text-ink" : ""}`}>{label}</span>
+        {trend && trend.length >= TREND_FROM && runId && <Sparkline points={trend} runId={runId} />}
       </div>
-      <div className={`mt-0.5 truncate text-section tabular-nums ${tone}`}>{value}</div>
-    </div>
+      <div className="mt-0.5 flex min-w-0 items-baseline gap-1.5">
+        <span className={`truncate text-section tabular-nums ${tone}`}>{value}</span>
+        {delta && <span className="shrink-0 text-tiny tabular-nums">{delta}</span>}
+      </div>
+    </>
+  );
+  if (!heat || !onPress) return <div className="min-w-0 px-3 py-2.5" title={title}>{inner}</div>;
+  return (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      onClick={onPress}
+      title={`${title}\n${pressed ? "Press again to warm only the heaviest steps" : `Press to warm every step by its ${heat === "cost" ? "cost" : "time"}`}`}
+      className={`block w-full min-w-0 px-3 py-2.5 text-left transition-colors duration-fast first:rounded-l-card last:rounded-r-card focus-visible:outline-none focus-visible:shadow-focusring ${pressed ? "bg-chrome" : "hover:bg-active"}`}
+    >
+      {inner}
+    </button>
   );
 }
 
@@ -101,6 +166,50 @@ export function TraceMetrics({ run, steps }: { run: RunSummary; steps: readonly 
 
   const elapsed = runElapsed(run, steps, now);
 
+  // AGAINST THE PARENT, LIKE FOR LIKE (`branchFigures`): its steps are loaded for this, as Changes
+  // loads them, once both runs have ended.
+  const parentId = run.parent_run_id ?? null;
+  const parentRun = useTraceStore((s) => (parentId ? s.runs[parentId] : undefined));
+  const parentBucket = useTraceStore((s) => (parentId ? s.stepsByRun[parentId] : undefined));
+  const parentNeedsLoad = useTraceStore((s) => (parentId ? !s.loaded[parentId] : false));
+  useEffect(() => {
+    if (parentId && parentNeedsLoad && !live) sendLoadRun(parentId);
+  }, [parentId, parentNeedsLoad, live]);
+  const vsParent = useMemo(() => {
+    if (!parentRun || !parentBucket || live) return null;
+    return branchFigures(run, steps, parentRun, orderedSteps(parentBucket));
+  }, [run, steps, parentRun, parentBucket, live]);
+  const deltaOf = (m: keyof RunFigures, format: (n: number) => string, pct = false): React.ReactNode => {
+    if (!vsParent) return undefined;
+    const a = vsParent.mine[m];
+    const b = vsParent.theirs[m];
+    if (a == null || b == null) return undefined;
+    return <Delta value={a - b} format={format} pct={pct && b > 0 ? ((a - b) / b) * 100 : null} />;
+  };
+  const vsTitle = (m: keyof RunFigures, format: (n: number) => string): string => {
+    const b = vsParent?.theirs[m];
+    return b == null ? "" : ` · the parent run's same stretch, from the fork on: ${format(b)}`;
+  };
+
+  // THE AGENT'S RECENT RUNS, for any run that is not a branch (a branch has its parent to answer to).
+  const runs = useTraceStore((s) => s.runs);
+  const trends = useMemo(() => {
+    if (parentId) return null;
+    return {
+      time: agentTrend(runs, run, "time"),
+      tokens: agentTrend(runs, run, "tokens"),
+      cost: agentTrend(runs, run, "cost"),
+    };
+  }, [parentId, runs, run]);
+  const trendTitle = (m: keyof RunFigures): string => {
+    const n = trends?.[m].length ?? 0;
+    return n >= TREND_FROM ? ` · the line: this agent's last ${n} finished runs, this one the dot` : "";
+  };
+
+  const heatBy = useTraceStore((s) => s.heatBy);
+  const setHeatBy = useTraceStore((s) => s.setHeatBy);
+  const press = (by: Exclude<HeatBy, null>) => () => setHeatBy(heatBy === by ? null : by);
+
   const calls = plural(totals.llmCalls, "model call");
   const tokensTitle = (totals.tokens == null
     ? totals.llmCalls === 0 ? "No model calls yet" : `None of the ${calls} reported tokens`
@@ -122,21 +231,42 @@ export function TraceMetrics({ run, steps }: { run: RunSummary; steps: readonly 
       // same run, measured end to end, and the two read as a contradiction. A paused run has
       // stopped its clock at the last step it finished.
       title:
-        run.status === "paused"
+        (run.status === "paused"
           ? "How long the agent's graph ran before it paused"
           : live
             ? "The agent's graph alone, from its start until now"
             : runOutcome(run) === "stopped"
               ? `From its start until it was stopped — its steps themselves took ${fmtDuration(stepsTime(own))}`
-              : "The agent's graph alone, from its start to its end — any time it sat paused included",
+              : "The agent's graph alone, from its start to its end — any time it sat paused included")
+        + vsTitle("time", fmtDuration) + trendTitle("time"),
       tone: run.status === "running" ? "text-run" : "text-ink",
+      delta: deltaOf("time", fmtDuration),
+      trend: trends?.time,
+      runId: run.id,
+      heat: "time",
+      pressed: heatBy === "time",
+      onPress: press("time"),
     },
-    { Mark: Icon.trace.tokens, label: "Tokens", value: totals.tokens == null ? "—" : tokenCount(totals.tokens), title: totals.tokens == null ? tokensTitle : `${totals.tokens.toLocaleString()} tokens · ${tokensTitle}` },
+    {
+      Mark: Icon.trace.tokens,
+      label: "Tokens",
+      value: totals.tokens == null ? "—" : tokenCount(totals.tokens),
+      title: (totals.tokens == null ? tokensTitle : `${totals.tokens.toLocaleString()} tokens · ${tokensTitle}`) + vsTitle("tokens", tokenCount) + trendTitle("tokens"),
+      delta: deltaOf("tokens", tokenCount),
+      trend: trends?.tokens,
+      runId: run.id,
+    },
     {
       Mark: Icon.trace.metricCost,
       label: totals.unpricedCalls > 0 && totals.cost != null ? "Cost (partial)" : "Cost",
       value: fmtCost(totals.cost),
-      title: costTitle,
+      title: costTitle + vsTitle("cost", (n) => fmtCost(n)) + trendTitle("cost"),
+      delta: deltaOf("cost", (n) => fmtCost(n), true),
+      trend: trends?.cost,
+      runId: run.id,
+      heat: "cost",
+      pressed: heatBy === "cost",
+      onPress: press("cost"),
     },
     {
       Mark: Icon.trace.metricSteps,
@@ -157,7 +287,7 @@ export function TraceMetrics({ run, steps }: { run: RunSummary; steps: readonly 
     <div ref={ref} className="relative shrink-0 px-6 pt-3">
       {/* The measure: each figure at its natural width, laid out and never seen. */}
       <div ref={natural} aria-hidden className="pointer-events-none invisible absolute left-0 top-0 flex w-max">
-        {figures.map((f) => <Figure key={f.label} {...f} />)}
+        {figures.map((f) => <Figure key={f.label} {...f} onPress={undefined} />)}
       </div>
       <div
         className="grid divide-x divide-hair rounded-card border border-hair bg-panel"

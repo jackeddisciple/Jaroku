@@ -14,6 +14,8 @@ import { nodeKind } from "../components/graphNodeIcons.ts";
 export type ConnectionState = "connecting" | "open" | "closed";
 export type StepView = "list" | "waterfall" | "graph";
 export type RunTab = "steps" | "changes" | "state" | "artifacts" | "raw";
+/** The metric the steps are warmed by, when the reader has pressed Cost or Duration in the strip. */
+export type HeatBy = "cost" | "time" | null;
 export type LogLine = { level: "stderr" | "parseError"; text: string };
 
 interface TraceState {
@@ -92,6 +94,8 @@ interface TraceState {
   stepView: StepView;
   /** Which of the run's views is open: its steps, or Changes, State, Artifacts or Raw. Session-only. */
   runTab: RunTab;
+  /** Pressed in the metrics strip: warm every step by its share of this metric. Null: the heaviest few. */
+  heatBy: HeatBy;
   /** Sections of a long run folded away, by their first node's step id (`traceSections`). Session-only. */
   collapsedSections: Record<string, true>;
   /**
@@ -136,6 +140,7 @@ interface TraceState {
   setStepView: (view: StepView) => void;
   toggleSection: (key: string) => void;
   setRunTab: (tab: RunTab) => void;
+  setHeatBy: (by: HeatBy) => void;
   setControlError: (error: { runId: string | null; message: string } | null) => void;
 }
 
@@ -210,6 +215,7 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   stepView: "list",
   collapsedSections: {},
   runTab: "steps",
+  heatBy: null,
   controlError: null,
 
   applyHistory: (runs, meta) =>
@@ -346,6 +352,7 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   setStepView: (stepView) => set({ stepView }),
 
   setRunTab: (runTab) => set({ runTab }),
+  setHeatBy: (heatBy) => set({ heatBy }),
 
   toggleSection: (key) =>
     set((state) => {

@@ -11,8 +11,7 @@ import { extractAgentOutput } from "../lib/agentOutput.ts";
 import { fmtCost, fmtDuration, tokenCount } from "../lib/format.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { sendLoadRun } from "../lib/socket.ts";
-import { compareRuns, finalState, runArtifacts, type StepPair } from "../lib/traceCompare.ts";
-import { ownSteps, runElapsed, traceTotals } from "../lib/traceView.ts";
+import { branchFigures, compareRuns, finalState, runArtifacts, type StepPair } from "../lib/traceCompare.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { orderedSteps, useTraceStore, type RunTab } from "../store/traceStore.ts";
 import type { RunSummary, Step } from "../types.ts";
@@ -146,12 +145,13 @@ export function ChangesView({ run, steps }: { run: RunSummary; steps: readonly S
   if (!parentId) return <p className="px-6 py-6 text-caption text-muted">This run is not a branch, so there is nothing to compare it with.</p>;
   if (!parentRun || parentSteps.length === 0) return <p className="px-6 py-6 text-caption text-muted">Loading the run this one branched from…</p>;
 
-  // THE RUNS AS A WHOLE FIRST: what this branch took and spent against its parent, then what each
-  // run came to, side by side.
-  const mine = traceTotals(ownSteps(run, steps));
-  const theirs = traceTotals(parentSteps);
-  const myTime = runElapsed(run, steps, Date.now());
-  const theirTime = runElapsed(parentRun, parentSteps, Date.now());
+  // THE RUNS AS A WHOLE FIRST: what this branch took and spent against its parent — the parent from
+  // the same fork on (`branchFigures`), the stretch this branch ran again — then what each came to.
+  const figures = branchFigures(run, steps, parentRun, parentSteps);
+  const mine = figures?.mine ?? { time: null, tokens: null, cost: null };
+  const theirs = figures?.theirs ?? { time: null, tokens: null, cost: null };
+  const myTime = mine.time;
+  const theirTime = theirs.time;
   const pct = (a: number | null, b: number | null): number | null => (a != null && b != null && b > 0 ? ((a - b) / b) * 100 : null);
   const changed = pairs.filter((p) => p.inputChanged || p.outputChanged || !p.parent || !p.own);
   const shown = showSame ? pairs : changed;
@@ -160,7 +160,10 @@ export function ChangesView({ run, steps }: { run: RunSummary; steps: readonly S
 
   return (
     <div className="flex flex-col gap-3 px-6 py-3">
-      <div className="grid grid-cols-3 divide-x divide-hair rounded-card border border-hair bg-panel">
+      <div
+        className="grid grid-cols-3 divide-x divide-hair rounded-card border border-hair bg-panel"
+        title={`The parent from the fork on — after #${run.branch_from_seq ?? "?"}, the steps this branch ran again — against this branch`}
+      >
         <Figure
           label="Duration"
           before={theirTime == null ? "—" : fmtDuration(theirTime)}

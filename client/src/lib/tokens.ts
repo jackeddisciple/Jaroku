@@ -446,6 +446,15 @@ export const METRIC = {
   time: ACCENT.bespoke,
 } as const;
 
+/**
+ * SPARK — the metrics strip's sparklines over an agent's recent runs (the product owner's call,
+ * 2026-10-14): a grey line, with this run marked on it in ink.
+ */
+export const SPARK = {
+  line: "#6B6B66",
+  dot: INK.primary,
+} as const;
+
 /** Tailwind class equivalents, for the common case where a class is what's wanted. */
 export const SPACE_CLASS = {
   tight: "mt-2",

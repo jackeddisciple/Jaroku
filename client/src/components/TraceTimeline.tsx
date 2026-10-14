@@ -129,7 +129,8 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
       time: Math.max(0, ...own.map((st) => (Number.isFinite(st.latency_ms) ? st.latency_ms : 0))),
     };
   }, [run, steps]);
-  const hot = useMemo(() => hotSteps(ownSteps(run, steps), scale), [run, steps, scale]);
+  const heatBy = useTraceStore((s) => s.heatBy);
+  const hot = useMemo(() => hotSteps(ownSteps(run, steps), scale, 3, heatBy), [run, steps, scale, heatBy]);
   const tabbableId = rows.some((r) => r.step.id === selectedStepId) ? selectedStepId : (rows[0]?.step.id ?? null);
   // A top-level row starts a card and takes every row after it until the next top-level one.
   // A LONG RUN IN SECTIONS (2026-10-14): runs of consecutive nodes of one kind under a header that

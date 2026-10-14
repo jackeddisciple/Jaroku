@@ -10,10 +10,10 @@ import { failedStepIds, jumpToError, treeSteps, useTraceStore, visibleTraceRows 
 import { graphLook, kindWord, traceMarks } from "../components/traceMarks.ts";
 import { nodeKind } from "../components/graphNodeIcons.ts";
 import { outcomePhase, runOutcome } from "./runOutcome.ts";
-import { compareRuns, finalState, runArtifacts } from "./traceCompare.ts";
+import { agentTrend, branchFigures, compareRuns, finalState, runArtifacts } from "./traceCompare.ts";
 import { answerPreview } from "../components/TraceResult.tsx";
 import { STATUS, STEP_HUE } from "./tokens.ts";
-import type { Step } from "../types.ts";
+import type { RunSummary, Step } from "../types.ts";
 import {
   ancestorIds,
   awaitingNode,
@@ -399,6 +399,9 @@ console.log("\nhow hot a step runs");
   const even = [1, 2, 3, 4, 5, 6].map((i) => mk({ id: `e${i}`, seq: i, latency_ms: 1000 + i }));
   const hotOnes = hotSteps(even, { cost: 0, time: 1006 });
   check("a run of even steps warms only its slowest three", hotOnes.size === 3 && hotOnes.has("e6") && !hotOnes.has("e1"), [...hotOnes.keys()].join());
+  const byTime = hotSteps(even, { cost: 0, time: 1006 }, 3, "time");
+  check("pressed by one metric, every step with any of it is warm", byTime.size === 6 && (byTime.get("e1") ?? 0) > 0.99, [...byTime.keys()].join());
+  check("...and a metric no step has warms none", hotSteps(even, { cost: 0, time: 1006 }, 3, "cost").size === 0);
 }
 
 console.log("\na long run in sections");
@@ -439,6 +442,33 @@ console.log("\na branch against its parent, and what a run made");
   check("the final state is the last node's update on what it started from", JSON.stringify(finalState([b0, b1, b2])) === JSON.stringify(b2.state_after));
   const appended = finalState([mk({ id: "z", seq: 0, state_before: { messages: [1], readings: [1] }, state_after: { messages: [2], readings: [9] } })]);
   check("...its messages appended, its other fields replaced", JSON.stringify(appended) === '{"messages":[1,2],"readings":[9]}', JSON.stringify(appended));
+  // Like for like: the parent from the fork on against the branch's own.
+  const runOf = (over: Partial<RunSummary> & Pick<RunSummary, "id">): RunSummary => ({
+    agent_id: "ag", provider: "anthropic", model: "m", status: "completed", started_at: "2026-10-09T05:00:00.000Z",
+    ended_at: "2026-10-09T05:00:10.000Z", cost: 0, tokens: 0, error: null, ...over,
+  });
+  const fp0 = mk({ id: "f0", seq: 0, cost: 0.01, tokens: 100, latency_ms: 2000, started_at: "2026-10-09T05:00:02.000Z" });
+  const fp1 = mk({ id: "f1", seq: 1, cost: 0.004, tokens: 40, latency_ms: 8000, started_at: "2026-10-09T05:00:10.000Z" });
+  const parentRun = runOf({ id: "P" });
+  const branchRun = runOf({ id: "B", parent_run_id: "P", branch_from_seq: 0, started_at: "2026-10-09T06:00:00.000Z", ended_at: "2026-10-09T06:00:05.000Z" });
+  const fb0 = { ...fp0, id: "g0", run_id: "B" };
+  const fb1 = mk({ id: "g1", seq: 1, run_id: "B", cost: 0.003, tokens: 30, latency_ms: 4000, started_at: "2026-10-09T06:00:05.000Z" });
+  const vs = branchFigures(branchRun, [fb0, fb1], parentRun, [fp0, fp1]);
+  check("a branch's cost is set against the parent's from the fork on, not its whole run", vs?.theirs.cost === 0.004 && vs?.mine.cost === 0.003, JSON.stringify(vs));
+  check("...and so are its tokens", vs?.theirs.tokens === 40 && vs?.mine.tokens === 30);
+  check("...and its time: the parent's from the fork's end to its own", vs?.theirs.time === 8000 && vs?.mine.time === 5000, JSON.stringify(vs));
+  check("a run that is not a branch has no parent to answer to", branchFigures(parentRun, [fp0], parentRun, [fp0]) === null);
+  const history: Record<string, RunSummary> = {
+    a: runOf({ id: "a", started_at: "2026-10-09T01:00:00.000Z", ended_at: "2026-10-09T01:00:04.000Z", cost: 1 }),
+    b: runOf({ id: "b", started_at: "2026-10-09T02:00:00.000Z", ended_at: "2026-10-09T02:00:02.000Z", cost: 2 }),
+    c: runOf({ id: "c", started_at: "2026-10-09T03:00:00.000Z", ended_at: "2026-10-09T03:00:01.000Z", cost: 3 }),
+    later: runOf({ id: "later", started_at: "2026-10-09T04:00:00.000Z", cost: 9 }),
+    other: runOf({ id: "other", agent_id: "zz", started_at: "2026-10-09T02:30:00.000Z", cost: 7 }),
+  };
+  const trend = agentTrend(history, history.c!, "cost");
+  check("the trend is the agent's finished runs up to this one, oldest first", trend.map((t) => t.runId).join() === "a,b,c", trend.map((t) => t.runId).join());
+  check("...by the figure asked for", agentTrend(history, history.c!, "time").map((t) => t.value).join() === "4000,2000,1000");
+  check("...and at most n of them", agentTrend(history, history.c!, "cost", 2).map((t) => t.runId).join() === "b,c");
   const arts = runArtifacts([p0, p1, p2]);
   check("a JSON reply is an artifact, named for its node", arts[0]?.title === "extract_jd" && JSON.stringify(arts[0]?.value) === '{"must_haves":["Python"]}');
   check("...and so is a structured state field", arts.some((a) => a.title === "jd"));

@@ -663,8 +663,22 @@ export function stepHeat(
  * (`stepHeat`, by the one metric that put it there; the larger when both did) — and only at half the
  * heaviest or more. A run whose steps all take about as long has a heaviest few, not a warm list.
  */
-export function hotSteps(steps: readonly Step[], scale: { cost: number; time: number }, top = 3): Map<string, number> {
+export function hotSteps(
+  steps: readonly Step[],
+  scale: { cost: number; time: number },
+  top = 3,
+  by: "cost" | "time" | null = null,
+): Map<string, number> {
   const out = new Map<string, number>();
+  // THE READER ASKED FOR ONE METRIC (a press on Cost or Duration in the strip): every step that has
+  // any of it, warm by its share — the list read as that metric, not just its heaviest three.
+  if (by) {
+    for (const s of steps) {
+      const h = stepHeat(s, scale, by);
+      if (h > 0) out.set(s.id, h);
+    }
+    return out;
+  }
   const take = (by: "cost" | "time", value: (s: Step) => number | null): void => {
     const ranked = steps.filter((s) => (value(s) ?? 0) > 0).sort((a, b) => (value(b) ?? 0) - (value(a) ?? 0)).slice(0, top);
     for (const s of ranked) {

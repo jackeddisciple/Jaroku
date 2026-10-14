@@ -309,11 +309,12 @@ function Marked({ text, query }: { text: string; query: string }) {
 /**
  * THE HEAVY STEPS ARE WARM (2026-10-14): a red wash behind a step that is among the run's costliest or
  * slowest — 8% at the heaviest, fading with its share, nothing below half of it — so the expensive part
- * of a run is found before a figure is read. Layered with an inherited step's hatch.
+ * of a run is found before a figure is read. Layered with an inherited step's hatch. Which steps are
+ * warm is `hotSteps`'s to say: the heaviest few, or every step when one metric was pressed.
  */
 function rowBackground(inherited: boolean, heat: number): React.CSSProperties | undefined {
   const layers: string[] = [];
-  if (heat >= 0.5) {
+  if (heat > 0) {
     const tint = `color-mix(in srgb, ${STATUS.error} ${(heat * 8).toFixed(1)}%, transparent)`;
     layers.push(`linear-gradient(${tint}, ${tint})`);
   }
