@@ -39,7 +39,7 @@ import { CopyTurn } from "./composer/CopyTurn.tsx";
 import { IconButton } from "./IconButton.tsx";
 import { ErrorView, InputTab, OutputTab, PromptTab, RawTab, StateTabBody, hasState, promptCalls } from "./StepDetail.tsx";
 import { tabBtn } from "./buttons.ts";
-import { StateBranchEditor } from "./StateBranchEditor.tsx";
+import { RerunFields, RerunFooter, useRerun } from "./StateBranchEditor.tsx";
 import { McpBadge } from "./McpBadge.tsx";
 import { StepTile } from "./StepRow.tsx";
 import { Metric } from "./TraceMetrics.tsx";
@@ -362,6 +362,9 @@ export function StepDetailPanel({ dock }: { dock: StepDetailDock }) {
     keepFocus();
   };
 
+  // THE RE-RUN, for the editor in Overview and the buttons pinned under every tab: one set of drafts,
+  // this step's (`useRerun` starts them again when the drawer moves to another step).
+  const rerun = useRerun(step);
   // The tabs this step has something for: Prompt only where a model was asked, State diff only where
   // state was recorded. A tab chosen on another step that this one lacks shows Overview, and the
   // choice is kept for the next step that has it.
@@ -487,12 +490,11 @@ export function StepDetailPanel({ dock }: { dock: StepDetailDock }) {
               </div>
             )}
             <Overview step={step} run={run} bucket={bucket} inside={inside} kind={kindWord(step, marks.get(step.name))} onNavigate={keepFocus} />
-            {/* KEYED BY STEP: its drafts are this step's fields. Without the key, prev/next kept the
-                last step's edits and offered to re-run the new step with them. */}
-            <StateBranchEditor key={step.id} step={step} />
+            <RerunFields rerun={rerun} />
             </>
                       )}
           </div>
+          <RerunFooter rerun={rerun} />
         </>
       )}
     </div>

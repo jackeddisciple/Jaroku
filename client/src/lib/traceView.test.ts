@@ -13,6 +13,7 @@ import { outcomePhase, runOutcome } from "./runOutcome.ts";
 import { agentTrend, branchFigures, compareRuns, finalState, runArtifacts } from "./traceCompare.ts";
 import { isVerdict, readVerdict, verdictTone } from "./runVerdict.ts";
 import { jsonLines, jsonMatches, jsonType } from "./jsonShape.ts";
+import { diffHunks, lineDiff } from "./textDiff.ts";
 import { answerPreview } from "../components/TraceResult.tsx";
 import { STATUS, STEP_HUE } from "./tokens.ts";
 import type { RunSummary, Step } from "../types.ts";
@@ -490,6 +491,16 @@ console.log("\nthe JSON viewer's lines, types and search");
   check("...a leaf is one", jsonLines("x") === 1 && jsonLines(null) === 1);
   check("types read as badges", jsonType(v.skills) === "array[2]" && jsonType(v) === "object{4}" && jsonType("a") === "string" && jsonType(true) === "bool" && jsonType(null) === "null");
   check("search counts keys and values, ignoring case", jsonMatches(v, "py") === 1 && jsonMatches(v, "s") === 2, String(jsonMatches(v, "s")));
+}
+
+console.log("\nan edit against what it was");
+{
+  const d = lineDiff("[\n  \"Python\",\n  \"Go\"\n]", "[\n  \"Python\",\n  \"Rust\"\n]");
+  check("a changed line is a removal and an addition", d.filter((l) => l.kind === "del").map((l) => l.text.trim()).join() === '"Go"' && d.filter((l) => l.kind === "add").map((l) => l.text.trim()).join() === '"Rust"', JSON.stringify(d));
+  check("...and the rest is the same", d.filter((l) => l.kind === "same").length === 3);
+  const long = lineDiff(Array.from({ length: 20 }, (_, i) => `l${i}`).join("\n"), Array.from({ length: 20 }, (_, i) => (i === 10 ? "X" : `l${i}`)).join("\n"));
+  const h = diffHunks(long);
+  check("a hunk is the change and a line either side, the rest left out", h.length === 6 && h[0] === null && h[5] === null && h[2]?.kind === "del", JSON.stringify(h));
 }
 
 console.log("\nwhere a search matched");

@@ -455,6 +455,12 @@ export const SPARK = {
   dot: INK.primary,
 } as const;
 
+/**
+ * EDITED — the dot beside a field somebody has changed in the re-run editor (the product owner's call,
+ * 2026-10-14): an orange the palette does not otherwise use, so an edit is never read as a state.
+ */
+export const EDITED = "#EA580C";
+
 /** Tailwind class equivalents, for the common case where a class is what's wanted. */
 export const SPACE_CLASS = {
   tight: "mt-2",

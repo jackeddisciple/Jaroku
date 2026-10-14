@@ -405,6 +405,7 @@ export const MANIFEST = {
     viewList: "ListViewIcon",
     viewWaterfall: "WaterfallDown01Icon",
     viewGraph: "ArtboardIcon",
+    resetField: "Undo03Icon",
   },
 
   // ── §5 Global ─────────────────────────────────────────────────────────────
