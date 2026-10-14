@@ -31,6 +31,8 @@ import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { CATEGORY_LABEL, buildTraceTree, descendantSteps, isInherited, stepCategory, stepWindow, traceTotals } from "../lib/traceView.ts";
 import { ICON, STEP_TYPE, TYPE } from "../lib/tokens.ts";
 import { showStepOnGraph } from "../lib/runActions.ts";
+import { sendEdit, sendExplain } from "../lib/socket.ts";
+import { fixPrompt } from "../lib/intent.ts";
 import type { RunSummary, Step } from "../types.ts";
 import { Chip } from "./Chip.tsx";
 import { CopyTurn } from "./composer/CopyTurn.tsx";
@@ -197,6 +199,7 @@ export function StepDetailPanel({ dock }: { dock: StepDetailDock }) {
   // Same join as the timeline row: a step carries a tool NAME, and whether that name came
   // from MCP is a fact about the AGENT, recorded in its manifest.
   const agent = useBuildStore((s) => s.agents.find((a) => a.agent_id === s.activeAgentId));
+  const selectedAgentId = useBuildStore((s) => s.activeAgentId);
   const mcpNames = agentMcpToolNames(agent?.mcp_tools);
   const expandedStepId = useTraceStore((s) => s.expandedStepId);
   const step = useTraceStore((s) => {
@@ -342,7 +345,18 @@ export function StepDetailPanel({ dock }: { dock: StepDetailDock }) {
             {/* A failure next: it is what somebody opening a red step came for. */}
             {step.error && (
               <div className="mt-4">
-                <ErrorView error={step.error} runStatus={run?.status} />
+                <ErrorView
+                  error={step.error}
+                  runStatus={run?.status}
+                  // Only about the agent on screen: an explanation or a fix is filed against it.
+                  actions={selectedAgentId && run?.agent_id === selectedAgentId ? {
+                    explain: () => sendExplain(selectedAgentId, "Why did this step fail?", {
+                      kind: "step",
+                      step: { name: step.name, type: step.type, seq: step.seq, error: step.error, input: step.input, output: step.output },
+                    }),
+                    fix: () => sendEdit(selectedAgentId, fixPrompt(step)),
+                  } : undefined}
+                />
               </div>
             )}
             <Overview step={step} run={run} bucket={bucket} inside={inside} onNavigate={keepFocus} />

@@ -162,10 +162,18 @@ function StateView({ step }: { step: Step }) {
  * shouting over the input and output that explain it.
  *
  * NO RETRY BUTTON. The trace has no notion of a retry, and a button that looked like one would be a
- * promise the schema cannot keep; "Re-run from here" below is the real thing, and the composer
- * answers "why did this fail?" about the selected step.
+ * promise the schema cannot keep; "Re-run from here" below is the real thing.
+ *
+ * EXPLAIN AND FIX IT LIVE HERE, beside the error they are about. They were a card over the composer
+ * that came up on every click of a failed row; the answer and the proposed change still arrive in the
+ * conversation, where they always did.
  */
-export function ErrorView({ error, runStatus }: { error: string; runStatus: RunStatus | undefined }) {
+export function ErrorView({ error, runStatus, actions }: {
+  error: string;
+  runStatus: RunStatus | undefined;
+  /** What can be done about it, when the step's agent is the one selected. */
+  actions?: { explain: () => void; fix: () => void };
+}) {
   const { type, message, detail } = errorParts(error);
   const [stackOpen, setStackOpen] = useState(false);
   return (
@@ -194,6 +202,26 @@ export function ErrorView({ error, runStatus }: { error: string; runStatus: RunS
             from the one that ended it. */}
         {runStatus === "completed" && (
           <p className="mt-1.5 text-tiny text-muted">The run still finished — the agent carried on past this failure.</p>
+        )}
+        {actions && (
+          <div className="mt-2.5 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={actions.explain}
+              title="Ask why this step failed — the answer appears in the conversation"
+              className="rounded-control border border-hair px-2.5 py-1 text-tiny text-ink transition-colors hover:bg-active focus-visible:outline-none focus-visible:shadow-focusring"
+            >
+              Explain
+            </button>
+            <button
+              type="button"
+              onClick={actions.fix}
+              title="Propose a code change for this failure — it arrives in the conversation for you to apply"
+              className="rounded-control border border-hair px-2.5 py-1 text-tiny text-ink transition-colors hover:bg-active focus-visible:outline-none focus-visible:shadow-focusring"
+            >
+              Fix it
+            </button>
+          </div>
         )}
       </div>
     </section>

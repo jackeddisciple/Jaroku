@@ -92,7 +92,7 @@ import { StatusDot } from "./StatusBadge.tsx";
 import { StatRow, STAT_ICON, type Stat } from "./StatRow.tsx";
 import {
   AlertTriangleIcon, CheckIcon, ChevronRightIcon, DollarSignIcon, FileIcon, HashIcon,
-  LightbulbIcon, LoaderIcon, PencilIcon, PlugIcon, RefreshIcon, SparklesIcon,
+  LightbulbIcon, LoaderIcon, PencilIcon, PlugIcon, SparklesIcon,
   WrenchIcon, XIcon, ZapIcon,
 } from "./panelIcons.tsx";
 import { useMcpStore, allMcpTools } from "../store/mcpStore.ts";
@@ -3113,51 +3113,12 @@ export function BuildPane({
         },
       ],
     };
-  } else if (selectedStep?.error && activeAgentId) {
-    // Three things you can do with a failure, each already reachable by typing a phrase the
-    // intent router recognises. The cards name them, which is the part that was undiscoverable.
-    const failed = selectedStep;
-    fork = {
-      key: `step:${failed.id}`,
-      question: `Step #${failed.seq} failed`,
-      choices: [
-        {
-          id: "explain",
-          label: "Explain",
-          hint: "why did this fail?",
-          icon: LightbulbIcon,
-          primary: true,
-          onPick: () =>
-            sendExplain(activeAgentId, "Why did this step fail?", {
-              kind: "step",
-              step: {
-                name: failed.name,
-                type: failed.type,
-                seq: failed.seq,
-                error: failed.error,
-                input: failed.input,
-                output: failed.output,
-              },
-            }),
-        },
-        {
-          id: "fix",
-          label: "Fix it",
-          hint: "propose a code change",
-          icon: WrenchIcon,
-          accent: ACCENT.bespoke,
-          onPick: () => sendEdit(activeAgentId, fixPrompt(failed)),
-        },
-        {
-          id: "rerun",
-          label: "Re-run",
-          hint: "branch from this step",
-          icon: RefreshIcon,
-          onPick: () => sendBranchRun(failed.run_id, failed.seq),
-        },
-      ],
-    };
   }
+  // NO FORK FOR A FAILED STEP. Selecting one put a "Step #N failed — Explain / Fix it / Re-run" card
+  // over the composer on every click, which is the box the product owner asked to be gone (round 2 of
+  // the trace redesign; the product owner's call on the card, 2026-10-14). Explain and Fix it are in the step's details
+  // now, beside the error they are about, and Re-run is the details' own button. Typing "why did this
+  // fail?" or "fix this" with the step selected still routes as it did.
   const showFork = fork !== null && fork.key !== skippedFork && composerMode === "chat" && !busy;
 
   // What the composer should say right now. Same inputs the fork above is derived from, plus the
@@ -3177,9 +3138,7 @@ export function BuildPane({
     contextLabel,
     operating,
   });
-  // SAID ONCE, ON TOP. A failed step's fork is headed "Step #N failed", and the status line under its
-  // cards said the same words again (the product owner's call, 2026-10-12). Skipped, the line returns.
-  const momentStatus = showFork && fork?.key.startsWith("step:") ? null : moment.status;
+  const momentStatus = moment.status;
 
   // Which messages open a day of this conversation, and so carry its date and time above them.
   const dayStartIds = dayStarts(turns.map((t) => ({ id: t.id, at: t.role === "user" ? t.at : undefined })));

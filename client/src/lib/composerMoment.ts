@@ -134,7 +134,8 @@ export function composerMoment(s: ComposerSituation): ComposerMoment {
   }
   if (s.failedStepSeq !== null) {
     return {
-      placeholder: `Ask about step #${s.failedStepSeq}, or pick an action above`,
+      // Its details say why, and carry Explain, Fix it and Re-run beside the error.
+      placeholder: `Ask why step #${s.failedStepSeq} failed, or open its details`,
       status: `Step #${s.failedStepSeq} failed`,
     };
   }
