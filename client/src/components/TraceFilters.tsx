@@ -143,7 +143,9 @@ export function TraceFilters({ steps }: { steps: readonly Step[] }) {
     alert: k.value === "errors" && counts.errors > 0,
     // Never disable the one that is chosen: it must stay pressable to read as chosen.
     disabled: counts[k.value] === 0 && k.value !== filter,
-    label: counts[k.value] === 0 ? `Show ${k.noun} — this run has none` : `Show ${k.noun}`,
+    // E jumps between failures from anywhere; the Errors tab is where the key is learnt, failures or not.
+    label: (counts[k.value] === 0 ? `Show ${k.noun} — this run has none` : `Show ${k.noun}`)
+      + (k.value === "errors" ? " · E jumps to the next failed step" : ""),
   }));
   const options = optionsWith(roomy);
 

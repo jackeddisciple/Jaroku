@@ -8,7 +8,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Command } from "cmdk";
-import { useTraceStore, visibleTraceRows } from "../store/traceStore.ts";
+import { jumpToError, useTraceStore, visibleTraceRows } from "../store/traceStore.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { isRunnable, runProviders, useProviderStore } from "../store/providerStore.ts";
@@ -184,6 +184,11 @@ export function CommandPalette() {
       // kept at its call sites costs. Both handlers ask the same function now.
       const ui = useUiStore.getState();
       if (!paneOwnsBareKey(e, { navView: ui.navView, paletteOpen: ui.paletteOpen })) return;
+      // E AND SHIFT+E WALK THE FAILURES (2026-10-14), as J and K walk every step.
+      if (e.key === "e" || e.key === "E") {
+        if (jumpToError(e.shiftKey ? -1 : 1)) e.preventDefault();
+        return;
+      }
       if (e.key === "j" || e.key === "J") { e.preventDefault(); moveStep(1); }
       else if (e.key === "k" || e.key === "K") { e.preventDefault(); moveStep(-1); }
       // ONLY AN ENTER NOTHING ELSE TOOK. A menu item, a button or a tab handles its own (Radix marks

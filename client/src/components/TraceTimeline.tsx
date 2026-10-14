@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { CANCELLED_BY_USER, orderedSteps, treeSteps, useTraceStore } from "../store/traceStore.ts";
+import { CANCELLED_BY_USER, jumpToError, orderedSteps, treeSteps, useTraceStore } from "../store/traceStore.ts";
 import type { RunSummary, Step } from "../types.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { COL, StepRow, columnsFor, tileCentre, type BarPlace, type FoldSummary, type RowTier } from "./StepRow.tsx";
@@ -174,10 +174,13 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
     }
   };
 
-  // THE FILTERS STICK, so they stay in reach however far down somebody has scrolled.
+  // THE FILTERS STICK, so they stay in reach however far down somebody has scrolled — and so does the
+  // error banner under them while anything failed.
+  const failedCount = useMemo(() => steps.filter((st) => st.error != null).length, [steps]);
   const header = (
     <div className="sticky top-0 z-10 -mx-1 mb-1 bg-bg px-1">
       <TraceFilters steps={steps} />
+      {failedCount > 0 && <ErrorBanner count={failedCount} />}
     </div>
   );
 
@@ -238,6 +241,29 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
         <LiveTail run={run} steps={steps} span={span} tier={tier} waiting={waiting} marks={marks} />
       </div>
     )}
+    </div>
+  );
+}
+
+/**
+ * SOMETHING FAILED, SAID WHERE IT CAN'T SCROLL AWAY (2026-10-14): a red wash under the filters, with the
+ * way to the next failure — the same as pressing E (Shift+E goes back). Only while there is a failure;
+ * at none, the Errors tab's tooltip teaches the key instead.
+ */
+function ErrorBanner({ count }: { count: number }) {
+  return (
+    <div role="status" className="mb-1.5 flex min-h-8 items-center gap-2 rounded-control border-l-2 border-err bg-err/[0.08] py-1 pl-2.5 pr-1 text-caption text-err">
+      <span aria-hidden className="shrink-0"><Icon.trace.failed size={ICON.xs} /></span>
+      <span className="min-w-0 flex-1 truncate">{count === 1 ? "1 step failed" : `${count} steps failed`}</span>
+      <button
+        type="button"
+        onClick={() => jumpToError(1)}
+        title="Select the next failed step (E · Shift+E for the previous)"
+        className="flex h-6 shrink-0 items-center gap-1.5 rounded-control px-2 text-tiny font-medium transition-colors hover:bg-err/10 focus-visible:outline-none focus-visible:shadow-focusring"
+      >
+        Jump to next
+        <kbd className="rounded-xs border border-err/30 px-1 font-sans text-tiny leading-none">E</kbd>
+      </button>
     </div>
   );
 }

@@ -6,7 +6,7 @@
 //
 //   npm run test:trace-view
 
-import { treeSteps, useTraceStore, visibleTraceRows } from "../store/traceStore.ts";
+import { failedStepIds, jumpToError, treeSteps, useTraceStore, visibleTraceRows } from "../store/traceStore.ts";
 import { graphLook, kindWord, traceMarks } from "../components/traceMarks.ts";
 import { outcomePhase, runOutcome } from "./runOutcome.ts";
 import { answerPreview } from "../components/TraceResult.tsx";
@@ -262,6 +262,17 @@ console.log("\nthe store's rules for selection and folding");
   check("...and moves a hidden selection up to its node", useTraceStore.getState().selectedStepId === "t");
   useTraceStore.getState().setAllCollapsed(false);
   check("expand all unfolds them", Object.keys(useTraceStore.getState().collapsedStepIds).length === 0);
+
+  reset();
+  check("the failures, in the order they are drawn", failedStepIds(useTraceStore.getState()).join() === "p");
+  useTraceStore.getState().setCollapsed("t", true);
+  useTraceStore.getState().selectStep("a");
+  check("E goes to the next failure", jumpToError(1) && useTraceStore.getState().selectedStepId === "p");
+  check("...unfolding the node it is in", !useTraceStore.getState().collapsedStepIds.t);
+  check("...and wraps round to it again", jumpToError(1) && useTraceStore.getState().selectedStepId === "p");
+  check("Shift+E goes back the same way", jumpToError(-1) && useTraceStore.getState().selectedStepId === "p");
+  useTraceStore.setState({ stepsByRun: { [run]: Object.fromEntries(steps.filter((x) => !x.error).map((x) => [x.id, x])) } });
+  check("with nothing failed it does nothing", !jumpToError(1));
 
   reset();
   useTraceStore.setState({ stepFilter: "llm", stepQuery: "Chat" });

@@ -391,7 +391,34 @@ export function treeSteps(steps: readonly Step[], run: Pick<RunSummary, "status"
   return waiting.size === 0 ? [...steps] : steps.filter((s) => !waiting.has(s.id));
 }
 
-/** Runs for the sidebar, newest first. */
+/**
+ * The run's failed steps in the order the timeline draws them (tree order) — what E and Shift+E walk,
+ * and what the error banner counts. Folds and filters do not hide a failure from these: selecting one
+ * unfolds its node and sets a filter aside (`selectStep`).
+ */
+export function failedStepIds(state: Pick<TraceState, "activeRunId" | "stepsByRun">): string[] {
+  const bucket = state.activeRunId ? state.stepsByRun[state.activeRunId] : undefined;
+  if (!bucket) return [];
+  return buildTraceTree(Object.values(bucket)).filter((r) => r.step.error != null).map((r) => r.step.id);
+}
+
+/** Select the next (or previous) failed step after the selection, wrapping round. False when none failed. */
+export function jumpToError(delta: 1 | -1): boolean {
+  const st = useTraceStore.getState();
+  const failed = failedStepIds(st);
+  if (failed.length === 0) return false;
+  const bucket = st.activeRunId ? st.stepsByRun[st.activeRunId] : undefined;
+  const order = bucket ? buildTraceTree(Object.values(bucket)).map((r) => r.step.id) : [];
+  const at = st.selectedStepId ? order.indexOf(st.selectedStepId) : -1;
+  const pos = (id: string): number => order.indexOf(id);
+  const next = delta === 1
+    ? failed.find((id) => pos(id) > at) ?? failed[0]!
+    : [...failed].reverse().find((id) => pos(id) < (at === -1 ? order.length : at)) ?? failed[failed.length - 1]!;
+  st.selectStep(next);
+  return true;
+}
+
+/** Runs for the sidebar, newest first. *//** Runs for the sidebar, newest first. */
 export function orderedRuns(runs: Record<string, RunSummary>): RunSummary[] {
   return Object.values(runs).sort((a, b) =>
     a.started_at < b.started_at ? 1 : a.started_at > b.started_at ? -1 : 0,
