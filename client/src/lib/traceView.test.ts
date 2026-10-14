@@ -265,6 +265,23 @@ console.log("\nthe store's rules for selection and folding");
     useTraceStore.getState().stepFilter === "all" && useTraceStore.getState().stepQuery === "");
 }
 
+console.log("\na run starts once");
+{
+  const first = "2026-10-12T15:40:16.000Z";
+  const resumedAt = "2026-10-12T15:40:55.000Z";
+  const base = { id: "resumed", agent_id: "x", provider: "fake", model: "m", cost: 0, tokens: 0, error: null };
+  useTraceStore.getState().applyEvent({ kind: "run_start", schema_version: 1, run: { ...base, status: "running", started_at: first, ended_at: null } });
+  useTraceStore.getState().setRunStatus("resumed", "paused");
+  useTraceStore.getState().setRunStatus("resumed", "running");
+  // The resumed process's own Run, stamped when it started.
+  useTraceStore.getState().applyEvent({ kind: "run_end", schema_version: 1, run: { ...base, status: "completed", started_at: resumedAt, ended_at: "2026-10-12T15:40:57.300Z" } });
+  const after = useTraceStore.getState().runs["resumed"];
+  check("a resumed run's end keeps its first start", after?.started_at === first, after?.started_at);
+  check("...and takes the rest of the end", after?.status === "completed" && after.ended_at === "2026-10-12T15:40:57.300Z");
+  useTraceStore.getState().applyEvent({ kind: "run_end", schema_version: 1, run: { ...base, id: "unseen", status: "completed", started_at: resumedAt, ended_at: resumedAt } });
+  check("a run heard of only at its end takes the end's start", useTraceStore.getState().runs["unseen"]?.started_at === resumedAt);
+}
+
 console.log("\nwhat Copy output copies");
 {
   const reply = mk({ id: "c", seq: 9, type: "llm_call", output: [{ content: '{"requirement_results": {"5 years of Python": true}}' }] });

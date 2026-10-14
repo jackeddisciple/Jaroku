@@ -174,8 +174,13 @@ export const useTraceStore = create<TraceState>((set, get) => ({
       }
       if (event.kind === "run_end") {
         const run: Run = event.run;
+        const known = state.runs[run.id];
         return {
-          runs: { ...state.runs, [run.id]: { ...state.runs[run.id], ...run } },
+          // A RUN STARTS ONCE. The runner that sends `run_end` after a Resume (or for a branch) is a
+          // new process with a new `Run`, stamped when IT started — merged over the row, it moved the
+          // run's start to the resume, so Duration shrank below its own steps and every step before
+          // the pause drew before the run began. The server keeps the first start; so does this.
+          runs: { ...state.runs, [run.id]: { ...known, ...run, started_at: known?.started_at ?? run.started_at } },
         };
       }
       // kind === "step"
