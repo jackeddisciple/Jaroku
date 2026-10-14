@@ -16,7 +16,7 @@ import {
   type ChatTurn, type GenTurn, type PlanTurn, type ProposalTurn, type ReplyTurn, type UserTurn,
   type WorkTurn,
 } from "../store/chatStore.ts";
-import { useTraceStore } from "../store/traceStore.ts";
+import { useTraceStore, visibleTraceRows } from "../store/traceStore.ts";
 import { inputKey, useUiStore } from "../store/uiStore.ts";
 import { isRunnable, modelName, providerLabelOf, runProviders, useProviderStore } from "../store/providerStore.ts";
 import {
@@ -2107,7 +2107,13 @@ export function BuildPane({
   // before for both: only in Chat, and only when there is an agent to ask about.
   const contextShown = composerMode === "chat" && Boolean(activeAgentId);
   const nodeChip = contextShown && selectedNodeId ? contextLabel : null;
-  const stepPill = contextShown && !selectedNodeId && selectedStep ? { seq: selectedStep.seq, name: selectedStep.name } : null;
+  // WHETHER THE TRACE IS SHOWING IT. A filter or a search set after the step was picked can hide its
+  // row, and the composer would go on asking about a step nobody can see — so the pill says so.
+  const stepHidden = useTraceStore((s) =>
+    s.selectedStepId != null && !visibleTraceRows(s).some((r) => r.step.id === s.selectedStepId));
+  const stepPill = contextShown && !selectedNodeId && selectedStep
+    ? { seq: selectedStep.seq, name: selectedStep.name, hidden: stepHidden }
+    : null;
 
   // How many files generation has started writing. Subscribed to purely so the scroll effect
   // below has something that changes while they stream — see there for why.

@@ -53,6 +53,14 @@ const RECENT_SHOWN = 2;
 /** How many matches a search lists. Past that the query is too loose to be worth scrolling. */
 const MATCHES_SHOWN = 8;
 
+/** The step the composer is asking about, as the tray draws it. */
+interface TrayStep {
+  seq: number;
+  name: string;
+  /** A filter or search in the trace is hiding its row. */
+  hidden?: boolean;
+}
+
 /**
  * THE TRACE STEP THE COMPOSER IS ASKING ABOUT, beside the agent it belongs to — the product owner's
  * design, 2026-10-12. It was a chip in a row of its own above the composer, a box that came and went
@@ -60,16 +68,24 @@ const MATCHES_SHOWN = 8;
  * composer works on, with the step's number and nothing else. Hovering swaps its mark for ×, in place,
  * so nothing in the tray moves, and pressing it takes the step out of the composer.
  */
-function StepPill({ step, onClear }: { step: { seq: number; name: string }; onClear: () => void }) {
+function StepPill({ step, onClear }: { step: TrayStep; onClear: () => void }) {
   return (
     <button
       type="button"
       onClick={onClear}
-      aria-label={`Remove step #${step.seq} from the composer`}
-      title={`Asking about step #${step.seq}, ${step.name} — press to remove it`}
+      aria-label={`Remove step #${step.seq} from the composer${step.hidden ? " (hidden in the trace by its filter or search)" : ""}`}
+      title={
+        step.hidden
+          ? `Asking about step #${step.seq}, ${step.name} — the trace's filter or search is hiding it. Press to remove it`
+          : `Asking about step #${step.seq}, ${step.name} — press to remove it`
+      }
       data-step-pill
-      className="group/step inline-flex h-5 shrink-0 items-center gap-1 rounded-pill bg-bespoke/15 px-1.5 text-tiny font-medium tabular-nums text-bespoke
-        transition-colors duration-fast hover:bg-bespoke/20 focus-visible:outline-none focus-visible:shadow-focusring"
+      // A STEP THE TRACE IS HIDING is still asked about, and the pill says it is out of sight: a
+      // dashed edge, as a placeholder for something not on screen, and its reason in the tooltip.
+      className={`group/step inline-flex h-5 shrink-0 items-center gap-1 rounded-pill bg-bespoke/15 px-1.5 text-tiny font-medium tabular-nums text-bespoke
+        transition-colors duration-fast hover:bg-bespoke/20 focus-visible:outline-none focus-visible:shadow-focusring ${
+          step.hidden ? "border border-dashed border-bespoke/60" : ""
+        }`}
     >
       <span className="relative inline-flex size-3 shrink-0 items-center justify-center" aria-hidden>
         <span className="inline-flex transition-opacity duration-fast group-hover/step:opacity-0 group-focus-visible/step:opacity-0">
@@ -106,7 +122,7 @@ export function AgentTray({
     disabled?: boolean;
   };
   /** The trace step the composer is asking about, if one is selected. */
-  step?: { seq: number; name: string } | null;
+  step?: TrayStep | null;
   /** Takes that step out of the composer. */
   onClearStep?: () => void;
 }) {
