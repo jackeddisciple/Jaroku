@@ -336,7 +336,9 @@ export function StepDetailPanel({ dock }: { dock: StepDetailDock }) {
                   {isInherited(step, run) && (
                     <>
                       <span className="text-faint">·</span>
-                      <span title="Copied from the run this one branched from — it ran there, before this run began">inherited</span>
+                      <span className="flex items-center gap-1" title="Copied from the run this one branched from — it ran there, before this run began, and was not re-run">
+                        <span aria-hidden><Icon.trace.inherited size={ICON.xs} /></span>inherited
+                      </span>
                     </>
                   )}
                 </div>

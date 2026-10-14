@@ -401,6 +401,7 @@ export const MANIFEST = {
     metricCalls: "AiBrain02Icon",
     collapseAll: "UnfoldLessIcon",
     expandAll: "UnfoldMoreIcon",
+    inherited: "Link01Icon",
   },
 
   // ── §5 Global ─────────────────────────────────────────────────────────────

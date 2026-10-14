@@ -25,7 +25,7 @@ import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { matchPlaces, stepCategory, stepOutputText, stepProvider, type StepCategory, type VisibleRow } from "../lib/traceView.ts";
 import { BRAND_COLOR, ProviderMark, hasProviderMark } from "../lib/icons.tsx";
 import { kindWord, type StepMark } from "./traceMarks.ts";
-import { ICON, STATUS, STEP_TYPE, TEXT } from "../lib/tokens.ts";
+import { ICON, STATUS, STEP_TYPE, SURFACE, TEXT } from "../lib/tokens.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { agentMcpToolNames } from "../store/mcpStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
@@ -362,7 +362,10 @@ export function StepRow({
       }}
       className={`group/step relative flex animate-slide-in cursor-pointer select-none items-center gap-2 rounded-control py-1.5 pl-2 pr-1 outline-none transition-colors duration-fast focus-visible:shadow-focusring motion-reduce:animate-none ${
         selected ? "bg-active" : "hover:bg-active/40"
-      } ${row.context ? "text-muted [&_.text-ink]:text-muted" : ""}`}
+      } ${row.context || inherited ? "text-muted [&_.text-ink]:text-muted" : ""}`}
+      // AN INHERITED STEP IS HATCHED (2026-10-14): a faint diagonal in the hairline grey behind a
+      // dimmed row, so "this was not re-executed" reads before a word of it does.
+      style={inherited ? { backgroundImage: `repeating-linear-gradient(135deg, transparent 0 6px, ${SURFACE.hair} 6px 7px)` } : undefined}
       // A row kept only so a match keeps its place in the tree reads quieter than the matches.
       title={row.context ? "Shown because a step inside it matches" : undefined}
     >
@@ -415,10 +418,11 @@ export function StepRow({
               · matched in {elsewhere.join(", ")}
             </span>
           )}
-          {/* SAID, NOT ONLY SHOWN. A branch's copied prefix looked exactly like the steps it ran. */}
+          {/* SAID, NOT ONLY SHOWN. A branch's copied prefix looked exactly like the steps it ran: now the
+              row is hatched and dimmed, and the word comes with a link mark (copied, not re-run). */}
           {inherited && (
-            <span className="shrink-0" title="Copied from the run this one branched from — it ran there, before this run began">
-              · inherited
+            <span className="flex shrink-0 items-center gap-1" title="Copied from the run this one branched from — it ran there, before this run began, and was not re-run">
+              · <span aria-hidden className="shrink-0"><Icon.trace.inherited size={ICON.xs} /></span>inherited
             </span>
           )}
           {fold && <span className="shrink-0">· {fold.steps} {fold.steps === 1 ? "step" : "steps"}</span>}
