@@ -1,11 +1,28 @@
 import { diffState, summarizeItem, type DiffEntry } from "../lib/stateDiff.ts";
 import { jsonPretty } from "../lib/format.ts";
 import { CODE } from "../lib/tokens.ts";
+import { codeTokenStyle } from "../lib/highlight.ts";
+import { useCodeTokens } from "../lib/useCodeTokens.ts";
 import { DiffStat } from "./DiffStat.tsx";
 
-/** One `+`/`-` line. Status colors only — `ok` for additions, `err` for removals. */
+/** Whether a line's text is a JSON value — what a state field's before and after usually are. */
+function isJson(text: string): boolean {
+  if (!/^[[{"\d-]|^(true|false|null)$/.test(text.trim())) return false;
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * One `+`/`-` line. The sign and the tint say added or removed — `ok`, `err` — and a JSON value is in
+ * the code palette, as code is everywhere else; anything else stays in the sign's colour.
+ */
 function Line({ sign, text }: { sign: "+" | "-"; text: string }) {
   const add = sign === "+";
+  const tokens = useCodeTokens(text, isJson(text) ? "json" : null);
   return (
     <div
       className={`flex gap-2 px-2 py-0.5 rounded-xs text-caption leading-relaxed ${
@@ -13,7 +30,16 @@ function Line({ sign, text }: { sign: "+" | "-"; text: string }) {
       }`}
     >
       <span className="shrink-0 select-none opacity-70">{sign}</span>
-      <span className="break-words min-w-0 whitespace-pre-wrap">{text}</span>
+      <span className="break-words min-w-0 whitespace-pre-wrap">
+        {tokens
+          ? tokens.map((runs, li) => (
+              <span key={li}>
+                {li > 0 && "\n"}
+                {runs.map((t, ti) => <span key={ti} style={codeTokenStyle(t)}>{t.content}</span>)}
+              </span>
+            ))
+          : text}
+      </span>
     </div>
   );
 }

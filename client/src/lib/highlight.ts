@@ -70,8 +70,12 @@ export function languageLabel(lang: string): string {
   return raw ? raw : "Code";
 }
 
+/** One coloured run of a line, as shiki tokenises it. `fontStyle` is shiki's bit set: 1 italic, 2 bold, 4 underline. */
+export type CodeToken = { content: string; color?: string; fontStyle?: number };
+
 type Highlighter = {
   codeToHtml: (code: string, opts: { lang: string; theme: string }) => string;
+  codeToTokens: (code: string, opts: { lang: string; theme: string }) => { tokens: CodeToken[][] };
   loadLanguage: (...langs: string[]) => Promise<void>;
   getLoadedLanguages: () => string[];
 };
@@ -101,4 +105,38 @@ export async function highlightCode(code: string, lang: string): Promise<string 
   } catch {
     return null;
   }
+}
+
+/**
+ * A file's grammar, from its name: its extension through the same aliases a fence uses (`.py` is
+ * Python, `.ts` TypeScript), or the whole name for the files that are named for what they are
+ * (`.env`, `Dockerfile`). Null when there is no grammar for it.
+ */
+export function languageForPath(path: string): string | null {
+  const name = path.split("/").pop() ?? "";
+  const dot = name.lastIndexOf(".");
+  return codeLanguage(dot > 0 ? name.slice(dot + 1) : dot === 0 ? name.slice(1) : name);
+}
+
+/**
+ * Code as lines of coloured runs, in the product's theme — what a surface that lays out its own lines
+ * (a diff) colours them with. Null as `highlightCode` is null: no grammar, or anything going wrong.
+ */
+export async function highlightTokens(code: string, lang: string): Promise<CodeToken[][] | null> {
+  const name = codeLanguage(lang);
+  if (!name) return null;
+  try {
+    const h = await getHighlighter();
+    if (!h.getLoadedLanguages().includes(name)) await h.loadLanguage(name);
+    return h.codeToTokens(code, { lang: name, theme: THEME }).tokens;
+  } catch {
+    return null;
+  }
+}
+
+/** A run's colour and style, as an inline style. */
+export function codeTokenStyle(t: CodeToken): { color?: string; fontStyle?: string; fontWeight?: number } | undefined {
+  if (!t.color && !t.fontStyle) return undefined;
+  const style = t.fontStyle ?? 0;
+  return { color: t.color, fontStyle: style & 1 ? "italic" : undefined, fontWeight: style & 2 ? 600 : undefined };
 }

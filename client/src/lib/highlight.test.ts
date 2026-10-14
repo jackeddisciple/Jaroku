@@ -2,7 +2,7 @@
 //
 //   npm run test:highlight
 
-import { codeLanguage, highlightCode, isCommandBlock, languageLabel } from "./highlight.ts";
+import { codeLanguage, highlightCode, highlightTokens, isCommandBlock, languageForPath, languageLabel } from "./highlight.ts";
 import { CODE } from "./tokens.ts";
 import { CODE_THEME_NAME } from "./codeTheme.ts";
 import { readFileSync } from "node:fs";
@@ -79,6 +79,20 @@ console.log("\nthe product's palette, token by token");
   check("the code pane is drawn in the same theme", viewer.includes(`const THEME = "${CODE_THEME_NAME}"`) && viewer.includes("CODE_THEME"));
   check("no background of its own is written into the markup",
     !/background-color:(?!transparent)/.test(ts), ts.match(/background-color:[^;"]*/)?.[0] ?? "");
+}
+
+console.log("\na diff's lines, coloured by the file they are in");
+{
+  check("a .py file is Python", languageForPath("agents/kai/agent.py") === "python");
+  check("a .tsx file is TSX", languageForPath("src/App.tsx") === "tsx");
+  check(".env by its whole name", languageForPath("project/.env") === "dotenv");
+  check("a Dockerfile by its name", languageForPath("Dockerfile") === "docker");
+  check("a file with no grammar is none", languageForPath("notes.xyz") === null && languageForPath("LICENSE") === null);
+  const lines = (await highlightTokens("x = 'a'\n# done", "python")) ?? [];
+  check("its code comes back a line at a time", lines.length === 2, String(lines.length));
+  check("...in the palette", lines[0]?.some((t) => t.color?.toUpperCase() === CODE.string.toUpperCase()) === true
+    && lines[1]?.some((t) => t.color?.toUpperCase() === CODE.comment.toUpperCase()) === true);
+  check("no grammar, no colours", (await highlightTokens("+++", "brainfuck")) === null);
 }
 
 console.log(fail === 0 ? "\nall highlight checks passed" : `\n${fail} highlight check(s) FAILED`);

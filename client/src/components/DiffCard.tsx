@@ -24,9 +24,47 @@ import { Truncate } from "./Truncate.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
 import { STAT_ICON } from "./StatRow.tsx";
 import { ICON, TYPE } from "../lib/tokens.ts";
+import { codeTokenStyle, languageForPath } from "../lib/highlight.ts";
+import { useCodeTokens } from "../lib/useCodeTokens.ts";
 import { CheckIcon, FileIcon, PlusIcon, UndoIcon } from "./panelIcons.tsx";
 
+/**
+ * One hunk's lines: the sign and the line's tint say added or removed, as they always did, and the
+ * code itself is in the code palette (`CODE`) like code everywhere else. The hunk is coloured as one
+ * block — strings and comments that span lines stay right — and drawn as it was, green and red,
+ * until the colours arrive or when its language has no grammar.
+ */
+function Hunk({ lines, lang }: { lines: string[]; lang: string | null }) {
+  const tokens = useCodeTokens(lines.map((l) => l.slice(1)).join("\n"), lang);
+  return (
+    <>
+      {lines.map((line, li) => {
+        const sign = line[0];
+        const tint = sign === "+" ? "bg-ok/[0.07]" : sign === "-" ? "bg-err/[0.07]" : "";
+        const tone = sign === "+" ? "text-ok" : sign === "-" ? "text-err" : "text-muted";
+        const runs = tokens?.[li];
+        return (
+          // Code wants tighter leading than prose — a diff is read as a block of related
+          // lines, and prose spacing pulls them apart into separate statements.
+          <div key={li} className={`px-2 text-caption leading-[1.45] whitespace-pre ${tint} ${runs ? "" : tone}`}>
+            {runs ? (
+              <>
+                <span className={`select-none ${tone}`}>{sign === "+" || sign === "-" ? sign : " "}</span>
+                {runs.map((t, ti) => <span key={ti} style={codeTokenStyle(t)}>{t.content}</span>)}
+                {runs.length === 0 && " "}
+              </>
+            ) : (
+              line || " "
+            )}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
 function HunkLines({ file }: { file: FileDiff }) {
+  const lang = languageForPath(file.path);
   return (
     // Diff bodies are the most literally-code thing in the pane — mono, always.
     // A well inside the file row: one step darker than the list it sits in, with its own
@@ -38,22 +76,7 @@ function HunkLines({ file }: { file: FileDiff }) {
           <div className="px-2 text-tiny text-faint tabular-nums select-none">
             @@ −{h.oldStart},{h.oldLines} +{h.newStart},{h.newLines} @@
           </div>
-          {h.lines.map((line, li) => {
-            const sign = line[0];
-            const cls =
-              sign === "+"
-                ? "bg-ok/[0.07] text-ok"
-                : sign === "-"
-                  ? "bg-err/[0.07] text-err"
-                  : "text-muted";
-            return (
-              // Code wants tighter leading than prose — a diff is read as a block of related
-              // lines, and prose spacing pulls them apart into separate statements.
-              <div key={li} className={`px-2 text-caption leading-[1.45] whitespace-pre ${cls}`}>
-                {line || " "}
-              </div>
-            );
-          })}
+          <Hunk lines={h.lines} lang={lang} />
         </div>
       ))}
     </div>
