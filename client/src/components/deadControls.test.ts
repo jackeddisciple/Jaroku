@@ -169,11 +169,25 @@ console.log("\n§16.1 — every pressable thing is reachable by Tab");
   // NOTHING IS TAKEN OUT OF THE TAB ORDER, swept over the whole client. This is the form of the
   // rule that IS decidable from the text: `tabIndex={-1}` on a button is how a row becomes
   // mouse-only without looking any different.
+  //
+  // THE TWO SHARED BUTTONS ARE SWEPT AS WELL, since `IconButton` and `CopyTurn` take a `tabIndex`.
+  //
+  // ONE EXCEPTION, AND IT IS A PATTERN RATHER THAN A FILE: the controls inside an ARIA TREE ROW.
+  // A tree is one Tab stop by definition — its rows rove, the arrows move between them — and the
+  // trace's rows were three stops each (27 presses to leave a nine-step trace). Each row's controls
+  // are reached through the row: Enter opens its details, which carry Show on graph and Copy output
+  // as ordinary buttons. A file is exempt only while it renders `role="treeitem"` and its row still
+  // opens the details from the keyboard (`toggleDetails` in its key handler).
+  const TREE_ROWS = ["components/StepRow.tsx"];
   const negative: string[] = [];
   for (const { path, text } of FILES) {
-    for (const m of text.matchAll(/<button\b[^>]{0,600}?tabIndex=\{-1\}/gs)) negative.push(`${path}: ${m[0].slice(0, 40)}`);
+    const treeRow = TREE_ROWS.some((t) => path.endsWith(t)) && /role="treeitem"/.test(text) && /onKeyDown=[\s\S]{0,600}?toggleDetails\(\)/.test(text);
+    if (treeRow) continue;
+    for (const m of text.matchAll(/<(?:button|IconButton|CopyTurn)\b[^>]{0,600}?tabIndex=\{-1\}/gs)) negative.push(`${path}: ${m[0].slice(0, 40)}`);
   }
   check(negative.length === 0, `no button is removed from the tab order${negative.length ? ` — ${negative.join("; ")}` : ""}`);
+  check(TREE_ROWS.every((t) => FILES.some((f) => f.path.endsWith(t) && /role="treeitem"/.test(f.text))),
+    "...and the one exception is still a tree row");
 
   // THE TURN-ACTION ROW SPECIFICALLY, since that is the surface §16.1 names. Every control in it
   // goes through `ActionButton`, which renders a `<button type="button">` with an `aria-label` and

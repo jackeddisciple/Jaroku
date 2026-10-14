@@ -466,6 +466,11 @@ export function StepRow({
         <button
           type="button"
           aria-pressed={expanded}
+          // ONE TAB STOP PER TREE, NOT THREE PER ROW. The rows rove (one is tabbable, the arrows move
+          // between them), and every row's Details was a stop of its own — 27 presses of Tab to leave
+          // a nine-step trace, most of them on buttons invisible until focused. Enter on the row
+          // opens the same details.
+          tabIndex={-1}
           onClick={(e) => {
             e.stopPropagation();
             toggleDetails();
