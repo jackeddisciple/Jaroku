@@ -8,9 +8,8 @@
 // CLOSED UNTIL THERE IS SOMETHING IN IT. Every launch starts with the panel collapsed and the rail
 // left at the window's edge, so the composer has the width; `useRightPanelFollow` is what opens it.
 
-import { useEffect, useRef, useState } from "react";
-import { failedStepIds, useTraceStore } from "../store/traceStore.ts";
-import { useMcpStore } from "../store/mcpStore.ts";
+import { useEffect, useRef } from "react";
+import { useTraceStore } from "../store/traceStore.ts";
 import { useUiStore, type RightTab } from "../store/uiStore.ts";
 import { TraceTimeline } from "./TraceTimeline.tsx";
 import { GraphView } from "./GraphView.tsx";
@@ -258,58 +257,14 @@ export function RightPanel() {
 /** The tabs a hairline follows in the rail: the agent and how it behaves, then what it reaches, then activity. */
 const GROUP_ENDS = new Set<RightTab>(["evals", "github"]);
 
-/** The rail's words beside its marks — one person's view preference, kept on this machine. */
-const RAIL_LABELS_KEY = "jaroku.railLabels";
-
-function readRailLabels(): boolean {
-  try {
-    return localStorage.getItem(RAIL_LABELS_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-/**
- * A COUNT, IN RED, WHERE SOMETHING WAITS ON SOMEBODY (2026-10-14): failed steps in the open run, tool
- * calls waiting for a confirmation, credentials that need attention. Over the mark's corner in the
- * narrow rail; at the end of the row beside its word.
- */
-function CountBadge({ n, label, inline }: { n: number; label: string; inline: boolean }) {
-  return (
-    <span
-      role="img"
-      aria-label={label}
-      className={`flex h-4 min-w-4 items-center justify-center rounded-full bg-err px-1 text-tiny leading-none tabular-nums text-bg ${
-        inline ? "ml-auto" : "absolute -right-0.5 -top-0.5"
-      }`}
-    >
-      {n > 99 ? "99+" : n}
-    </span>
-  );
-}
-
 export function RightPanelRail() {
   const tab = useShownTab();
-  // THE EXPANDED RAIL (2026-10-14): each mark with its word, for somebody who does not read glyphs.
-  const [labels, setLabelsState] = useState(readRailLabels);
-  const setLabels = (on: boolean): void => {
-    setLabelsState(on);
-    try {
-      localStorage.setItem(RAIL_LABELS_KEY, on ? "1" : "0");
-    } catch {
-      /* the rail still works this session */
-    }
-  };
-  // What waits on somebody, counted for the badges.
-  const failedSteps = useTraceStore((s) => failedStepIds(s).length);
-  const waitingConfirms = useMcpStore((s) => s.confirms.length);
   const open = useUiStore((s) => s.rightPanelOpen);
   const setTab = useUiStore((s) => s.setRightTab);
   const setOpen = useUiStore((s) => s.setRightPanelOpen);
   const agentOpen = useAgentOpen();
 
   const secretsNeedAttention = useSecretsStore((s) => needsAttention(s.health));
-  const secretsCount = useSecretsStore((s) => (s.health ? s.health.expiringSoon + s.health.invalid + s.health.rotationDue : 0));
 
   // §0: THE TAB LABEL CARRIES LIVE STATE, so you never open the tab just to check. It is read off
   // the view the server already computed rather than derived here — see githubStore's `badgeFor`.
@@ -351,7 +306,9 @@ export function RightPanelRail() {
   const toggleLabel = open ? "Hide the panel" : "Show the panel";
 
   return (
-    <div className={`flex shrink-0 flex-col border-l border-hair bg-bg py-2 ${labels ? "w-40 items-stretch px-1" : "w-10 items-center"}`}>
+    // A FIXED COLUMN OF MARKS (the product owner's call, 2026-10-14): no expanded mode with names —
+    // every mark's name is its tooltip — and no counters on it.
+    <div className="flex w-10 shrink-0 flex-col items-center border-l border-hair bg-bg py-2">
       {/* THE PANEL'S OWN TOGGLE, at the top of the rail it belongs to — the sidebar's toggle on the
           other edge of the window, one glyph in two states with a label that names the action.
           Outside the tablist because it is not a destination: it shows or hides whichever tab is
@@ -362,16 +319,15 @@ export function RightPanelRail() {
           aria-label={toggleLabel}
           aria-expanded={open}
           onClick={() => setOpen(!open)}
-          className={`flex h-9 shrink-0 items-center rounded-control text-muted transition-colors duration-fast hover:bg-active/40 hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring ${labels ? "w-full gap-2.5 px-2.5" : "w-9 justify-center"}`}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-active/40 hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
         >
           <Icon.panel.toggle size={ICON.md} />
-          {labels && <span className="truncate text-caption">{open ? "Hide panel" : "Show panel"}</span>}
         </button>
       </Tip>
 
       {/* A hairline between the control and the destinations, and the reason the ten marks sit a
           little lower than they did: the toggle acts on the panel, the marks choose what is in it. */}
-      <div aria-hidden className={`my-1.5 h-px shrink-0 bg-hair ${labels ? "mx-2.5" : "w-5"}`} />
+      <div aria-hidden className="my-1.5 h-px w-5 shrink-0 bg-hair" />
 
       {/* A TABLIST, AND REACHABLE THE WAY ONE IS. Ten plain buttons meant ten Tab presses to cross
           the rail and no announcement of which one was chosen; the pattern is one stop for the
@@ -389,23 +345,17 @@ export function RightPanelRail() {
           const next = visible[(at + step + visible.length) % visible.length];
           if (next) setTab(next.id);
         }}
-        className={`flex flex-col gap-0.5 ${labels ? "items-stretch" : "items-center"}`}
+        className="flex flex-col items-center gap-0.5"
       >
         {visible.map((t, i) => {
           const active = tab === t.id;
           // LIT ONLY WHILE THE PANEL SHOWS IT. A closed panel still has a tab in the store and
           // nothing on screen, and a highlighted cell would say otherwise.
           const shown = open && active;
-          const count = t.id === "trace" ? failedSteps : t.id === "mcp" ? waitingConfirms : t.id === "secrets" && secretsNeedAttention ? secretsCount : 0;
-          const countLabel = t.id === "trace"
-            ? `${count} failed ${count === 1 ? "step" : "steps"} in this run`
-            : t.id === "mcp"
-              ? `${count} tool ${count === 1 ? "call waits" : "calls wait"} for a confirmation`
-              : `${count} ${count === 1 ? "credential needs" : "credentials need"} attention`;
           const tip = t.id === "github" && githubBadge
             ? `GitHub: ${githubBadge}`
-            : count > 0
-              ? `${t.label} · ${countLabel}`
+            : t.id === "secrets" && secretsNeedAttention
+              ? `${t.label} · A credential needs attention`
               : t.label;
           // A hairline after the last of a group, while another tab follows it.
           const divider = GROUP_ENDS.has(t.id) && i < visible.length - 1;
@@ -429,9 +379,9 @@ export function RightPanelRail() {
                 }}
                 aria-label={t.label}
                 onClick={() => (shown ? setOpen(false) : setTab(t.id))}
-                className={`relative flex h-9 shrink-0 items-center rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
-                  labels ? "w-full gap-2.5 px-2.5" : "w-9 justify-center"
-                } ${shown ? "bg-active text-accent" : "text-muted hover:bg-active/40 hover:text-ink"}`}
+                className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+                  shown ? "bg-active text-accent" : "text-muted hover:bg-active/40 hover:text-ink"
+                }`}
               >
                 {/* THE CHOSEN TAB, SAID MORE FIRMLY (2026-10-14): a 2px ink bar on the side the panel
                     is on, as the sidebar marks its chosen row. */}
@@ -442,8 +392,6 @@ export function RightPanelRail() {
                     a lesser version of the other. The cell grows with the mark so the padding around
                     it is unchanged. */}
                 <t.Mark size={ICON.lg} />
-                {labels && <span className="min-w-0 truncate text-caption">{t.label}</span>}
-                {count > 0 && <CountBadge n={count} label={countLabel} inline={labels} />}
                 {/* THE ONE BADGE IN THIS RAIL, and it is computable while the tab is locked — the
                     health route answers in counts, without elevation, so somebody is not asked for a
                     passcode to be told whether they need to care. Carries a title as well as a colour,
@@ -454,28 +402,19 @@ export function RightPanelRail() {
                 {t.id === "github" && githubBadge ? (
                   <GithubBadge badge={githubBadge} syncing={githubBadge === "⟳"} />
                 ) : null}
+                {t.id === "secrets" && secretsNeedAttention ? (
+                  <span
+                    aria-label="A credential needs attention"
+                    role="img"
+                    className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-run"
+                  />
+                ) : null}
               </button>
             </Tip>
-            {divider && <div aria-hidden className={`my-1 h-px shrink-0 bg-hair ${labels ? "mx-2.5" : "mx-auto w-5"}`} />}
+            {divider && <div aria-hidden className="mx-auto my-1 h-px w-5 shrink-0 bg-hair" />}
             </div>
           );
         })}
-      </div>
-
-      {/* WORDS OR MARKS, at the foot of the rail: the expanded rail names every tab beside its mark. */}
-      <div className={`mt-auto flex ${labels ? "px-0" : "justify-center"}`}>
-        <Tip label={labels ? "Show marks only" : "Show the tab names"} side="left">
-          <button
-            type="button"
-            aria-pressed={labels}
-            aria-label={labels ? "Show marks only" : "Show the tab names"}
-            onClick={() => setLabels(!labels)}
-            className={`flex h-9 shrink-0 items-center rounded-control text-muted transition-colors duration-fast hover:bg-active/40 hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring ${labels ? "w-full gap-2.5 px-2.5" : "w-9 justify-center"}`}
-          >
-            <Icon.panel.railLabels size={ICON.md} />
-            {labels && <span className="truncate text-caption">Hide names</span>}
-          </button>
-        </Tip>
       </div>
     </div>
   );
