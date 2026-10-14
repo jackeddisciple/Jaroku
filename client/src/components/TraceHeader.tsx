@@ -8,12 +8,12 @@
 // A STOPPED RUN SAYS "stopped", NOT "failed": the server stores both as `error`, and the reason is
 // what tells them apart. A paused one says "paused", because it can be resumed.
 //
-// THE MENU HOLDS ONLY WHAT ALREADY WORKS. Copy the id, show this run on the graph, find it in the
-// Runs list, run the agent again — the same `runAgain` the Runs tab's row calls.
+// THE ACTIONS ARE MARKS BESIDE THE OUTCOME, and only what already works: copy the id, show this run on
+// the graph, find it in the Runs list, run it again — the same `runAgain` the Runs tab's row calls.
 
-import { useState } from "react";
-
-import { absTime, relTime } from "../lib/format.ts";
+import { absTime, fmtDuration, relTime } from "../lib/format.ts";
+import { runElapsed } from "../lib/traceView.ts";
+import { useRunClock } from "../lib/useRunClock.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { runAgain, runAgainBlocked } from "../lib/runActions.ts";
 import { runOutcome, type RunOutcome } from "../lib/runOutcome.ts";
@@ -22,7 +22,7 @@ import { useBuildStore } from "../store/buildStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import type { RunSummary } from "../types.ts";
 import { PauseResumeControls } from "./PauseResumeControls.tsx";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu.tsx";
+import { IconButton } from "./IconButton.tsx";
 
 /** The first segment of a uuid — enough to tell two runs apart. */
 const shortId = (id: string): string => id.slice(0, 8);
@@ -32,30 +32,46 @@ type Outcome = RunOutcome;
 /**
  * THE OUTCOME AS A PILL — the product owner's call on 2026-10-12: a finished run is a green pill,
  * its word and its mark green together. Each outcome keeps the colour it means everywhere else in
- * the app: amber only for a run still moving, red for a failure, and no colour for a run that was
- * stopped or paused, which is neither a success nor a fault.
+ * the app: amber only for a run still moving, red for a failure. A run somebody STOPPED is info blue
+ * (2026-10-14) — not a success, not a fault, and no longer the grey of a paused one beside it.
  */
 const OUTCOME: Record<Outcome, { tone: string; Mark: IconComponent }> = {
   finished: { tone: "bg-ok/10 text-ok", Mark: Icon.trace.finished },
   failed: { tone: "bg-err/10 text-err", Mark: Icon.trace.failed },
   running: { tone: "bg-run/10 text-run", Mark: Icon.trace.running },
   paused: { tone: "bg-active text-muted", Mark: Icon.trace.paused },
-  stopped: { tone: "bg-active text-muted", Mark: Icon.trace.stopped },
+  stopped: { tone: "bg-warn/10 text-warn", Mark: Icon.trace.stopped },
 };
 
-function OutcomePill({ outcome }: { outcome: Outcome }) {
+/**
+ * WHILE IT RUNS, THE PILL IS ALIVE: a pulsing amber dot where the mark was, and the time it has run
+ * so far beside the word, on the run's own clock (`useRunClock`) — the same figure as Elapsed.
+ */
+function OutcomePill({ run }: { run: RunSummary }) {
+  const outcome = runOutcome(run);
   const { tone, Mark } = OUTCOME[outcome];
+  const live = outcome === "running";
+  const now = useRunClock(run.id, live, 200);
+  const elapsed = live ? runElapsed(run, [], now) : null;
   return (
-    <span className={`flex h-6 items-center gap-1 rounded-pill px-2 text-tiny font-medium ${tone}`}>
-      <Mark size={ICON.xs} />
+    <span className={`flex h-6 items-center gap-1.5 rounded-pill px-2 text-tiny font-medium ${tone}`}>
+      {live ? (
+        <span aria-hidden className="h-1.5 w-1.5 shrink-0 animate-stream-pulse rounded-full bg-run motion-reduce:animate-none" />
+      ) : (
+        <Mark size={ICON.xs} />
+      )}
       {outcome}
+      {elapsed != null && <span className="tabular-nums font-normal">· {fmtDuration(elapsed)}</span>}
     </span>
   );
 }
 
-function RunMenu({ run }: { run: RunSummary }) {
-  const [open, setOpen] = useState(false);
-
+/**
+ * WHAT CAN BE DONE TO THE RUN, AS MARKS BESIDE ITS OUTCOME — the product owner's call on 2026-10-14:
+ * the four were behind a ⋯ that hid them a click away. Copy its id, show it on the graph, find it in
+ * Runs, run it again; each mark says what it does on hover, and Run again says why when it can't.
+ */
+function RunActions({ run }: { run: RunSummary }) {
   const copyId = async (): Promise<void> => {
     try {
       await navigator.clipboard.writeText(run.id);
@@ -64,46 +80,18 @@ function RunMenu({ run }: { run: RunSummary }) {
       useUiStore.getState().showToast("Couldn't reach the clipboard", "err");
     }
   };
-
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          title="More"
-          aria-label={`More actions for run ${shortId(run.id)}`}
-          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-control transition-colors hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring ${
-            open ? "bg-active text-ink" : "text-faint"
-          }`}
-        >
-          <Icon.agents.more size={ICON.sm} />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" aria-label="Run actions">
-        <DropdownMenuItem size="compact" onSelect={() => { void copyId(); }}>
-          <Icon.turn.copy size={ICON.sm} />
-          <span className="min-w-0 flex-1 truncate">Copy run ID</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem size="compact" onSelect={() => useUiStore.getState().setRightTab("graph")}>
-          <Icon.panel.graph size={ICON.sm} />
-          <span className="min-w-0 flex-1 truncate">Show on graph</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem size="compact" onSelect={() => useUiStore.getState().setRightTab("runs")}>
-          <Icon.panel.runs size={ICON.sm} />
-          <span className="min-w-0 flex-1 truncate">Open in Runs</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          size="compact"
-          disabled={runAgainBlocked(run) !== null}
-          title={runAgainBlocked(run) ?? "Run the agent again on this run's input and model"}
-          onSelect={() => runAgain(run)}
-        >
-          <Icon.cockpit.refresh size={ICON.sm} />
-          <span className="min-w-0 flex-1 truncate">Run again</span>
-          {runAgainBlocked(run) && <span className="shrink-0 text-tiny">input not kept</span>}
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <span className="flex items-center" role="group" aria-label="Run actions">
+      <IconButton icon={Icon.turn.copy} label="Copy run ID" onClick={() => { void copyId(); }} />
+      <IconButton icon={Icon.panel.graph} label="Show on graph" onClick={() => useUiStore.getState().setRightTab("graph")} />
+      <IconButton icon={Icon.panel.runs} label="Open in Runs" onClick={() => useUiStore.getState().setRightTab("runs")} />
+      <IconButton
+        icon={Icon.cockpit.refresh}
+        label="Run again on this run's input and model"
+        disabledReason={runAgainBlocked(run)}
+        onClick={() => runAgain(run)}
+      />
+    </span>
   );
 }
 
@@ -128,8 +116,8 @@ export function TraceHeader({ run }: { run: RunSummary | undefined }) {
         <span className={`min-w-0 truncate ${TYPE.panelLabel}`}>Execution trace</span>
         <span className="ml-auto flex shrink-0 items-center gap-3">
           <PauseResumeControls />
-          <OutcomePill outcome={runOutcome(run)} />
-          <RunMenu run={run} />
+          <OutcomePill run={run} />
+          <RunActions run={run} />
         </span>
       </div>
       {/* WHOSE RUN AND WHEN — one line that gives up its tail before it wraps. The model is not
