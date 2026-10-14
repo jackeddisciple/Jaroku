@@ -51,6 +51,14 @@ export const primaryBtn =
   "inline-flex items-center gap-1.5 rounded-control px-3 py-1.5 text-label bg-ink text-bg hover:bg-ink/90 active:bg-ink/80 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
 
 /**
+ * The primary, compact: the same ink fill at a 28px height and caption-size words, for a pane where a
+ * full-size primary is the loudest thing in view — Step details' re-run pair, which the product owner
+ * found "huge" (2026-10-14).
+ */
+export const primaryBtnSm =
+  "inline-flex h-7 items-center gap-1.5 rounded-control px-2.5 text-caption bg-ink text-bg hover:bg-ink/90 active:bg-ink/80 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+
+/**
  * A real action that is not *the* action — the second button in a pair, or the primary of a card
  * that is not the screen's centre. Filled one surface step, ink text.
  *

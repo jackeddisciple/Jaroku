@@ -14,7 +14,7 @@ import { stepNodeId } from "../lib/traceGraphMap.ts";
 import { rerunBlocked } from "../lib/traceView.ts";
 import { sendBranchRun } from "../lib/socket.ts";
 import { TYPE } from "../lib/tokens.ts";
-import { primaryBtn } from "./buttons.ts";
+import { primaryBtnSm } from "./buttons.ts";
 
 /**
  * How a field is edited, and read back: a STRING as the text it is, anything else as JSON.
@@ -150,14 +150,15 @@ export function StateBranchEditor({ step }: { step: Step }) {
       )}
 
       {/* THE DRAWER'S TWO DECISIONS, BOTH BLACK — the product owner's call on 2026-10-12, that every
-          major button there is the app's ink-filled primary. Re-run leads because it always works;
-          Re-run with edits waits, greyed, until a field has been changed. */}
-      <div className="flex items-center gap-2">
+          major button there is the app's ink-filled primary — and SMALL (2026-10-14): two full-width
+          primaries were the loudest thing in the drawer. Re-run leads because it always works;
+          Re-run with edits waits, greyed, until a field has been changed, and counts them. */}
+      <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={() => branch(false)}
           disabled={blocked !== null || starting}
-          className={`${primaryBtn} flex-1 justify-center focus-visible:outline-none focus-visible:shadow-focusring`}
+          className={`${primaryBtnSm} focus-visible:outline-none focus-visible:shadow-focusring`}
           title={blocked ?? (starting ? "Starting the new run…" : "Start a new run from this step, as it was — this run stays as it is")}
         >
           {starting ? "Starting…" : "Re-run from here"}
@@ -166,10 +167,10 @@ export function StateBranchEditor({ step }: { step: Step }) {
           type="button"
           onClick={() => branch(true)}
           disabled={dirtyKeys.length === 0 || blocked !== null || starting}
-          className={`${primaryBtn} flex-1 justify-center focus-visible:outline-none focus-visible:shadow-focusring`}
+          className={`${primaryBtnSm} focus-visible:outline-none focus-visible:shadow-focusring`}
           title={blocked ?? (dirtyKeys.length === 0 ? "Edit a field above to re-run with changes" : "Start a new run from this step with these edits — this run stays as it is")}
         >
-          Re-run with edits{dirtyKeys.length ? ` (${dirtyKeys.length})` : ""}
+          {dirtyKeys.length ? `Re-run with ${dirtyKeys.length} ${dirtyKeys.length === 1 ? "edit" : "edits"}` : "Re-run with edits"}
         </button>
       </div>
       {blocked && <p className="mt-2 text-tiny text-muted">{blocked}.</p>}
