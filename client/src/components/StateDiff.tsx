@@ -60,7 +60,8 @@ function Entry({ entry }: { entry: DiffEntry }) {
       {entry.carriedOver ? (
         <div className="mt-1 px-2 text-faint text-tiny">
           {entry.carriedOver} earlier {entry.carriedOver === 1 ? "item" : "items"} unchanged
-          {entry.partial && " · partial update, reducer-merged"}
+          {/* Plain words for a reducer merge: the step returned only its new items. */}
+          {entry.partial && " · this step sent only what it added, and the rest were kept"}
         </div>
       ) : null}
     </div>

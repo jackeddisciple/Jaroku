@@ -2,10 +2,10 @@
 // there — a new run forks from that node's durable checkpoint, the original stays intact.
 //
 // Editing is scoped (decision: validated domain fields): every state key EXCEPT `messages` is
-// exposed as editable JSON. `messages` is shown read-only in v1 — its add_messages reducer makes
-// naive replacement of LangChain message objects a corrupt-resume risk. Each edited field must be
-// valid JSON before a branch is allowed; an invalid edit is refused client-side and the original
-// checkpoint is never touched.
+// editable — a string as text, anything else as JSON. `messages` is not offered — its add_messages
+// reducer makes naive replacement of LangChain message objects a corrupt-resume risk. An edited JSON
+// field must parse before a re-run is allowed; an invalid edit is refused client-side and the
+// original checkpoint is never touched.
 
 import { useMemo, useState } from "react";
 import type { Step } from "../types.ts";
@@ -14,6 +14,16 @@ import { stepNodeId } from "../lib/traceGraphMap.ts";
 import { sendBranchRun } from "../lib/socket.ts";
 import { TYPE } from "../lib/tokens.ts";
 import { primaryBtn } from "./buttons.ts";
+
+/**
+ * How a field is edited, and read back: a STRING as the text it is, anything else as JSON.
+ *
+ * Every field was JSON, so a string showed as `"shortlist"` — quotes somebody had to keep intact,
+ * and a missing one refused the branch. Text in, text out now; only numbers, lists and objects are
+ * written as JSON, and say so.
+ */
+const asText = (v: unknown): boolean => typeof v === "string";
+const draftOf = (v: unknown): string => (asText(v) ? (v as string) : JSON.stringify(v, null, 2));
 
 function domainFields(stateAfter: unknown): Record<string, unknown> {
   if (!stateAfter || typeof stateAfter !== "object") return {};
@@ -35,13 +45,13 @@ export function StateBranchEditor({ step }: { step: Step }) {
 
   // Draft JSON text per editable field, seeded from the current value.
   const [draft, setDraft] = useState<Record<string, string>>(() =>
-    Object.fromEntries(fieldKeys.map((k) => [k, JSON.stringify(fields[k], null, 2)])),
+    Object.fromEntries(fieldKeys.map((k) => [k, draftOf(fields[k])])),
   );
   const [error, setError] = useState<string | null>(null);
 
   if (!activeRunId) return null;
 
-  const dirtyKeys = fieldKeys.filter((k) => draft[k] !== JSON.stringify(fields[k], null, 2));
+  const dirtyKeys = fieldKeys.filter((k) => draft[k] !== draftOf(fields[k]));
 
   const branch = (withEdits: boolean) => {
     setError(null);
@@ -49,10 +59,14 @@ export function StateBranchEditor({ step }: { step: Step }) {
     if (withEdits) {
       editedState = {};
       for (const k of dirtyKeys) {
+        if (asText(fields[k])) {
+          editedState[k] = draft[k] ?? "";
+          continue;
+        }
         try {
           editedState[k] = JSON.parse(draft[k]!);
         } catch {
-          setError(`"${k}" is not valid JSON — fix it before branching.`);
+          setError(`${k} isn't valid JSON — fix it before re-running.`);
           return; // refuse: the original checkpoint is never touched
         }
       }
@@ -73,13 +87,16 @@ export function StateBranchEditor({ step }: { step: Step }) {
 
       {fieldKeys.length === 0 ? (
         <p className="text-tiny text-muted mb-2">
-          No editable domain fields at this step. You can still re-run the graph from this point.
+          Nothing at this step can be edited. You can still re-run from here.
         </p>
       ) : (
         <div className="space-y-2 mb-2">
           {fieldKeys.map((k) => (
             <label key={k} className="block">
-              <span className="text-tiny text-muted">{k}</span>
+              <span className="text-tiny text-muted">
+                {k}
+                {!asText(fields[k]) && <span className="text-faint"> · JSON</span>}
+              </span>
               <textarea
                 value={draft[k]}
                 onChange={(e) => {
@@ -91,13 +108,13 @@ export function StateBranchEditor({ step }: { step: Step }) {
                 }}
                 spellCheck={false}
                 rows={Math.min(6, (draft[k]?.split("\n").length ?? 1) + 1)}
-                className="w-full mt-1 bg-elevated text-ink text-tiny font-mono rounded-input p-2 resize-y
-                  outline-none focus-visible:shadow-focusring border border-edge focus:border-faint leading-relaxed"
+                className={`w-full mt-1 bg-elevated text-ink text-tiny rounded-input p-2 resize-y
+                  outline-none focus-visible:shadow-focusring border border-edge focus:border-faint leading-relaxed ${asText(fields[k]) ? "" : "font-mono"}`}
               />
             </label>
           ))}
           <p className="text-tiny text-faint">
-            messages is read-only in v1. Edits replace the field value on the branch.
+            An edited field replaces its value in the new run. The conversation (messages) can't be edited here.
           </p>
         </div>
       )}
