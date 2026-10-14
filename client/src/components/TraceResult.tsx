@@ -77,9 +77,25 @@ function ClampedAnswer({ text }: { text: string }) {
   );
 }
 
+/**
+ * The answer's opening, as one line of plain words: its first line with the markdown taken off. What
+ * a folded answer shows, so folding it away still says what the run came to.
+ */
+export function answerPreview(text: string): string {
+  const first = text.split("\n").map((l) => l.trim()).find((l) => l !== "" && !/^(```|---|\*\*\*)/.test(l)) ?? "";
+  return first
+    .replace(/^(#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)/, "")
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/(\*\*|__|`)/g, "")
+    // A single * or _ only where it is emphasis around words — an identifier keeps its underscores.
+    .replace(/(^|\s)[*_]([^*_\s][^*_]*?)[*_](?=\s|$|[.,;:!?])/g, "$1$2")
+    .trim();
+}
+
 function FinalAnswer({ text }: { text: string }) {
   const open = useTraceStore((s) => s.answerOpen);
   const setOpen = useTraceStore((s) => s.setAnswerOpen);
+  const preview = useMemo(() => answerPreview(text), [text]);
   return (
     <section className={SURFACE} aria-label="Final answer">
       <CollapsibleRegion label="Final answer" open={open} onToggle={() => setOpen(!open)} trailing={<CopyTurn source={text} />} chevron={Icon.trace.fold}>
@@ -87,6 +103,18 @@ function FinalAnswer({ text }: { text: string }) {
           <ClampedAnswer text={text} />
         </div>
       </CollapsibleRegion>
+      {/* FOLDED, IT STILL SAYS WHAT THE RUN CAME TO: the answer's first line, which opens it. The
+          fold itself stays one choice for the session (`answerOpen`) — the product owner's call. */}
+      {!open && preview && (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          title="Show the final answer"
+          className="-mx-1 mb-0.5 mt-0.5 block w-[calc(100%+0.5rem)] truncate rounded-control px-1 text-left text-caption text-muted transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+        >
+          {preview}
+        </button>
+      )}
     </section>
   );
 }

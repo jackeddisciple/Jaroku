@@ -9,6 +9,7 @@
 import { useTraceStore, visibleTraceRows } from "../store/traceStore.ts";
 import { traceMarks } from "../components/traceMarks.ts";
 import { outcomePhase, runOutcome } from "./runOutcome.ts";
+import { answerPreview } from "../components/TraceResult.tsx";
 import { STATUS, STEP_HUE } from "./tokens.ts";
 import type { Step } from "../types.ts";
 import {
@@ -341,6 +342,16 @@ console.log("\na reply that is JSON");
   check("prose is not", jsonReply("Here is the shortlist: {see below}") === undefined);
   check("a bare string or number is not", jsonReply('"hi"') === undefined && jsonReply("42") === undefined);
   check("broken JSON is not", jsonReply('{"a": ') === undefined);
+}
+
+console.log("\na folded answer's one line");
+{
+  check("a heading's words", answerPreview("## Two queues are backing up:\n\n- **orders**: x") === "Two queues are backing up:");
+  check("bold taken off", answerPreview("**Shortlist**: Ada") === "Shortlist: Ada");
+  check("a link's words", answerPreview("- [Link](http://x) text") === "Link text");
+  check("past a code fence's opening", answerPreview("```json\n{\"a\":1}\n```") === '{"a":1}');
+  check("an identifier keeps its underscores", answerPreview("Use route_after_extract next") === "Use route_after_extract next");
+  check("emphasis taken off", answerPreview("This is *really* _good_.") === "This is really good.");
 }
 
 console.log("\nwhere a search matched");
