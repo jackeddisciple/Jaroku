@@ -12,11 +12,13 @@
 // items with a button for the next fifty. Nothing is dropped — every limit is one click from lifted.
 //
 // MONOSPACE, because these are literal payloads: keys and values line up, and a stack of nested
-// objects is read by its indentation.
+// objects is read by its indentation. IN THE CODE PALETTE (`CODE`, the product owner's, 2026-10-14),
+// as every other piece of code in the app is: keys as properties, strings, numbers, and `true`,
+// `false` and `null` as the language's own words; braces and colons are plain code text.
 
 import { useState } from "react";
 
-import { ICON } from "../lib/tokens.ts";
+import { CODE, ICON } from "../lib/tokens.ts";
 import { Icon } from "../lib/icons/registry.ts";
 
 /** Characters of a string shown before "show more". */
@@ -47,7 +49,7 @@ function JsonString({ value }: { value: string }) {
   const long = value.length > STRING_SHOWN;
   const shown = long && !all ? value.slice(0, STRING_SHOWN) : value;
   return (
-    <span className="whitespace-pre-wrap text-ink">
+    <span className="whitespace-pre-wrap" style={{ color: CODE.string }}>
       "{shown}{long && !all ? "…" : ""}"
       {long && (
         <>
@@ -62,14 +64,23 @@ function JsonString({ value }: { value: string }) {
 }
 
 function Leaf({ value }: { value: unknown }) {
-  if (value === null || value === undefined) return <span className="text-faint">null</span>;
+  if (value === null || value === undefined) return <span style={{ color: CODE.keyword }}>null</span>;
   if (typeof value === "string") return <JsonString value={value} />;
-  return <span className="text-muted">{String(value)}</span>;
+  if (typeof value === "number" || typeof value === "bigint") return <span style={{ color: CODE.number }}>{String(value)}</span>;
+  if (typeof value === "boolean") return <span style={{ color: CODE.keyword }}>{String(value)}</span>;
+  return <span style={{ color: CODE.plain }}>{String(value)}</span>;
 }
 
+/** An object's key is a property; an array's index is only a position, and stays quiet. */
 function Key({ name }: { name: string | number | undefined }) {
   if (name === undefined) return null;
-  return <span className="text-muted">{typeof name === "number" ? `${name}` : name}: </span>;
+  if (typeof name === "number") return <span className="text-faint">{name}: </span>;
+  return (
+    <span>
+      <span style={{ color: CODE.variable }}>{name}</span>
+      <span style={{ color: CODE.plain }}>: </span>
+    </span>
+  );
 }
 
 function Branch({ name, value, depth, openDepth }: { name?: string | number; value: object; depth: number; openDepth: number }) {
@@ -85,7 +96,7 @@ function Branch({ name, value, depth, openDepth }: { name?: string | number; val
     return (
       <div>
         <Key name={name} />
-        <span className="text-faint">{isArray ? "[ ]" : "{ }"}</span>
+        <span style={{ color: CODE.plain }}>{isArray ? "[ ]" : "{ }"}</span>
       </div>
     );
   }
@@ -103,9 +114,9 @@ function Branch({ name, value, depth, openDepth }: { name?: string | number; val
         </span>
         <span className="min-w-0">
           <Key name={name} />
-          <span className="text-faint">{isArray ? "[" : "{"}</span>
+          <span style={{ color: CODE.plain }}>{isArray ? "[" : "{"}</span>
           {!open && <span className="font-sans text-tiny text-faint"> {size} </span>}
-          {!open && <span className="text-faint">{isArray ? "]" : "}"}</span>}
+          {!open && <span style={{ color: CODE.plain }}>{isArray ? "]" : "}"}</span>}
         </span>
       </button>
       {open && (
@@ -122,7 +133,7 @@ function Branch({ name, value, depth, openDepth }: { name?: string | number; val
               </MoreButton>
             )}
           </div>
-          <span className="text-faint">{isArray ? "]" : "}"}</span>
+          <span style={{ color: CODE.plain }}>{isArray ? "]" : "}"}</span>
         </>
       )}
     </div>

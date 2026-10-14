@@ -1,5 +1,6 @@
 import { diffState, summarizeItem, type DiffEntry } from "../lib/stateDiff.ts";
 import { jsonPretty } from "../lib/format.ts";
+import { CODE } from "../lib/tokens.ts";
 import { DiffStat } from "./DiffStat.tsx";
 
 /** One `+`/`-` line. Status colors only — `ok` for additions, `err` for removals. */
@@ -30,7 +31,8 @@ function Entry({ entry }: { entry: DiffEntry }) {
   return (
     <div className="mt-2 first:mt-0">
       <div className="flex items-baseline gap-3">
-        <span className="font-mono text-muted text-caption">{entry.key}</span>
+        {/* A state key is a property, in the code palette as everywhere else code appears. */}
+        <span className="font-mono text-caption" style={{ color: CODE.variable }}>{entry.key}</span>
         <span className="ml-auto">
           {entry.items ? (
             <DiffStat additions={added} deletions={removed} unit="items" />
