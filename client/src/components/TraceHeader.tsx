@@ -15,7 +15,7 @@ import { useState } from "react";
 
 import { absTime, relTime } from "../lib/format.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
-import { runAgain } from "../lib/runActions.ts";
+import { runAgain, runAgainBlocked } from "../lib/runActions.ts";
 import { runOutcome, type RunOutcome } from "../lib/runOutcome.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { useBuildStore } from "../store/buildStore.ts";
@@ -92,9 +92,15 @@ function RunMenu({ run }: { run: RunSummary }) {
           <Icon.panel.runs size={ICON.sm} />
           <span className="min-w-0 flex-1 truncate">Open in Runs</span>
         </DropdownMenuItem>
-        <DropdownMenuItem size="compact" onSelect={() => runAgain(run.agent_id)}>
+        <DropdownMenuItem
+          size="compact"
+          disabled={runAgainBlocked(run) !== null}
+          title={runAgainBlocked(run) ?? "Run the agent again on this run's input and model"}
+          onSelect={() => runAgain(run)}
+        >
           <Icon.cockpit.refresh size={ICON.sm} />
           <span className="min-w-0 flex-1 truncate">Run again</span>
+          {runAgainBlocked(run) && <span className="shrink-0 text-tiny">input not kept</span>}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

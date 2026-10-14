@@ -1286,6 +1286,14 @@ export function sendRun(
 }
 
 /**
+ * "Run again" for one run: the server starts it afresh with that run's own kept input, provider and
+ * model (`rerunOf`). The agent is named for the permission check, which reads it.
+ */
+export function sendRunAgain(runId: string, agentId: string): void {
+  send({ cmd: "run", rerunOf: runId, agentId, threadId: activeThread() });
+}
+
+/**
  * Ask for a LARGER WINDOW on the run history.
  *
  * The 51st-newest run used to be unreachable: `loadRun` needs an id, and the only source of ids was a

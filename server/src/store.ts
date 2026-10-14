@@ -22,7 +22,9 @@ import type { Run, Step, StepType } from "./types.ts";
 
 // A run plus a cheap derived step count, for the sidebar history list. The frozen Run
 // schema is unchanged — step_count is a read-side convenience, not part of the event schema.
-export type RunSummary = Run & { step_count: number };
+// `has_input` is the same kind of thing: whether the run's input was kept (migration 084), so the
+// app can say before it asks that "Run again" has nothing to send — never the input itself.
+export type RunSummary = Run & { step_count: number; has_input: boolean };
 
 /**
  * The columns a Run is read as.
@@ -168,14 +170,15 @@ export class TraceStore {
     const rows = await this.q(ctx).all<Record<string, unknown>>(
       `SELECT ${cols(RUN_COLUMNS, "r")},
               (SELECT COUNT(*) FROM steps s
-                WHERE s.run_id = r.id AND s.workspace_id = r.workspace_id) AS step_count
+                WHERE s.run_id = r.id AND s.workspace_id = r.workspace_id) AS step_count,
+              CASE WHEN r.input IS NULL THEN 0 ELSE 1 END AS has_input
          FROM runs r
         WHERE r.workspace_id = ?
         ORDER BY r.started_at DESC LIMIT ?`,
       [ctx.workspaceId, limit],
     );
     // COUNT is a bigint in Postgres and arrives as a string. The sidebar renders it.
-    return rows.map((r) => ({ ...r, step_count: asInt(r["step_count"]) })) as unknown as RunSummary[];
+    return rows.map((r) => ({ ...r, step_count: asInt(r["step_count"]), has_input: asInt(r["has_input"]) === 1 })) as unknown as RunSummary[];
   }
 
   /**
@@ -263,6 +266,29 @@ export class TraceStore {
       `SELECT ${cols(RUN_COLUMNS)} FROM runs WHERE id = ? AND workspace_id = ?`,
       [runId, ctx.workspaceId],
     )) as Run | undefined;
+  }
+
+  /**
+   * What a run was started with (migration 084) — "" for a run given no input — recorded by the server
+   * when the run's `run_start` lands. Only a run with no input kept yet is written: a run starts once.
+   */
+  async setRunInput(ctx: TenantContext, runId: string, input: string): Promise<void> {
+    await this.q(ctx).run(
+      `UPDATE runs SET input = ? WHERE id = ? AND workspace_id = ? AND input IS NULL`,
+      [input, runId, ctx.workspaceId],
+    );
+  }
+
+  /**
+   * A run's kept input: the text, "" for none given, null for a run whose input was never kept (one
+   * started before 084), and undefined for a run this workspace does not have.
+   */
+  async runInput(ctx: TenantContext, runId: string): Promise<string | null | undefined> {
+    const row = await this.q(ctx).get<{ input: string | null }>(
+      `SELECT input FROM runs WHERE id = ? AND workspace_id = ?`,
+      [runId, ctx.workspaceId],
+    );
+    return row ? row.input : undefined;
   }
 
   /**
@@ -460,13 +486,19 @@ export class TraceStore {
         [parentRunId, ctx.workspaceId],
       );
       if (!parent) throw new Error(`copyRunPrefix: unknown parent run ${parentRunId}`);
+      // A BRANCH WAS STARTED WITH ITS PARENT'S INPUT — its state at the fork grew from it — so that
+      // is what running it again sends.
+      const parentInput = await tx.get<{ input: string | null }>(
+        `SELECT input FROM runs WHERE id = ? AND workspace_id = ?`,
+        [parentRunId, ctx.workspaceId],
+      );
       await tx.run(
         `INSERT INTO runs (id, workspace_id, agent_id, provider, model, status, started_at,
-           ended_at, cost, tokens, error, parent_run_id, branch_from_seq)
-         VALUES (?, ?, ?, ?, ?, 'running', ?, NULL, 0, 0, NULL, ?, ?)`,
+           ended_at, cost, tokens, error, parent_run_id, branch_from_seq, input)
+         VALUES (?, ?, ?, ?, ?, 'running', ?, NULL, 0, 0, NULL, ?, ?, ?)`,
         [
           newRunId, ctx.workspaceId, parent["agent_id"], parent["provider"], parent["model"],
-          new Date().toISOString(), parentRunId, branchFromSeq,
+          new Date().toISOString(), parentRunId, branchFromSeq, parentInput?.input ?? null,
         ],
       );
 

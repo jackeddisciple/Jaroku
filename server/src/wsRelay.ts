@@ -37,6 +37,11 @@ export type RunCommand = {
   model?: string;
   agentId?: string;
   /**
+   * "Run again": the id of a run to start afresh with ITS kept input, provider and model — the
+   * server reads them (index.ts `runAgainOf`), and `input`/`provider`/`model` here are ignored.
+   */
+  rerunOf?: string;
+  /**
    * The build session this work belongs to (§7.1, migration 044).
    *
    * OPTIONAL ON EVERY COMMAND THAT CARRIES IT, and that is deliberate rather than transitional. A

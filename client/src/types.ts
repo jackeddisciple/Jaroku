@@ -47,6 +47,11 @@ export type RunSummary = Run & {
   step_count?: number;
   parent_run_id?: string | null;
   branch_from_seq?: number | null;
+  /**
+   * Whether the server kept what this run was started with (migration 084) — what "Run again" sends.
+   * On history rows only; undefined on a run heard of from its live events, which the server has.
+   */
+  has_input?: boolean;
 };
 
 export type TraceEvent =
@@ -2358,7 +2363,7 @@ export type ClientCommand =
   // `threadId` on the five commands that START work: the session it belongs to. Optional on every
   // one of them — a client that does not name a thread gets the agent's most recently active one,
   // which is the continuity the backfill established.
-  | { cmd: "run"; input?: string; provider?: string; model?: string; agentId?: string; threadId?: string }
+  | { cmd: "run"; input?: string; provider?: string; model?: string; agentId?: string; threadId?: string; rerunOf?: string }
   | { cmd: "loadRun"; runId: string }
   /**
    * A LARGER WINDOW ON THE RUN HISTORY — the paging this product had none of.

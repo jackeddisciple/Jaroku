@@ -111,6 +111,11 @@ interface Slot {
    *  whether to revoke one and, since a self-contained token cannot be un-minted, until when
    *  the revocation entry itself needs to be kept around. */
   tokenExpiresAtMs: number | null;
+  /**
+   * What the occupant was started with — "" for no input — kept while it runs, so the run's row can
+   * record it when its `run_start` lands (`inputOf`). Null between runs.
+   */
+  input: string | null;
 }
 
 export class RunPool extends EventEmitter<RunPoolEvents> {
@@ -159,6 +164,7 @@ export class RunPool extends EventEmitter<RunPoolEvents> {
       timedOut: false,
       startedAtMs: null,
       tokenExpiresAtMs: null,
+      input: null,
     };
 
     // Attribute every event to the run that produced it. Listeners are permanent — the
@@ -207,10 +213,12 @@ export class RunPool extends EventEmitter<RunPoolEvents> {
     slot.timedOut = false;
     slot.startedAtMs = null;
     slot.tokenExpiresAtMs = null;
+    slot.input = null;
   }
 
   private launch(slot: Slot, opts: PoolRunOptions): void {
     slot.runId = opts.runId;
+    slot.input = opts.input ?? "";
     slot.timedOut = false;
     slot.startedAtMs = Date.now();
     if (opts.timeoutMs && opts.timeoutMs > 0) {
@@ -278,6 +286,11 @@ export class RunPool extends EventEmitter<RunPoolEvents> {
    *  reading them would make the trace lie about what ran. */
   get busy(): boolean {
     return this.slots.some((s) => s.manager.running || s.runId !== null);
+  }
+
+  /** What a run in this pool was started with ("" for no input), while it is here; undefined otherwise. */
+  inputOf(runId: string): string | undefined {
+    return this.slots.find((s) => s.runId === runId)?.input ?? undefined;
   }
 
   activeRunIds(): string[] {

@@ -8,7 +8,7 @@ import { useState } from "react";
 
 import { absTime, relTime } from "../lib/format.ts";
 import { Icon } from "../lib/icons/registry.ts";
-import { openRun, runAgain } from "../lib/runActions.ts";
+import { openRun, runAgain, runAgainBlocked } from "../lib/runActions.ts";
 import { outcomePhase, runOutcome } from "../lib/runOutcome.ts";
 import { selectAgent } from "../lib/selection.ts";
 import { sendLoadHistory } from "../lib/socket.ts";
@@ -111,9 +111,15 @@ function RunOverflow({ run, agentId }: { run: RunSummary; agentId: string }) {
           <Icon.panel.trace size={ICON.sm} />
           <span className="min-w-0 flex-1 truncate">View trace</span>
         </DropdownMenuItem>
-        <DropdownMenuItem size="compact" onSelect={() => { selectAgent(agentId); runAgain(agentId); }}>
+        <DropdownMenuItem
+          size="compact"
+          disabled={runAgainBlocked(run) !== null}
+          title={runAgainBlocked(run) ?? "Run the agent again on this run's input and model"}
+          onSelect={() => { selectAgent(agentId); runAgain(run); }}
+        >
           <Icon.cockpit.refresh size={ICON.sm} />
           <span className="min-w-0 flex-1 truncate">Run again</span>
+          {runAgainBlocked(run) && <span className="shrink-0 text-tiny">input not kept</span>}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

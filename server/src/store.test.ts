@@ -164,6 +164,29 @@ console.log("\na branch's boundaries stamp only its own steps");
   check(stamps[0] === null, `...and one copied without any is not handed the branch's (${stamps[0]})`);
 }
 
+console.log("\na run keeps what it was started with");
+{
+  const asked = randomUUID();
+  await store.upsertRun(A, run(asked));
+  check((await store.runInput(A, asked)) === null, "a run with nothing kept says null, not empty");
+  await store.setRunInput(A, asked, "Do not return JSON… banana");
+  check((await store.runInput(A, asked)) === "Do not return JSON… banana", "its input is kept");
+  await store.setRunInput(A, asked, "something else");
+  check((await store.runInput(A, asked)) === "Do not return JSON… banana", "...once: a run starts once");
+  check((await store.runInput(B, asked)) === undefined, "...and another workspace reads nothing");
+  const row = (await store.listRuns(A, 500)).find((r) => r.id === asked) as unknown as Record<string, unknown>;
+  check(row?.["has_input"] === true && !("input" in row), "the history says one was kept, and does not carry it");
+  const bare = randomUUID();
+  await store.upsertRun(A, run(bare));
+  const bareRow = (await store.listRuns(A, 500)).find((r) => r.id === bare);
+  check(bareRow?.has_input === false, "...and says when none was");
+  await store.insertStep(A, step(asked, 0));
+  await store.setCheckpointUpto(A, asked, 0, "ck-asked");
+  const forked = randomUUID();
+  await store.copyRunPrefix(A, asked, forked, 0, 0);
+  check((await store.runInput(A, forked)) === "Do not return JSON… banana", "a branch was started with its parent's input");
+}
+
 console.log("\nthe storage column stays in storage");
 
 // The one documented exception to the frozen schema. `SELECT *` would put it into the object

@@ -190,7 +190,7 @@ import { buildFactPack, type FactPack, type PackDeps } from "./work/factPack.ts"
 import { citableFrom, citedIds, resolveCitations, type CitationView } from "./work/citations.ts";
 import { CHAT_SYSTEM, chatClosing, CONVERSATION_SYSTEM, conversationClosing, renderRecord } from "./prompt.ts";
 import type { AskRecordCommand, ChatCommand, ConnectionCommand, ConnectionView, DeployChannelCommand, ExplainCommand, InboxCommand, EditTurnCommand, ProviderSnapshot, SelectVariantCommand, StopChatCommand, RecordChatTurnCommand, RecordBuildTurnCommand, BuildChunkCommand, EditCommand} from "./wsRelay.ts";
-import type { ListWorkCommand, WorkCommand, WorkSnapshotWire } from "./wsRelay.ts";
+import type { ListWorkCommand, RunCommand, WorkCommand, WorkSnapshotWire } from "./wsRelay.ts";
 import { loadRuntimeEnv } from "./env.ts";
 import { installLogRedaction, protectEnv, protectSecret } from "./obs/log.ts";
 import { currentTraceparent, formatTraceparent, openTracer, parseTraceparent } from "./obs/trace.ts";
@@ -5441,7 +5441,10 @@ async function entitlementRefusalFor(
 async function dispatchCommand(cmd: ForwardedCommand, ctx: TenantContext): Promise<void> {
   if (!(await admitCommand(ctx, cmd))) return;
   {
-    if (cmd.cmd === "run") void runAgent(ctx, cmd.input, cmd.provider, cmd.model, cmd.agentId, undefined, cmd.threadId);
+    if (cmd.cmd === "run") {
+      if (cmd.rerunOf) void runAgainOf(ctx, { ...cmd, rerunOf: cmd.rerunOf });
+      else void runAgent(ctx, cmd.input, cmd.provider, cmd.model, cmd.agentId, undefined, cmd.threadId);
+    }
     else if (cmd.cmd === "generate") generateAgent(ctx, cmd);
     else if (cmd.cmd === "planAgent") planAgent(ctx, cmd);
     else if (cmd.cmd === "discardPlan") planner.discard(ctx.workspaceId, cmd.planId);
@@ -11510,6 +11513,40 @@ async function upsertRunWhole(ctx: TenantContext, runId: string, event: Extract<
     if (whole) Object.assign(event.run, whole);
   }
   await store.upsertRun(ctx, event.run);
+  // AND WHAT IT WAS STARTED WITH, once its row exists — the slot that is running it still holds it.
+  // What "Run again" sends (migration 084); a deployed run has no slot here and keeps none.
+  if (event.kind === "run_start") {
+    const input = interactivePool.inputOf(runId) ?? evalPool.inputOf(runId);
+    if (input !== undefined) await store.setRunInput(ctx, runId, input);
+  }
+}
+
+/**
+ * "Run again": the run `rerunOf` names, started afresh with ITS input, provider and model.
+ *
+ * IT SENT NOTHING. The menus called `run` with no input and the composer's model, so the runner fell
+ * back to its default greeting and a run of a job description came back as a run of "Hello!" — on a
+ * different model. The server has the input (migration 084) and the run has its model, so the client
+ * names the run and this reads the rest. A run whose input was never kept is refused in words, not
+ * re-run on a guess. The agent must be the one the command was authorised for: the capability check
+ * read `agentId`, and a re-run of another agent's run would be a run it never allowed.
+ */
+async function runAgainOf(ctx: TenantContext, cmd: RunCommand & { rerunOf: string }): Promise<void> {
+  const run = await store.getRun(ctx, cmd.rerunOf);
+  if (!run || run.agent_id !== cmd.agentId) {
+    relay.broadcastDebug(ctx, { type: "error", runId: cmd.rerunOf, message: "that run is not one of this agent's" });
+    return;
+  }
+  const input = await store.runInput(ctx, run.id);
+  if (input === null || input === undefined) {
+    relay.broadcastDebug(ctx, {
+      type: "error",
+      runId: run.id,
+      message: "this run's input wasn't kept (it ran before inputs were), so it can't be run again — run the agent from the composer instead",
+    });
+    return;
+  }
+  await runAgent(ctx, input || undefined, run.provider, run.model, run.agent_id, undefined, cmd.threadId);
 }
 function ingest(work: () => Promise<void>): void {
   ingestChain = ingestChain.then(work, work).catch((err) => {

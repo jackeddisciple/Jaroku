@@ -127,5 +127,18 @@ await (async () => {
   }
 })();
 
+await (async () => {
+  // What "Run again" sends is what the slot was started with, read while the run is in it.
+  const fakes: FakeSandbox[] = [];
+  const pool = new RunPool(2, { sandbox: () => { const f = new FakeSandbox(); fakes.push(f); return f; } });
+  pool.tryStart({ ...base, runId: "asked", input: "Do not return JSON… banana" });
+  pool.tryStart({ ...base, runId: "bare" });
+  check("a run's input is the slot's while it runs", pool.inputOf("asked") === "Do not return JSON… banana");
+  check("...a run given none is \"\", not unknown", pool.inputOf("bare") === "");
+  check("...and a run not in the pool is unknown", pool.inputOf("elsewhere") === undefined);
+  fakes[0]!.stop();
+  check("...and gone with the run", pool.inputOf("asked") === undefined);
+})();
+
 console.log(fail === 0 ? "\nALL CORRECT" : `\n${fail} FAILURES`);
 process.exit(fail === 0 ? 0 : 1);
