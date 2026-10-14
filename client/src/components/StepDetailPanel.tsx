@@ -17,7 +17,7 @@
 // not the input/output split, so the split is named as not recorded rather than guessed. Its start is
 // `started_at − latency_ms`, because `started_at` is stamped when the step finishes (see traceView).
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { useTraceStore, visibleTraceRows } from "../store/traceStore.ts";
 import { absTime, fmtCost, fmtDuration } from "../lib/format.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
@@ -189,6 +189,14 @@ export function StepDetailPanel() {
     [step, bucket],
   );
 
+  // EVERY STEP OPENS AT ITS TOP. Prev/next swapped the content under a scroller that kept its
+  // place, so stepping from #1 (scrolled down to Raw event) to #8 opened #8 mid-way, its figures and
+  // Overview above the fold. Before paint, so the old offset is never drawn on the new step.
+  const body = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    body.current?.scrollTo({ top: 0 });
+  }, [expandedStepId]);
+
   // Escape closes the panel.
   useEffect(() => {
     if (!open) return;
@@ -265,7 +273,7 @@ export function StepDetailPanel() {
             </div>
           </div>
 
-          <div className="flex-1 overflow-auto px-4 pb-6 pt-4">
+          <div ref={body} className="flex-1 overflow-auto px-4 pb-6 pt-4">
             <Figures step={step} inside={inside} />
             {/* A failure next: it is what somebody opening a red step came for. */}
             {step.error && (
