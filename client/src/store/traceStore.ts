@@ -76,6 +76,12 @@ interface TraceState {
    * leaving it at the run's end with the step's own node the faded one. Cleared when taken.
    */
   graphStepRequest: string | null;
+  /**
+   * The latest refusal from the run controls — a pause, a resume or a re-run the server turned down —
+   * and the run it was about, when it named one. Read by the controls that asked, so a refusal is said
+   * where the button is rather than only in a two-second toast. `at` tells two equal refusals apart.
+   */
+  controlError: { runId: string | null; message: string; at: number } | null;
 
   /**
    * The run history, merged by id.
@@ -106,6 +112,7 @@ interface TraceState {
   setStepFilter: (filter: StepFilter) => void;
   setStepQuery: (query: string) => void;
   requestGraphStep: (stepId: string | null) => void;
+  setControlError: (error: { runId: string | null; message: string } | null) => void;
 }
 
 const LOG_CAP = 200;
@@ -175,6 +182,7 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   stepFilter: "all",
   stepQuery: "",
   graphStepRequest: null,
+  controlError: null,
 
   applyHistory: (runs, meta) =>
     set((state) => {
@@ -299,6 +307,8 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   setStepQuery: (stepQuery) => set({ stepQuery }),
 
   requestGraphStep: (graphStepRequest) => set({ graphStepRequest }),
+
+  setControlError: (error) => set({ controlError: error ? { ...error, at: Date.now() } : null }),
 
   setCollapsed: (stepId, collapsed) =>
     set((state) => {

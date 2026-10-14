@@ -8,7 +8,7 @@
 // refusals ("stop it before resuming this one", "stop it before branching") are instructions to
 // press a button that did not exist. A user's only remedy was to wait for a timeout.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTraceStore } from "../store/traceStore.ts";
 import { sendCancelRun, sendPauseRun, sendResumeRun } from "../lib/socket.ts";
 import { Icon } from "../lib/icons/registry.ts";
@@ -22,7 +22,20 @@ export function PauseResumeControls() {
   // not resumable either, and a mis-click on the button next to Pause would read as a pause that
   // silently killed the run, so the second press is the confirmation.
   const [confirming, setConfirming] = useState(false);
+  // ASKED, NOT YET DONE. A pause lands at the next node boundary — a second or more — and Resume waits
+  // on a new process; meanwhile the button stayed live and said nothing had happened. It says
+  // "Pausing…" (or "Resuming…") and waits, until the run's status moves, the server refuses (said in
+  // the toast), or long enough that something else is wrong and it should be pressable again.
+  const [pending, setPending] = useState<{ runId: string; what: "pause" | "resume" } | null>(null);
+  const refusedAt = useTraceStore((s) => (s.controlError && s.controlError.runId === activeRunId ? s.controlError.at : null));
+  useEffect(() => setPending(null), [status, activeRunId, refusedAt]);
+  useEffect(() => {
+    if (!pending) return;
+    const id = setTimeout(() => setPending(null), 20_000);
+    return () => clearTimeout(id);
+  }, [pending]);
   if (!activeRunId || (status !== "running" && status !== "paused")) return null;
+  const waiting = pending?.runId === activeRunId ? pending.what : null;
 
   const base =
     "flex items-center gap-1.5 rounded-control px-2 py-1 text-tiny transition-colors border";
@@ -57,19 +70,27 @@ export function PauseResumeControls() {
           Pause/Stop while it moves and Resume/Stop once it has stopped moving. */}
       {status === "running" ? (
         <button
-          onClick={() => sendPauseRun(activeRunId)}
-          className={`${base} border-hair text-run hover:bg-active active:bg-chrome`}
-          title="Pause at the next step boundary"
+          onClick={() => {
+            sendPauseRun(activeRunId);
+            setPending({ runId: activeRunId, what: "pause" });
+          }}
+          disabled={waiting === "pause"}
+          className={`${base} border-hair text-run hover:bg-active active:bg-chrome disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent`}
+          title={waiting === "pause" ? "Pausing at the next step boundary…" : "Pause at the next step boundary"}
         >
-          <Icon.trace.pause size={ICON.xs} /> Pause
+          <Icon.trace.pause size={ICON.xs} /> {waiting === "pause" ? "Pausing…" : "Pause"}
         </button>
       ) : (
         <button
-          onClick={() => sendResumeRun(activeRunId)}
-          className={`${base} border-hair text-ok hover:bg-active active:bg-chrome`}
-          title="Resume from the durable checkpoint"
+          onClick={() => {
+            sendResumeRun(activeRunId);
+            setPending({ runId: activeRunId, what: "resume" });
+          }}
+          disabled={waiting === "resume"}
+          className={`${base} border-hair text-ok hover:bg-active active:bg-chrome disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent`}
+          title={waiting === "resume" ? "Resuming from the durable checkpoint…" : "Resume from the durable checkpoint"}
         >
-          <Icon.trace.resume size={ICON.xs} /> Resume
+          <Icon.trace.resume size={ICON.xs} /> {waiting === "resume" ? "Resuming…" : "Resume"}
         </button>
       )}
       {stop}

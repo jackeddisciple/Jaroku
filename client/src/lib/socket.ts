@@ -333,6 +333,7 @@ function dispatch(msg: ServerMessage): void {
         s.addLog({ level: "stderr", text: "debug: run cancelled" });
       } else if (msg.type === "error") {
         s.addLog({ level: "stderr", text: `debug: ${msg.message}` });
+        s.setControlError({ runId: msg.runId ?? null, message: msg.message });
         // A refused pause, resume or branch was said only in a log no panel shows, so pressing
         // "Re-run from here" on a run that could not branch did nothing anyone could see.
         useUiStore.getState().showToast(msg.message, "err");
