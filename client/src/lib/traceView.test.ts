@@ -10,7 +10,7 @@ import { failedStepIds, jumpToError, treeSteps, useTraceStore, visibleTraceRows 
 import { graphLook, kindWord, traceMarks } from "../components/traceMarks.ts";
 import { nodeKind } from "../components/graphNodeIcons.ts";
 import { outcomePhase, runOutcome } from "./runOutcome.ts";
-import { agentTrend, branchFigures, compareRuns, finalState, runArtifacts } from "./traceCompare.ts";
+import { branchFigures, compareRuns, finalState, runArtifacts } from "./traceCompare.ts";
 import { isVerdict, readVerdict, verdictTone } from "./runVerdict.ts";
 import { jsonLines, jsonMatches, jsonType } from "./jsonShape.ts";
 import { diffHunks, lineDiff } from "./textDiff.ts";
@@ -443,17 +443,6 @@ console.log("\na branch against its parent, and what a run made");
   check("...and so are its tokens", vs?.theirs.tokens === 40 && vs?.mine.tokens === 30);
   check("...and its time: the parent's from the fork's end to its own", vs?.theirs.time === 8000 && vs?.mine.time === 5000, JSON.stringify(vs));
   check("a run that is not a branch has no parent to answer to", branchFigures(parentRun, [fp0], parentRun, [fp0]) === null);
-  const history: Record<string, RunSummary> = {
-    a: runOf({ id: "a", started_at: "2026-10-09T01:00:00.000Z", ended_at: "2026-10-09T01:00:04.000Z", cost: 1 }),
-    b: runOf({ id: "b", started_at: "2026-10-09T02:00:00.000Z", ended_at: "2026-10-09T02:00:02.000Z", cost: 2 }),
-    c: runOf({ id: "c", started_at: "2026-10-09T03:00:00.000Z", ended_at: "2026-10-09T03:00:01.000Z", cost: 3 }),
-    later: runOf({ id: "later", started_at: "2026-10-09T04:00:00.000Z", cost: 9 }),
-    other: runOf({ id: "other", agent_id: "zz", started_at: "2026-10-09T02:30:00.000Z", cost: 7 }),
-  };
-  const trend = agentTrend(history, history.c!, "cost");
-  check("the trend is the agent's finished runs up to this one, oldest first", trend.map((t) => t.runId).join() === "a,b,c", trend.map((t) => t.runId).join());
-  check("...by the figure asked for", agentTrend(history, history.c!, "time").map((t) => t.value).join() === "4000,2000,1000");
-  check("...and at most n of them", agentTrend(history, history.c!, "cost", 2).map((t) => t.runId).join() === "b,c");
   const arts = runArtifacts([p0, p1, p2]);
   check("a JSON reply is an artifact, named for its node", arts[0]?.title === "extract_jd" && JSON.stringify(arts[0]?.value) === '{"must_haves":["Python"]}');
   check("...and so is a structured state field", arts.some((a) => a.title === "jd"));

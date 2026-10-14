@@ -113,35 +113,6 @@ export function branchFigures(
   };
 }
 
-/** One of the agent's runs, as a sparkline draws it. */
-export interface TrendPoint {
-  runId: string;
-  value: number;
-}
-
-/**
- * The agent's recent finished runs up to and including this one, oldest first — at most `n` — with
- * one figure of each: its wall time, its tokens or its cost, as the run list records them.
- */
-export function agentTrend(
-  runs: Readonly<Record<string, RunSummary>>,
-  run: RunSummary,
-  metric: keyof RunFigures,
-  n = 12,
-): TrendPoint[] {
-  const at = Date.parse(run.started_at);
-  const mine = Object.values(runs)
-    .filter((r) => r.agent_id === run.agent_id && r.ended_at != null && (r.id === run.id || Date.parse(r.started_at) <= at))
-    .sort((a, b) => Date.parse(a.started_at) - Date.parse(b.started_at))
-    .slice(-n);
-  const out: TrendPoint[] = [];
-  for (const r of mine) {
-    const value = metric === "time" ? Date.parse(r.ended_at!) - Date.parse(r.started_at) : metric === "tokens" ? r.tokens : r.cost;
-    if (typeof value === "number" && Number.isFinite(value) && value >= 0) out.push({ runId: r.id, value });
-  }
-  return out;
-}
-
 // ── State: where the run left its state ─────────────────────────────────────
 
 /**

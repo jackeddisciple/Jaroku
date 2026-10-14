@@ -13,12 +13,12 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { fmtCost, fmtDuration, tokenCount } from "../lib/format.ts";
 import { sendLoadRun } from "../lib/socket.ts";
-import { agentTrend, branchFigures, type RunFigures, type TrendPoint } from "../lib/traceCompare.ts";
+import { branchFigures, type RunFigures } from "../lib/traceCompare.ts";
 import { isInherited, ownSteps, runElapsed, stepsTime, traceTotals } from "../lib/traceView.ts";
 import { runOutcome } from "../lib/runOutcome.ts";
 import { useRunClock } from "../lib/useRunClock.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
-import { ICON, SPARK } from "../lib/tokens.ts";
+import { ICON } from "../lib/tokens.ts";
 import { orderedSteps, useTraceStore } from "../store/traceStore.ts";
 import type { RunSummary, Step } from "../types.ts";
 import { Delta } from "./TraceRunTabs.tsx";
@@ -38,45 +38,12 @@ export function Metric({ label, value, title, tone = "text-ink", Mark }: { label
 }
 
 /**
- * The agent's recent runs as a line, this one a dot on it — whether this run was a heavy one is read
- * against the runs before it (the product owner's list, 2026-10-14: grey line, ink dot).
- */
-function Sparkline({ points, runId }: { points: readonly TrendPoint[]; runId: string }) {
-  const W = 44;
-  const H = 14;
-  const max = Math.max(...points.map((p) => p.value));
-  const min = Math.min(...points.map((p) => p.value));
-  const span = max - min || 1;
-  const xy = points.map((p, i) => ({
-    id: p.runId,
-    x: 1 + (i * (W - 2)) / Math.max(1, points.length - 1),
-    y: H - 2 - ((p.value - min) / span) * (H - 4),
-  }));
-  const me = xy.find((p) => p.id === runId);
-  return (
-    <svg aria-hidden width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="shrink-0 overflow-visible">
-      <polyline
-        points={xy.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")}
-        fill="none"
-        stroke={SPARK.line}
-        strokeWidth={1.25}
-        strokeLinejoin="round"
-        strokeLinecap="round"
-      />
-      {me && <circle cx={me.x} cy={me.y} r={2} fill={SPARK.dot} />}
-    </svg>
-  );
-}
-
-/** The fewest runs a sparkline is drawn over: two points are a slope, not a trend. */
-const TREND_FROM = 3;
-
-/**
  * One of the strip's figures: its mark and its word, then the number, large — the number is what
  * somebody opens a trace to read (the product owner's call on 2026-10-12, "richer metrics").
  *
- * EACH ONE SAYS HOW IT COMPARES (2026-10-14): a branch's figure against its parent's, as a delta beside
- * the number; any other run's against the agent's recent runs, as a sparkline beside its word.
+ * A BRANCH'S SAYS HOW IT COMPARES (2026-10-14): against its parent's, as a delta beside the number.
+ * The sparklines over an agent's recent runs that stood beside the other runs' words came out the
+ * same day — the product owner read them as decoration.
  */
 interface FigureProps {
   Mark: IconComponent;
@@ -85,17 +52,14 @@ interface FigureProps {
   title: string;
   tone?: string;
   delta?: React.ReactNode;
-  trend?: readonly TrendPoint[];
-  runId?: string;
 }
 
-function Figure({ Mark, label, value, title, tone = "text-ink", delta, trend, runId }: FigureProps) {
+function Figure({ Mark, label, value, title, tone = "text-ink", delta }: FigureProps) {
   return (
     <div className="min-w-0 px-3 py-2.5" title={title}>
       <div className="flex min-w-0 items-center gap-1.5 text-tiny text-faint">
         <span aria-hidden className="shrink-0"><Mark size={ICON.xs} /></span>
         <span className="min-w-0 flex-1 truncate">{label}</span>
-        {trend && trend.length >= TREND_FROM && runId && <Sparkline points={trend} runId={runId} />}
       </div>
       <div className="mt-0.5 flex min-w-0 items-baseline gap-1.5">
         <span className={`truncate text-section tabular-nums ${tone}`}>{value}</span>
@@ -174,21 +138,6 @@ export function TraceMetrics({ run, steps }: { run: RunSummary; steps: readonly 
     return b == null ? "" : ` · the parent run's same stretch, from the fork on: ${format(b)}`;
   };
 
-  // THE AGENT'S RECENT RUNS, for any run that is not a branch (a branch has its parent to answer to).
-  const runs = useTraceStore((s) => s.runs);
-  const trends = useMemo(() => {
-    if (parentId) return null;
-    return {
-      time: agentTrend(runs, run, "time"),
-      tokens: agentTrend(runs, run, "tokens"),
-      cost: agentTrend(runs, run, "cost"),
-    };
-  }, [parentId, runs, run]);
-  const trendTitle = (m: keyof RunFigures): string => {
-    const n = trends?.[m].length ?? 0;
-    return n >= TREND_FROM ? ` · the line: this agent's last ${n} finished runs, this one the dot` : "";
-  };
-
   const calls = plural(totals.llmCalls, "model call");
   const tokensTitle = (totals.tokens == null
     ? totals.llmCalls === 0 ? "No model calls yet" : `None of the ${calls} reported tokens`
@@ -219,29 +168,23 @@ export function TraceMetrics({ run, steps }: { run: RunSummary; steps: readonly 
             : runOutcome(run) === "stopped"
               ? `From its start until it was stopped — its steps themselves took ${fmtDuration(stepsTime(own))}`
               : "The agent's graph alone, from its start to its end — any time it sat paused included")
-        + vsTitle("time", fmtDuration) + trendTitle("time"),
+        + vsTitle("time", fmtDuration),
       tone: run.status === "running" ? "text-run" : "text-ink",
       delta: deltaOf("time", fmtDuration),
-      trend: trends?.time,
-      runId: run.id,
     },
     {
       Mark: Icon.trace.tokens,
       label: "Tokens",
       value: totals.tokens == null ? "—" : tokenCount(totals.tokens),
-      title: (totals.tokens == null ? tokensTitle : `${totals.tokens.toLocaleString()} tokens · ${tokensTitle}`) + vsTitle("tokens", tokenCount) + trendTitle("tokens"),
+      title: (totals.tokens == null ? tokensTitle : `${totals.tokens.toLocaleString()} tokens · ${tokensTitle}`) + vsTitle("tokens", tokenCount),
       delta: deltaOf("tokens", tokenCount),
-      trend: trends?.tokens,
-      runId: run.id,
     },
     {
       Mark: Icon.trace.metricCost,
       label: totals.unpricedCalls > 0 && totals.cost != null ? "Cost (partial)" : "Cost",
       value: fmtCost(totals.cost),
-      title: costTitle + vsTitle("cost", (n) => fmtCost(n)) + trendTitle("cost"),
+      title: costTitle + vsTitle("cost", (n) => fmtCost(n)),
       delta: deltaOf("cost", (n) => fmtCost(n), true),
-      trend: trends?.cost,
-      runId: run.id,
     },
     {
       Mark: Icon.trace.metricSteps,

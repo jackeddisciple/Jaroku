@@ -447,15 +447,6 @@ export const METRIC = {
 } as const;
 
 /**
- * SPARK — the metrics strip's sparklines over an agent's recent runs (the product owner's call,
- * 2026-10-14): a grey line, with this run marked on it in ink.
- */
-export const SPARK = {
-  line: "#6B6B66",
-  dot: INK.primary,
-} as const;
-
-/**
  * EDITED — the dot beside a field somebody has changed in the re-run editor (the product owner's call,
  * 2026-10-14): an orange the palette does not otherwise use, so an edit is never read as a state.
  */
