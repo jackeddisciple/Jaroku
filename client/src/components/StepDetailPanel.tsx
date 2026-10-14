@@ -57,7 +57,10 @@ function Kv({ label, children, title }: { label: string; children: React.ReactNo
   );
 }
 
-/** How the step went, as the same kind of pill the run's own outcome wears. */
+/**
+ * How the step went, as the same kind of pill the run's own outcome wears — and in the same word: a
+ * run that went through is "finished" in the header, so a step that did is too, not "completed".
+ */
 function StepStatus({ failed }: { failed: boolean }) {
   return (
     <span
@@ -66,7 +69,7 @@ function StepStatus({ failed }: { failed: boolean }) {
       }`}
     >
       {failed ? <Icon.trace.failed size={ICON.xs} /> : <Icon.trace.finished size={ICON.xs} />}
-      {failed ? "failed" : "completed"}
+      {failed ? "failed" : "finished"}
     </span>
   );
 }
