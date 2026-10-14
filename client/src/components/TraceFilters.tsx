@@ -88,6 +88,9 @@ export function TraceFilters({ steps }: { steps: readonly Step[] }) {
     const onKey = (e: KeyboardEvent): void => {
       const ui = useUiStore.getState();
       if (ui.navView !== null || ui.paletteOpen || insideKeyOwner(e.target)) return;
+      // NOT UNDER SOMETHING ON TOP: the code overlay or a modal covers the trace, and focus sent to a
+      // field behind it is focus somebody cannot see.
+      if (ui.codeOverlayOpen || document.querySelector('[role="dialog"][aria-modal="true"], [role="alertdialog"]')) return;
       const find = (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "f";
       const slash = e.key === "/" && paneOwnsBareKey(e, { navView: ui.navView, paletteOpen: ui.paletteOpen });
       if (!find && !slash) return;
