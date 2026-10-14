@@ -410,6 +410,31 @@ export const SPACE = {
   block: 24,
 } as const;
 
+/**
+ * CODE — the colours code is drawn in, everywhere it appears: a reply's code block, the code pane, a
+ * step's JSON in the trace, an edit's diff.
+ *
+ * THE PRODUCT OWNER'S PALETTE (2026-10-14) IS VS CODE'S DARK+ — keywords #C586C0, strings #CE9178,
+ * functions #DCDCAA, variables #9CDCFE, types #4EC9B0, numbers #B5CEA8, comments #6A9955 — and those
+ * values were made for a dark editor: on this app's light surfaces they measure 1.3–3.1:1 against
+ * the 4.5:1 text needs. The call was to keep the light surfaces and keep the hues, each darkened
+ * (same hue, same saturation, lower lightness) just until it reads at 4.5:1 on `void`, the darkest
+ * surface code sits on. Plain code text and punctuation are the app's ink rather than Dark+'s grey.
+ *
+ * Numbers and comments land a few steps apart once darkened, both greens; comments are also italic
+ * (`codeTheme.ts`), so the two never read as one.
+ */
+export const CODE = {
+  plain: INK.primary,
+  keyword: "#9E4C98",
+  string: "#A1583A",
+  function: "#6E6E2D",
+  variable: "#0270AB",
+  type: "#257867",
+  number: "#537542",
+  comment: "#517541",
+} as const;
+
 /** Tailwind class equivalents, for the common case where a class is what's wanted. */
 export const SPACE_CLASS = {
   tight: "mt-2",

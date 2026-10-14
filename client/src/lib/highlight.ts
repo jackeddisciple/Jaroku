@@ -1,7 +1,8 @@
 // Code in a reply, highlighted: which language a fence names, what to call it, and its coloured HTML.
 //
-// THE SAME HIGHLIGHTER AND THEME AS THE CODE PANE — shiki, `vitesse-light` — so a snippet in a reply and
-// the file it came from are coloured the same way. It loads lazily, once, with no grammars at all, and
+// THE SAME HIGHLIGHTER AND THEME AS THE CODE PANE — shiki, with the product's own code theme
+// (`codeTheme.ts`, the palette in `CODE`) — so a snippet in a reply and the file it came from are
+// coloured the same way. It loads lazily, once, with no grammars at all, and
 // takes each language the first time a reply uses it: a chat answer can be in any of forty languages,
 // and paying for all of them on the first render would put the cost on every reply that has no code.
 //
@@ -10,7 +11,9 @@
 //
 //   npm run test:highlight
 
-const THEME = "vitesse-light";
+import { CODE_THEME, CODE_THEME_NAME } from "./codeTheme.ts";
+
+const THEME = CODE_THEME_NAME;
 
 /** The names a model writes on a fence, mapped to the grammar shiki knows them by. */
 const ALIASES: Readonly<Record<string, string>> = {
@@ -78,7 +81,7 @@ let highlighter: Promise<Highlighter> | null = null;
 function getHighlighter(): Promise<Highlighter> {
   if (!highlighter) {
     highlighter = import("shiki").then((shiki) =>
-      shiki.createHighlighter({ themes: [THEME], langs: [] }),
+      shiki.createHighlighter({ themes: [CODE_THEME], langs: [] }),
     ) as unknown as Promise<Highlighter>;
   }
   return highlighter;

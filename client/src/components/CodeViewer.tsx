@@ -12,6 +12,7 @@
 import { useEffect, useRef, useState } from "react";
 import { orderedFiles, useBuildStore } from "../store/buildStore.ts";
 import { ICON } from "../lib/tokens.ts";
+import { CODE_THEME } from "../lib/codeTheme.ts";
 import { Truncate } from "./Truncate.tsx";
 import { StatusDot } from "./StatusBadge.tsx";
 import { CheckIcon, ChevronDownIcon, LockIcon } from "./panelIcons.tsx";
@@ -27,11 +28,10 @@ const LANGS = ["python", "json", "markdown", "toml"] as const;
 // would have gone light around a code pane that stayed near-black, and no token, class or variable
 // in the system reaches inside that markup to say otherwise.
 //
-// `vitesse-light` rather than one of the several light themes available, because it is the same
-// author's companion to the `vitesse-dark` this replaces — the same hue assignments at the same low
-// saturation, which is what "muted, close to the app's palette" meant when the app was dark and
-// still means now that it is not.
-const THEME = "vitesse-light";
+// The product's own code theme (`lib/codeTheme.ts`): the product owner's palette, darkened for a light
+// page, the same one a reply's code blocks and the trace's JSON are drawn in. Its name is written out
+// because `test:colour-system` reads it here to hold the pane to a light theme.
+const THEME = "jaroku-light";
 
 /** One coloured run of a line, as shiki tokenises it. `fontStyle` is shiki's bit set: 1 italic, 2 bold, 4 underline. */
 type Token = { content: string; color?: string; fontStyle?: number };
@@ -42,7 +42,7 @@ let highlighterPromise: Promise<Highlighter> | null = null;
 function getHighlighter(): Promise<Highlighter> {
   if (!highlighterPromise) {
     highlighterPromise = import("shiki").then((shiki) =>
-      shiki.createHighlighter({ themes: [THEME], langs: [...LANGS] }),
+      shiki.createHighlighter({ themes: [CODE_THEME], langs: [...LANGS] }),
     ) as Promise<Highlighter>;
   }
   return highlighterPromise;

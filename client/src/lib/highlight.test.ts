@@ -3,6 +3,10 @@
 //   npm run test:highlight
 
 import { codeLanguage, highlightCode, isCommandBlock, languageLabel } from "./highlight.ts";
+import { CODE } from "./tokens.ts";
+import { CODE_THEME_NAME } from "./codeTheme.ts";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 let fail = 0;
 const check = (name: string, ok: boolean, detail = ""): void => {
@@ -38,6 +42,43 @@ console.log("\nhighlighting");
   check("a language with no grammar is plain text", (await highlightCode("+++", "brainfuck")) === null);
   const escaped = await highlightCode("<script>alert(1)</script>", "html");
   check("code is escaped, never markup", typeof escaped === "string" && !escaped.includes("<script>"), String(escaped).slice(0, 120));
+}
+
+console.log("\nthe product's palette, token by token");
+{
+  // Each word below, in the colour the palette gives its kind — read out of shiki's own markup.
+  const colourOf = (html: string, word: string): string | null => {
+    const m = new RegExp(`<span style="color:(#[0-9A-Fa-f]{6})[^"]*">[^<]*${word.replace(/[()]/g, "\\$&")}`).exec(html);
+    return m ? m[1]!.toUpperCase() : null;
+  };
+  const ts = (await highlightCode(
+    "import { Component } from 'react';\nclass HomePage extends Component {\n  name: string = 'Hello world';\n  validateForm() { return this.email.trim() + 100; } // a comment\n}",
+    "ts",
+  )) ?? "";
+  const want: [string, string, string][] = [
+    ["import", CODE.keyword, "a keyword"],
+    ["return", CODE.keyword, "...another"],
+    ["Hello world", CODE.string, "a string"],
+    ["validateForm", CODE.function, "a function"],
+    ["trim", CODE.function, "a method"],
+    ["email", CODE.variable, "a property"],
+    ["HomePage", CODE.type, "a class"],
+    ["string", CODE.type, "a type"],
+    ["100", CODE.number, "a number"],
+    ["a comment", CODE.comment, "a comment"],
+  ];
+  for (const [word, colour, what] of want) {
+    check(`${what} (${word}) is ${colour}`, colourOf(ts, word) === colour.toUpperCase(), String(colourOf(ts, word)));
+  }
+  check("a comment is italic as well", /font-style:italic[^>]*>[^<]*a comment/.test(ts));
+  const json = (await highlightCode('{"must_haves": ["Python", 5], "ok": true}', "json")) ?? "";
+  check("a JSON key is a property", colourOf(json, "must_haves") === CODE.variable.toUpperCase(), String(colourOf(json, "must_haves")));
+  check("...its values strings and numbers", colourOf(json, "Python") === CODE.string.toUpperCase() && colourOf(json, "5") === CODE.number.toUpperCase());
+  // THE CODE PANE ASKS FOR THE SAME THEME, by name — its own highlighter, the same colours.
+  const viewer = readFileSync(fileURLToPath(new URL("../components/CodeViewer.tsx", import.meta.url)), "utf8");
+  check("the code pane is drawn in the same theme", viewer.includes(`const THEME = "${CODE_THEME_NAME}"`) && viewer.includes("CODE_THEME"));
+  check("no background of its own is written into the markup",
+    !/background-color:(?!transparent)/.test(ts), ts.match(/background-color:[^;"]*/)?.[0] ?? "");
 }
 
 console.log(fail === 0 ? "\nall highlight checks passed" : `\n${fail} highlight check(s) FAILED`);
