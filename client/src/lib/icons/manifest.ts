@@ -402,6 +402,9 @@ export const MANIFEST = {
     collapseAll: "UnfoldLessIcon",
     expandAll: "UnfoldMoreIcon",
     inherited: "Link01Icon",
+    viewList: "ListViewIcon",
+    viewWaterfall: "WaterfallDown01Icon",
+    viewGraph: "ArtboardIcon",
   },
 
   // ── §5 Global ─────────────────────────────────────────────────────────────

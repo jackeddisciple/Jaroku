@@ -20,7 +20,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { filterCounts, type StepFilter } from "../lib/traceView.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { ICON, STATUS, STEP_TYPE } from "../lib/tokens.ts";
-import { useTraceStore, visibleTraceRows } from "../store/traceStore.ts";
+import { useTraceStore, visibleTraceRows, type StepView } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { insideKeyOwner, paneOwnsBareKey } from "../lib/bareKeys.ts";
 import { keyHint } from "../lib/modKey.ts";
@@ -46,8 +46,23 @@ const KIND_DOT: Partial<Record<StepFilter, string>> = {
   errors: STATUS.error,
 };
 
-/** What sits beside the segments: Collapse all and Expand all, then the search mark (32px each), and their gaps. */
-const MARK_ROOM = 8 + 32 * 2 + 8 + 32;
+/** What sits beside the segments: the fold mark, the view switcher's three, the search mark (32px each), and their gaps. */
+const MARK_ROOM = 8 + 32 + 4 + 32 * 3 + 4 + 32;
+
+/**
+ * LIST, WATERFALL OR GRAPH (2026-10-14), beside the search: the steps as a list, the same list with each
+ * step's time drawn behind its row, or the agent's graph with this run on it.
+ */
+export function ViewSwitcher() {
+  const view = useTraceStore((s) => s.stepView);
+  const setView = useTraceStore((s) => s.setStepView);
+  const options: SegmentOption<StepView>[] = [
+    { value: "list", label: "List", icon: Icon.trace.viewList },
+    { value: "waterfall", label: "Waterfall — each step's time behind its row", icon: Icon.trace.viewWaterfall },
+    { value: "graph", label: "Graph — the agent's nodes with this run on them", icon: Icon.trace.viewGraph },
+  ];
+  return <Segmented options={options} value={view} onChange={setView} ariaLabel="Show the steps as" />;
+}
 
 export function TraceFilters({ steps }: { steps: readonly Step[] }) {
   // THE COUNTS SHOW WHENEVER THEY FIT, measured rather than guessed. A fixed 460px threshold hid them
@@ -73,10 +88,14 @@ export function TraceFilters({ steps }: { steps: readonly Step[] }) {
   const setFilter = useTraceStore((s) => s.setStepFilter);
   const setQuery = useTraceStore((s) => s.setStepQuery);
   const counts = useMemo(() => filterCounts(steps), [steps]);
-  const foldable = useMemo(() => {
+  // The nodes that fold — steps something ran inside — and whether any of them is open now.
+  const folds = useMemo(() => {
     const ids = new Set(steps.map((st) => st.id));
-    return steps.some((st) => st.parent_step_id != null && ids.has(st.parent_step_id));
+    return [...new Set(steps.map((st) => st.parent_step_id).filter((p): p is string => p != null && ids.has(p)))];
   }, [steps]);
+  const foldable = folds.length > 0;
+  const collapsedIds = useTraceStore((s) => s.collapsedStepIds);
+  const anyOpen = folds.some((id) => !collapsedIds[id]);
   const narrowed = filter !== "all" || query.trim() !== "";
 
   const [open, setOpen] = useState(false);
@@ -161,24 +180,28 @@ export function TraceFilters({ steps }: { steps: readonly Step[] }) {
       <div className="max-w-full overflow-x-auto">
         <Segmented options={options} value={filter} onChange={setFilter} ariaLabel="Show steps of kind" />
       </div>
-      {/* FOLD OR UNFOLD EVERY NODE AT ONCE (2026-10-14) — for a run of thirty steps, the way to read it as
-          its nodes first. Off while a filter or a search is on: those set folding aside. */}
-      <span className={`flex shrink-0 items-center ${showField ? "" : "ml-auto"}`}>
+      {/* THE TOOLS, AS ONE GROUP AT THE ROW'S END — fold, view, search — so on a narrow panel they move to
+          the next line together rather than one at a time. */}
+      <span className="ml-auto flex shrink-0 items-center gap-1">
+        {/* FOLD OR UNFOLD EVERY NODE AT ONCE (2026-10-14), one mark that says which it will do: Collapse
+            all while any node is open, Expand all once none is. Off while a filter or a search is on:
+            those set folding aside. */}
         <IconButton
-          icon={Icon.trace.collapseAll}
-          label="Collapse all"
+          icon={anyOpen ? Icon.trace.collapseAll : Icon.trace.expandAll}
+          label={anyOpen ? "Collapse all" : "Expand all"}
           disabledReason={!foldable ? "Nothing here folds" : narrowed ? "Folding is set aside while a filter or search is on" : null}
-          onClick={() => useTraceStore.getState().setAllCollapsed(true)}
+          onClick={() => useTraceStore.getState().setAllCollapsed(anyOpen)}
         />
-        <IconButton
-          icon={Icon.trace.expandAll}
-          label="Expand all"
-          disabledReason={!foldable ? "Nothing here folds" : narrowed ? "Folding is set aside while a filter or search is on" : null}
-          onClick={() => useTraceStore.getState().setAllCollapsed(false)}
-        />
+        <ViewSwitcher />
+        {!showField && (
+          <span ref={mark} className="shrink-0">
+            <IconButton icon={Icon.trace.search} label={`Search steps (${keyHint("⌘F")} or /)`} onClick={() => setOpen(true)} />
+          </span>
+        )}
       </span>
-      {showField ? (
-        <div className="flex h-8 min-w-[9rem] flex-1 items-center gap-2 rounded-control border border-hair bg-panel px-2 focus-within:border-edge">
+      {showField && (
+        // Open, the search takes a line of its own under the filters and the tools.
+        <div className="flex h-8 min-w-[9rem] basis-full items-center gap-2 rounded-control border border-hair bg-panel px-2 focus-within:border-edge">
           <span className="shrink-0 text-faint" aria-hidden><Icon.trace.search size={ICON.xs} /></span>
           <input
             ref={input}
@@ -222,10 +245,6 @@ export function TraceFilters({ steps }: { steps: readonly Step[] }) {
             </button>
           )}
         </div>
-      ) : (
-        <span ref={mark} className="shrink-0">
-          <IconButton icon={Icon.trace.search} label={`Search steps (${keyHint("⌘F")} or /)`} onClick={() => setOpen(true)} />
-        </span>
       )}
     </div>
   );

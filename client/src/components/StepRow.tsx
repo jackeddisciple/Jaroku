@@ -332,6 +332,7 @@ export function StepRow({
   inherited = false,
   scale,
   heat = 0,
+  waterfall = false,
 }: {
   row: VisibleRow;
   tabbable: boolean;
@@ -350,6 +351,8 @@ export function StepRow({
   scale?: MetricScale;
   /** How hot this step runs, 0–1: its share of the run's costliest or slowest (`stepHeat`). */
   heat?: number;
+  /** The waterfall view: this step's time drawn behind the whole row rather than in a column. */
+  waterfall?: boolean;
 }) {
   const { step } = row;
   const group = row.childIds.length > 0;
@@ -408,7 +411,7 @@ export function StepRow({
         e.preventDefault();
         toggleDetails();
       }}
-      className={`group/step relative flex animate-slide-in cursor-pointer select-none items-center gap-2 rounded-control py-1.5 pl-2 pr-1 outline-none transition-colors duration-fast focus-visible:shadow-focusring motion-reduce:animate-none ${
+      className={`group/step relative isolate flex animate-slide-in cursor-pointer select-none items-center gap-2 rounded-control py-1.5 pl-2 pr-1 outline-none transition-colors duration-fast focus-visible:shadow-focusring motion-reduce:animate-none ${
         selected ? "bg-active" : "hover:bg-active/40"
       } ${row.context || inherited ? "text-muted [&_.text-ink]:text-muted" : ""}`}
       // AN INHERITED STEP IS HATCHED (2026-10-14): a faint diagonal in the hairline grey behind a
@@ -420,6 +423,22 @@ export function StepRow({
       {/* The same selection mark the other lists use — inset, square, ink. */}
       {selected && <span aria-hidden className="absolute left-0 top-1 bottom-1 w-0.5 bg-accent" />}
 
+      {/* THE WATERFALL VIEW (2026-10-14): the step's time across the whole row, behind everything on
+          it — where it began and how long it ran against the run's span, in its own colour, faint. */}
+      {waterfall && bar && (
+        // One axis for every row: from just past the step numbers to the row's end, whatever the depth.
+        // A faint fill with a firmer bottom edge, so it reads as a bar and not as a highlight.
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-y-0.5 -z-10 rounded-sm border-b-2"
+          style={{
+            left: `calc(${GUTTER}px + (100% - ${GUTTER + 4}px) * ${bar.left})`,
+            width: `max(3px, calc((100% - ${GUTTER + 4}px) * ${bar.width}))`,
+            background: `color-mix(in srgb, ${stepColour(step, provider, mark)} 8%, transparent)`,
+            borderBottomColor: `color-mix(in srgb, ${stepColour(step, provider, mark)} 45%, transparent)`,
+          }}
+        />
+      )}
       <Connectors row={row} />
       {/* LEFT-ALIGNED, so every row's # stands in one column whatever its number's digits. */}
       <span className="w-7 shrink-0 text-left text-tiny tabular-nums text-faint">#{step.seq}</span>
@@ -544,7 +563,7 @@ export function StepRow({
           <span className="truncate">{fmtDuration(step.latency_ms)}</span>
           {scale && <MiniBar value={Number.isFinite(step.latency_ms) ? step.latency_ms : null} max={scale.time} colour={METRIC.time} />}
         </span>
-        {show.timeline && <Waterfall step={step} bar={bar} colour={stepColour(step, provider, mark)} inherited={inherited} />}
+        {show.timeline && !waterfall && <Waterfall step={step} bar={bar} colour={stepColour(step, provider, mark)} inherited={inherited} />}
       </span>
 
       {/* DETAILS HOLDS ITS OWN PLACE, so the figures never move when it appears. Too narrow for a

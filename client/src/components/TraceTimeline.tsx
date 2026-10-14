@@ -7,7 +7,8 @@ import { buildTraceTree, descendantSteps, isInherited, ownSteps, runWindow, step
 import { EmptyState } from "./EmptyState.tsx";
 import { TraceHeader } from "./TraceHeader.tsx";
 import { TraceMetrics } from "./TraceMetrics.tsx";
-import { TraceFilters } from "./TraceFilters.tsx";
+import { TraceFilters, ViewSwitcher } from "./TraceFilters.tsx";
+import { GraphView } from "./GraphView.tsx";
 import { TraceResult } from "./TraceResult.tsx";
 import { StepDetailPanel } from "./StepDetailPanel.tsx";
 import { graphLook, traceMarks, type StepMark } from "./traceMarks.ts";
@@ -80,6 +81,7 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
   const own = useMemo(() => ownSteps(run, steps), [run, steps]);
   const span = useMemo(() => (run ? runWindow(run, own, now) : null), [run, own, now]);
   const collapsed = useTraceStore((s) => s.collapsedStepIds);
+  const view = useTraceStore((s) => s.stepView);
   // MEASURED ON A BOX THAT IS ALWAYS THERE. The tree unmounts while "No steps match" shows, and an
   // observer left on it would keep reading the detached element after the filter is cleared.
   const frame = useRef<HTMLDivElement>(null);
@@ -243,6 +245,7 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
               mark={marks.get(r.step.name)}
               scale={scale}
               heat={isInherited(r.step, run) ? 0 : stepHeat(r.step, scale)}
+              waterfall={view === "waterfall"}
             />
           ))}
         </div>
@@ -465,6 +468,7 @@ export function TraceTimeline() {
   const run = useTraceStore((s) => (activeRunId ? s.runs[activeRunId] : undefined));
   const bucket = useTraceStore((s) => (activeRunId ? s.stepsByRun[activeRunId] : undefined));
   const detailsOpen = useTraceStore((s) => Boolean(s.expandedStepId && bucket?.[s.expandedStepId]));
+  const stepView = useTraceStore((s) => s.stepView);
   const body = useRef<HTMLDivElement>(null);
   const side = useSideBySide(body, run != null);
 
@@ -487,7 +491,14 @@ export function TraceTimeline() {
       {/* THE STEPS, AND THEIR DETAILS DOCKED BESIDE OR UNDER THEM (see StepDetailPanel): beside on a
           panel wide enough for both, and otherwise below, with the list keeping its top two-fifths so
           the selected row stays on screen while somebody reads about it. */}
-      {!run ? <div className="min-h-0 flex-1"><NoRun /></div> : (
+      {!run ? <div className="min-h-0 flex-1"><NoRun /></div> : stepView === "graph" ? (
+        // THE GRAPH VIEW: the agent's graph with this run on it, in place of the list — the switcher
+        // stays above it, so the list is one press away.
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex shrink-0 justify-end px-6 py-2"><ViewSwitcher /></div>
+          <div className="min-h-0 flex-1 border-t border-hair"><GraphView /></div>
+        </div>
+      ) : (
       <div ref={body} className={`flex min-h-0 flex-1 ${detailsOpen && side ? "flex-row" : "flex-col"}`}>
       {/* timeline body */}
       {/* NO `scroll-fade` HERE: the filter row sticks to the top of this region, and a mask over the

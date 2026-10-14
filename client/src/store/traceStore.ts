@@ -11,6 +11,7 @@ import type { Run, RunStatus, RunSummary, Step, TraceEvent } from "../types.ts";
 import { ancestorIds, awaitingNode, buildTraceTree, visibleRows, type StepFilter, type VisibleRow } from "../lib/traceView.ts";
 
 export type ConnectionState = "connecting" | "open" | "closed";
+export type StepView = "list" | "waterfall" | "graph";
 export type LogLine = { level: "stderr" | "parseError"; text: string };
 
 interface TraceState {
@@ -83,6 +84,11 @@ interface TraceState {
    */
   graphStepRequest: string | null;
   /**
+   * How the Steps tab draws the run: the list, the list with each step's time drawn behind its row
+   * (waterfall), or the agent's graph. One choice for the session, kept across runs.
+   */
+  stepView: StepView;
+  /**
    * The latest refusal from the run controls — a pause, a resume or a re-run the server turned down —
    * and the run it was about, when it named one. Read by the controls that asked, so a refusal is said
    * where the button is rather than only in a two-second toast. `at` tells two equal refusals apart.
@@ -121,6 +127,7 @@ interface TraceState {
   setStepFilter: (filter: StepFilter) => void;
   setStepQuery: (query: string) => void;
   requestGraphStep: (stepId: string | null) => void;
+  setStepView: (view: StepView) => void;
   setControlError: (error: { runId: string | null; message: string } | null) => void;
 }
 
@@ -192,6 +199,7 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   stepFilter: "all",
   stepQuery: "",
   graphStepRequest: null,
+  stepView: "list",
   controlError: null,
 
   applyHistory: (runs, meta) =>
@@ -324,6 +332,8 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   setStepQuery: (stepQuery) => set({ stepQuery }),
 
   requestGraphStep: (graphStepRequest) => set({ graphStepRequest }),
+
+  setStepView: (stepView) => set({ stepView }),
 
   setControlError: (error) => set({ controlError: error ? { ...error, at: Date.now() } : null }),
 
