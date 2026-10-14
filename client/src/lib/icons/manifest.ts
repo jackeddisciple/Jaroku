@@ -147,6 +147,8 @@ export const MANIFEST = {
      * panel", then "Hide the panel" — and `PanelRightOpenIcon` exists and is not used.
      */
     toggle: "PanelRightCloseIcon",
+    // The rail's own words beside its marks, on and off (2026-10-14).
+    railLabels: "TextAlignLeftIcon",
     agent: "Orbit02Icon",
     graph: "ArtboardIcon",
     trace: "FootprintsIcon",

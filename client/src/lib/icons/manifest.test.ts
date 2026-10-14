@@ -77,7 +77,7 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // 283 WITH THE DETAILS DRAWER'S PREVIOUS AND NEXT STEP — marks already here.
   // 288 WITH THE METRICS STRIP'S FIVE MARKS — and still 288 when two of them became the trace's
   // `time` and `tokens`, renamed rather than added.
-  check("298 registry keys", entries.length === 298, `${entries.length}`);
+  check("299 registry keys", entries.length === 299, `${entries.length}`);
   const names = new Set(entries.map((e) => e.export));
   // 104 from icons_integration's appendix, plus D8's 13 — the composer glyphs that had to move
   // here when `@hugeicons/react` came out. See the note at the top of `registry.ts`.
