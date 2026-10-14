@@ -61,8 +61,9 @@ function useRowTier(ref: React.RefObject<HTMLDivElement | null>): RowTier {
  * holds, what they cost, and whether any of them failed.
  *
  * ONE ROW IS IN THE TAB ORDER — the selected one, or the first — and ↑/↓ move the selection and the
- * focus together, ← folds a node (or climbs to it), → unfolds it (or steps into it). J/K walk the same
- * visible rows from anywhere (CommandPalette), and Enter on a row opens its details.
+ * focus together, ← folds a node (or climbs to it), → unfolds it (or steps into it), Home and End go
+ * to the first and last. J/K walk the same visible rows from anywhere (CommandPalette), and Enter on a
+ * row opens its details.
  */
 function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly Step[] }) {
   const selectedStepId = useTraceStore((s) => s.selectedStepId);
@@ -120,9 +121,16 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
   };
 
   const onKeyDown = (e: React.KeyboardEvent): void => {
-    if (!["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"].includes(e.key)) return;
+    if (!["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
     if (e.target instanceof HTMLElement && e.target.getAttribute("role") !== "treeitem") return;
     e.preventDefault();
+    // FIRST AND LAST, as the ARIA tree pattern has them — of the rows on screen, folds and filters
+    // respected, like every other key here.
+    if (e.key === "Home" || e.key === "End") {
+      const edge = e.key === "Home" ? rows[0] : rows[rows.length - 1];
+      if (edge) focusRow(edge.step.id);
+      return;
+    }
     const at = rows.findIndex((r) => r.step.id === useTraceStore.getState().selectedStepId);
     const row = rows[at];
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
