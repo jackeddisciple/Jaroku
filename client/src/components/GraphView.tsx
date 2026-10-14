@@ -1702,7 +1702,7 @@ export function GraphView() {
   return (
     <div
       ref={canvasRef}
-      className={`graph-canvas relative h-full w-full focus:outline-none ${framed || olderPending ? "" : "opacity-0"}`}
+      className="graph-canvas relative h-full w-full focus:outline-none"
       // Enter on a focused node opens it, as a click does. Read off the node's own element, because
       // React Flow reports a keyboard selection only for nodes whose state it holds, and these are
       // rebuilt from the introspected topology on every render.
@@ -1732,6 +1732,14 @@ export function GraphView() {
         }
       }}
     >
+      {/* NOT SHOWN UNTIL IT IS FRAMED, and not blank meanwhile: the canvas sat invisible for the
+          second React Flow takes to start and be framed, so "Show on graph" opened on an empty
+          panel. The shape of the graph arriving covers it instead, as it does while the graph loads. */}
+      {!framed && !olderPending && (
+        <div className="absolute inset-0 z-30" aria-hidden>
+          <GraphSkeleton />
+        </div>
+      )}
       {olderPending && (
         // WHERE THE OLDER GRAPH WILL BE, said as such: the shape of one arriving, or why it did not.
         <div className="absolute inset-0">
