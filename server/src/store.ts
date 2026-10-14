@@ -393,6 +393,11 @@ export class TraceStore {
 
   // Correlate a boundary's checkpoint to the steps it covers (seq <= uptoSeq, not yet stamped),
   // so branching can later resume from the checkpoint that follows a chosen step's node.
+  //
+  // NEVER A BRANCH'S INHERITED STEPS. A branch's first boundary covers everything up to its first own
+  // node, and that range starts with the prefix it copied from its parent — so a copied step with no
+  // checkpoint of its own took the branch's, and "re-run from" it started after the branch's first
+  // node instead of where that step really was. A copied step keeps what it was copied with.
   async setCheckpointUpto(
     ctx: TenantContext,
     runId: string,
@@ -401,8 +406,9 @@ export class TraceStore {
   ): Promise<void> {
     await this.q(ctx).run(
       `UPDATE steps SET checkpoint_id = ?
-        WHERE run_id = ? AND workspace_id = ? AND seq <= ? AND checkpoint_id IS NULL`,
-      [checkpointId, runId, ctx.workspaceId, uptoSeq],
+        WHERE run_id = ? AND workspace_id = ? AND seq <= ? AND checkpoint_id IS NULL
+          AND seq > COALESCE((SELECT branch_from_seq FROM runs WHERE id = ? AND workspace_id = ?), -1)`,
+      [checkpointId, runId, ctx.workspaceId, uptoSeq, runId, ctx.workspaceId],
     );
   }
 

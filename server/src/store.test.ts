@@ -145,6 +145,25 @@ console.log("\na continued run ends as the whole run");
   check(none?.tokens === 0 && none?.cost === 0, "a run with no steps yet totals zero, not null");
 }
 
+console.log("\na branch's boundaries stamp only its own steps");
+{
+  // The parent's node step #0 was never stamped; #1 was. The branch copies both, then runs #2.
+  const parentRun = randomUUID();
+  await store.upsertRun(A, run(parentRun));
+  await store.insertStep(A, step(parentRun, 0));
+  await store.insertStep(A, step(parentRun, 1));
+  await store.setCheckpointUpto(A, parentRun, 1, "ckpt-parent");
+  await db.run(`UPDATE steps SET checkpoint_id = NULL WHERE run_id = ? AND seq = 0`, [parentRun]);
+  const child = randomUUID();
+  await store.copyRunPrefix(A, parentRun, child, 1, 1);
+  await store.insertStep(A, step(child, 2));
+  await store.setCheckpointUpto(A, child, 2, "ckpt-branch");
+  const stamps = Object.fromEntries((await store.stepsForRun(A, child)).map((s) => [s.seq, (s as unknown as { checkpoint_id: string | null }).checkpoint_id]));
+  check(stamps[2] === "ckpt-branch", `its own step takes its boundary (${stamps[2]})`);
+  check(stamps[1] === "ckpt-parent", `an inherited step keeps the checkpoint it was copied with (${stamps[1]})`);
+  check(stamps[0] === null, `...and one copied without any is not handed the branch's (${stamps[0]})`);
+}
+
 console.log("\nthe storage column stays in storage");
 
 // The one documented exception to the frozen schema. `SELECT *` would put it into the object
