@@ -410,7 +410,9 @@ export function StepRow({
 
       <span className="relative min-w-[4.5rem] flex-1">
         <span className="flex min-w-0 items-center gap-1.5">
-          <span className="min-w-0 truncate text-body font-medium text-ink" title={step.name}>
+          {/* 13px (the product owner's call, 2026-10-15): a step up from the 12px kind line under it,
+              a step down from the sidebar's 14px destinations. */}
+          <span className="min-w-0 truncate text-label font-medium text-ink" title={step.name}>
             {places.includes("name") ? <Marked text={step.name} query={query} /> : step.name}
           </span>
           {/* Derived from the AGENT's manifest, not from the step: the frozen Step schema has no

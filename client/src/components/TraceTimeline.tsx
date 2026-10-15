@@ -371,7 +371,7 @@ function LiveTail({ run, steps, span, tier, waiting = [], marks }: {
         </span>
       </span>
       <span className="min-w-[4.5rem] flex-1">
-        <span className="block truncate text-body font-medium text-ink" title={name}>{name}</span>
+        <span className="block truncate text-label font-medium text-ink" title={name}>{name}</span>
         <span className={`mt-0.5 block truncate text-caption ${state === "running" ? "text-run" : "text-faint"}`} title={more}>{word}</span>
       </span>
       {/* THE STEPS' OWN COLUMNS, so its time sits under theirs: the time it has run so far, in amber. */}
