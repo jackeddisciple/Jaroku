@@ -2,7 +2,7 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 
 import { CANCELLED_BY_USER, DRAWER_SNAP, orderedSteps, treeSteps, useTraceStore } from "../store/traceStore.ts";
 import type { RunSummary, Step } from "../types.ts";
 import { useUiStore } from "../store/uiStore.ts";
-import { COL, StepRow, columnsFor, type BarPlace, type FoldSummary, type MetricScale, type RowTier } from "./StepRow.tsx";
+import { COL, NAME_X, StepRow, TILE_X, columnsFor, type BarPlace, type FoldSummary, type MetricScale, type RowTier } from "./StepRow.tsx";
 import { buildTraceTree, descendantSteps, isInherited, ownSteps, runWindow, stepWindow, traceSections, traceTotals, visibleRows, type TimeWindow, type TraceSection, type VisibleRow } from "../lib/traceView.ts";
 import { nodeKind } from "./graphNodeIcons.ts";
 import { EmptyState } from "./EmptyState.tsx";
@@ -191,7 +191,14 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
     <div key={group[0]!.step.id} role="none" className="rounded-card border border-hair bg-panel p-1">
       {group.map((r, i) => (
         <Fragment key={r.step.id}>
-        {i === 1 && <div role="none" aria-hidden className="mx-2 my-0.5 h-px bg-hair" />}
+        {i === 1 && (
+          // The hairline under the header, from where the names start — so the card's line runs on beside
+          // it rather than crossing it (the product owner's call, 2026-10-15).
+          <div role="none" aria-hidden className="relative h-[5px]">
+            <span className="absolute right-2 top-0.5 h-px bg-hair" style={{ left: NAME_X }} />
+            <span className="absolute inset-y-0 w-0.5 bg-grip" style={{ left: TILE_X - 1 }} />
+          </div>
+        )}
         <StepRow
           key={r.step.id}
           row={r}
@@ -203,6 +210,7 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
           provider={run?.provider}
           mark={marks.get(r.step.name)}
           scale={scale}
+          link={{ up: i > 0, down: i < group.length - 1 }}
         />
         </Fragment>
       ))}

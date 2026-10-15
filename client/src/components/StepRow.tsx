@@ -200,6 +200,16 @@ function Waterfall({ step, bar, colour, inherited }: { step: Step; bar: BarPlace
   );
 }
 
+/**
+ * WHERE A ROW'S TILE STANDS, for the line that joins the steps of one card (2026-10-15): the row's
+ * padding, the #seq column and its gap (44px), the fold chevron's slot (20px), then half the 22px tile.
+ * Every row's tile is here — nothing is indented — so the line runs straight down the card.
+ */
+export const TILE_X = 44 + 20 + 11;
+const TILE_HALF = 11;
+/** Where a row's name starts: past the tile and the row's 8px gap. */
+export const NAME_X = TILE_X + TILE_HALF + 8;
+
 /** What a folded node stands for: its steps, what they cost, and whether any of them failed. */
 export interface FoldSummary {
   steps: number;
@@ -315,6 +325,7 @@ export function StepRow({
   mark,
   inherited = false,
   scale,
+  link,
 }: {
   row: VisibleRow;
   tabbable: boolean;
@@ -331,6 +342,8 @@ export function StepRow({
   inherited?: boolean;
   /** The run's heaviest figures, for the mini bars under this row's own. */
   scale?: MetricScale;
+  /** Joined to the step above and below it in its card: a line into the top and out of the bottom of its tile. */
+  link?: { up: boolean; down: boolean };
 }) {
   const { step } = row;
   const group = row.childIds.length > 0;
@@ -404,6 +417,11 @@ export function StepRow({
       {selected && <span aria-hidden className="absolute left-0 top-1 bottom-1 w-0.5 bg-accent" />}
 
       {/* LEFT-ALIGNED, so every row's # stands in one column whatever its number's digits. */}
+      {/* ONE LINE DOWN THE CARD, THROUGH EVERY STEP'S TILE (the product owner's call, 2026-10-15): the
+          steps of one node are joined, level with each other — no elbows, no indent. Each piece stops
+          at the tile's edge, so the line never paints over a tile. */}
+      {link?.up && <span aria-hidden className="absolute top-0 w-0.5 bg-grip" style={{ left: TILE_X - 1, height: `calc(50% - ${TILE_HALF}px)` }} />}
+      {link?.down && <span aria-hidden className="absolute bottom-0 w-0.5 bg-grip" style={{ left: TILE_X - 1, top: `calc(50% + ${TILE_HALF}px)` }} />}
       <span className="w-7 shrink-0 text-left text-tiny tabular-nums text-faint">#{step.seq}</span>
       {/* NO INDENT AND NO TREE LINES (the product owner's call, 2026-10-14): a node is its card's header
           row, and every step inside it sits level with the others below it — the staircase of
