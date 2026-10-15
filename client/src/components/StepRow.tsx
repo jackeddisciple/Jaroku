@@ -185,7 +185,7 @@ function Waterfall({ step, bar, colour, inherited }: { step: Step; bar: BarPlace
       {bar && (
         <span
           aria-hidden
-          // The step's own colour — the same one as its tile — so a bar is findable from its row.
+          // Ink, or red for a step that failed — see the call site.
           className="absolute bottom-0 top-0 rounded-full"
           style={{
             left: `${bar.left * 100}%`,
@@ -533,7 +533,10 @@ export function StepRow({
           <span className="truncate">{fmtDuration(step.latency_ms)}</span>
           {scale && <MiniBar value={Number.isFinite(step.latency_ms) ? step.latency_ms : null} max={scale.time} colour={METRIC.time} />}
         </span>
-        {show.timeline && <Waterfall step={step} bar={bar} colour={stepColour(step, provider, mark)} inherited={inherited} />}
+        {/* INK, AND RED ONLY FOR A FAILURE (the product owner's call, 2026-10-15): the tile beside it
+            already says the step's kind, so the mark only has to say when it ran and for how long —
+            and a failed step is the one mark that should stand out of the column. */}
+        {show.timeline && <Waterfall step={step} bar={bar} colour={step.error ? STATUS.error : TEXT.ink} inherited={inherited} />}
       </span>
 
       {runId && <ViewedBox runId={runId} step={step} viewed={viewed} />}
