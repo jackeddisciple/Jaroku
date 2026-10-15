@@ -174,7 +174,7 @@ export function TraceHeader({ run }: { run: RunSummary | undefined }) {
           <span className={`${CHIP} shrink-0 cursor-default`} tabIndex={0}>{relTime(run.started_at)}</span>
         </Tip>
         {run.parent_run_id && (
-          <Tip label={`Open run ${run.parent_run_id}, which this branched from`}>
+          <Tip label={`A branch of run ${run.parent_run_id}${run.branch_from_seq != null ? `, re-run from step #${run.branch_from_seq}` : ""} — press to open that run`}>
             <button
               type="button"
               onClick={() => openRun(run.parent_run_id!)}
@@ -182,9 +182,10 @@ export function TraceHeader({ run }: { run: RunSummary | undefined }) {
             >
               {/* The branch mark in green, the product owner's call on 2026-10-12; its words stay muted. */}
               <span aria-hidden className="shrink-0 text-ok"><Icon.agents.fork size={ICON.xs} /></span>
-              <span className="truncate">
-                branch of {shortId(run.parent_run_id)}
-                {run.branch_from_seq != null && ` from #${run.branch_from_seq}`}
+              {/* SHORT (the product owner's call, 2026-10-15): the mark, the original's id, the step. */}
+              <span className="truncate tabular-nums">
+                {shortId(run.parent_run_id)}
+                {run.branch_from_seq != null && ` · #${run.branch_from_seq}`}
               </span>
             </button>
           </Tip>
