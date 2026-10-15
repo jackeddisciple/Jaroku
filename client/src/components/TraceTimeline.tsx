@@ -1,8 +1,8 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CANCELLED_BY_USER, DRAWER_SNAP, orderedSteps, treeSteps, useTraceStore } from "../store/traceStore.ts";
 import type { RunSummary, Step } from "../types.ts";
 import { useUiStore } from "../store/uiStore.ts";
-import { COL, StepRow, columnsFor, tileCentre, type BarPlace, type FoldSummary, type MetricScale, type RowTier } from "./StepRow.tsx";
+import { COL, StepRow, columnsFor, type BarPlace, type FoldSummary, type MetricScale, type RowTier } from "./StepRow.tsx";
 import { buildTraceTree, descendantSteps, isInherited, ownSteps, runWindow, stepWindow, traceSections, traceTotals, visibleRows, type TimeWindow, type TraceSection, type VisibleRow } from "../lib/traceView.ts";
 import { nodeKind } from "./graphNodeIcons.ts";
 import { EmptyState } from "./EmptyState.tsx";
@@ -185,10 +185,13 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
 
   // ONE CARD PER NODE — the product owner's call on 2026-10-12: a node and the steps that ran inside it
   // read as one block, and the run as a stack of them. Presentation only (`role="none"`): the rows are
-  // still the tree's items, and every line is drawn inside its own row.
+  // still the tree's items. THE NODE IS THE CARD'S HEADER (2026-10-14): its row on top, a hairline, and
+  // the steps inside it below, level with one another — no indent, no connector lines.
   const card = (group: VisibleRow[]) => (
     <div key={group[0]!.step.id} role="none" className="rounded-card border border-hair bg-panel p-1">
-      {group.map((r) => (
+      {group.map((r, i) => (
+        <Fragment key={r.step.id}>
+        {i === 1 && <div role="none" aria-hidden className="mx-2 my-0.5 h-px bg-hair" />}
         <StepRow
           key={r.step.id}
           row={r}
@@ -201,6 +204,7 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
           mark={marks.get(r.step.name)}
           scale={scale}
         />
+        </Fragment>
       ))}
     </div>
   );
@@ -364,10 +368,6 @@ function LiveTail({ run, steps, span, tier, waiting = [], marks }: {
       aria-live="polite"
     >
     <div className="relative flex items-center gap-2 rounded-control py-1.5 pl-2 pr-1">
-      {/* Down out of the tile to the steps already finished inside it. */}
-      {inside.length > 0 && (
-        <span aria-hidden className="absolute bottom-0 w-0.5 bg-grip" style={{ left: tileCentre(0) - 1, top: "calc(50% + 11px)" }} />
-      )}
       <span className="w-7 shrink-0" />
       <span className="flex shrink-0 items-center" style={{ paddingLeft: 20 }}>
         <span

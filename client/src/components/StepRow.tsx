@@ -200,17 +200,6 @@ function Waterfall({ step, bar, colour, inherited }: { step: Step; bar: BarPlace
   );
 }
 
-/**
- * Where a row's tile sits, so the lines that join a node to its steps meet it exactly. A row is the
- * seq gutter (44px with its padding), then INDENT per level, a fold chevron's slot, then the tile.
- */
-const GUTTER = 44;
-const INDENT = 20;
-const CHEVRON = 20; // the chevron's 16px slot and the 4px before the tile
-const TILE = 22;
-/** The x of the centre of a tile at `depth` — where that level's connector line runs. */
-export const tileCentre = (depth: number): number => GUTTER + depth * INDENT + CHEVRON + TILE / 2;
-
 /** What a folded node stands for: its steps, what they cost, and whether any of them failed. */
 export interface FoldSummary {
   steps: number;
@@ -244,55 +233,6 @@ export const columnsFor = (tier: RowTier) => ({
   // ALWAYS: re-run and details are on every row at every width (the product owner's call, 2026-10-14).
   actions: true,
 });
-
-/** Connector lines' weight: 2px, the strongest neutral border — the product owner's call, 2026-10-12. */
-const LINE = 2;
-
-/**
- * The lines joining this row to the tree around it, 2px and in `grip`, with a ROUNDED ELBOW where a
- * step meets the node it ran inside (the product owner's call on 2026-10-12, "more bolder").
- *
- *   a node with steps showing  — a line from the bottom of its tile down to the row's bottom edge;
- *   a step inside a node       — an elbow: down from the row's top at the node's line, curving into
- *                                its own tile, and straight on down when another step follows it;
- *   every outer level          — a straight line wherever that level's node has a step still to come.
- *
- * EVERY PIECE STOPS AT A TILE'S EDGE. The lines are positioned and the tile is not, so a line drawn
- * across a tile would paint over it.
- */
-function Connectors({ row }: { row: VisibleRow }) {
-  const lines: React.ReactNode[] = [];
-  const v = (key: string, x: number, cls: string, style: React.CSSProperties = {}) =>
-    lines.push(<span key={key} aria-hidden className={`absolute w-0.5 bg-grip ${cls}`} style={{ left: x - LINE / 2, ...style }} />);
-
-  // Down out of a node whose steps are on screen.
-  if (row.shownChildren) {
-    v("down", tileCentre(row.depth), "bottom-0", { top: `calc(50% + ${TILE / 2}px)` });
-  }
-  if (row.depth === 0) return <>{lines}</>;
-
-  // Outer levels: a full-height line wherever that level's node has a step still to come.
-  for (let level = 1; level < row.depth; level++) {
-    if (row.lastPath[level - 1] === false) v(`v${level}`, tileCentre(level - 1), "bottom-0 top-0");
-  }
-  const parentX = tileCentre(row.depth - 1);
-  const tileLeft = tileCentre(row.depth) - TILE / 2;
-  // The elbow: down from the top at the node's line, curving into this step's tile.
-  lines.push(
-    <span
-      key="elbow"
-      aria-hidden
-      className="absolute top-0 rounded-bl-control border-b-2 border-l-2 border-grip"
-      style={{ left: parentX - LINE / 2, width: tileLeft - (parentX - LINE / 2), height: `calc(50% + ${LINE / 2}px)` }}
-    />,
-  );
-  // ...and straight on down past it when another step of the same node follows.
-  if (!row.lastChild) v("on", parentX, "bottom-0 top-1/2");
-  // A FRAGMENT, NOT A WRAPPER. The lines are absolute, so on their own they take no part in the row's
-  // flex layout; wrapped in a span they made a zero-width flex item that still took a gap, which
-  // pushed every nested row's number, tile and name 8px right of the rows above it.
-  return <>{lines}</>;
-}
 
 /** A name with the searched-for words marked — every place they occur, ignoring case. */
 function Marked({ text, query }: { text: string; query: string }) {
@@ -463,10 +403,12 @@ export function StepRow({
       {/* The same selection mark the other lists use — inset, square, ink. */}
       {selected && <span aria-hidden className="absolute left-0 top-1 bottom-1 w-0.5 bg-accent" />}
 
-      <Connectors row={row} />
       {/* LEFT-ALIGNED, so every row's # stands in one column whatever its number's digits. */}
       <span className="w-7 shrink-0 text-left text-tiny tabular-nums text-faint">#{step.seq}</span>
-      <span className="flex shrink-0 items-center" style={{ paddingLeft: row.depth * INDENT }}>
+      {/* NO INDENT AND NO TREE LINES (the product owner's call, 2026-10-14): a node is its card's header
+          row, and every step inside it sits level with the others below it — the staircase of
+          elbows read as nesting to be decoded rather than a list to be read. */}
+      <span className="flex shrink-0 items-center">
         {/* THE FOLD, FOR A POINTER. A span rather than a button: the row is the tree item and owns the
             keys (← folds, → unfolds), and a button here would be one more tab stop per node. */}
         <span
