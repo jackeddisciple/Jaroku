@@ -214,6 +214,7 @@ function dispatch(msg: ServerMessage): void {
     case "runSteps":
       s.applyRunSteps(msg.runId, msg.steps, msg.eval);
       if (msg.marks) s.applyStepMarks(msg.runId, msg.marks);
+      if (msg.baseline_run_id) s.setBaseline(msg.runId, msg.baseline_run_id);
       break;
     case "stepMarks":
       s.applyStepMarks(msg.runId, msg.marks);

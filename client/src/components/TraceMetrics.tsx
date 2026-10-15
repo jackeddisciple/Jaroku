@@ -13,9 +13,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { fmtCost, fmtDuration, tokenCount } from "../lib/format.ts";
 import { sendLoadRun } from "../lib/socket.ts";
-import { branchFigures, type RunFigures } from "../lib/traceCompare.ts";
+import { runFigures, type RunFigures } from "../lib/traceCompare.ts";
 import { isInherited, ownSteps, runElapsed, stepsTime, traceTotals } from "../lib/traceView.ts";
 import { runOutcome } from "../lib/runOutcome.ts";
+import { openRun } from "../lib/runActions.ts";
 import { useRunClock } from "../lib/useRunClock.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { ICON } from "../lib/tokens.ts";
@@ -40,9 +41,10 @@ export function Metric({ label, value, title, tone = "text-ink", Mark }: { label
  * One of the strip's figures: its mark and its word, then the number, large — the number is what
  * somebody opens a trace to read (the product owner's call on 2026-10-12, "richer metrics").
  *
- * A RE-RUN'S SAYS HOW IT COMPARES WITH THE ORIGINAL (2026-10-15): the change beside the number, and
- * under it what it is against — "vs original from #4" — so the arrow is never a number without a
- * subject. Lower is green, higher red; Duration's is the steps' working time (`branchFigures`).
+ * EACH SAYS HOW IT COMPARES WITH THE LAST RUN ON THE SAME INPUT (2026-10-15): the change beside the
+ * number, and under it what it is against — "vs last run on this input", which opens that run — so
+ * the arrow is never a number without a subject. Lower is green, higher red; Duration's is the
+ * steps' working time (`runFigures`).
  * The sparklines over an agent's recent runs that stood beside the other runs' words came out the
  * same day — the product owner read them as decoration.
  */
@@ -53,11 +55,12 @@ interface FigureProps {
   title: string;
   tone?: string;
   delta?: React.ReactNode;
-  /** What the delta is against, said under the number. */
+  /** What the delta is against, said under the number — and, pressed, that run opened. */
   note?: string;
+  onNote?: () => void;
 }
 
-function Figure({ Mark, label, value, title, tone = "text-ink", delta, note }: FigureProps) {
+function Figure({ Mark, label, value, title, tone = "text-ink", delta, note, onNote }: FigureProps) {
   return (
     <div className="min-w-0 px-3 py-2.5" title={title}>
       <div className="flex min-w-0 items-center gap-1.5 text-tiny text-faint">
@@ -68,7 +71,16 @@ function Figure({ Mark, label, value, title, tone = "text-ink", delta, note }: F
         <span className={`truncate text-section tabular-nums ${tone}`}>{value}</span>
         {delta && <span className="shrink-0 text-tiny tabular-nums">{delta}</span>}
       </div>
-      {note && <div className="truncate text-tiny text-faint">{note}</div>}
+      {note && (onNote ? (
+        <button
+          type="button"
+          onClick={onNote}
+          title="Open the run this is compared with"
+          className="block max-w-full truncate rounded-xs text-left text-tiny text-faint underline decoration-transparent underline-offset-2 transition-colors hover:text-muted hover:decoration-current focus-visible:outline-none focus-visible:shadow-focusring"
+        >
+          {note}
+        </button>
+      ) : <div className="truncate text-tiny text-faint">{note}</div>)}
     </div>
   );
 }
@@ -117,21 +129,22 @@ export function TraceMetrics({ run, steps }: { run: RunSummary; steps: readonly 
 
   const elapsed = runElapsed(run, steps, now);
 
-  // AGAINST THE PARENT, LIKE FOR LIKE (`branchFigures`): its steps are loaded for this, as Changes
-  // loads them, once both runs have ended.
-  const parentId = run.parent_run_id ?? null;
-  const parentRun = useTraceStore((s) => (parentId ? s.runs[parentId] : undefined));
-  const parentBucket = useTraceStore((s) => (parentId ? s.stepsByRun[parentId] : undefined));
-  const parentNeedsLoad = useTraceStore((s) => (parentId ? !s.loaded[parentId] : false));
+  // AGAINST THE LAST RUN ON THE SAME INPUT (the product owner's call, 2026-10-15): like for like — a
+  // run's time, tokens and cost follow its input, so only the same input says whether a change made
+  // it better or worse. The server names that run with this one's steps; its steps are loaded here,
+  // and both are compared whole: the steps' working time, every token, every dollar.
+  const baselineId = useTraceStore((s) => s.baselineByRun[run.id]);
+  const baselineBucket = useTraceStore((s) => (baselineId ? s.stepsByRun[baselineId] : undefined));
+  const baselineNeedsLoad = useTraceStore((s) => (baselineId ? !s.loaded[baselineId] : false));
   useEffect(() => {
-    if (parentId && parentNeedsLoad && !live) sendLoadRun(parentId);
-  }, [parentId, parentNeedsLoad, live]);
+    if (baselineId && baselineNeedsLoad && !live) sendLoadRun(baselineId);
+  }, [baselineId, baselineNeedsLoad, live]);
   const vsParent = useMemo(() => {
-    if (!parentRun || !parentBucket || live) return null;
-    return branchFigures(run, steps, parentRun, orderedSteps(parentBucket));
-  }, [run, steps, parentRun, parentBucket, live]);
+    if (!baselineBucket || live) return null;
+    return { mine: runFigures(steps), theirs: runFigures(orderedSteps(baselineBucket)) };
+  }, [steps, baselineBucket, live]);
   // THE CHANGE, SAID FOR WHAT IT IS: time as an amount (↓ 0.6s), tokens as an amount and a share
-  // (↑ 300 (+10%)), cost as a share (↓ 18%) — or an amount, when the original spent nothing.
+  // (↑ 300 (+10%)), cost as a share (↓ 18%) — or an amount, when the earlier run spent nothing.
   const deltaOf = (m: keyof RunFigures): React.ReactNode => {
     if (!vsParent) return undefined;
     const a = vsParent.mine[m];
@@ -148,14 +161,13 @@ export function TraceMetrics({ run, steps }: { run: RunSummary; steps: readonly 
         : pct != null ? `${arrow} ${pct}%` : `${arrow} ${fmtCost(Math.abs(diff))}`;
     return <span className={diff < 0 ? "text-ok" : "text-err"}>{text}</span>;
   };
-  const from = run.branch_from_seq != null ? ` from #${run.branch_from_seq}` : "";
-  const vsNote = vsParent ? `vs original${from}` : undefined;
+  const vsNote = vsParent ? "vs last run on this input" : undefined;
   const vsTitle = (m: keyof RunFigures, format: (n: number) => string): string => {
     const a = vsParent?.mine[m];
     const b = vsParent?.theirs[m];
-    if (a == null || b == null) return "";
+    if (a == null || b == null || !baselineId) return "";
     const what = m === "time" ? "steps' working time" : m;
-    return ` · this re-run's ${what}: ${format(a)}, the original's${from} on: ${format(b)}`;
+    return ` · this run's ${what}: ${format(a)}, the last run on this input (${baselineId.slice(0, 8)}): ${format(b)}`;
   };
 
   const calls = plural(totals.llmCalls, "model call");
@@ -192,6 +204,7 @@ export function TraceMetrics({ run, steps }: { run: RunSummary; steps: readonly 
       tone: run.status === "running" ? "text-run" : "text-ink",
       delta: deltaOf("time"),
       note: vsNote,
+      onNote: baselineId ? () => openRun(baselineId) : undefined,
     },
     {
       Mark: Icon.trace.tokens,
@@ -200,6 +213,7 @@ export function TraceMetrics({ run, steps }: { run: RunSummary; steps: readonly 
       title: (totals.tokens == null ? tokensTitle : `${totals.tokens.toLocaleString()} tokens · ${tokensTitle}`) + vsTitle("tokens", tokenCount),
       delta: deltaOf("tokens"),
       note: vsNote,
+      onNote: baselineId ? () => openRun(baselineId) : undefined,
     },
     {
       Mark: Icon.trace.metricCost,
@@ -208,6 +222,7 @@ export function TraceMetrics({ run, steps }: { run: RunSummary; steps: readonly 
       title: costTitle + vsTitle("cost", (n) => fmtCost(n)),
       delta: deltaOf("cost"),
       note: vsNote,
+      onNote: baselineId ? () => openRun(baselineId) : undefined,
     },
     {
       Mark: Icon.trace.metricSteps,
@@ -228,7 +243,7 @@ export function TraceMetrics({ run, steps }: { run: RunSummary; steps: readonly 
     <div ref={ref} className="relative shrink-0 px-6 pt-3">
       {/* The measure: each figure at its natural width, laid out and never seen. */}
       <div ref={natural} aria-hidden className="pointer-events-none invisible absolute left-0 top-0 flex w-max">
-        {figures.map((f) => <Figure key={f.label} {...f} />)}
+        {figures.map((f) => <Figure key={f.label} {...f} onNote={undefined} />)}
       </div>
       <div
         className="grid divide-x divide-hair rounded-card border border-hair bg-panel"

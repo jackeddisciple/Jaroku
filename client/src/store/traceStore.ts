@@ -55,6 +55,11 @@ interface TraceState {
    * round trip (and still works, for this session, against a server that does not keep them yet).
    */
   marksByRun: Record<string, Record<string, StepMarkState>>;
+  /**
+   * The run each run's figures are compared with: the last finished one on the same input, as the
+   * server named it with the run's steps (2026-10-15). Absent: nothing to compare with.
+   */
+  baselineByRun: Record<string, string>;
   activeRunId: string | null;
   // The step the user is focused on — drives trace↔graph sync (a clicked step lights its
   // graph node, and clicking a node selects a step here). Cleared when the active run changes.
@@ -139,6 +144,7 @@ interface TraceState {
   applyEvent: (event: TraceEvent) => void;
   applyRunSteps: (runId: string, steps: Step[], evalScore?: RunEvalScore) => void;
   applyStepMarks: (runId: string, marks: StepMark[]) => void;
+  setBaseline: (runId: string, baselineId: string) => void;
   markStep: (runId: string, stepId: string, mark: StepMarkKind, on: boolean) => void;
   selectRun: (id: string) => void;
   /** Drop the run and step selection entirely — used when the run on screen no longer
@@ -226,6 +232,7 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   loaded: {},
   evalByRun: {},
   marksByRun: {},
+  baselineByRun: {},
   activeRunId: null,
   selectedStepId: null,
   expandedStepId: null,
@@ -296,6 +303,9 @@ export const useTraceStore = create<TraceState>((set, get) => ({
       // moment its delay is measured from.
       return { stepsByRun: { ...state.stepsByRun, [step.run_id]: nextBucket }, runs, lagByRun: withLag(state.lagByRun, step.run_id, step.started_at) };
     }),
+
+  setBaseline: (runId, baselineId) =>
+    set((state) => (state.baselineByRun[runId] === baselineId ? state : { baselineByRun: { ...state.baselineByRun, [runId]: baselineId } })),
 
   applyStepMarks: (runId, marks) =>
     set((state) => ({

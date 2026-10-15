@@ -5489,7 +5489,14 @@ export class WsRelay {
               const marks = steps.length > 0 && this.opts.stepMarks && ctx.actorUserId
                 ? await this.opts.stepMarks.forRun(ctx, runId, ctx.actorUserId).catch(() => undefined)
                 : undefined;
-              return { channel: "runSteps", runId, steps, ...(verdict ? { eval: verdict } : {}), ...(marks ? { marks } : {}) };
+              // WHAT ITS FIGURES ARE COMPARED WITH: the last finished run on the same input (2026-10-15).
+              const baseline = steps.length > 0 ? await this.store.sameInputBefore(ctx, runId).catch(() => null) : null;
+              return {
+                channel: "runSteps", runId, steps,
+                ...(verdict ? { eval: verdict } : {}),
+                ...(marks ? { marks } : {}),
+                ...(baseline ? { baseline_run_id: baseline } : {}),
+              };
             }, live, (message) => ({
               // `runSteps` carries one run's steps and nothing else; the diagnostics rail is
               // where this one says so, for the same reason `loadHistory` above does.

@@ -304,6 +304,26 @@ export class TraceStore {
   }
 
   /**
+   * The last finished run before this one, of the same agent, started on the IDENTICAL input — what
+   * the trace's figures compare against (the product owner's call, 2026-10-15). Like for like: a run's
+   * time, tokens and cost follow its input, so only the same input says whether a change made it
+   * better or worse. A re-run carries its original's input, so it compares with that. Null when the
+   * run kept no input (before migration 084) or nothing earlier ran on it.
+   */
+  async sameInputBefore(ctx: TenantContext, runId: string): Promise<string | null> {
+    const row = await this.q(ctx).get<{ id: string }>(
+      `SELECT prev.id FROM runs prev
+         JOIN runs cur ON cur.id = ? AND cur.workspace_id = ?
+        WHERE prev.workspace_id = ? AND prev.agent_id = cur.agent_id AND prev.id <> cur.id
+          AND cur.input IS NOT NULL AND prev.input = cur.input
+          AND prev.status = 'completed' AND prev.started_at < cur.started_at
+        ORDER BY prev.started_at DESC LIMIT 1`,
+      [runId, ctx.workspaceId, ctx.workspaceId],
+    );
+    return row?.id ?? null;
+  }
+
+  /**
    * A continued run's start and its own totals, for the `run_end` its latest process sends.
    *
    * A RESUMED RUN IS SEVERAL PROCESSES AND ONE RUN. Each segment's runner builds a fresh `Run`, so its

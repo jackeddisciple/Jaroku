@@ -91,6 +91,20 @@ export interface RunFigures {
  * A STRETCH WITH NO MODEL CALLS SPENT NOTHING: its tokens and cost are 0, not unknown, so a branch that
  * stopped calling the model still compares. Unknown stays null — calls made that reported nothing.
  */
+/**
+ * A whole run's three figures, as the trace's strip compares them with another run's (2026-10-15):
+ * the steps' working time, and every token and dollar its steps spent. A run that made no model
+ * call spent nothing — 0, not unknown.
+ */
+export function runFigures(steps: readonly Step[]): RunFigures {
+  const t = traceTotals(steps);
+  return {
+    time: stepsTime(steps),
+    tokens: t.tokens ?? (t.llmCalls === 0 ? 0 : null),
+    cost: t.cost ?? (t.llmCalls === 0 ? 0 : null),
+  };
+}
+
 export function branchFigures(
   run: RunSummary,
   steps: readonly Step[],
@@ -101,15 +115,7 @@ export function branchFigures(
   if (!run.ended_at || !parentRun.ended_at) return null;
   const own = ownSteps(run, steps);
   const stretch = parentSteps.filter((s) => !isInherited(s, run));
-  const figures = (part: readonly Step[]): RunFigures => {
-    const t = traceTotals(part);
-    return {
-      time: stepsTime(part),
-      tokens: t.tokens ?? (t.llmCalls === 0 ? 0 : null),
-      cost: t.cost ?? (t.llmCalls === 0 ? 0 : null),
-    };
-  };
-  return { mine: figures(own), theirs: figures(stretch) };
+  return { mine: runFigures(own), theirs: runFigures(stretch) };
 }
 
 // ── State: where the run left its state ─────────────────────────────────────

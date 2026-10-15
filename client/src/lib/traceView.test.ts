@@ -10,7 +10,7 @@ import { failedStepIds, jumpToError, treeSteps, useTraceStore, visibleTraceRows 
 import { graphLook, kindWord, traceMarks } from "../components/traceMarks.ts";
 import { nodeKind } from "../components/graphNodeIcons.ts";
 import { outcomePhase, runOutcome } from "./runOutcome.ts";
-import { branchFigures, compareRuns, finalState, runArtifacts } from "./traceCompare.ts";
+import { branchFigures, compareRuns, finalState, runArtifacts, runFigures } from "./traceCompare.ts";
 import { isVerdict, readVerdict, verdictTone } from "./runVerdict.ts";
 import { jsonLines, jsonMatches, jsonType } from "./jsonShape.ts";
 import { diffHunks, lineDiff } from "./textDiff.ts";
@@ -445,6 +445,9 @@ console.log("\na branch against its parent, and what a run made");
   const quiet = branchFigures(branchRun, [fb0, mk({ id: "g9", seq: 1, run_id: "B", latency_ms: 10 })], parentRun, [fp0, fp1]);
   check("...and a stretch with no model calls spent nothing, rather than an unknown", quiet?.mine.tokens === 0 && quiet?.mine.cost === 0, JSON.stringify(quiet));
   check("a run that is not a branch has no parent to answer to", branchFigures(parentRun, [fp0], parentRun, [fp0]) === null);
+  const whole = runFigures([fp0, fp1]);
+  check("a whole run's figures: the steps' working time, every token and dollar", whole.time === 10000 && whole.tokens === 140 && Math.abs((whole.cost ?? 0) - 0.014) < 1e-12, JSON.stringify(whole));
+  check("...and a run that called no model spent nothing", JSON.stringify(runFigures([mk({ id: "q", seq: 0, latency_ms: 5 })])) === '{"time":5,"tokens":0,"cost":0}');
   const arts = runArtifacts([p0, p1, p2]);
   check("a JSON reply is an artifact, named for its node", arts[0]?.title === "extract_jd" && JSON.stringify(arts[0]?.value) === '{"must_haves":["Python"]}');
   check("...and so is a structured state field", arts.some((a) => a.title === "jd"));

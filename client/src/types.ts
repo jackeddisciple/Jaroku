@@ -2216,7 +2216,7 @@ export type ServerMessage =
   // merging by run id. A broadcast that carries neither leaves the flags alone.
   | { channel: "history"; runs: RunSummary[]; complete?: boolean; window?: number }
   | { channel: "trace"; event: TraceEvent }
-  | { channel: "runSteps"; runId: string; steps: Step[]; eval?: RunEvalScore; marks?: StepMark[] }
+  | { channel: "runSteps"; runId: string; steps: Step[]; eval?: RunEvalScore; marks?: StepMark[]; baseline_run_id?: string }
   | { channel: "stepMarks"; runId: string; marks: StepMark[] }
   | { channel: "log"; level: "stderr" | "parseError"; text: string }
   | AgentMessage

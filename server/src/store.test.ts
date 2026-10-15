@@ -187,6 +187,33 @@ console.log("\na run keeps what it was started with");
   check((await store.runInput(A, forked)) === "Do not return JSON… banana", "a branch was started with its parent's input");
 }
 
+console.log("\nthe last run on the same input");
+{
+  const at = (min: number): string => new Date(Date.UTC(2026, 0, 15, 9, min)).toISOString();
+  const mk = async (id: string, min: number, input: string | null, status: Run["status"] = "completed", agent = "a"): Promise<void> => {
+    await store.upsertRun(A, { ...run(id), agent_id: agent, started_at: at(min), status });
+    if (input !== null) await store.setRunInput(A, id, input);
+  };
+  const [first, other, failed, latest, later, elsewhere, bare] = [randomUUID(), randomUUID(), randomUUID(), randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+  await mk(first, 1, "Paris weather");
+  await mk(other, 2, "Lisbon weather");
+  await mk(failed, 3, "Paris weather", "error");
+  await mk(elsewhere, 4, "Paris weather", "completed", "b");
+  await mk(latest, 5, "Paris weather");
+  await mk(later, 6, "Paris weather");
+  await mk(bare, 7, null);
+  check((await store.sameInputBefore(A, latest)) === first, "the last earlier finished run of the agent on the same input — not a failed one, nor another agent's");
+  check((await store.sameInputBefore(A, later)) === latest, "...the latest such, not the first");
+  check((await store.sameInputBefore(A, first)) === null, "...and none for the first run on an input");
+  check((await store.sameInputBefore(A, bare)) === null, "...nor for a run that kept no input");
+  check((await store.sameInputBefore(B, latest)) === null, "...and another workspace learns nothing");
+  await store.insertStep(A, step(later, 0));
+  await store.setCheckpointUpto(A, later, 0, "ck-later");
+  const rerun = randomUUID();
+  await store.copyRunPrefix(A, later, rerun, 0, 0);
+  check((await store.sameInputBefore(A, rerun)) === later, "a re-run compares with its original, which ran on its input");
+}
+
 console.log("\na model call's tokens, split");
 {
   const split = randomUUID();
