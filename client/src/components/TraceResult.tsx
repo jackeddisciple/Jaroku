@@ -1,36 +1,28 @@
-// What the run came to, above the steps that got it there — ONE LINE, AND WHATEVER THE RUN MADE.
+// What the run came to — split between two places since 2026-10-15 (the product owner's call: "remove
+// response entirely, and move it to … artifacts"):
 //
-// THE PRODUCT OWNER'S CALL, 2026-10-15: "adaptive, and just one line by default." A final answer is the
-// product of a Q&A agent and noise for most others — an extractor's is a JSON blob, an action agent's is
-// "I've sent the email", a pipeline's is nothing at all — and a verdict card read a decision out of the
-// output by guesswork, which a developer debugging the run cannot trust. So the row says what THIS run
-// produced, from what it recorded and nothing inferred:
+//   on Steps     — only a FAILURE, as one red line that opens: the run's error, and the step that
+//                  failed a press away. Nothing else stands between the figures and the steps.
+//   in Artifacts — what the run MADE, at the top of the tab that lists what it produced: its text
+//                  Response (the same string the eval judge scores, `extractAgentOutput`) with the tools
+//                  it called, or — when it replied nothing — the tools it called, "Did". A JSON reply or
+//                  a structured final state is already an artifact below it, and is not repeated.
 //
-//   Response — the text it replied with, the same string the eval judge scores (`extractAgentOutput`);
-//   Result — what it made instead of prose: a JSON reply, or the fields of its final state;
-//   Did    — the tools it called, when it answered nothing — an action agent's real output;
-//   Failed — the run's error, with a way straight to the step that failed;
-//   and a one-line note while it runs, while it is paused, or when somebody stopped it.
-//
-// A run that finished having made none of these shows no row at all: "finished without a text
-// answer" told nobody anything.
-//
-// ONE LINE UNTIL OPENED, AND THE FOLD IS ONE CHOICE FOR THE SESSION (`answerOpen`, closed to begin
-// with): the steps start right under the figures, and the line still says what the run came to. An
-// eval's judge, when one scored the run, is a chip at the line's end — a real score, not a reading.
+// From what the run recorded and nothing inferred: an earlier verdict card read a decision out of the
+// output by guesswork, which a developer cannot trust, and is gone. An eval's judge, when one scored
+// the run, is a chip beside the Response — a real score.
 
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { extractAgentOutput } from "../lib/agentOutput.ts";
 import { Icon } from "../lib/icons/registry.ts";
 import { finalState } from "../lib/traceCompare.ts";
-import { errorParts, jsonReply, ownSteps, runElapsed, stepsTime } from "../lib/traceView.ts";
-import { fmtDuration } from "../lib/format.ts";
+import { errorParts, jsonReply } from "../lib/traceView.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { CANCELLED_BY_USER, useTraceStore } from "../store/traceStore.ts";
 import type { RunEvalScore, RunSummary, Step } from "../types.ts";
 import { CopyTurn } from "./composer/CopyTurn.tsx";
-import { JsonTree, PayloadText } from "./JsonTree.tsx";
+import { PayloadText } from "./JsonTree.tsx";
 import { Markdown } from "./Markdown.tsx";
 
 /** Taller than this and an opened answer is clamped until somebody asks for the rest. */
@@ -84,20 +76,6 @@ function ClampedAnswer({ text }: { text: string }) {
   );
 }
 
-/**
- * The answer's opening, as one line of plain words: its first line with the markdown taken off. What
- * the folded row shows, so folding it away still says what the run came to.
- */
-export function answerPreview(text: string): string {
-  const first = text.split("\n").map((l) => l.trim()).find((l) => l !== "" && !/^(```|---|\*\*\*)/.test(l)) ?? "";
-  return first
-    .replace(/^(#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)/, "")
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/(\*\*|__|`)/g, "")
-    // A single * or _ only where it is emphasis around words — an identifier keeps its underscores.
-    .replace(/(^|\s)[*_]([^*_\s][^*_]*?)[*_](?=\s|$|[.,;:!?])/g, "$1$2")
-    .trim();
-}
 
 // ── What a finished run made ─────────────────────────────────────────────────
 
@@ -127,27 +105,6 @@ export function runOutput(steps: readonly Step[]): RunOutput | null {
     if (Object.keys(fields).length > 0) return { kind: "result", value: fields, copy: JSON.stringify(fields, null, 2), calls };
   }
   return calls.length > 0 ? { kind: "did", calls } : null;
-}
-
-/** A value as the folded row shows it: short text quoted, numbers as they are, lists and maps by size. */
-function brief(v: unknown): string {
-  if (typeof v === "string") return `"${v.length > 28 ? `${v.slice(0, 28)}…` : v}"`;
-  if (Array.isArray(v)) return `[${v.length}]`;
-  if (isMap(v)) return `{${Object.keys(v).length}}`;
-  return String(v);
-}
-
-/** The folded line for a structured result: its top-level fields, `name: "Ada" · score: 92 · skills: [3]`. */
-export function resultPreview(value: object): string {
-  if (Array.isArray(value)) return `${value.length} ${value.length === 1 ? "item" : "items"}`;
-  return Object.entries(value).map(([k, v]) => `${k}: ${brief(v)}`).join(" · ");
-}
-
-/** The folded line for the tools a run called: each name once, in the order first called, with its count. */
-export function callsPreview(calls: readonly Step[]): string {
-  const seen = new Map<string, number>();
-  for (const c of calls) seen.set(c.name, (seen.get(c.name) ?? 0) + 1);
-  return [...seen].map(([name, n]) => (n > 1 ? `${name} ×${n}` : name)).join(" · ");
 }
 
 /** Each tool call, ✓ or ✗, opening its step. */
@@ -223,43 +180,6 @@ function ResultRow({ label, tone, line, trailing, children }: {
   );
 }
 
-/** What a finished run made, as one line: its answer, its result, or what it did. */
-function Finished({ output, evalScore }: { output: RunOutput; evalScore: RunEvalScore | undefined }) {
-  const judge = evalScore ? <JudgeChip score={evalScore} /> : null;
-  if (output.kind === "answer") {
-    return (
-      <ResultRow label="Response" line={answerPreview(output.text)} trailing={<>{judge}<CopyTurn source={output.text} /></>}>
-        <ClampedAnswer text={output.text} />
-        {output.calls.length > 0 && <div className="mt-3"><CallList calls={output.calls} /></div>}
-      </ResultRow>
-    );
-  }
-  if (output.kind === "result") {
-    return (
-      <ResultRow
-        label="Result"
-        line={resultPreview(output.value)}
-        trailing={<>{judge}<CopyTurn source={output.copy} label="Copy result" title="Copy the result as JSON" /></>}
-      >
-        <JsonTree value={output.value} openDepth={1} />
-        <button
-          type="button"
-          onClick={() => useTraceStore.getState().setRunTab("artifacts")}
-          className="mt-1.5 rounded-xs text-tiny text-muted underline decoration-hair underline-offset-2 transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
-        >
-          Open in Artifacts
-        </button>
-        {output.calls.length > 0 && <div className="mt-3"><CallList calls={output.calls} /></div>}
-      </ResultRow>
-    );
-  }
-  return (
-    <ResultRow label="Did" line={callsPreview(output.calls)} trailing={judge}>
-      <CallList calls={output.calls} />
-    </ResultRow>
-  );
-}
-
 /**
  * A failed run's reason, in the same place an answer would have been: red words on the ordinary
  * surface, one line until opened, and the step that failed a press away.
@@ -295,46 +215,60 @@ function RunFailure({ error, failedStep }: { error: string; failedStep: Step | u
   );
 }
 
-/** One quiet line for an ending with nothing more to show. */
+/** A quiet sentence for a run that has not made anything yet. */
 function Note({ children }: { children: React.ReactNode }) {
-  return <p className={`${SURFACE} px-3 py-2.5 text-caption text-muted`}>{children}</p>;
+  return <p className="text-caption text-muted">{children}</p>;
 }
 
-/**
- * A run somebody stopped, said as such — the trace never said "cancelled", only the Runs list did —
- * and, when its duration is mostly not its steps, where the rest of the time went: it sat paused or
- * waiting until the stop came.
- */
-function Stopped({ run, steps }: { run: RunSummary; steps: readonly Step[] }) {
-  const own = ownSteps(run, steps);
-  const total = runElapsed(run, own, Date.now());
-  const busy = stepsTime(own);
-  const idle = total == null ? 0 : total - busy;
-  const explain = total != null && own.length > 0 && idle > Math.max(2000, total / 4);
+/** On the Steps tab: a failed run's reason, as one red line that opens. Nothing for any other run. */
+export function RunFailureLine({ run, steps }: { run: RunSummary; steps: readonly Step[] }) {
+  const failedStep = useMemo(() => steps.find((s) => s.error != null), [steps]);
+  if (run.status !== "error" || run.error === CANCELLED_BY_USER) return null;
+  const error = run.error ?? failedStep?.error ?? null;
+  return error ? <RunFailure error={error} failedStep={failedStep} /> : null;
+}
+
+/** A section of the Artifacts tab's output: its word, what sits beside it, and the thing itself. */
+function OutputSection({ label, trailing, children }: { label: string; trailing?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <Note>
-      Stopped before it finished.
-      {explain && (
-        <>
-          {" "}Its steps ran for {fmtDuration(busy)}; the rest of its {fmtDuration(total!)} it was paused or waiting.
-        </>
-      )}
-    </Note>
+    <section aria-label={label}>
+      <div className="mb-1.5 flex min-h-8 min-w-0 items-center gap-2">
+        <span className={TYPE.sectionLabel}>{label}</span>
+        {trailing && <span className="ml-auto flex shrink-0 items-center gap-1">{trailing}</span>}
+      </div>
+      {children}
+    </section>
   );
 }
 
-export function TraceResult({ run, steps }: { run: RunSummary; steps: readonly Step[] }) {
+/**
+ * At the top of the Artifacts tab: what the run made — its Response and the tools it called, or, when
+ * it replied nothing, what it Did. Null when there is nothing of the sort (its JSON or structured
+ * state is listed below as artifacts), and a sentence while the run is still going.
+ */
+export function RunOutputSection({ run, steps }: { run: RunSummary; steps: readonly Step[] }) {
   const output = useMemo(() => (run.status === "completed" ? runOutput(steps) : null), [run.status, steps]);
-  const failedStep = useMemo(() => steps.find((s) => s.error != null), [steps]);
   const evalScore = useTraceStore((s) => s.evalByRun[run.id]);
-
-  if (run.status === "running") return <Note>What it makes shows here when the run finishes.</Note>;
-  if (run.status === "paused") return <Note>Paused. What it makes shows here once it is resumed and finishes.</Note>;
-  if (run.status === "error") {
-    if (run.error === CANCELLED_BY_USER) return <Stopped run={run} steps={steps} />;
-    const error = run.error ?? failedStep?.error ?? null;
-    return error ? <RunFailure error={error} failedStep={failedStep} /> : <Note>The run failed without saying why.</Note>;
+  if (run.status === "running") return <Note>What the run makes shows here when it finishes.</Note>;
+  if (run.status === "paused") return <Note>Paused. What the run makes shows here once it is resumed and finishes.</Note>;
+  if (!output) return null;
+  const judge = evalScore ? <JudgeChip score={evalScore} /> : null;
+  if (output.kind === "answer") {
+    return (
+      <OutputSection label="Response" trailing={<>{judge}<CopyTurn source={output.text} /></>}>
+        <div className="rounded-card border border-hair bg-panel px-3 py-2.5">
+          <ClampedAnswer text={output.text} />
+        </div>
+        {output.calls.length > 0 && <div className="mt-2"><CallList calls={output.calls} /></div>}
+      </OutputSection>
+    );
   }
-  // FINISHED HAVING MADE NOTHING THIS CAN SHOW: no row at all.
-  return output ? <Finished output={output} evalScore={evalScore} /> : null;
+  // A RESULT IS ALREADY AN ARTIFACT (the JSON reply, the state's fields), listed below; what is said
+  // here is only what the list does not — the tools it called.
+  if (output.calls.length === 0 && !judge) return null;
+  return (
+    <OutputSection label="Did" trailing={judge}>
+      {output.calls.length > 0 ? <CallList calls={output.calls} /> : null}
+    </OutputSection>
+  );
 }

@@ -11,7 +11,7 @@ import { TraceMetrics } from "./TraceMetrics.tsx";
 import { TraceFilters, ViewSwitcher } from "./TraceFilters.tsx";
 import { GraphView } from "./GraphView.tsx";
 import { ArtifactsTab, ChangesView, RawTab, RunTabs, StateTab } from "./TraceRunTabs.tsx";
-import { TraceResult } from "./TraceResult.tsx";
+import { RunFailureLine } from "./TraceResult.tsx";
 import { StepDetailPanel } from "./StepDetailPanel.tsx";
 import { graphLook, traceMarks, type StepMark } from "./traceMarks.ts";
 import { useBuildStore } from "../store/buildStore.ts";
@@ -492,7 +492,7 @@ export function TraceTimeline() {
         <div className="min-h-0 flex-1 overflow-auto pb-4">
           {tab === "changes" ? <ChangesView run={run} steps={steps} />
             : tab === "state" ? <StateTab steps={steps} />
-              : tab === "artifacts" ? <ArtifactsTab steps={steps} />
+              : tab === "artifacts" ? <ArtifactsTab run={run} steps={steps} />
                 : <RawTab run={run} steps={steps} />}
         </div>
       ) : stepView === "graph" ? (
@@ -518,10 +518,7 @@ export function TraceTimeline() {
             run?.status === "running" || run?.status === "paused" ? (
               // A RUN WITH NOTHING FINISHED YET is not an empty trace: it is a trace whose first row has
               // not landed. Say what is happening, and that rows arrive as their steps finish.
-              <>
-                <TraceResult run={run} steps={steps} />
-                <LiveTail run={run} steps={steps} span={null} tier="narrow" />
-              </>
+              <LiveTail run={run} steps={steps} span={null} tier="narrow" />
             ) : (
               <EmptyState
                 size="line"
@@ -532,7 +529,8 @@ export function TraceTimeline() {
             )
           ) : (
             <>
-              {run && <TraceResult run={run} steps={steps} />}
+              {/* ONLY A FAILURE STANDS ABOVE THE STEPS; what the run made is in Artifacts (2026-10-15). */}
+              {run && <RunFailureLine run={run} steps={steps} />}
               <StepList run={run} steps={steps} />
             </>
           )}

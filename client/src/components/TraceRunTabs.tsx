@@ -16,6 +16,7 @@ import { ICON, TYPE } from "../lib/tokens.ts";
 import { orderedSteps, useTraceStore, type RunTab } from "../store/traceStore.ts";
 import type { RunSummary, Step } from "../types.ts";
 import { primaryBtnSm, tabBtn } from "./buttons.ts";
+import { RunOutputSection, runOutput } from "./TraceResult.tsx";
 import { useBuildStore } from "../store/buildStore.ts";
 import { useProviderStore } from "../store/providerStore.ts";
 import { CopyTurn } from "./composer/CopyTurn.tsx";
@@ -294,13 +295,18 @@ export function StateTab({ steps }: { steps: readonly Step[] }) {
   );
 }
 
-export function ArtifactsTab({ steps }: { steps: readonly Step[] }) {
+export function ArtifactsTab({ run, steps }: { run: RunSummary; steps: readonly Step[] }) {
   const artifacts = useMemo(() => runArtifacts(steps), [steps]);
-  if (artifacts.length === 0) {
-    return <p className="px-6 py-6 text-caption text-muted">This run produced no structured output — no JSON reply and no structured field in its state.</p>;
-  }
+  // WHAT THE RUN MADE COMES FIRST (2026-10-15): its Response — moved here off the Steps tab — or what
+  // it Did; then the structured things it produced.
+  const made = useMemo(() => run.status === "completed" && runOutput(steps) != null, [run.status, steps]);
+  const finished = run.status !== "running" && run.status !== "paused";
   return (
     <div className="flex flex-col gap-3 px-6 py-3">
+      <RunOutputSection run={run} steps={steps} />
+      {finished && !made && artifacts.length === 0 && (
+        <p className="text-caption text-muted">This run made nothing to show here — no response, no tool calls and no structured output.</p>
+      )}
       {artifacts.map((a) => (
         <section key={a.key} aria-label={a.title}>
           <div className="mb-1 flex min-w-0 items-center gap-2">

@@ -13,7 +13,7 @@ import { outcomePhase, runOutcome } from "./runOutcome.ts";
 import { branchFigures, compareRuns, finalState, runArtifacts, runFigures } from "./traceCompare.ts";
 import { jsonLines, jsonMatches, jsonType } from "./jsonShape.ts";
 import { diffHunks, lineDiff } from "./textDiff.ts";
-import { answerPreview, callsPreview, resultPreview, runOutput } from "../components/TraceResult.tsx";
+import { runOutput } from "../components/TraceResult.tsx";
 import { STATUS, STEP_HUE } from "./tokens.ts";
 import type { RunSummary, Step } from "../types.ts";
 import {
@@ -371,15 +371,6 @@ console.log("\na reply that is JSON");
   check("broken JSON is not", jsonReply('{"a": ') === undefined);
 }
 
-console.log("\na folded answer's one line");
-{
-  check("a heading's words", answerPreview("## Two queues are backing up:\n\n- **orders**: x") === "Two queues are backing up:");
-  check("bold taken off", answerPreview("**Shortlist**: Ada") === "Shortlist: Ada");
-  check("a link's words", answerPreview("- [Link](http://x) text") === "Link text");
-  check("past a code fence's opening", answerPreview("```json\n{\"a\":1}\n```") === '{"a":1}');
-  check("an identifier keeps its underscores", answerPreview("Use route_after_extract next") === "Use route_after_extract next");
-  check("emphasis taken off", answerPreview("This is *really* _good_.") === "This is really good.");
-}
 
 console.log("\nhow long the steps themselves took");
 {
@@ -461,11 +452,10 @@ console.log("\nwhat a finished run made");
   check("a text reply is the answer, with the tools beside it", answer?.kind === "answer" && answer.text === "Paris is 18°C." && answer.calls.length === 1);
   const json = runOutput([reply('{"name": "Ada", "score": 92, "skills": ["Go", "Rust", "SQL"]}')]);
   check("a JSON reply is a result", json?.kind === "result");
-  check("...folded to its fields", json?.kind === "result" && resultPreview(json.value) === 'name: "Ada" · score: 92 · skills: [3]', json?.kind === "result" ? resultPreview(json.value) : "");
   const state = runOutput([mk({ id: "s0", seq: 0, state_before: { messages: [] }, state_after: { flagged: ["orders"] } })]);
   check("no reply: the final state's fields are the result", state?.kind === "result" && JSON.stringify(state.value) === '{"flagged":["orders"]}', JSON.stringify(state));
   const did = runOutput([tool("send_email", 0), tool("create_ticket", 1), tool("create_ticket", 2, "boom")]);
-  check("no reply and no fields: what it did", did?.kind === "did" && callsPreview(did.calls) === "send_email · create_ticket ×2", did?.kind === "did" ? callsPreview(did.calls) : "");
+  check("no reply and no fields: what it did", did?.kind === "did" && did.calls.length === 3);
   check("and nothing at all is no row", runOutput([mk({ id: "n0", seq: 0, state_before: { messages: [] }, state_after: { messages: [] } })]) === null);
 }
 
