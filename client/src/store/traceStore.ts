@@ -88,7 +88,8 @@ interface TraceState {
    */
   boundaryByRun: Record<string, number>;
   /**
-   * Whether the trace's Final answer section is open. One choice for every run, kept for the session
+   * Whether the trace's result row (answer, result, what it did, failure) is open past its one line.
+   * Closed to begin with. One choice for every run, kept for the session
    * and never written to storage: somebody who folded it away to read steps wants the next run's
    * answer folded too, and a reload is a fair moment to show it again.
    */
@@ -241,7 +242,8 @@ export const useTraceStore = create<TraceState>((set, get) => ({
   nextByRun: {},
   lagByRun: {},
   boundaryByRun: {},
-  answerOpen: true,
+  // ONE LINE BY DEFAULT (the product owner's call, 2026-10-15): the steps start right under the figures.
+  answerOpen: false,
   collapsedStepIds: {},
   stepFilter: "all",
   stepQuery: "",

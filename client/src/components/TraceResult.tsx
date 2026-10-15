@@ -1,38 +1,42 @@
-// What the run came to, above the steps that got it there.
+// What the run came to, above the steps that got it there — ONE LINE, AND WHATEVER THE RUN MADE.
 //
-// THE ANSWER CARD ONLY EXISTED FOR A RUN THAT FINISHED WITH TEXT. Every other ending left the slot
-// empty: a failed run's reason was in the Runs list and nowhere in its own trace, a stopped run looked
-// like one that never answered, and a live one gave no sign that an answer was coming. Now the slot
-// always says how the run ended, in the run's own words:
+// THE PRODUCT OWNER'S CALL, 2026-10-15: "adaptive, and just one line by default." A final answer is the
+// product of a Q&A agent and noise for most others — an extractor's is a JSON blob, an action agent's is
+// "I've sent the email", a pipeline's is nothing at all — and a verdict card read a decision out of the
+// output by guesswork, which a developer debugging the run cannot trust. So the row says what THIS run
+// produced, from what it recorded and nothing inferred:
 //
-//   finished — the answer, the same string the eval judge scores (`extractAgentOutput`), with copy;
-//   failed   — the run's error, and a way straight to the step that failed;
-//   stopped  — that somebody stopped it;
-//   live     — that the answer arrives when the run finishes.
+//   Answer — the text it replied with, the same string the eval judge scores (`extractAgentOutput`);
+//   Result — what it made instead of prose: a JSON reply, or the fields of its final state;
+//   Did    — the tools it called, when it answered nothing — an action agent's real output;
+//   Failed — the run's error, with a way straight to the step that failed;
+//   and a one-line note while it runs, while it is paused, or when somebody stopped it.
 //
-// FOLDABLE, AND THE FOLD IS ONE CHOICE FOR THE SESSION (`answerOpen`). Somebody reading steps does not
-// want twenty lines of prose above them on every run they open; somebody reading answers does. A long
-// answer is clamped as well, so an open answer still leaves the timeline on screen.
+// A run that finished having made none of these shows no row at all: "finished without a text
+// answer" told nobody anything.
+//
+// ONE LINE UNTIL OPENED, AND THE FOLD IS ONE CHOICE FOR THE SESSION (`answerOpen`, closed to begin
+// with): the steps start right under the figures, and the line still says what the run came to. An
+// eval's judge, when one scored the run, is a chip at the line's end — a real score, not a reading.
 
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { extractAgentOutput } from "../lib/agentOutput.ts";
 import { Icon } from "../lib/icons/registry.ts";
-import { isVerdict, readVerdict, type RunVerdict, type VerdictTone } from "../lib/runVerdict.ts";
 import { finalState } from "../lib/traceCompare.ts";
-import { errorParts, ownSteps, runElapsed, stepsTime } from "../lib/traceView.ts";
+import { errorParts, jsonReply, ownSteps, runElapsed, stepsTime } from "../lib/traceView.ts";
 import { fmtDuration } from "../lib/format.ts";
-import { TYPE } from "../lib/tokens.ts";
+import { ICON, TYPE } from "../lib/tokens.ts";
 import { CANCELLED_BY_USER, useTraceStore } from "../store/traceStore.ts";
 import type { RunEvalScore, RunSummary, Step } from "../types.ts";
-import { CollapsibleRegion } from "./CollapsibleRegion.tsx";
 import { CopyTurn } from "./composer/CopyTurn.tsx";
+import { JsonTree, PayloadText } from "./JsonTree.tsx";
 import { Markdown } from "./Markdown.tsx";
 
-/** Taller than this and an answer is clamped until somebody asks for the rest. */
+/** Taller than this and an opened answer is clamped until somebody asks for the rest. */
 const CLAMP_PX = 240;
 
-const SURFACE = "mb-3 rounded-card border border-hair bg-panel px-3 py-2";
+const SURFACE = "mb-3 rounded-card border border-hair bg-panel";
 
 /** Select a step and open its details — an explicit "show me", unlike a plain row click. */
 function inspectStep(id: string): void {
@@ -82,7 +86,7 @@ function ClampedAnswer({ text }: { text: string }) {
 
 /**
  * The answer's opening, as one line of plain words: its first line with the markdown taken off. What
- * a folded answer shows, so folding it away still says what the run came to.
+ * the folded row shows, so folding it away still says what the run came to.
  */
 export function answerPreview(text: string): string {
   const first = text.split("\n").map((l) => l.trim()).find((l) => l !== "" && !/^(```|---|\*\*\*)/.test(l)) ?? "";
@@ -95,175 +99,180 @@ export function answerPreview(text: string): string {
     .trim();
 }
 
-function FinalAnswer({ text }: { text: string }) {
-  const open = useTraceStore((s) => s.answerOpen);
-  const setOpen = useTraceStore((s) => s.setAnswerOpen);
-  const preview = useMemo(() => answerPreview(text), [text]);
-  return (
-    <section className={SURFACE} aria-label="Final answer">
-      <CollapsibleRegion label="Final answer" open={open} onToggle={() => setOpen(!open)} trailing={<CopyTurn source={text} />} chevron={Icon.trace.fold}>
-        <div className="pb-1">
-          <ClampedAnswer text={text} />
-        </div>
-      </CollapsibleRegion>
-      {/* FOLDED, IT STILL SAYS WHAT THE RUN CAME TO: the answer's first line, which opens it. The
-          fold itself stays one choice for the session (`answerOpen`) — the product owner's call. */}
-      {!open && preview && (
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          title="Show the final answer"
-          className="-mx-1 mb-0.5 mt-0.5 block w-[calc(100%+0.5rem)] truncate rounded-control px-1 text-left text-caption text-muted transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
-        >
-          {preview}
-        </button>
-      )}
-    </section>
-  );
+// ── What a finished run made ─────────────────────────────────────────────────
+
+/** What a finished run produced, in the order the row prefers it. */
+export type RunOutput =
+  | { kind: "answer"; text: string; calls: Step[] }
+  | { kind: "result"; value: object; copy: string; calls: Step[] }
+  | { kind: "did"; calls: Step[] };
+
+const isMap = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/**
+ * WHAT THE RUN MADE, FROM WHAT IT RECORDED: its text reply; failing that a JSON reply, or the fields
+ * its final state holds besides the conversation; failing that the tools it called. Null when it made
+ * none of these.
+ */
+export function runOutput(steps: readonly Step[]): RunOutput | null {
+  const calls = steps.filter((s) => s.type === "tool_call");
+  const text = extractAgentOutput(steps);
+  if (text) {
+    const json = jsonReply(text);
+    return json ? { kind: "result", value: json, copy: text, calls } : { kind: "answer", text, calls };
+  }
+  const state = finalState(steps);
+  if (isMap(state)) {
+    const fields = Object.fromEntries(Object.entries(state).filter(([k, v]) => k !== "messages" && v != null && v !== ""));
+    if (Object.keys(fields).length > 0) return { kind: "result", value: fields, copy: JSON.stringify(fields, null, 2), calls };
+  }
+  return calls.length > 0 ? { kind: "did", calls } : null;
 }
 
-// ── The verdict card (2026-10-14) ───────────────────────────────────────────
-
-/** Advance green, reject red, anything else grey — the product owner's call on 2026-10-14. */
-const CHIP: Record<VerdictTone, string> = {
-  advance: "bg-ok/10 text-ok",
-  reject: "bg-err/10 text-err",
-  other: "bg-active text-muted",
-};
-
-const capital = (s: string): string => (s ? s[0]!.toUpperCase() + s.slice(1) : s);
-
-/** "Advance · 92": the decision and the score, as one chip. */
-export function verdictChipText(v: RunVerdict): string {
-  const head = v.decision ? capital(v.decision) : "Score";
-  return v.score ? `${head} · ${v.score}` : head;
+/** A value as the folded row shows it: short text quoted, numbers as they are, lists and maps by size. */
+function brief(v: unknown): string {
+  if (typeof v === "string") return `"${v.length > 28 ? `${v.slice(0, 28)}…` : v}"`;
+  if (Array.isArray(v)) return `[${v.length}]`;
+  if (isMap(v)) return `{${Object.keys(v).length}}`;
+  return String(v);
 }
 
-/** Met ✓ green, unmet ✗ red. */
-function RequirementPills({ items }: { items: RunVerdict["requirements"] }) {
+/** The folded line for a structured result: its top-level fields, `name: "Ada" · score: 92 · skills: [3]`. */
+export function resultPreview(value: object): string {
+  if (Array.isArray(value)) return `${value.length} ${value.length === 1 ? "item" : "items"}`;
+  return Object.entries(value).map(([k, v]) => `${k}: ${brief(v)}`).join(" · ");
+}
+
+/** The folded line for the tools a run called: each name once, in the order first called, with its count. */
+export function callsPreview(calls: readonly Step[]): string {
+  const seen = new Map<string, number>();
+  for (const c of calls) seen.set(c.name, (seen.get(c.name) ?? 0) + 1);
+  return [...seen].map(([name, n]) => (n > 1 ? `${name} ×${n}` : name)).join(" · ");
+}
+
+/** Each tool call, ✓ or ✗, opening its step. */
+function CallList({ calls }: { calls: readonly Step[] }) {
   return (
-    <ul className="flex flex-wrap gap-1.5" aria-label="Requirements">
-      {items.map((r, i) => (
-        <li
-          key={`${r.label}-${i}`}
-          className={`max-w-full truncate rounded-full px-2 py-0.5 text-tiny ${r.met ? "bg-ok/[0.08] text-ok" : "bg-err/[0.08] text-err"}`}
-          title={`${r.met ? "Met" : "Not met"}: ${r.label}`}
-        >
-          <span aria-hidden>{r.met ? "✓" : "✗"}</span> {r.label}
+    <ul className="flex flex-wrap gap-1.5" aria-label="Tools it called">
+      {calls.map((c) => (
+        <li key={c.id}>
+          <button
+            type="button"
+            onClick={() => inspectStep(c.id)}
+            title={c.error ? `#${c.seq} ${c.name} failed — open its details` : `Open #${c.seq} ${c.name}`}
+            className="flex items-center gap-1 rounded-full bg-active px-2 py-0.5 text-tiny text-ink transition-colors hover:bg-chrome focus-visible:outline-none focus-visible:shadow-focusring"
+          >
+            <span aria-hidden className={c.error ? "text-err" : "text-ok"}>{c.error ? "✗" : "✓"}</span>
+            <span className="tabular-nums text-faint">#{c.seq}</span>
+            {c.name}
+          </button>
         </li>
       ))}
     </ul>
   );
 }
 
-/**
- * WHY, IN TWO LINES UNTIL ASKED FOR MORE. The reasoning was the whole card — a wall of text over the
- * steps — and the decision it argued for was somewhere inside it. Now the decision is the chip, and
- * this is two lines and "Show reasoning".
- */
-function Reasoning({ text }: { text: string }) {
-  const [all, setAll] = useState(false);
-  const preview = useMemo(() => text.split("\n").map((l) => answerPreview(l)).filter(Boolean).join(" "), [text]);
+/** An eval's judge on this run, when one scored it: a real score, at the line's end. */
+function JudgeChip({ score }: { score: RunEvalScore }) {
+  const criteria = score.criteria.map((c) => `${c.label} ${c.score}/${score.scale_max}`).join(" · ");
   return (
-    <div>
-      {all ? (
-        <div className={`${TYPE.body} break-words`}><Markdown text={text} /></div>
-      ) : (
-        <p className="line-clamp-2 break-words text-caption text-muted">{preview}</p>
-      )}
-      <button
-        type="button"
-        onClick={() => setAll((v) => !v)}
-        aria-expanded={all}
-        className="mt-1 rounded-control text-tiny text-muted transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
-      >
-        {all ? "Hide reasoning" : "Show reasoning"}
-      </button>
-    </div>
+    <span
+      className="shrink-0 rounded-full bg-active px-2 py-0.5 text-tiny tabular-nums text-muted"
+      title={score.score == null
+        ? `The eval's judge could not score this run${score.error ? `: ${score.error}` : ""}`
+        : `Scored by an eval's judge${criteria ? ` · ${criteria}` : ""}${score.rationale ? `\n${score.rationale}` : ""}`}
+    >
+      {score.score == null ? "Judge —" : `Judge ${Math.round(score.score * 100)}%`}
+    </span>
   );
 }
 
-function VerdictCard({ verdict, text }: { verdict: RunVerdict; text: string }) {
+/**
+ * The row: a word for what it holds, one line of it, and — opened — all of it. The fold is the
+ * session's (`answerOpen`); the controls at the end stay outside the toggle, so a copy is not a fold.
+ */
+function ResultRow({ label, tone, line, trailing, children }: {
+  label: string;
+  tone?: "err";
+  line: string;
+  trailing?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   const open = useTraceStore((s) => s.answerOpen);
   const setOpen = useTraceStore((s) => s.setAnswerOpen);
-  const chip = verdictChipText(verdict);
   return (
-    <section className={SURFACE} aria-label="Verdict">
-      <CollapsibleRegion label="Verdict" open={open} onToggle={() => setOpen(!open)} trailing={<CopyTurn source={text} />} chevron={Icon.trace.fold}>
-        <div className="flex flex-col gap-2 pb-1">
-          <div>
-            <span className={`inline-block rounded-control px-3 py-1 text-label font-medium tabular-nums ${CHIP[verdict.tone]}`}>{chip}</span>
-          </div>
-          {verdict.requirements.length > 0 && <RequirementPills items={verdict.requirements} />}
-          {(verdict.reasoning ?? text) && <Reasoning text={verdict.reasoning ?? text} />}
-        </div>
-      </CollapsibleRegion>
-      {!open && (
+    <section className={SURFACE} aria-label={label}>
+      <div className="flex min-h-9 min-w-0 items-center gap-2 px-2">
         <button
           type="button"
-          onClick={() => setOpen(true)}
-          title="Show the verdict"
-          className="-mx-1 mb-0.5 mt-0.5 flex w-[calc(100%+0.5rem)] min-w-0 items-center gap-2 rounded-control px-1 text-left text-caption text-muted transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+          onClick={() => setOpen(!open)}
+          aria-expanded={open}
+          title={open ? "Fold to one line" : `Show the whole ${label.toLowerCase()}`}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-control py-1.5 text-left focus-visible:outline-none focus-visible:shadow-focusring"
         >
-          <span className={`shrink-0 rounded-control px-1.5 text-tiny font-medium ${CHIP[verdict.tone]}`}>{chip}</span>
-          <span className="truncate">{answerPreview(verdict.reasoning ?? text)}</span>
+          <span aria-hidden className={`shrink-0 text-faint transition-transform duration-fast ${open ? "" : "-rotate-90"}`}>
+            <Icon.trace.fold size={ICON.xs} />
+          </span>
+          <span className={`${TYPE.sectionLabel} shrink-0 ${tone === "err" ? "!text-err" : ""}`}>{label}</span>
+          <span className="min-w-0 flex-1 truncate text-caption text-ink">{line}</span>
         </button>
-      )}
+        {trailing && <span className="flex shrink-0 items-center gap-1">{trailing}</span>}
+      </div>
+      {open && <div className="border-t border-hair px-3 pb-3 pt-2">{children}</div>}
     </section>
   );
 }
 
-// ── The run summary card (2026-10-14) ───────────────────────────────────────
-
-/**
- * THE RUN IN ONE LINE OF RESULTS: how many of its requirements it met — "3/3 must-haves matched", as a
- * pull request shows its checks — and, when an eval ran it, what the judge gave it, criterion by
- * criterion.
- */
-function RunSummaryCard({ verdict, evalScore }: { verdict: RunVerdict | null; evalScore: RunEvalScore | undefined }) {
-  const reqs = verdict?.requirements ?? [];
-  const met = reqs.filter((r) => r.met).length;
-  const allMet = reqs.length > 0 && met === reqs.length;
+/** What a finished run made, as one line: its answer, its result, or what it did. */
+function Finished({ output, evalScore }: { output: RunOutput; evalScore: RunEvalScore | undefined }) {
+  const judge = evalScore ? <JudgeChip score={evalScore} /> : null;
+  if (output.kind === "answer") {
+    return (
+      <ResultRow label="Answer" line={answerPreview(output.text)} trailing={<>{judge}<CopyTurn source={output.text} /></>}>
+        <ClampedAnswer text={output.text} />
+        {output.calls.length > 0 && <div className="mt-3"><CallList calls={output.calls} /></div>}
+      </ResultRow>
+    );
+  }
+  if (output.kind === "result") {
+    return (
+      <ResultRow
+        label="Result"
+        line={resultPreview(output.value)}
+        trailing={<>{judge}<CopyTurn source={output.copy} label="Copy result" title="Copy the result as JSON" /></>}
+      >
+        <JsonTree value={output.value} openDepth={1} />
+        <button
+          type="button"
+          onClick={() => useTraceStore.getState().setRunTab("artifacts")}
+          className="mt-1.5 rounded-xs text-tiny text-muted underline decoration-hair underline-offset-2 transition-colors hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+        >
+          Open in Artifacts
+        </button>
+        {output.calls.length > 0 && <div className="mt-3"><CallList calls={output.calls} /></div>}
+      </ResultRow>
+    );
+  }
   return (
-    <section className={`${SURFACE} flex flex-col gap-1 py-2.5`} aria-label="Run summary">
-      <div className={TYPE.sectionLabel}>Summary</div>
-      {reqs.length > 0 && (
-        <p className="flex min-w-0 items-center gap-1.5 text-caption text-ink" title={reqs.map((r) => `${r.met ? "✓" : "✗"} ${r.label}`).join("\n")}>
-          <span aria-hidden className={allMet ? "text-ok" : "text-err"}>{allMet ? "✓" : "✗"}</span>
-          <span className="truncate"><span className="tabular-nums">{met}/{reqs.length}</span> {verdict!.noun} matched</span>
-        </p>
-      )}
-      {evalScore && (
-        <p className="min-w-0 truncate text-caption text-ink" title={evalScore.rationale ?? evalScore.error ?? undefined}>
-          {evalScore.score == null ? (
-            <span className="text-muted">The eval's judge could not score this run{evalScore.error ? `: ${evalScore.error}` : ""}</span>
-          ) : (
-            <>
-              <span>Judge <span className="tabular-nums">{Math.round(evalScore.score * 100)}%</span></span>
-              {evalScore.criteria.map((c) => (
-                <span key={c.id} className="text-muted"> · {c.label} <span className="tabular-nums">{c.score}/{evalScore.scale_max}</span></span>
-              ))}
-            </>
-          )}
-        </p>
-      )}
-    </section>
+    <ResultRow label="Did" line={callsPreview(output.calls)} trailing={judge}>
+      <CallList calls={output.calls} />
+    </ResultRow>
   );
 }
 
 /**
- * A failed run's reason, in the same place an answer would have been.
- *
- * RED WORDS ON THE ORDINARY SURFACE, not a red panel: the failure has to be findable at a glance,
- * and a block of red the size of an answer would be louder than anything it is trying to explain.
+ * A failed run's reason, in the same place an answer would have been: red words on the ordinary
+ * surface, one line until opened, and the step that failed a press away.
  */
 function RunFailure({ error, failedStep }: { error: string; failedStep: Step | undefined }) {
-  const { type, message } = errorParts(error);
+  const { type, message, detail } = errorParts(error);
   return (
-    <section className={SURFACE} aria-label="Run failed">
-      <div className="flex min-h-8 items-center gap-2">
-        <span className={`${TYPE.sectionLabel} !text-err`}>Run failed</span>
-        <span className="ml-auto flex items-center gap-1">
+    <ResultRow
+      label="Failed"
+      tone="err"
+      line={`${type ? `${type}: ` : ""}${message}`}
+      trailing={
+        <>
           {failedStep && (
             <button
               type="button"
@@ -274,21 +283,21 @@ function RunFailure({ error, failedStep }: { error: string; failedStep: Step | u
             </button>
           )}
           <CopyTurn source={error} label="Copy error" title="Copy the run's error" />
-        </span>
-      </div>
-      <div className="pb-1">
-        <p className="line-clamp-4 break-words text-caption text-ink" title={error}>
-          {type && <span className="mr-1.5 font-medium text-err">{type}</span>}
-          {message}
-        </p>
-      </div>
-    </section>
+        </>
+      }
+    >
+      <p className="whitespace-pre-wrap break-words text-caption text-ink [overflow-wrap:anywhere]">
+        {type && <span className="mr-1.5 font-medium text-err">{type}</span>}
+        {message}
+      </p>
+      {detail && <div className="mt-2"><PayloadText text={detail} /></div>}
+    </ResultRow>
   );
 }
 
 /** One quiet line for an ending with nothing more to show. */
 function Note({ children }: { children: React.ReactNode }) {
-  return <p className={`${SURFACE} py-2.5 text-caption text-muted`}>{children}</p>;
+  return <p className={`${SURFACE} px-3 py-2.5 text-caption text-muted`}>{children}</p>;
 }
 
 /**
@@ -304,10 +313,10 @@ function Stopped({ run, steps }: { run: RunSummary; steps: readonly Step[] }) {
   const explain = total != null && own.length > 0 && idle > Math.max(2000, total / 4);
   return (
     <Note>
-      Cancelled by a user before it finished, so there is no final answer.
+      Stopped before it finished.
       {explain && (
         <>
-          {" "}Its steps ran for {fmtDuration(busy)}; the rest of its {fmtDuration(total!)} it was paused or waiting until it was stopped.
+          {" "}Its steps ran for {fmtDuration(busy)}; the rest of its {fmtDuration(total!)} it was paused or waiting.
         </>
       )}
     </Note>
@@ -315,20 +324,17 @@ function Stopped({ run, steps }: { run: RunSummary; steps: readonly Step[] }) {
 }
 
 export function TraceResult({ run, steps }: { run: RunSummary; steps: readonly Step[] }) {
-  const answer = useMemo(() => (run.status === "completed" ? extractAgentOutput(steps) : ""), [run.status, steps]);
+  const output = useMemo(() => (run.status === "completed" ? runOutput(steps) : null), [run.status, steps]);
   const failedStep = useMemo(() => steps.find((s) => s.error != null), [steps]);
-  const verdict = useMemo(() => (run.status === "completed" ? readVerdict(finalState(steps), answer) : null), [run.status, steps, answer]);
   const evalScore = useTraceStore((s) => s.evalByRun[run.id]);
-  const summary = (verdict?.requirements.length ?? 0) > 0 || evalScore ? <RunSummaryCard verdict={verdict} evalScore={evalScore} /> : null;
 
-  if (run.status === "running") return <Note>The final answer appears here when the run finishes.</Note>;
-  if (run.status === "paused") return <Note>Paused. The final answer appears here once the run is resumed and finishes.</Note>;
+  if (run.status === "running") return <Note>What it makes shows here when the run finishes.</Note>;
+  if (run.status === "paused") return <Note>Paused. What it makes shows here once it is resumed and finishes.</Note>;
   if (run.status === "error") {
     if (run.error === CANCELLED_BY_USER) return <Stopped run={run} steps={steps} />;
     const error = run.error ?? failedStep?.error ?? null;
     return error ? <RunFailure error={error} failedStep={failedStep} /> : <Note>The run failed without saying why.</Note>;
   }
-  const result = isVerdict(verdict) ? <VerdictCard verdict={verdict} text={answer} />
-    : answer ? <FinalAnswer text={answer} /> : <Note>The run finished without a text answer.</Note>;
-  return summary ? <>{summary}{result}</> : result;
+  // FINISHED HAVING MADE NOTHING THIS CAN SHOW: no row at all.
+  return output ? <Finished output={output} evalScore={evalScore} /> : null;
 }

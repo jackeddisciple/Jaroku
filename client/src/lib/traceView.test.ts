@@ -11,10 +11,9 @@ import { graphLook, kindWord, traceMarks } from "../components/traceMarks.ts";
 import { nodeKind } from "../components/graphNodeIcons.ts";
 import { outcomePhase, runOutcome } from "./runOutcome.ts";
 import { branchFigures, compareRuns, finalState, runArtifacts, runFigures } from "./traceCompare.ts";
-import { isVerdict, readVerdict, verdictTone } from "./runVerdict.ts";
 import { jsonLines, jsonMatches, jsonType } from "./jsonShape.ts";
 import { diffHunks, lineDiff } from "./textDiff.ts";
-import { answerPreview } from "../components/TraceResult.tsx";
+import { answerPreview, callsPreview, resultPreview, runOutput } from "../components/TraceResult.tsx";
 import { STATUS, STEP_HUE } from "./tokens.ts";
 import type { RunSummary, Step } from "../types.ts";
 import {
@@ -454,28 +453,20 @@ console.log("\na branch against its parent, and what a run made");
   check("...but not a scalar one", !arts.some((a) => a.title === "score"));
 }
 
-console.log("\nwhat a run decided");
+console.log("\nwhat a finished run made");
 {
-  const screened = readVerdict(
-    { decision: "advance", score: 92, requirements: [{ name: "5+ yrs Python", met: true }, { name: "PostgreSQL", met: true }, { name: "AWS", met: false }], reasoning: "Strong backend history across three roles, with Postgres at scale." },
-    "",
-  );
-  check("a decision and a score in the state are a verdict", isVerdict(screened) && screened.decision === "advance" && screened.score === "92");
-  check("...its requirements read as met and not", screened?.requirements.map((r) => `${r.met ? "+" : "-"}${r.label}`).join() === "+5+ yrs Python,+PostgreSQL,-AWS", screened?.requirements.map((r) => r.label).join());
-  check("...and its reasoning field is the reasoning", screened?.reasoning?.startsWith("Strong backend") === true);
-  const nested = readVerdict({ evaluation: { verdict: "Reject", fit_score: 0.41, must_haves: { python: true, aws: "missing" } } }, "");
-  check("a verdict a level down, its fraction a percentage", nested?.decision === "Reject" && nested.score === "41" && nested.tone === "reject");
-  check("...requirements as a map, named by their field", nested?.noun === "must-haves" && nested.requirements.length === 2 && !nested.requirements[1]!.met);
-  const prose = readVerdict(null, "**Decision:** Advance (strong fit)\nScore: 88/100\n\n- ✓ Python\n- ✗ Kubernetes\n\nThe candidate has deep Python experience.");
-  check("prose: Decision: and Score: lines", prose?.decision === "Advance" && prose.score === "88/100", JSON.stringify(prose));
-  check("...and its ✓ / ✗ lines", prose?.requirements.map((r) => `${r.met ? "+" : "-"}${r.label}`).join() === "+Python,-Kubernetes");
-  const matchedMissing = readVerdict({ recommendation: "interview", matched: ["Go", "gRPC"], missing: ["Rust"] }, "");
-  check("matched / missing lists are requirements met and not", matchedMissing?.requirements.length === 3 && matchedMissing.requirements[2]?.met === false);
-  check("an ordinary answer is no verdict", !isVerdict(readVerdict({ messages: [], readings: [1, 2] }, "Two queues are backing up.")));
-  check("a status field is not a decision", !isVerdict(readVerdict({ status: "done" }, "")));
-  check("advance words read as advance", verdictTone("Advance to onsite") === "advance" && verdictTone("Strong yes") === "advance");
-  check("reject words as reject, a negated advance too", verdictTone("decline") === "reject" && verdictTone("Do not advance") === "reject" && verdictTone("No hire") === "reject");
-  check("anything else is neither", verdictTone("hold for review") === "other");
+  const reply = (text: string, seq = 1) => mk({ id: `r${seq}`, seq, type: "llm_call", output: [{ content: text }] });
+  const tool = (name: string, seq: number, error: string | null = null) => mk({ id: `t${seq}`, seq, type: "tool_call", name, error });
+  const answer = runOutput([reply("Paris is 18°C."), tool("get_weather", 0)]);
+  check("a text reply is the answer, with the tools beside it", answer?.kind === "answer" && answer.text === "Paris is 18°C." && answer.calls.length === 1);
+  const json = runOutput([reply('{"name": "Ada", "score": 92, "skills": ["Go", "Rust", "SQL"]}')]);
+  check("a JSON reply is a result", json?.kind === "result");
+  check("...folded to its fields", json?.kind === "result" && resultPreview(json.value) === 'name: "Ada" · score: 92 · skills: [3]', json?.kind === "result" ? resultPreview(json.value) : "");
+  const state = runOutput([mk({ id: "s0", seq: 0, state_before: { messages: [] }, state_after: { flagged: ["orders"] } })]);
+  check("no reply: the final state's fields are the result", state?.kind === "result" && JSON.stringify(state.value) === '{"flagged":["orders"]}', JSON.stringify(state));
+  const did = runOutput([tool("send_email", 0), tool("create_ticket", 1), tool("create_ticket", 2, "boom")]);
+  check("no reply and no fields: what it did", did?.kind === "did" && callsPreview(did.calls) === "send_email · create_ticket ×2", did?.kind === "did" ? callsPreview(did.calls) : "");
+  check("and nothing at all is no row", runOutput([mk({ id: "n0", seq: 0, state_before: { messages: [] }, state_after: { messages: [] } })]) === null);
 }
 
 console.log("\nthe JSON viewer's lines, types and search");
