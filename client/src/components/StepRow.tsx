@@ -81,8 +81,10 @@ export function StepTile({
   /** `lg` for the details drawer's header, where the tile introduces the step. */
   size?: "md" | "lg";
 }) {
-  const box = size === "lg" ? "h-8 w-8 rounded-control" : "h-[22px] w-[22px] rounded-sm";
-  const glyph = size === "lg" ? ICON.md : ICON.sm;
+  // A STEP ROW'S TILE IS 28px (2026-10-15, the product owner's "increase the overall sizes"): a size
+  // under the drawer's 32px one, so the drawer's still introduces the step.
+  const box = size === "lg" ? "h-8 w-8 rounded-control" : "h-7 w-7 rounded-control";
+  const glyph = ICON.md;
   const brand = stepProvider(step, provider);
   if (brand && hasProviderMark(brand)) {
     const colour = step.error ? STATUS.error : BRAND_COLOR[brand] ?? TEXT.muted;
@@ -162,11 +164,11 @@ function MiniBar({ value, max }: { value: number | null; max: number }) {
 
 /**
  * WHERE A ROW'S TILE STANDS, for the line that joins the steps of one card (2026-10-15): the row's
- * padding, the #seq column and its gap (44px), the fold chevron's slot (20px), then half the 22px tile.
+ * padding, the #seq column and its gap (48px), the fold chevron's slot (20px), then half the 28px tile.
  * Every row's tile is here — nothing is indented — so the line runs straight down the card.
  */
-export const TILE_X = 44 + 20 + 11;
-const TILE_HALF = 11;
+export const TILE_X = 48 + 20 + 14;
+const TILE_HALF = 14;
 /** Where a row's name starts: past the tile and the row's 8px gap. */
 export const NAME_X = TILE_X + TILE_HALF + 8;
 
@@ -187,12 +189,12 @@ export interface FoldSummary {
  */
 export const COL = {
   // Tokens and time carry their marks (the product owner's call, 2026-10-12), 16px of each column.
-  tokens: "w-14",
-  time: "w-14",
+  tokens: "w-16",
+  time: "w-16",
   /** The Viewed box (2026-10-14), held on every row so the figures stay one column. */
-  viewed: "w-6",
+  viewed: "w-7",
   /** Re-run and Details, two marks side by side on every row. */
-  actions: "w-[3.75rem]",
+  actions: "w-[4.25rem]",
 } as const;
 
 /** Which columns a width tier can afford — every row, and the live row, read the same answer. */
@@ -227,10 +229,10 @@ function ViewedMark({ viewed }: { viewed: boolean }) {
   return (
     <span
       aria-hidden
-      className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-xs border ${viewed ? "" : "border-grip"}`}
+      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-xs border ${viewed ? "" : "border-grip"}`}
       style={viewed ? { backgroundColor: VIEWED, borderColor: VIEWED, color: SURFACE.elevated } : undefined}
     >
-      {viewed && <Icon.trace.viewedTick size={ICON.badge} />}
+      {viewed && <Icon.trace.viewedTick size={ICON.xs} />}
     </span>
   );
 }
@@ -358,7 +360,7 @@ export function StepRow({
         e.preventDefault();
         toggleDetails();
       }}
-      className={`group/step relative isolate flex animate-slide-in cursor-pointer select-none items-center gap-2 rounded-control py-1.5 pl-2 pr-1 outline-none transition-colors duration-fast focus-visible:shadow-focusring motion-reduce:animate-none ${
+      className={`group/step relative isolate flex animate-slide-in cursor-pointer select-none items-center gap-2 rounded-control py-2 pl-2 pr-1 outline-none transition-colors duration-fast focus-visible:shadow-focusring motion-reduce:animate-none ${
         selected ? "bg-active" : "hover:bg-active/40"
       } ${row.context || inherited ? "text-muted [&_.text-ink]:text-muted" : ""}`}
       // NO BACKGROUND OF ITS OWN (the product owner's call, 2026-10-14): a red wash on the heavy steps
@@ -376,7 +378,7 @@ export function StepRow({
           at the tile's edge, so the line never paints over a tile. */}
       {link?.up && <span aria-hidden className="absolute top-0 w-0.5 bg-grip" style={{ left: TILE_X - 1, height: `calc(50% - ${TILE_HALF}px)` }} />}
       {link?.down && <span aria-hidden className="absolute bottom-0 w-0.5 bg-grip" style={{ left: TILE_X - 1, top: `calc(50% + ${TILE_HALF}px)` }} />}
-      <span className="w-7 shrink-0 text-left text-tiny tabular-nums text-faint">#{step.seq}</span>
+      <span className="w-8 shrink-0 text-left text-caption tabular-nums text-faint">#{step.seq}</span>
       {/* NO INDENT AND NO TREE LINES (the product owner's call, 2026-10-14): a node is its card's header
           row, and every step inside it sits level with the others below it — the staircase of
           elbows read as nesting to be decoded rather than a list to be read. */}
@@ -399,7 +401,7 @@ export function StepRow({
         >
           {group && (
             <span className={`transition-transform duration-fast ${row.collapsed ? "-rotate-90" : ""}`}>
-              <Icon.trace.fold size={ICON.xs} />
+              <Icon.trace.fold size={ICON.sm} />
             </span>
           )}
         </span>
@@ -408,7 +410,7 @@ export function StepRow({
 
       <span className="relative min-w-[4.5rem] flex-1">
         <span className="flex min-w-0 items-center gap-1.5">
-          <span className="min-w-0 truncate text-caption font-medium text-ink" title={step.name}>
+          <span className="min-w-0 truncate text-body font-medium text-ink" title={step.name}>
             {places.includes("name") ? <Marked text={step.name} query={query} /> : step.name}
           </span>
           {/* Derived from the AGENT's manifest, not from the step: the frozen Step schema has no
@@ -417,12 +419,12 @@ export function StepRow({
           {/* PINNED, IN VIOLET (2026-10-14): one of the steps somebody keeps coming back to. P walks them. */}
           {pinned && (
             <span className="shrink-0" style={{ color: PINNED }} title="Pinned — P and Shift+P go from pin to pin">
-              <Icon.trace.pinStep size={ICON.xs} />
+              <Icon.trace.pinStep size={ICON.sm} />
               <span className="sr-only">pinned</span>
             </span>
           )}
         </span>
-        <span className="flex min-w-0 items-center gap-1.5 text-tiny text-faint">
+        <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-caption text-faint">
           {/* The kind keeps its word; where a search matched gives way first. */}
           <span className={elsewhere.length > 0 ? "shrink-0" : "truncate"}>{kind}</span>
           {elsewhere.length > 0 && (
@@ -434,20 +436,20 @@ export function StepRow({
               row is dimmed, and the word comes with a link mark (copied, not re-run). */}
           {inherited && (
             <span className="flex shrink-0 items-center gap-1" title="Copied from the run this one branched from — it ran there, before this run began, and was not re-run">
-              · <span aria-hidden className="shrink-0"><Icon.trace.inherited size={ICON.xs} /></span>inherited
+              · <span aria-hidden className="shrink-0"><Icon.trace.inherited size={ICON.sm} /></span>inherited
             </span>
           )}
           {fold && <span className="shrink-0">· {fold.steps} {fold.steps === 1 ? "step" : "steps"}</span>}
           {/* A FAILURE INSIDE A FOLD IS STILL SAID. Folding a node must never be how an error disappears. */}
           {fold && fold.failed > 0 && !failed && (
             <span className="flex shrink-0 items-center gap-1 text-err" title="A step inside this one failed">
-              <Icon.trace.failed size={ICON.xs} />
+              <Icon.trace.failed size={ICON.sm} />
               {fold.failed} failed inside
             </span>
           )}
           {failed && (
             <span className="flex shrink-0 items-center gap-1 text-err" title="This step failed">
-              <Icon.trace.failed size={ICON.xs} />
+              <Icon.trace.failed size={ICON.sm} />
               failed
             </span>
           )}
@@ -456,7 +458,7 @@ export function StepRow({
 
       {/* Figures, tabular, and only the ones this step has: a node has no tokens of its own. An
           inherited step's are quieter: its parent spent them, and the run's totals leave them out. */}
-      <span className={`flex shrink-0 items-center gap-2 text-tiny tabular-nums ${inherited ? "text-faint" : "text-muted"}`}>
+      <span className={`flex shrink-0 items-center gap-2 text-caption tabular-nums ${inherited ? "text-faint" : "text-muted"}`}>
         {/* A folded node shows what its steps add up to, said as such — the node itself has none. An
             empty cell keeps its width, so the columns stay columns. The token mark says what it is. */}
         {show.tokens && (
@@ -468,7 +470,7 @@ export function StepRow({
           >
             {tokens != null && (
               <>
-                <span aria-hidden className="shrink-0 text-faint"><Icon.trace.tokens size={ICON.xs} /></span>
+                <span aria-hidden className="shrink-0 text-faint"><Icon.trace.tokens size={ICON.sm} /></span>
                 <span className="truncate">{tokenCount(tokens)}</span>
                 <span className="sr-only"> tokens</span>
               </>
@@ -477,7 +479,7 @@ export function StepRow({
           </span>
         )}
         <span className={`${COL.time} relative flex items-center justify-end gap-1`} title={`Took ${fmtDuration(step.latency_ms)}`}>
-          <span aria-hidden className="shrink-0 text-faint"><Icon.trace.time size={ICON.xs} /></span>
+          <span aria-hidden className="shrink-0 text-faint"><Icon.trace.time size={ICON.sm} /></span>
           <span className="truncate">{fmtDuration(step.latency_ms)}</span>
           {scale && <MiniBar value={Number.isFinite(step.latency_ms) ? step.latency_ms : null} max={scale.time} />}
         </span>
@@ -498,9 +500,9 @@ export function StepRow({
           }}
           aria-label={`Re-run from #${step.seq} ${step.name}`}
           title="Re-run from here — a new run from this step, as it was"
-          className="flex h-7 w-7 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+          className="flex h-8 w-8 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
         >
-          <Icon.trace.rerunStep size={ICON.sm} />
+          <Icon.trace.rerunStep size={ICON.md} />
         </button>
         <button
           type="button"
@@ -517,11 +519,11 @@ export function StepRow({
           // WHICH STEP, SAID. Nine buttons all read "Details — Open step details" to VoiceOver.
           aria-label={`${expanded ? "Close" : "Open"} details for #${step.seq} ${step.name}`}
           title={expanded ? "Close step details" : "Open step details"}
-          className={`flex h-7 w-7 items-center justify-center rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+          className={`flex h-8 w-8 items-center justify-center rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
             expanded ? "bg-chrome text-ink" : "text-muted hover:bg-active hover:text-ink"
           }`}
         >
-          <Icon.trace.details size={ICON.sm} />
+          <Icon.trace.details size={ICON.md} />
         </button>
       </span>
     </div>

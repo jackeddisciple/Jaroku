@@ -34,7 +34,9 @@ function useRowTier(ref: React.RefObject<HTMLDivElement | null>): RowTier {
       const w = el.clientWidth;
       // 24px above where they were before tokens and time took their marks, so each tier still leaves
       // a step's name the room it was sized for.
-      setTier(w >= 564 ? "full" : w >= 504 ? "wide" : w >= 404 ? "medium" : "narrow");
+      // 42px above where they were before the rows grew a size (2026-10-15), so each tier still leaves
+      // its names the room it did.
+      setTier(w >= 606 ? "full" : w >= 546 ? "wide" : w >= 446 ? "medium" : "narrow");
     };
     measure();
     if (typeof ResizeObserver === "undefined") return;
@@ -354,12 +356,12 @@ function LiveTail({ run, steps, span, tier, waiting = [], marks }: {
       className={`rounded-card border border-dashed p-1 ${state === "running" ? "border-run/50 bg-run/[0.04]" : "border-edge bg-panel"}`}
       aria-live="polite"
     >
-    <div className="relative flex items-center gap-2 rounded-control py-1.5 pl-2 pr-1">
-      <span className="w-7 shrink-0" />
+    <div className="relative flex items-center gap-2 rounded-control py-2 pl-2 pr-1">
+      <span className="w-8 shrink-0" />
       <span className="flex shrink-0 items-center" style={{ paddingLeft: 20 }}>
         <span
           aria-hidden
-          className={`flex h-[22px] w-[22px] items-center justify-center rounded-sm border border-dashed ${
+          className={`flex h-7 w-7 items-center justify-center rounded-control border border-dashed ${
             state === "running" ? "border-run/60 bg-run/10" : "border-grip bg-void"
           }`}
         >
@@ -369,16 +371,16 @@ function LiveTail({ run, steps, span, tier, waiting = [], marks }: {
         </span>
       </span>
       <span className="min-w-[4.5rem] flex-1">
-        <span className="block truncate text-caption font-medium text-ink" title={name}>{name}</span>
-        <span className={`block truncate text-tiny ${state === "running" ? "text-run" : "text-faint"}`} title={more}>{word}</span>
+        <span className="block truncate text-body font-medium text-ink" title={name}>{name}</span>
+        <span className={`mt-0.5 block truncate text-caption ${state === "running" ? "text-run" : "text-faint"}`} title={more}>{word}</span>
       </span>
       {/* THE STEPS' OWN COLUMNS, so its time sits under theirs: the time it has run so far, in amber. */}
-      <span className="flex shrink-0 items-center gap-2 text-tiny tabular-nums">
+      <span className="flex shrink-0 items-center gap-2 text-caption tabular-nums">
         {show.tokens && <span className={COL.tokens} />}
         <span className={`${COL.time} flex items-center justify-end gap-1 ${state === "running" ? "text-run" : "text-faint"}`}>
           {soFar != null && (
             <>
-              <span aria-hidden className="shrink-0"><Icon.trace.time size={ICON.xs} /></span>
+              <span aria-hidden className="shrink-0"><Icon.trace.time size={ICON.sm} /></span>
               <span className="truncate">{fmtDuration(soFar)}</span>
             </>
           )}
