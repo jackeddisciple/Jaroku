@@ -20,7 +20,7 @@
 
 import { useEffect, useRef } from "react";
 
-import { fmtCost, fmtDuration, tokenCount } from "../lib/format.ts";
+import { fmtDuration, tokenCount } from "../lib/format.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { matchPlaces, rerunBlocked, stepCategory, stepProvider, type StepCategory, type VisibleRow } from "../lib/traceView.ts";
 import { BRAND_COLOR, ProviderMark, hasProviderMark } from "../lib/icons.tsx";
@@ -133,7 +133,6 @@ export type RowTier = "full" | "wide" | "medium" | "narrow";
 /** The heaviest step's figures in the run — what each row's mini bars are a share of. */
 export interface MetricScale {
   tokens: number;
-  cost: number;
   time: number;
 }
 
@@ -171,11 +170,10 @@ const TILE_HALF = 11;
 /** Where a row's name starts: past the tile and the row's 8px gap. */
 export const NAME_X = TILE_X + TILE_HALF + 8;
 
-/** What a folded node stands for: its steps, what they cost, and whether any of them failed. */
+/** What a folded node stands for: its steps, their tokens, and whether any of them failed. */
 export interface FoldSummary {
   steps: number;
   tokens: number | null;
-  cost: number | null;
   failed: number;
 }
 
@@ -183,11 +181,13 @@ export interface FoldSummary {
  * THE FIGURE COLUMNS, AT FIXED WIDTHS — so every row's numbers line up in a column, a node's empty
  * cells included. There are no headings over them (the product owner's call, 2026-10-12): the figures
  * say what they are. Narrow enough that a nested step's name keeps a hundred-odd pixels.
+ *
+ * TOKENS AND TIME, NOT COST (the product owner's call, 2026-10-15): a row is read for how big and how
+ * slow a step was; what the run cost is in the strip above, and a step's own cost in its details.
  */
 export const COL = {
   // Tokens and time carry their marks (the product owner's call, 2026-10-12), 16px of each column.
   tokens: "w-14",
-  cost: "w-14",
   time: "w-14",
   /** The Viewed box (2026-10-14), held on every row so the figures stay one column. */
   viewed: "w-6",
@@ -198,7 +198,6 @@ export const COL = {
 /** Which columns a width tier can afford — every row, and the live row, read the same answer. */
 export const columnsFor = (tier: RowTier) => ({
   tokens: tier !== "narrow",
-  cost: tier === "wide" || tier === "full",
   // ALWAYS: re-run and details are on every row at every width (the product owner's call, 2026-10-14).
   actions: true,
 });
@@ -336,7 +335,6 @@ export function StepRow({
   const elsewhere = places.filter((p) => p !== "name");
   const show = columnsFor(tier);
   const tokens = step.tokens ?? fold?.tokens ?? null;
-  const cost = step.cost ?? fold?.cost ?? null;
   const failed = step.error != null;
 
   return (
@@ -476,12 +474,6 @@ export function StepRow({
               </>
             )}
             {scale && <MiniBar value={tokens} max={scale.tokens} />}
-          </span>
-        )}
-        {show.cost && (
-          <span className={`${COL.cost} relative text-right`} title={cost != null && fold ? `Across the ${fold.steps} steps inside` : undefined}>
-            <span className="block truncate">{cost == null ? "" : fmtCost(cost)}</span>
-            {scale && <MiniBar value={cost} max={scale.cost} />}
           </span>
         )}
         <span className={`${COL.time} relative flex items-center justify-end gap-1`} title={`Took ${fmtDuration(step.latency_ms)}`}>

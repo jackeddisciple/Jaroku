@@ -98,7 +98,6 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
       out[row.step.id] = {
         steps: inside.length,
         tokens: totals.tokens,
-        cost: totals.cost,
         failed: inside.filter((s) => s.error != null).length,
       };
     }
@@ -110,7 +109,6 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
     const own = ownSteps(run, steps);
     return {
       tokens: Math.max(0, ...own.map((st) => st.tokens ?? 0)),
-      cost: Math.max(0, ...own.map((st) => st.cost ?? 0)),
       time: Math.max(0, ...own.map((st) => (Number.isFinite(st.latency_ms) ? st.latency_ms : 0))),
     };
   }, [run, steps]);
@@ -377,7 +375,6 @@ function LiveTail({ run, steps, span, tier, waiting = [], marks }: {
       {/* THE STEPS' OWN COLUMNS, so its time sits under theirs: the time it has run so far, in amber. */}
       <span className="flex shrink-0 items-center gap-2 text-tiny tabular-nums">
         {show.tokens && <span className={COL.tokens} />}
-        {show.cost && <span className={COL.cost} />}
         <span className={`${COL.time} flex items-center justify-end gap-1 ${state === "running" ? "text-run" : "text-faint"}`}>
           {soFar != null && (
             <>
