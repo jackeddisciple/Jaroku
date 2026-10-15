@@ -56,6 +56,7 @@ export function Segmented<T extends string>({
   ariaLabel,
   size = ICON.sm,
   className = "",
+  round = false,
 }: {
   options: readonly SegmentOption<T>[];
   value: T;
@@ -64,12 +65,14 @@ export function Segmented<T extends string>({
   ariaLabel: string;
   size?: number;
   className?: string;
+  /** A pill rather than a box: fully rounded ends (the trace's step filters, 2026-10-14). */
+  round?: boolean;
 }) {
   return (
     <div
       role="radiogroup"
       aria-label={ariaLabel}
-      className={`inline-flex items-center divide-x divide-edge overflow-hidden rounded-control border border-edge ${className}`}
+      className={`inline-flex items-center divide-x divide-edge overflow-hidden ${round ? "rounded-full" : "rounded-control"} border border-edge ${className}`}
     >
       {options.map((o) =>
         o.icon ? (

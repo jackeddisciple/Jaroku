@@ -2,8 +2,9 @@
 //
 // THE KINDS ARE THE SCHEMA'S FOUR AND NOTHING INVENTED — model calls, tool calls, state updates,
 // routing — plus Errors, which is not a kind but the question people open a trace with. Each says
-// how many steps it would show, and a kind this run has none of stays in place, greyed, so the row
-// never reflows while a live run streams in.
+// how many steps it would show — always, as the tab's own number beside its word (the product owner's
+// call, 2026-10-14: numbers, not coloured dots) — and a kind this run has none of stays in place,
+// greyed, so the row never reflows while a live run streams in.
 //
 // A FAILURE IS NEVER FILTERED INTO SILENCE. The Errors count is red whenever there is one, whatever is
 // selected, so a trace narrowed to model calls still says that something else went wrong.
@@ -15,11 +16,11 @@
 // under the filters. The mark opens into the field in the same row; Escape, or leaving it empty,
 // folds it back. A search that is on stays open, so the words narrowing the list are always in view.
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { filterCounts, type StepFilter } from "../lib/traceView.ts";
 import { Icon } from "../lib/icons/registry.ts";
-import { ICON, STATUS, STEP_TYPE } from "../lib/tokens.ts";
+import { ICON } from "../lib/tokens.ts";
 import { useTraceStore, visibleTraceRows, type StepView } from "../store/traceStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import { insideKeyOwner, paneOwnsBareKey } from "../lib/bareKeys.ts";
@@ -37,17 +38,6 @@ const KINDS: { value: StepFilter; text: string; noun: string }[] = [
   { value: "errors", text: "Errors", noun: "failed steps" },
 ];
 
-/** Each kind's dot: its STEP_TYPE colour, the one its fallback tile is drawn in; red for Errors. */
-const KIND_DOT: Partial<Record<StepFilter, string>> = {
-  llm: STEP_TYPE.llm_call.fg,
-  tool: STEP_TYPE.tool_call.fg,
-  state: STEP_TYPE.state_update.fg,
-  route: STEP_TYPE.router.fg,
-  errors: STATUS.error,
-};
-
-/** What sits beside the segments: the fold mark, the view switcher's two, the search mark (32px each), and their gaps. */
-const MARK_ROOM = 8 + 32 + 4 + 32 * 2 + 4 + 32;
 
 /**
  * LIST OR GRAPH (2026-10-14), beside the search: the steps as a list, or the agent's graph with this
@@ -65,24 +55,7 @@ export function ViewSwitcher() {
 }
 
 export function TraceFilters({ steps }: { steps: readonly Step[] }) {
-  // THE COUNTS SHOW WHENEVER THEY FIT, measured rather than guessed. A fixed 460px threshold hid them
-  // at the panel's default width, where they fit with room to spare; now an invisible copy of the
-  // segments WITH their counts says how wide they are, and the counts give way — all but the red
-  // one — only when that copy and the search mark would not fit on the row.
   const ref = useRef<HTMLDivElement>(null);
-  const counted = useRef<HTMLDivElement>(null);
-  const [roomy, setRoomy] = useState(true);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const measure = (): void => setRoomy(el.clientWidth >= (counted.current?.offsetWidth ?? 0) + MARK_ROOM);
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    if (counted.current) ro.observe(counted.current);
-    return () => ro.disconnect();
-  }, []);
   const filter = useTraceStore((s) => s.stepFilter);
   const query = useTraceStore((s) => s.stepQuery);
   const setFilter = useTraceStore((s) => s.setStepFilter);
@@ -151,14 +124,13 @@ export function TraceFilters({ steps }: { steps: readonly Step[] }) {
       document.querySelector<HTMLElement>(`[role="treeitem"][data-step-id="${first.step.id}"]`)?.focus());
   };
 
-  const optionsWith = (showCounts: boolean): SegmentOption<StepFilter>[] => KINDS.map((k) => ({
+  const options: SegmentOption<StepFilter>[] = KINDS.map((k) => ({
     value: k.value,
     text: k.text,
-    count: showCounts || (k.value === "errors" && counts.errors > 0) ? counts[k.value] : undefined,
+    // HOW MANY, ALWAYS — the count is how a tab says what it holds. Errors' turns red, word and number,
+    // the moment there is one (2026-10-14).
+    count: counts[k.value],
     countTone: k.value === "errors" ? "danger" : undefined,
-    // EACH KIND'S DOT IN ITS TILE COLOUR, so a tab points at the rows it shows; Errors' is red, and
-    // its word turns red the moment there is one (2026-10-14).
-    dot: KIND_DOT[k.value],
     alert: k.value === "errors" && counts.errors > 0,
     // Never disable the one that is chosen: it must stay pressable to read as chosen.
     disabled: counts[k.value] === 0 && k.value !== filter,
@@ -166,19 +138,14 @@ export function TraceFilters({ steps }: { steps: readonly Step[] }) {
     label: (counts[k.value] === 0 ? `Show ${k.noun} — this run has none` : `Show ${k.noun}`)
       + (k.value === "errors" ? " · E jumps to the next failed step" : ""),
   }));
-  const options = optionsWith(roomy);
 
   return (
     // Sticky with the column names under it — StepList holds the two in one box.
     <div ref={ref} className="relative flex flex-wrap items-center gap-2 py-2">
-      {/* The measure: the segments with every count, laid out and never seen or reached. */}
-      <div ref={counted} aria-hidden className="pointer-events-none invisible absolute left-0 top-0 w-max">
-        <Segmented options={optionsWith(true)} value={filter} onChange={() => {}} ariaLabel="" />
-      </div>
       {/* At the pane's very narrowest the words alone do not fit; the strip scrolls in its own box
           rather than pushing the panel wide. */}
       <div className="max-w-full overflow-x-auto">
-        <Segmented options={options} value={filter} onChange={setFilter} ariaLabel="Show steps of kind" />
+        <Segmented options={options} value={filter} onChange={setFilter} ariaLabel="Show steps of kind" round />
       </div>
       {/* THE TOOLS, AS ONE GROUP AT THE ROW'S END — fold, view, search — so on a narrow panel they move to
           the next line together rather than one at a time. */}
