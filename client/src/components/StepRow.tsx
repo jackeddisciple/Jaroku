@@ -25,7 +25,7 @@ import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { matchPlaces, rerunBlocked, stepCategory, stepProvider, type StepCategory, type VisibleRow } from "../lib/traceView.ts";
 import { BRAND_COLOR, ProviderMark, hasProviderMark } from "../lib/icons.tsx";
 import { kindWord, type StepMark } from "./traceMarks.ts";
-import { ICON, METRIC, PINNED, STATUS, STEP_TYPE, SURFACE, TEXT, VIEWED } from "../lib/tokens.ts";
+import { ICON, PINNED, STATUS, STEP_TYPE, SURFACE, TEXT, VIEWED } from "../lib/tokens.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { agentMcpToolNames } from "../store/mcpStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
@@ -139,10 +139,10 @@ export interface MetricScale {
 
 /**
  * A FIGURE'S SHARE, DRAWN (2026-10-14): a hairline bar under the number, as long as this step's share of
- * the run's heaviest, in the figure's own colour (METRIC) — so the heavy steps stand out down the column
+ * the run's heaviest, in ink — so the heavy steps stand out down the column, by length alone,
  * before a digit is read. Right-aligned under the right-aligned number; nothing for an unknown figure.
  */
-function MiniBar({ value, max, colour }: { value: number | null; max: number; colour: string }) {
+function MiniBar({ value, max }: { value: number | null; max: number }) {
   // Nothing for an unknown figure or a zero: a stub under "0ms" would say there was something.
   if (value == null || !(value > 0) || !(max > 0)) return null;
   const share = Math.min(1, Math.max(0, value / max));
@@ -152,7 +152,10 @@ function MiniBar({ value, max, colour }: { value: number | null; max: number; co
     <span
       aria-hidden
       className="pointer-events-none absolute -bottom-1 right-0 h-0.5 rounded-full"
-      style={{ width: `max(2px, ${share * 100}%)`, background: colour, opacity: 0.75 }}
+      // INK, ONE COLOUR FOR ALL THREE (the product owner's call, 2026-10-15): the line sits under its
+      // own figure, so its place already says which it measures; three hues down every row said it
+      // again, louder. At the timeline marks' strength, so the row's marks read as one set.
+      style={{ width: `max(2px, ${share * 100}%)`, background: TEXT.ink, opacity: 0.6 }}
     />
   );
 }
@@ -519,19 +522,19 @@ export function StepRow({
                 <span className="sr-only"> tokens</span>
               </>
             )}
-            {scale && <MiniBar value={tokens} max={scale.tokens} colour={METRIC.tokens} />}
+            {scale && <MiniBar value={tokens} max={scale.tokens} />}
           </span>
         )}
         {show.cost && (
           <span className={`${COL.cost} relative text-right`} title={cost != null && fold ? `Across the ${fold.steps} steps inside` : undefined}>
             <span className="block truncate">{cost == null ? "" : fmtCost(cost)}</span>
-            {scale && <MiniBar value={cost} max={scale.cost} colour={METRIC.cost} />}
+            {scale && <MiniBar value={cost} max={scale.cost} />}
           </span>
         )}
         <span className={`${COL.time} relative flex items-center justify-end gap-1`} title={`Took ${fmtDuration(step.latency_ms)}`}>
           <span aria-hidden className="shrink-0 text-faint"><Icon.trace.time size={ICON.xs} /></span>
           <span className="truncate">{fmtDuration(step.latency_ms)}</span>
-          {scale && <MiniBar value={Number.isFinite(step.latency_ms) ? step.latency_ms : null} max={scale.time} colour={METRIC.time} />}
+          {scale && <MiniBar value={Number.isFinite(step.latency_ms) ? step.latency_ms : null} max={scale.time} />}
         </span>
         {/* INK, AND RED ONLY FOR A FAILURE (the product owner's call, 2026-10-15): the tile beside it
             already says the step's kind, so the mark only has to say when it ran and for how long —
