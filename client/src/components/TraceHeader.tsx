@@ -100,9 +100,6 @@ function RunActions({ run }: { run: RunSummary }) {
       <button type="button" aria-label="Copy run ID" title="Copy run ID" onClick={() => { void copyRunId(run.id); }} className={GREY_MARK}>
         <Icon.turn.copy size={ICON.sm} />
       </button>
-      <button type="button" aria-label="Show on graph" title="Show on graph" onClick={() => useUiStore.getState().setRightTab("graph")} className={GREY_MARK}>
-        <Icon.panel.graph size={ICON.sm} />
-      </button>
       <button
         type="button"
         onClick={() => useUiStore.getState().setRightTab("runs")}
