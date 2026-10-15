@@ -6,7 +6,7 @@
 // output by guesswork, which a developer debugging the run cannot trust. So the row says what THIS run
 // produced, from what it recorded and nothing inferred:
 //
-//   Answer — the text it replied with, the same string the eval judge scores (`extractAgentOutput`);
+//   Response — the text it replied with, the same string the eval judge scores (`extractAgentOutput`);
 //   Result — what it made instead of prose: a JSON reply, or the fields of its final state;
 //   Did    — the tools it called, when it answered nothing — an action agent's real output;
 //   Failed — the run's error, with a way straight to the step that failed;
@@ -228,7 +228,7 @@ function Finished({ output, evalScore }: { output: RunOutput; evalScore: RunEval
   const judge = evalScore ? <JudgeChip score={evalScore} /> : null;
   if (output.kind === "answer") {
     return (
-      <ResultRow label="Answer" line={answerPreview(output.text)} trailing={<>{judge}<CopyTurn source={output.text} /></>}>
+      <ResultRow label="Response" line={answerPreview(output.text)} trailing={<>{judge}<CopyTurn source={output.text} /></>}>
         <ClampedAnswer text={output.text} />
         {output.calls.length > 0 && <div className="mt-3"><CallList calls={output.calls} /></div>}
       </ResultRow>
