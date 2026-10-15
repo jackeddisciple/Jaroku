@@ -20,12 +20,12 @@
 
 import { useEffect, useRef } from "react";
 
-import { fmtCost, fmtDuration, fmtOffset, tokenCount } from "../lib/format.ts";
+import { fmtCost, fmtDuration, tokenCount } from "../lib/format.ts";
 import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { matchPlaces, rerunBlocked, stepCategory, stepProvider, type StepCategory, type VisibleRow } from "../lib/traceView.ts";
 import { BRAND_COLOR, ProviderMark, hasProviderMark } from "../lib/icons.tsx";
 import { kindWord, type StepMark } from "./traceMarks.ts";
-import { ICON, PINNED, STATUS, STEP_TYPE, SURFACE, TEXT, TIMELINE_MARK, VIEWED } from "../lib/tokens.ts";
+import { ICON, PINNED, STATUS, STEP_TYPE, SURFACE, TEXT, VIEWED } from "../lib/tokens.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { agentMcpToolNames } from "../store/mcpStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
@@ -160,48 +160,6 @@ function MiniBar({ value, max }: { value: number | null; max: number }) {
   );
 }
 
-/** Where a step's bar sits in the waterfall, as fractions of the run's span. */
-export interface BarPlace {
-  left: number;
-  width: number;
-  /** When it began, relative to the run's start, for the tooltip — signed: a clock can be a little off. */
-  offsetMs: number;
-}
-
-/**
- * WHEN THE STEP RAN, against the whole run. The bar starts where the step really began and ends where
- * it finished — `started_at` is stamped as a step ends, so its start is that minus its duration — and
- * so a node's bar spans its model call's, steps that overlapped are drawn overlapping, and the gaps
- * between nodes are visible as gaps rather than invented away.
- */
-function Waterfall({ step, bar, colour, inherited }: { step: Step; bar: BarPlace | null; colour: string; inherited: boolean }) {
-  return (
-    <span
-      className={`relative h-1.5 shrink-0 rounded-full bg-void ${COL.timeline}`}
-      title={
-        bar ? `Started ${fmtOffset(bar.offsetMs)} · took ${fmtDuration(step.latency_ms)}`
-          // AN INHERITED STEP HAS NO BAR: it ran in the parent, before this run began.
-          : inherited ? "Ran in the run this one branched from, before this run began"
-            : "No timing recorded"
-      }
-    >
-      {bar && (
-        <span
-          aria-hidden
-          // Pure black, or red for a step that failed — see the call site. Full strength: a softened
-          // black is a grey.
-          className="absolute bottom-0 top-0 rounded-full"
-          style={{
-            left: `${bar.left * 100}%`,
-            // Never thinner than a hair, so a 0ms routing decision still marks its moment.
-            width: `max(2px, ${bar.width * 100}%)`,
-            backgroundColor: colour,
-          }}
-        />
-      )}
-    </span>
-  );
-}
 
 /**
  * WHERE A ROW'S TILE STANDS, for the line that joins the steps of one card (2026-10-15): the row's
@@ -231,7 +189,6 @@ export const COL = {
   tokens: "w-14",
   cost: "w-14",
   time: "w-14",
-  timeline: "w-16",
   /** The Viewed box (2026-10-14), held on every row so the figures stay one column. */
   viewed: "w-6",
   /** Re-run and Details, two marks side by side on every row. */
@@ -242,7 +199,6 @@ export const COL = {
 export const columnsFor = (tier: RowTier) => ({
   tokens: tier !== "narrow",
   cost: tier === "wide" || tier === "full",
-  timeline: tier === "full",
   // ALWAYS: re-run and details are on every row at every width (the product owner's call, 2026-10-14).
   actions: true,
 });
@@ -323,7 +279,6 @@ export function StepRow({
   tabbable,
   tier,
   fold,
-  bar,
   provider,
   mark,
   inherited = false,
@@ -335,8 +290,6 @@ export function StepRow({
   tier: RowTier;
   /** Set while this node is folded: what its hidden steps add up to. */
   fold?: FoldSummary;
-  /** Its place in the run's waterfall, or null when its times can't say. */
-  bar: BarPlace | null;
   /** The run's provider, for a model call whose class does not name one. */
   provider?: string | null;
   /** This step's own mark and colour (traceMarks). */
@@ -536,10 +489,6 @@ export function StepRow({
           <span className="truncate">{fmtDuration(step.latency_ms)}</span>
           {scale && <MiniBar value={Number.isFinite(step.latency_ms) ? step.latency_ms : null} max={scale.time} />}
         </span>
-        {/* PURE BLACK, AND RED ONLY FOR A FAILURE (the product owner's call, 2026-10-15): the tile beside it
-            already says the step's kind, so the mark only has to say when it ran and for how long —
-            and a failed step is the one mark that should stand out of the column. */}
-        {show.timeline && <Waterfall step={step} bar={bar} colour={step.error ? STATUS.error : TIMELINE_MARK} inherited={inherited} />}
       </span>
 
       {runId && <ViewedBox runId={runId} step={step} viewed={viewed} />}

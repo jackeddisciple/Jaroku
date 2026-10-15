@@ -2,7 +2,7 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 
 import { CANCELLED_BY_USER, DRAWER_SNAP, orderedSteps, treeSteps, useTraceStore } from "../store/traceStore.ts";
 import type { RunSummary, Step } from "../types.ts";
 import { useUiStore } from "../store/uiStore.ts";
-import { COL, NAME_X, StepRow, TILE_X, columnsFor, type BarPlace, type FoldSummary, type MetricScale, type RowTier } from "./StepRow.tsx";
+import { COL, NAME_X, StepRow, TILE_X, columnsFor, type FoldSummary, type MetricScale, type RowTier } from "./StepRow.tsx";
 import { buildTraceTree, descendantSteps, isInherited, ownSteps, runWindow, stepWindow, traceSections, traceTotals, visibleRows, type TimeWindow, type TraceSection, type VisibleRow } from "../lib/traceView.ts";
 import { nodeKind } from "./graphNodeIcons.ts";
 import { EmptyState } from "./EmptyState.tsx";
@@ -23,20 +23,6 @@ import { fmtDuration } from "../lib/format.ts";
 import { ICON, TYPE } from "../lib/tokens.ts";
 import { useRunClock } from "../lib/useRunClock.ts";
 
-/**
- * A step's place in the run's span, or null when either has no readable times — or when the step was
- * inherited by a branch, which ran it before the branch existed.
- */
-function barFor(step: Step, span: TimeWindow | null, inherited: boolean): BarPlace | null {
-  const w = stepWindow(step);
-  if (!w || !span || inherited) return null;
-  const total = span.end - span.start;
-  return {
-    left: Math.min(1, Math.max(0, (w.start - span.start) / total)),
-    width: Math.min(1, Math.max(0, (w.end - w.start) / total)),
-    offsetMs: w.start - span.start,
-  };
-}
 
 /** The list's own width, as the tier its rows can afford. Measured, because the panel is resizable. */
 function useRowTier(ref: React.RefObject<HTMLDivElement | null>): RowTier {
@@ -205,7 +191,6 @@ function StepList({ run, steps }: { run: RunSummary | undefined; steps: readonly
           tabbable={r.step.id === tabbableId}
           tier={tier}
           fold={folds[r.step.id]}
-          bar={barFor(r.step, span, isInherited(r.step, run))}
           inherited={isInherited(r.step, run)}
           provider={run?.provider}
           mark={marks.get(r.step.name)}
@@ -357,14 +342,10 @@ function LiveTail({ run, steps, span, tier, waiting = [], marks }: {
       : state === "paused"
         ? ["Paused here", "Paused here — Resume continues the run from this step"]
         : ["Stopped here", "Stopped here, before this step ran"];
-  // Its bar runs from the last thing that finished to now: the time the run has spent on it so far.
-  let bar: { left: number; width: number } | null = null;
+  // The time the run has spent on it so far: from the last thing that finished to now.
   let soFar: number | null = null;
   if (state === "running" && span) {
     const lastEnd = Math.max(span.start, ...steps.map((st) => stepWindow(st)?.end ?? span.start));
-    const end = Math.max(span.end, now);
-    const total = end - span.start;
-    bar = { left: Math.min(1, (lastEnd - span.start) / total), width: Math.max(0, (end - lastEnd) / total) };
     soFar = Math.max(0, now - lastEnd);
   }
   const show = columnsFor(tier);
@@ -393,8 +374,7 @@ function LiveTail({ run, steps, span, tier, waiting = [], marks }: {
         <span className="block truncate text-caption font-medium text-ink" title={name}>{name}</span>
         <span className={`block truncate text-tiny ${state === "running" ? "text-run" : "text-faint"}`} title={more}>{word}</span>
       </span>
-      {/* THE STEPS' OWN COLUMNS, so its time and bar sit under the headers: the time it has run so
-          far, in amber, and its bar from the last finished step to now. */}
+      {/* THE STEPS' OWN COLUMNS, so its time sits under theirs: the time it has run so far, in amber. */}
       <span className="flex shrink-0 items-center gap-2 text-tiny tabular-nums">
         {show.tokens && <span className={COL.tokens} />}
         {show.cost && <span className={COL.cost} />}
@@ -406,16 +386,6 @@ function LiveTail({ run, steps, span, tier, waiting = [], marks }: {
             </>
           )}
         </span>
-        {show.timeline && (
-          <span className={`relative h-1.5 shrink-0 rounded-full bg-void ${COL.timeline}`} aria-hidden>
-            {bar && (
-              <span
-                className="absolute bottom-0 top-0 animate-stream-pulse rounded-full bg-run motion-reduce:animate-none"
-                style={{ left: `${bar.left * 100}%`, width: `max(2px, ${bar.width * 100}%)`, opacity: 0.55 }}
-              />
-            )}
-          </span>
-        )}
       </span>
       <span className={`${COL.viewed} shrink-0`} />
       {show.actions && <span className={`${COL.actions} shrink-0`} />}
@@ -428,7 +398,6 @@ function LiveTail({ run, steps, span, tier, waiting = [], marks }: {
             row={r}
             tabbable={false}
             tier={tier}
-            bar={barFor(r.step, span, false)}
             provider={run.provider}
             mark={marks?.get(r.step.name)}
           />

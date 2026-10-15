@@ -449,12 +449,6 @@ export const EDITED = "#EA580C";
  */
 export const VIEWED = "#2E6B45";
 
-/**
- * TIMELINE_MARK — a step's mark on its row's timeline tube (the product owner's call, 2026-10-15): pure
- * black at full strength, not the ink, so the one mark that says when a step ran is the darkest thing
- * on the row. A failed step's mark stays the error red.
- */
-export const TIMELINE_MARK = "#000000";
 
 /**
  * TOKEN_SPLIT — a model call's tokens as one bar, prompt against completion (the product owner's
