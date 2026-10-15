@@ -5,7 +5,7 @@
 
 import type { RunSummary, Step } from "../types.ts";
 import { textFromLlmOutput } from "./agentOutput.ts";
-import { isInherited, jsonReply, ownSteps, runElapsed, stepWindow, traceTotals } from "./traceView.ts";
+import { isInherited, jsonReply, ownSteps, stepsTime, traceTotals } from "./traceView.ts";
 
 // ── Changes: a branch against the run it branched from ───────────────────────
 
@@ -72,7 +72,7 @@ export function compareRuns(parentSteps: readonly Step[], ownSteps: readonly Ste
   });
 }
 
-/** A run's three figures: its wall time, its tokens and its cost — null where it has none. */
+/** A run's three figures: its steps' working time, its tokens and its cost — null where unknown. */
 export interface RunFigures {
   time: number | null;
   tokens: number | null;
@@ -84,8 +84,12 @@ export interface RunFigures {
  * steps from the same fork on — the stretch the branch ran again. The parent's whole run against the
  * branch's own work compared a run with a part of one, and every branch read as cheaper.
  *
- * The parent's time is its wall time from the end of its last step before the fork to its end, as the
- * branch's is from its start to its end. Null while either run is still going.
+ * TIME IS THE STEPS' WORKING TIME (`stepsTime`), on both sides — not the wall clock. A parent that sat
+ * paused or waiting for hours after the fork made a branch read "↓ 2h 23m" faster, a number about the
+ * waiting rather than the work (the product owner's call, 2026-10-15).
+ *
+ * A STRETCH WITH NO MODEL CALLS SPENT NOTHING: its tokens and cost are 0, not unknown, so a branch that
+ * stopped calling the model still compares. Unknown stays null — calls made that reported nothing.
  */
 export function branchFigures(
   run: RunSummary,
@@ -94,23 +98,18 @@ export function branchFigures(
   parentSteps: readonly Step[],
 ): { mine: RunFigures; theirs: RunFigures } | null {
   if (run.parent_run_id == null || run.branch_from_seq == null) return null;
+  if (!run.ended_at || !parentRun.ended_at) return null;
   const own = ownSteps(run, steps);
   const stretch = parentSteps.filter((s) => !isInherited(s, run));
-  const mineTotals = traceTotals(own);
-  const theirTotals = traceTotals(stretch);
-  let forkEnd: number | null = null;
-  for (const s of parentSteps) {
-    if (!isInherited(s, run)) continue;
-    const w = stepWindow(s);
-    if (w && (forkEnd == null || w.end > forkEnd)) forkEnd = w.end;
-  }
-  const parentEnd = parentRun.ended_at ? Date.parse(parentRun.ended_at) : NaN;
-  const theirTime = forkEnd != null && Number.isFinite(parentEnd) ? Math.max(0, parentEnd - forkEnd) : null;
-  const mineTime = run.ended_at ? runElapsed(run, own, Date.now()) : null;
-  return {
-    mine: { time: mineTime, tokens: mineTotals.tokens, cost: mineTotals.cost },
-    theirs: { time: theirTime, tokens: theirTotals.tokens, cost: theirTotals.cost },
+  const figures = (part: readonly Step[]): RunFigures => {
+    const t = traceTotals(part);
+    return {
+      time: stepsTime(part),
+      tokens: t.tokens ?? (t.llmCalls === 0 ? 0 : null),
+      cost: t.cost ?? (t.llmCalls === 0 ? 0 : null),
+    };
   };
+  return { mine: figures(own), theirs: figures(stretch) };
 }
 
 // ── State: where the run left its state ─────────────────────────────────────

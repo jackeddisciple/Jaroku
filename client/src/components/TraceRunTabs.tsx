@@ -218,7 +218,7 @@ export function ChangesView({ run, steps }: { run: RunSummary; steps: readonly S
         title={`The parent from the fork on — after #${run.branch_from_seq ?? "?"}, the steps this branch ran again — against this branch`}
       >
         <Figure
-          label="Duration"
+          label="Step time"
           before={theirTime == null ? "—" : fmtDuration(theirTime)}
           after={myTime == null ? "—" : fmtDuration(myTime)}
           delta={<Delta value={myTime != null && theirTime != null ? myTime - theirTime : null} format={fmtDuration} />}

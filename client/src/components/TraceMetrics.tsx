@@ -21,7 +21,6 @@ import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { ICON } from "../lib/tokens.ts";
 import { orderedSteps, useTraceStore } from "../store/traceStore.ts";
 import type { RunSummary, Step } from "../types.ts";
-import { Delta } from "./TraceRunTabs.tsx";
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
@@ -41,7 +40,9 @@ export function Metric({ label, value, title, tone = "text-ink", Mark }: { label
  * One of the strip's figures: its mark and its word, then the number, large — the number is what
  * somebody opens a trace to read (the product owner's call on 2026-10-12, "richer metrics").
  *
- * A BRANCH'S SAYS HOW IT COMPARES (2026-10-14): against its parent's, as a delta beside the number.
+ * A RE-RUN'S SAYS HOW IT COMPARES WITH THE ORIGINAL (2026-10-15): the change beside the number, and
+ * under it what it is against — "vs original from #4" — so the arrow is never a number without a
+ * subject. Lower is green, higher red; Duration's is the steps' working time (`branchFigures`).
  * The sparklines over an agent's recent runs that stood beside the other runs' words came out the
  * same day — the product owner read them as decoration.
  */
@@ -52,9 +53,11 @@ interface FigureProps {
   title: string;
   tone?: string;
   delta?: React.ReactNode;
+  /** What the delta is against, said under the number. */
+  note?: string;
 }
 
-function Figure({ Mark, label, value, title, tone = "text-ink", delta }: FigureProps) {
+function Figure({ Mark, label, value, title, tone = "text-ink", delta, note }: FigureProps) {
   return (
     <div className="min-w-0 px-3 py-2.5" title={title}>
       <div className="flex min-w-0 items-center gap-1.5 text-tiny text-faint">
@@ -65,6 +68,7 @@ function Figure({ Mark, label, value, title, tone = "text-ink", delta }: FigureP
         <span className={`truncate text-section tabular-nums ${tone}`}>{value}</span>
         {delta && <span className="shrink-0 text-tiny tabular-nums">{delta}</span>}
       </div>
+      {note && <div className="truncate text-tiny text-faint">{note}</div>}
     </div>
   );
 }
@@ -126,16 +130,32 @@ export function TraceMetrics({ run, steps }: { run: RunSummary; steps: readonly 
     if (!parentRun || !parentBucket || live) return null;
     return branchFigures(run, steps, parentRun, orderedSteps(parentBucket));
   }, [run, steps, parentRun, parentBucket, live]);
-  const deltaOf = (m: keyof RunFigures, format: (n: number) => string, pct = false): React.ReactNode => {
+  // THE CHANGE, SAID FOR WHAT IT IS: time as an amount (↓ 0.6s), tokens as an amount and a share
+  // (↑ 300 (+10%)), cost as a share (↓ 18%) — or an amount, when the original spent nothing.
+  const deltaOf = (m: keyof RunFigures): React.ReactNode => {
     if (!vsParent) return undefined;
     const a = vsParent.mine[m];
     const b = vsParent.theirs[m];
     if (a == null || b == null) return undefined;
-    return <Delta value={a - b} format={format} pct={pct && b > 0 ? ((a - b) / b) * 100 : null} />;
+    const diff = a - b;
+    if (Math.abs(diff) < (m === "cost" ? 1e-9 : 0.5)) return <span className="text-faint">no change</span>;
+    const arrow = diff < 0 ? "↓" : "↑";
+    const pct = b > 0 ? Math.round((Math.abs(diff) / b) * 100) : null;
+    const text = m === "time"
+      ? `${arrow} ${fmtDuration(Math.abs(diff))}`
+      : m === "tokens"
+        ? `${arrow} ${tokenCount(Math.abs(diff))}${pct != null ? ` (${diff < 0 ? "−" : "+"}${pct}%)` : ""}`
+        : pct != null ? `${arrow} ${pct}%` : `${arrow} ${fmtCost(Math.abs(diff))}`;
+    return <span className={diff < 0 ? "text-ok" : "text-err"}>{text}</span>;
   };
+  const from = run.branch_from_seq != null ? ` from #${run.branch_from_seq}` : "";
+  const vsNote = vsParent ? `vs original${from}` : undefined;
   const vsTitle = (m: keyof RunFigures, format: (n: number) => string): string => {
+    const a = vsParent?.mine[m];
     const b = vsParent?.theirs[m];
-    return b == null ? "" : ` · the parent run's same stretch, from the fork on: ${format(b)}`;
+    if (a == null || b == null) return "";
+    const what = m === "time" ? "steps' working time" : m;
+    return ` · this re-run's ${what}: ${format(a)}, the original's${from} on: ${format(b)}`;
   };
 
   const calls = plural(totals.llmCalls, "model call");
@@ -170,21 +190,24 @@ export function TraceMetrics({ run, steps }: { run: RunSummary; steps: readonly 
               : "The agent's graph alone, from its start to its end — any time it sat paused included")
         + vsTitle("time", fmtDuration),
       tone: run.status === "running" ? "text-run" : "text-ink",
-      delta: deltaOf("time", fmtDuration),
+      delta: deltaOf("time"),
+      note: vsNote,
     },
     {
       Mark: Icon.trace.tokens,
       label: "Tokens",
       value: totals.tokens == null ? "—" : tokenCount(totals.tokens),
       title: (totals.tokens == null ? tokensTitle : `${totals.tokens.toLocaleString()} tokens · ${tokensTitle}`) + vsTitle("tokens", tokenCount),
-      delta: deltaOf("tokens", tokenCount),
+      delta: deltaOf("tokens"),
+      note: vsNote,
     },
     {
       Mark: Icon.trace.metricCost,
       label: totals.unpricedCalls > 0 && totals.cost != null ? "Cost (partial)" : "Cost",
       value: fmtCost(totals.cost),
       title: costTitle + vsTitle("cost", (n) => fmtCost(n)),
-      delta: deltaOf("cost", (n) => fmtCost(n), true),
+      delta: deltaOf("cost"),
+      note: vsNote,
     },
     {
       Mark: Icon.trace.metricSteps,
