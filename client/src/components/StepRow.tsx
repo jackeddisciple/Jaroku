@@ -25,7 +25,7 @@ import { Icon, type IconComponent } from "../lib/icons/registry.ts";
 import { matchPlaces, rerunBlocked, stepCategory, stepProvider, type StepCategory, type VisibleRow } from "../lib/traceView.ts";
 import { BRAND_COLOR, ProviderMark, hasProviderMark } from "../lib/icons.tsx";
 import { kindWord, type StepMark } from "./traceMarks.ts";
-import { ICON, PINNED, STATUS, STEP_TYPE, SURFACE, TEXT, VIEWED } from "../lib/tokens.ts";
+import { ICON, PINNED, STATUS, STEP_TYPE, SURFACE, TEXT, TIMELINE_MARK, VIEWED } from "../lib/tokens.ts";
 import { useBuildStore } from "../store/buildStore.ts";
 import { agentMcpToolNames } from "../store/mcpStore.ts";
 import { useTraceStore } from "../store/traceStore.ts";
@@ -188,14 +188,14 @@ function Waterfall({ step, bar, colour, inherited }: { step: Step; bar: BarPlace
       {bar && (
         <span
           aria-hidden
-          // Ink, or red for a step that failed — see the call site.
+          // Pure black, or red for a step that failed — see the call site. Full strength: a softened
+          // black is a grey.
           className="absolute bottom-0 top-0 rounded-full"
           style={{
             left: `${bar.left * 100}%`,
             // Never thinner than a hair, so a 0ms routing decision still marks its moment.
             width: `max(2px, ${bar.width * 100}%)`,
             backgroundColor: colour,
-            opacity: step.error ? 0.8 : 0.6,
           }}
         />
       )}
@@ -536,10 +536,10 @@ export function StepRow({
           <span className="truncate">{fmtDuration(step.latency_ms)}</span>
           {scale && <MiniBar value={Number.isFinite(step.latency_ms) ? step.latency_ms : null} max={scale.time} />}
         </span>
-        {/* INK, AND RED ONLY FOR A FAILURE (the product owner's call, 2026-10-15): the tile beside it
+        {/* PURE BLACK, AND RED ONLY FOR A FAILURE (the product owner's call, 2026-10-15): the tile beside it
             already says the step's kind, so the mark only has to say when it ran and for how long —
             and a failed step is the one mark that should stand out of the column. */}
-        {show.timeline && <Waterfall step={step} bar={bar} colour={step.error ? STATUS.error : TEXT.ink} inherited={inherited} />}
+        {show.timeline && <Waterfall step={step} bar={bar} colour={step.error ? STATUS.error : TIMELINE_MARK} inherited={inherited} />}
       </span>
 
       {runId && <ViewedBox runId={runId} step={step} viewed={viewed} />}
