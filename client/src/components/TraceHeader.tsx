@@ -22,7 +22,7 @@ import { useBuildStore } from "../store/buildStore.ts";
 import { useUiStore } from "../store/uiStore.ts";
 import type { RunSummary } from "../types.ts";
 import { PauseResumeControls } from "./PauseResumeControls.tsx";
-import { IconButton } from "./IconButton.tsx";
+import { primaryBtnSm } from "./buttons.ts";
 import { Tip } from "./ui/tooltip.tsx";
 
 /** The first segment of a uuid — enough to tell two runs apart. */
@@ -67,8 +67,14 @@ function OutcomePill({ run }: { run: RunSummary }) {
   );
 }
 
-/** A pressable fact on the metadata line: the app's neutral chip, darker on hover. */
-const CHIP = "rounded-xs bg-active/60 px-1.5 py-px text-tiny text-muted transition-colors hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring";
+/**
+ * A pressable fact on the metadata line: a round pill in a darker grey (the product owner's call,
+ * 2026-10-14 — the square, faint chips read as background), darker still on hover.
+ */
+const CHIP = "rounded-full bg-chrome px-2 py-px text-tiny text-muted transition-colors hover:bg-edge hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring";
+
+/** One of the run's mark buttons: the mark on a grey ground, faded with it when it cannot be pressed. */
+const GREY_MARK = "inline-flex h-8 w-8 items-center justify-center rounded-control bg-active text-muted transition-colors hover:bg-chrome hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-active disabled:hover:text-muted";
 
 async function copyRunId(id: string): Promise<void> {
   try {
@@ -85,17 +91,37 @@ async function copyRunId(id: string): Promise<void> {
  * Runs, run it again; each mark says what it does on hover, and Run again says why when it can't.
  */
 function RunActions({ run }: { run: RunSummary }) {
+  // THE MARKS ON A GREY GROUND, AND RUNS IN INK WITH ITS WORD (the product owner's call, 2026-10-14):
+  // Runs is where somebody goes next from a trace, so it is the one filled button; Run again stays a
+  // mark, on the same grey and faded with it when it cannot run.
+  const blocked = runAgainBlocked(run);
   return (
-    <span className="flex items-center" role="group" aria-label="Run actions">
-      <IconButton icon={Icon.turn.copy} label="Copy run ID" onClick={() => { void copyRunId(run.id); }} />
-      <IconButton icon={Icon.panel.graph} label="Show on graph" onClick={() => useUiStore.getState().setRightTab("graph")} />
-      <IconButton icon={Icon.panel.runs} label="Open in Runs" onClick={() => useUiStore.getState().setRightTab("runs")} />
-      <IconButton
-        icon={Icon.cockpit.refresh}
-        label="Run again on this run's input and model"
-        disabledReason={runAgainBlocked(run)}
+    <span className="flex items-center gap-1" role="group" aria-label="Run actions">
+      <button type="button" aria-label="Copy run ID" title="Copy run ID" onClick={() => { void copyRunId(run.id); }} className={GREY_MARK}>
+        <Icon.turn.copy size={ICON.sm} />
+      </button>
+      <button type="button" aria-label="Show on graph" title="Show on graph" onClick={() => useUiStore.getState().setRightTab("graph")} className={GREY_MARK}>
+        <Icon.panel.graph size={ICON.sm} />
+      </button>
+      <button
+        type="button"
+        onClick={() => useUiStore.getState().setRightTab("runs")}
+        title="Open this agent's runs"
+        className={`${primaryBtnSm} focus-visible:outline-none focus-visible:shadow-focusring`}
+      >
+        <Icon.panel.runs size={ICON.sm} />
+        Runs
+      </button>
+      <button
+        type="button"
+        aria-label="Run again on this run's input and model"
+        title={blocked ?? "Run again on this run's input and model"}
+        disabled={blocked !== null}
         onClick={() => runAgain(run)}
-      />
+        className={GREY_MARK}
+      >
+        <Icon.cockpit.refresh size={ICON.sm} />
+      </button>
     </span>
   );
 }

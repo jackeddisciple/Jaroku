@@ -407,7 +407,7 @@ export const MANIFEST = {
     resetField: "Undo03Icon",
     pinStep: "PinIcon",
     viewedTick: "Tick02Icon",
-    rerunStep: "GitForkIcon",
+    rerunStep: "RedoIcon",
   },
 
   // ── §5 Global ─────────────────────────────────────────────────────────────

@@ -114,7 +114,7 @@ console.log("\nthe manifest parses, and it is the size the specification asks fo
   // 206 WITH `TextFontIcon`, for tokens; the strip's other four marks were already here.
   // 207 WITH `TokenCircleIcon` AND `Time04Icon`, for tokens and time wherever the trace says them;
   // `TextFontIcon` leaves with the tokens mark it was.
-  check("211 distinct marks", names.size === 211, `${names.size}`);
+  check("212 distinct marks", names.size === 212, `${names.size}`);
   check("no key is declared twice", new Set(entries.map((e) => e.key)).size === entries.length);
 }
 

@@ -33,7 +33,6 @@ import { useUiStore } from "../store/uiStore.ts";
 import { markTraceStep, sendBranchRun } from "../lib/socket.ts";
 import { stepNodeId } from "../lib/traceGraphMap.ts";
 import type { Step } from "../types.ts";
-import { IconButton } from "./IconButton.tsx";
 import { McpBadge } from "./McpBadge.tsx";
 
 /** The one colour a step is drawn in — its tile, its bar: red if it failed, else its own. */
@@ -233,8 +232,8 @@ export const COL = {
   timeline: "w-16",
   /** The Viewed box (2026-10-14), held on every row so the figures stay one column. */
   viewed: "w-6",
-  /** The Details slot, held empty when the row is not hovered or selected. */
-  actions: "w-16",
+  /** Re-run and Details, two marks side by side on every row. */
+  actions: "w-[3.75rem]",
 } as const;
 
 /** Which columns a width tier can afford — every row, and the live row, read the same answer. */
@@ -242,7 +241,8 @@ export const columnsFor = (tier: RowTier) => ({
   tokens: tier !== "narrow",
   cost: tier === "wide" || tier === "full",
   timeline: tier === "full",
-  actions: tier !== "narrow",
+  // ALWAYS: re-run and details are on every row at every width (the product owner's call, 2026-10-14).
+  actions: true,
 });
 
 /** Connector lines' weight: 2px, the strongest neutral border — the product owner's call, 2026-10-12. */
@@ -327,7 +327,7 @@ function ViewedMark({ viewed }: { viewed: boolean }) {
   );
 }
 
-function ViewedBox({ runId, step, viewed, selected }: { runId: string; step: Step; viewed: boolean; selected: boolean }) {
+function ViewedBox({ runId, step, viewed }: { runId: string; step: Step; viewed: boolean }) {
   return (
     <button
       type="button"
@@ -341,9 +341,9 @@ function ViewedBox({ runId, step, viewed, selected }: { runId: string; step: Ste
         e.stopPropagation();
         markTraceStep(runId, step.id, "viewed", !viewed);
       }}
-      className={`flex h-7 ${COL.viewed} shrink-0 items-center justify-center rounded-control transition-opacity duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
-        viewed || selected ? "opacity-100" : "opacity-0 group-hover/step:opacity-100"
-      }`}
+      // ON EVERY ROW, ALWAYS (the product owner's call, 2026-10-14): a review is read down the column
+      // of boxes, and a box that appears only under the pointer cannot be read that way.
+      className={`flex h-7 ${COL.viewed} shrink-0 items-center justify-center rounded-control focus-visible:outline-none focus-visible:shadow-focusring`}
     >
       <ViewedMark viewed={viewed} />
     </button>
@@ -538,28 +538,6 @@ export function StepRow({
             </span>
           )}
         </span>
-        {/* THE POINTER'S SHORTCUTS, OVER THE END OF THE NAME AND ONLY UNDER THE POINTER (the product
-            owner's call, 2026-10-14). They floated over the figures and stayed up while the row had
-            focus, so the selected row never showed its own time and its tokens lost a digit. The
-            name is truncated anyway and whole in its tooltip; the figures are not, so they stay
-            visible. Out of the Tab order: the keyboard opens the details (Enter), which carry them.
-            RE-RUN ALONE (the product owner's call, 2026-10-14): copy ID and pin came and went the same
-            day — both are in the details, the ID in Overview and the pin in its header. */}
-        {tier !== "narrow" && (
-          <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center opacity-0 transition-opacity duration-fast group-hover/step:pointer-events-auto group-hover/step:opacity-100">
-            <span className="flex items-center rounded-control bg-panel">
-              <span className={`flex items-center rounded-control ${selected ? "bg-active" : "bg-active/40"}`}>
-                <IconButton
-                  icon={Icon.trace.rerunStep}
-                  label="Re-run from here — a new run from this step, as it was"
-                  tabIndex={-1}
-                  stopPropagation
-                  onClick={() => rerunFromRow(step)}
-                />
-              </span>
-            </span>
-          </span>
-        )}
       </span>
 
       {/* Figures, tabular, and only the ones this step has: a node has no tokens of its own. An
@@ -598,11 +576,25 @@ export function StepRow({
         {show.timeline && <Waterfall step={step} bar={bar} colour={stepColour(step, provider, mark)} inherited={inherited} />}
       </span>
 
-      {runId && <ViewedBox runId={runId} step={step} viewed={viewed} selected={selected} />}
+      {runId && <ViewedBox runId={runId} step={step} viewed={viewed} />}
 
-      {/* DETAILS HOLDS ITS OWN PLACE, so the figures never move when it appears. Too narrow for a
-          slot, it floats over the duration instead, and the two shortcuts stay in the details. */}
-      <span className={tier === "narrow" ? "absolute right-1 top-1/2 flex -translate-y-1/2 items-center" : `relative flex shrink-0 items-center justify-end ${COL.actions}`}>
+      {/* RE-RUN AND DETAILS, ON EVERY ROW AND ALWAYS (the product owner's call, 2026-10-14): two marks at
+          the row's end, re-run on the left of details. They were a "Details ›" that showed under the
+          pointer and a re-run that floated over the name; both are read at a glance now. */}
+      <span className={`relative flex shrink-0 items-center justify-end gap-0.5 ${COL.actions}`}>
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={(e) => {
+            e.stopPropagation();
+            rerunFromRow(step);
+          }}
+          aria-label={`Re-run from #${step.seq} ${step.name}`}
+          title="Re-run from here — a new run from this step, as it was"
+          className="flex h-7 w-7 items-center justify-center rounded-control text-muted transition-colors duration-fast hover:bg-active hover:text-ink focus-visible:outline-none focus-visible:shadow-focusring"
+        >
+          <Icon.trace.rerunStep size={ICON.sm} />
+        </button>
         <button
           type="button"
           aria-pressed={expanded}
@@ -618,14 +610,11 @@ export function StepRow({
           // WHICH STEP, SAID. Nine buttons all read "Details — Open step details" to VoiceOver.
           aria-label={`${expanded ? "Close" : "Open"} details for #${step.seq} ${step.name}`}
           title={expanded ? "Close step details" : "Open step details"}
-          className={`flex h-7 items-center gap-0.5 rounded-control px-2 text-tiny transition-[opacity,color,background-color] duration-fast focus-visible:opacity-100 focus-visible:outline-none focus-visible:shadow-focusring ${
-            expanded
-              ? "bg-chrome text-ink opacity-100"
-              : `${tier === "narrow" ? "bg-active" : ""} text-muted hover:bg-active hover:text-ink ${selected ? "opacity-100" : "opacity-0 group-hover/step:opacity-100 group-focus-within/step:opacity-100"}`
+          className={`flex h-7 w-7 items-center justify-center rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:shadow-focusring ${
+            expanded ? "bg-chrome text-ink" : "text-muted hover:bg-active hover:text-ink"
           }`}
         >
-          Details
-          <Icon.trace.details size={ICON.xs} />
+          <Icon.trace.details size={ICON.sm} />
         </button>
       </span>
     </div>
